@@ -1,6 +1,6 @@
 # ⚡ MarketPulse
 
-A terminal-based portfolio tracker with live market data, ASCII charts, and multi-portfolio management. Built to stress-test `uv` while being genuinely useful.
+A terminal-based portfolio tracker with live market data, ASCII charts, and multi-portfolio management.
 
 ---
 
