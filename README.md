@@ -1,6 +1,6 @@
 # ⚡ MarketPulse
 
-A terminal-based portfolio tracker with live market data, ASCII charts, and multi-portfolio management.
+A terminal-based portfolio tracker with live market data, ASCII charts, and multi-portfolio management. Made with Claude Code.
 
 ---
 
