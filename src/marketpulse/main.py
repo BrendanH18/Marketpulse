@@ -24,6 +24,8 @@ from .display import (
     portfolio_table,
     quote_panel,
     history_panel,
+    _sparkline,
+    _sign_color,
 )
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
@@ -357,7 +359,6 @@ def compare(tickers, period):
         drawdown = ((series - running_max) / running_max * 100).min()
         color = _sign_color(ret)
         sign = "+" if ret >= 0 else ""
-        from .display import _sparkline, _sign_color
         spark = _sparkline(series, width=30)
         t.add_row(
             Text(ticker, style=f"bold {color}"),
@@ -376,14 +377,6 @@ def compare(tickers, period):
 def _now() -> str:
     from datetime import datetime
     return datetime.now().strftime("%H:%M:%S")
-
-
-def _sign_color(value: float) -> str:
-    if value > 0:
-        return "bright_green"
-    elif value < 0:
-        return "bright_red"
-    return "white"
 
 
 if __name__ == "__main__":

@@ -3,8 +3,6 @@ from datetime import datetime
 from typing import Optional
 import pandas as pd
 from rich.console import Console
-from rich.layout import Layout
-from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -81,6 +79,11 @@ def quote_panel(quote: Quote) -> Panel:
         f"Mkt Cap: {_humanize(quote.market_cap)}" if quote.market_cap else "",
         style="dim"
     )
+    week52_text = Text(
+        f"52W  {_fmt_price(quote.week52_low)}  ──  {_fmt_price(quote.week52_high)}"
+        if quote.week52_high and quote.week52_low else "",
+        style="dim"
+    )
     timestamp = Text(
         f"  {quote.timestamp.strftime('%H:%M:%S')}",
         style="dim italic"
@@ -89,10 +92,10 @@ def quote_panel(quote: Quote) -> Panel:
     lines = [name_line, price_line, change_line, low_high, vol_text]
     if mcap_text.plain:
         lines.append(mcap_text)
+    if week52_text.plain:
+        lines.append(week52_text)
     lines.append(timestamp)
 
-    content = "\n".join(line.plain for line in lines)  # fallback
-    # Build actual renderables
     from rich.console import Group
     group = Group(*lines)
     return Panel(group, title=title, border_style=color, expand=False, padding=(0, 1))

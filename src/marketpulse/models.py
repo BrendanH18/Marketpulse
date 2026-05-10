@@ -16,6 +16,8 @@ class Quote:
     market_cap: Optional[float]
     currency: str
     exchange: str
+    week52_high: Optional[float] = None
+    week52_low: Optional[float] = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     @property

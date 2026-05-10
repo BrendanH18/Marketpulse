@@ -1,5 +1,6 @@
 """Market data fetching via yfinance."""
 import yfinance as yf
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Optional
 from .models import Quote
@@ -20,6 +21,8 @@ def fetch_quote(ticker: str) -> Optional[Quote]:
         market_cap = getattr(info, "market_cap", None)
         currency = getattr(info, "currency", "USD") or "USD"
         exchange = getattr(info, "exchange", "?") or "?"
+        week52_high = getattr(info, "fifty_two_week_high", None)
+        week52_low = getattr(info, "fifty_two_week_low", None)
 
         # Fall back to slower info if fast_info is missing price
         if price is None:
@@ -51,6 +54,8 @@ def fetch_quote(ticker: str) -> Optional[Quote]:
             market_cap=float(market_cap) if market_cap else None,
             currency=currency,
             exchange=exchange,
+            week52_high=float(week52_high) if week52_high else None,
+            week52_low=float(week52_low) if week52_low else None,
             timestamp=datetime.now(),
         )
     except Exception as e:
@@ -58,13 +63,16 @@ def fetch_quote(ticker: str) -> Optional[Quote]:
 
 
 def fetch_quotes(tickers: list[str]) -> dict[str, Quote]:
-    """Fetch quotes for multiple tickers. Returns a dict keyed by ticker."""
+    """Fetch quotes for multiple tickers in parallel. Returns a dict keyed by ticker."""
     results = {}
-    for ticker in tickers:
-        try:
-            results[ticker.upper()] = fetch_quote(ticker)
-        except RuntimeError:
-            pass  # caller can detect missing keys
+    with ThreadPoolExecutor(max_workers=min(len(tickers), 10)) as executor:
+        futures = {executor.submit(fetch_quote, ticker): ticker for ticker in tickers}
+        for future in as_completed(futures):
+            try:
+                quote = future.result()
+                results[quote.ticker] = quote
+            except RuntimeError:
+                pass
     return results
 
 
