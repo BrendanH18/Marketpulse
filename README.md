@@ -31,6 +31,25 @@ marketpulse --help
 
 ## Commands
 
+### TUI — Interactive Mode (default)
+
+Run with no arguments to launch the full-screen TUI — one process, no re-running commands:
+
+```bash
+uv run marketpulse                 # launches the TUI
+uv run marketpulse tui -p rrsp     # TUI on a named portfolio
+uv run marketpulse tui -r 15       # refresh quotes every 15s
+```
+
+Keys: `1`/`2`/`3` switch between Watchlist, Portfolio, and Chart tabs • `r` refresh now • `q` quit.
+On the Chart tab, type `TICKER [PERIOD]` (e.g. `SPY 1y`) and press Enter.
+
+> **Tip:** install the command globally so you can skip `uv run` entirely:
+> ```bash
+> uv tool install --editable .
+> marketpulse        # from any directory
+> ```
+
 ### `watch` — Live Watchlist Table
 
 ```bash
@@ -68,7 +87,7 @@ Periods: `1d` `5d` `1mo` `3mo` `6mo` `1y` `2y` `5y`
 ### `compare` — Normalized Performance Comparison
 
 ```bash
-# Compare XEQT vs QQQ vs SPY over 1 year (normalized to 100 at start)
+# Compare XEQT vs QQQ vs SPY over 1 year
 uv run marketpulse compare XEQT.TO QQQ SPY --period 1y
 
 # Canadian ETF shootout
@@ -84,7 +103,7 @@ Includes return %, max drawdown, and sparklines.
 uv run marketpulse portfolio add XEQT.TO 200 28.50
 uv run marketpulse portfolio add AAPL 15 175.00 --note "Core holding"
 
-# View with live P&L
+# View with live P&L, day change, weights, and a portfolio summary
 uv run marketpulse portfolio show
 
 # Use a named portfolio
@@ -130,6 +149,7 @@ Portfolios are stored as JSON in `~/.marketpulse/`. Override with `MARKETPULSE_D
 |--------------|---------------------------------|
 | `yfinance`   | Yahoo Finance market data       |
 | `rich`       | Terminal UI, tables, panels     |
+| `textual`    | Interactive TUI                 |
 | `click`      | CLI framework                   |
 | `pandas`     | Time series data manipulation   |
 | `httpx`      | HTTP client (used by yfinance)  |

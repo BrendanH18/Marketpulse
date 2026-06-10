@@ -2,11 +2,10 @@
 import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Optional
 from .models import Quote
 
 
-def fetch_quote(ticker: str) -> Optional[Quote]:
+def fetch_quote(ticker: str) -> Quote:
     """Fetch a single live quote for a ticker."""
     try:
         t = yf.Ticker(ticker)
@@ -64,6 +63,8 @@ def fetch_quote(ticker: str) -> Optional[Quote]:
 
 def fetch_quotes(tickers: list[str]) -> dict[str, Quote]:
     """Fetch quotes for multiple tickers in parallel. Returns a dict keyed by ticker."""
+    if not tickers:
+        return {}
     results = {}
     with ThreadPoolExecutor(max_workers=min(len(tickers), 10)) as executor:
         futures = {executor.submit(fetch_quote, ticker): ticker for ticker in tickers}

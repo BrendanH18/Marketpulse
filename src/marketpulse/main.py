@@ -22,6 +22,7 @@ from .display import (
     header,
     watchlist_table,
     portfolio_table,
+    portfolio_summary,
     quote_panel,
     history_panel,
     _sparkline,
@@ -36,19 +37,46 @@ DEFAULT_WATCHLIST = ["XEQT.TO", "QQQ", "SPY", "VFV.TO", "AAPL", "NVDA", "BTC-USD
 
 # ── CLI group ─────────────────────────────────────────────────────────────────
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option("0.1.0", prog_name="MarketPulse")
-def cli():
+@click.pass_context
+def cli(ctx):
     """⚡ MarketPulse — terminal portfolio tracker with live market data.\n
     \b
+    Run with no arguments to launch the interactive TUI.
+    \b
     Quick start:
+      marketpulse                            # interactive TUI
       marketpulse watch                      # live watchlist
       marketpulse quote XEQT.TO AAPL        # quick quotes
       marketpulse portfolio add XEQT.TO 100 28.50
       marketpulse portfolio show
       marketpulse chart XEQT.TO --period 6mo
     """
-    pass
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(tui)
+
+
+# ── tui ───────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--portfolio", "-p", default=DEFAULT_PORTFOLIO, help="Portfolio name", show_default=True)
+@click.option("--refresh", "-r", default=30, type=int, help="Auto-refresh interval in seconds", show_default=True)
+def tui(portfolio, refresh):
+    """Launch the interactive TUI (also runs when no command is given).
+
+    \b
+    Keys:
+      1 / 2 / 3   switch between Watchlist, Portfolio, Chart
+      r           refresh quotes now
+      q           quit
+    """
+    from .tui import MarketPulseApp
+    MarketPulseApp(
+        portfolio_name=portfolio,
+        default_watchlist=DEFAULT_WATCHLIST,
+        refresh_seconds=max(refresh, 5),
+    ).run()
 
 
 # ── watch ─────────────────────────────────────────────────────────────────────
@@ -75,25 +103,34 @@ def watch(tickers, portfolio, refresh):
     seen = set()
     all_tickers = [t for t in all_tickers if not (t.upper() in seen or seen.add(t.upper()))]
 
-    def _render():
-        console.print(header())
-        with console.status("[cyan]Fetching quotes…[/cyan]", spinner="dots"):
-            quotes = fetch_quotes(all_tickers)
+    def _build():
+        quotes = fetch_quotes(all_tickers)
         failed = [t for t in all_tickers if t.upper() not in quotes]
-        console.print(watchlist_table(quotes, failed))
-        console.print(Text(f"\n  {len(quotes)} quotes  •  {len(failed)} failed  •  {_now()}", style="dim"))
+        from rich.console import Group
+        parts = [
+            header(),
+            watchlist_table(quotes, failed),
+            Text(f"\n  {len(quotes)} quotes  •  {len(failed)} failed  •  {_now()}", style="dim"),
+        ]
+        if refresh > 0:
+            parts.append(Text(f"  [Auto-refresh every {refresh}s — Ctrl+C to stop]", style="dim"))
+        return Group(*parts)
 
     if refresh > 0:
+        from rich.live import Live
         try:
-            while True:
-                console.clear()
-                _render()
-                console.print(Text(f"\n  [Auto-refresh every {refresh}s — Ctrl+C to stop]", style="dim"))
-                time.sleep(refresh)
+            # Live keeps the previous table on screen while the next fetch
+            # runs, so refreshes don't flicker
+            with Live(console=console, auto_refresh=False) as live:
+                while True:
+                    live.update(_build(), refresh=True)
+                    time.sleep(refresh)
         except KeyboardInterrupt:
             console.print("\n[dim]Stopped.[/dim]")
     else:
-        _render()
+        with console.status("[cyan]Fetching quotes…[/cyan]", spinner="dots"):
+            view = _build()
+        console.print(view)
 
 
 # ── quote ─────────────────────────────────────────────────────────────────────
@@ -180,6 +217,8 @@ def portfolio_show(ctx, no_live):
             with console.status("[cyan]Fetching live prices…[/cyan]", spinner="dots"):
                 quotes = fetch_quotes(tickers)
         console.print(portfolio_table(p, quotes))
+        if quotes:
+            console.print(portfolio_summary(p, quotes))
     else:
         console.print(Panel("[dim]No positions yet.[/dim]", title=f"Portfolio: {name}"))
 
@@ -339,7 +378,7 @@ def compare(tickers, period):
 
     # Normalize to 100 at start
     t = Table(
-        title=f"[bold]Performance Comparison[/bold]  [{period}]  [dim](normalized to 100)[/dim]",
+        title=f"[bold]Performance Comparison[/bold]  [{period}]",
         box=box.SIMPLE_HEAVY,
         header_style="bold cyan",
     )
