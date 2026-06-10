@@ -133,7 +133,6 @@ uv run marketpulse portfolio delete rrsp
 | TSX (Canadian)  | `XEQT.TO`, `VFV.TO` |
 | NYSE/NASDAQ     | `AAPL`, `QQQ`, `SPY`|
 | Crypto          | `BTC-USD`, `ETH-USD` |
-| TSX (CAD ETF)   | `QQC.TO`, `ZAG.TO`  |
 
 ---
 
