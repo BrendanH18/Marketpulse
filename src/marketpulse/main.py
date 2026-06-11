@@ -8,7 +8,7 @@ from rich.text import Text
 from rich.panel import Panel
 from rich import print as rprint
 
-from .models import Position
+from .models import Portfolio
 from .storage import (
     get_or_create_portfolio,
     save_portfolio,
@@ -28,6 +28,15 @@ from .display import (
     _sparkline,
     _sign_color,
 )
+
+# Windows consoles/pipes often default to cp1252, which can't encode the
+# Unicode symbols used throughout the UI — degrade to '?' instead of crashing
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 
@@ -79,6 +88,64 @@ def tui(portfolio, refresh):
     ).run()
 
 
+# ── setup ─────────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--name", "-n", default=DEFAULT_PORTFOLIO, help="Portfolio name", show_default=True)
+def setup(name):
+    """Interactive wizard to set up your watchlist and portfolio.
+
+    Runs automatically inside the TUI on first launch; use this command to
+    set up from the terminal or to redo the setup later.
+    """
+    console.print(header())
+    existing = load_portfolio(name)
+    if existing is not None:
+        console.print(
+            f"[yellow]Portfolio '{name}' already exists[/yellow] "
+            f"({len(existing.positions)} positions, {len(existing.watchlist)} watchlist tickers)."
+        )
+        if not Confirm.ask("Edit it with the setup wizard?"):
+            return
+        p = existing
+    else:
+        p = Portfolio(name=name)
+
+    # Watchlist
+    current = " ".join(p.watchlist) if p.watchlist else " ".join(DEFAULT_WATCHLIST)
+    console.print("\n[bold cyan]Watchlist[/bold cyan] — tickers to track (space-separated).")
+    raw = Prompt.ask("Tickers", default=current)
+    seen = set()
+    p.watchlist = [
+        t.upper() for t in raw.replace(",", " ").split()
+        if not (t.upper() in seen or seen.add(t.upper()))
+    ]
+
+    # Positions
+    console.print("\n[bold cyan]Portfolio positions[/bold cyan] — leave ticker blank when done.")
+    while True:
+        ticker = Prompt.ask("  Ticker", default="").strip()
+        if not ticker:
+            break
+        try:
+            shares = float(Prompt.ask(f"  {ticker.upper()} shares"))
+            avg_cost = float(Prompt.ask(f"  {ticker.upper()} avg cost per share"))
+        except ValueError:
+            console.print("  [red]Shares and avg cost must be numbers — position skipped.[/red]")
+            continue
+        note = Prompt.ask("  Note (optional)", default="")
+        pos, blended = p.add_position(ticker, shares, avg_cost, note)
+        verb = "Updated (blended)" if blended else "Added"
+        console.print(f"  [green]{verb}[/green] {pos.ticker}: {pos.shares:,.4f} @ {pos.avg_cost:,.2f}\n")
+
+    save_portfolio(p)
+    console.print(
+        f"\n[green]Saved portfolio '{name}'[/green] — "
+        f"{len(p.positions)} positions, {len(p.watchlist)} watchlist tickers."
+    )
+    console.print("[dim]Run [bold]marketpulse[/bold] to launch the TUI.[/dim]")
+
+
 # ── watch ─────────────────────────────────────────────────────────────────────
 
 @cli.command()
@@ -104,8 +171,7 @@ def watch(tickers, portfolio, refresh):
     all_tickers = [t for t in all_tickers if not (t.upper() in seen or seen.add(t.upper()))]
 
     def _build():
-        quotes = fetch_quotes(all_tickers)
-        failed = [t for t in all_tickers if t.upper() not in quotes]
+        quotes, failed = fetch_quotes(all_tickers)
         from rich.console import Group
         parts = [
             header(),
@@ -215,7 +281,9 @@ def portfolio_show(ctx, no_live):
         quotes = {}
         if not no_live:
             with console.status("[cyan]Fetching live prices…[/cyan]", spinner="dots"):
-                quotes = fetch_quotes(tickers)
+                quotes, errors = fetch_quotes(tickers)
+            for ticker, reason in errors.items():
+                console.print(f"[yellow]Warning:[/yellow] [dim]{reason}[/dim]")
         console.print(portfolio_table(p, quotes))
         if quotes:
             console.print(portfolio_summary(p, quotes))
@@ -242,23 +310,15 @@ def portfolio_add(ctx, ticker, shares, avg_cost, note):
     """
     name = ctx.obj["name"]
     p = get_or_create_portfolio(name)
-    ticker = ticker.upper()
 
-    existing = p.positions.get(ticker)
-    if existing:
-        # Average down/up
-        old_book = existing.shares * existing.avg_cost
-        new_book = shares * avg_cost
-        total_shares = existing.shares + shares
-        new_avg = (old_book + new_book) / total_shares if total_shares else avg_cost
-        p.positions[ticker] = Position(ticker=ticker, shares=total_shares, avg_cost=new_avg, note=note or existing.note)
+    pos, blended = p.add_position(ticker, shares, avg_cost, note)
+    if blended:
         console.print(
-            f"[green]Updated[/green] {ticker}: "
-            f"{total_shares:,.4f} shares @ avg {new_avg:,.2f} (blended)"
+            f"[green]Updated[/green] {pos.ticker}: "
+            f"{pos.shares:,.4f} shares @ avg {pos.avg_cost:,.2f} (blended)"
         )
     else:
-        p.positions[ticker] = Position(ticker=ticker, shares=shares, avg_cost=avg_cost, note=note)
-        console.print(f"[green]Added[/green] {ticker}: {shares:,.4f} shares @ {avg_cost:,.2f}")
+        console.print(f"[green]Added[/green] {pos.ticker}: {pos.shares:,.4f} shares @ {pos.avg_cost:,.2f}")
 
     save_portfolio(p)
 

@@ -115,8 +115,14 @@ def _humanize(n: Optional[float]) -> str:
 
 # ── Watchlist table ───────────────────────────────────────────────────────────
 
-def watchlist_table(quotes: dict[str, Quote], failed: list[str] = None) -> Table:
-    """Render a compact watchlist table."""
+def _short_error(reason: str, limit: int = 40) -> str:
+    """Trim a fetch-error message to something table-friendly."""
+    reason = reason.split("\n")[0]
+    return reason[: limit - 1] + "…" if len(reason) > limit else reason
+
+
+def watchlist_table(quotes: dict[str, Quote], failed: dict[str, str] = None) -> Table:
+    """Render a compact watchlist table. `failed` maps ticker -> error reason."""
     t = Table(
         title="[bold]Watchlist[/bold]",
         box=box.SIMPLE_HEAVY,
@@ -148,13 +154,111 @@ def watchlist_table(quotes: dict[str, Quote], failed: list[str] = None) -> Table
         )
 
     if failed:
-        for ticker in failed:
+        for ticker, reason in failed.items():
             t.add_row(
                 Text(ticker, style="bold red"),
-                Text("Fetch failed", style="red dim"),
+                Text(_short_error(reason), style="red dim"),
                 "—", "—", "—", "—", "—", "—",
             )
     return t
+
+
+# ── DataTable row helpers (used by the Textual TUI) ───────────────────────────
+
+WATCHLIST_COLUMNS = ["Ticker", "Name", "Price", "Change", "Change %", "Volume", "Mkt Cap", "Ccy"]
+PORTFOLIO_COLUMNS = [
+    "Ticker", "Name", "Shares", "Avg Cost", "Price", "Day Chg%",
+    "Day P&L", "Mkt Value", "Book Value", "Gain / Loss", "G/L %", "Weight",
+]
+
+
+def watchlist_row(quote: Quote) -> list[Text]:
+    """One watchlist row as styled Text cells, matching watchlist_table()."""
+    color = _sign_color(quote.change)
+    sign = "+" if quote.change >= 0 else ""
+    name = quote.name[:28] + "…" if len(quote.name) > 28 else quote.name
+    return [
+        Text(quote.ticker, style=f"bold {color}"),
+        Text(name, style="dim"),
+        Text(f"{quote.price:,.2f}", style=f"bold {color}", justify="right"),
+        Text(f"{sign}{quote.change:,.2f}", style=color, justify="right"),
+        Text(f"{sign}{quote.change_pct:.2f}%", style=color, justify="right"),
+        Text(f"{quote.volume:,}", style="dim", justify="right"),
+        Text(_humanize(quote.market_cap), style="dim", justify="right"),
+        Text(quote.currency, style="dim"),
+    ]
+
+
+def watchlist_failed_row(ticker: str, reason: str) -> list[Text]:
+    """Row for a ticker whose fetch failed."""
+    return [
+        Text(ticker, style="bold red"),
+        Text(_short_error(reason), style="red dim"),
+        *(Text("—", style="dim", justify="right") for _ in range(5)),
+        Text("—", style="dim"),
+    ]
+
+
+def portfolio_row(pos: Position, quote: Optional[Quote], total_market: float) -> list[Text]:
+    """One portfolio row as styled Text cells, matching portfolio_table()."""
+    def dash() -> Text:
+        return Text("—", style="dim", justify="right")
+
+    if quote is None:
+        return [
+            Text(pos.ticker, style="bold red"),
+            Text("N/A", style="red dim"),
+            Text(f"{pos.shares:,.4f}", justify="right"),
+            Text(f"{pos.avg_cost:,.2f}", style="dim", justify="right"),
+            dash(), dash(), dash(), dash(),
+            Text(f"{pos.book_value:,.2f}", style="dim", justify="right"),
+            dash(), dash(), dash(),
+        ]
+
+    mv = pos.market_value(quote.price)
+    gl = pos.gain_loss(quote.price)
+    gl_pct = pos.gain_loss_pct(quote.price)
+    day_pl = pos.shares * quote.change
+    weight = (mv / total_market * 100) if total_market else 0
+    color = _sign_color(gl)
+    day_color = _sign_color(quote.change)
+    sign = "+" if gl >= 0 else ""
+    day_sign = "+" if quote.change >= 0 else ""
+    name = quote.name[:18] + "…" if len(quote.name) > 18 else quote.name
+    return [
+        Text(pos.ticker, style=f"bold {color}"),
+        Text(name, style="dim"),
+        Text(f"{pos.shares:,.4f}", justify="right"),
+        Text(f"{pos.avg_cost:,.2f}", style="dim", justify="right"),
+        Text(f"{quote.price:,.2f}", style="bold", justify="right"),
+        Text(f"{day_sign}{quote.change_pct:.2f}%", style=day_color, justify="right"),
+        Text(f"{day_sign}{day_pl:,.2f}", style=day_color, justify="right"),
+        Text(f"{mv:,.2f}", style=f"bold {color}", justify="right"),
+        Text(f"{pos.book_value:,.2f}", style="dim", justify="right"),
+        Text(f"{sign}{gl:,.2f}", style=color, justify="right"),
+        Text(f"{sign}{gl_pct:.2f}%", style=color, justify="right"),
+        Text(f"{weight:.1f}%", style="dim", justify="right"),
+    ]
+
+
+def portfolio_totals_line(portfolio: Portfolio, quotes: dict[str, Quote]) -> Text:
+    """Compact TOTAL line to render under the portfolio DataTable."""
+    total_market, total_book, total_day, _ = _portfolio_totals(portfolio, quotes)
+    total_gl = total_market - total_book
+    total_gl_pct = (total_gl / total_book * 100) if total_book else 0
+    gl_color = _sign_color(total_gl)
+    day_color = _sign_color(total_day)
+    sign = "+" if total_gl >= 0 else ""
+    day_sign = "+" if total_day >= 0 else ""
+    line = Text("  TOTAL  ", style="bold")
+    line.append(f"Mkt {total_market:,.2f}", style=f"bold {gl_color}")
+    line.append("   ")
+    line.append(f"Book {total_book:,.2f}", style="dim")
+    line.append("   ")
+    line.append(f"Day {day_sign}{total_day:,.2f}", style=f"bold {day_color}")
+    line.append("   ")
+    line.append(f"G/L {sign}{total_gl:,.2f} ({sign}{total_gl_pct:.2f}%)", style=f"bold {gl_color}")
+    return line
 
 
 # ── Portfolio table ───────────────────────────────────────────────────────────

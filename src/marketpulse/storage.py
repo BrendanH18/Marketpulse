@@ -34,7 +34,10 @@ def save_portfolio(portfolio: Portfolio) -> None:
             for ticker, pos in portfolio.positions.items()
         },
     }
-    path.write_text(json.dumps(data, indent=2))
+    # Write atomically: a crash mid-write must not corrupt the portfolio file
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, path)
 
 
 def load_portfolio(name: str) -> Optional[Portfolio]:

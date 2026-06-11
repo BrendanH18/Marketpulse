@@ -26,7 +26,7 @@ def fetch_quote(ticker: str) -> Quote:
         # Fall back to slower info if fast_info is missing price
         if price is None:
             full_info = t.info
-            price = full_info.get("currentPrice") or full_info.get("regularMarketPrice", 0.0)
+            price = full_info.get("currentPrice") or full_info.get("regularMarketPrice")
             prev_close = full_info.get("previousClose") or full_info.get("regularMarketPreviousClose", price)
             day_high = full_info.get("dayHigh", 0.0)
             day_low = full_info.get("dayLow", 0.0)
@@ -42,10 +42,14 @@ def fetch_quote(ticker: str) -> Quote:
             except Exception:
                 name = ticker
 
+        # yfinance returns empty data instead of raising for unknown tickers
+        if not price:
+            raise ValueError("no price data (invalid or delisted ticker?)")
+
         return Quote(
             ticker=ticker.upper(),
             name=name,
-            price=float(price or 0),
+            price=float(price),
             prev_close=float(prev_close or price or 0),
             day_high=float(day_high or 0),
             day_low=float(day_low or 0),
@@ -61,20 +65,26 @@ def fetch_quote(ticker: str) -> Quote:
         raise RuntimeError(f"Failed to fetch {ticker}: {e}") from e
 
 
-def fetch_quotes(tickers: list[str]) -> dict[str, Quote]:
-    """Fetch quotes for multiple tickers in parallel. Returns a dict keyed by ticker."""
+def fetch_quotes(tickers: list[str]) -> tuple[dict[str, Quote], dict[str, str]]:
+    """Fetch quotes for multiple tickers in parallel.
+
+    Returns (quotes, errors): quotes keyed by upper-cased ticker, and an
+    error-message dict for every ticker that failed.
+    """
     if not tickers:
-        return {}
+        return {}, {}
     results = {}
+    errors = {}
     with ThreadPoolExecutor(max_workers=min(len(tickers), 10)) as executor:
         futures = {executor.submit(fetch_quote, ticker): ticker for ticker in tickers}
         for future in as_completed(futures):
+            ticker = futures[future]
             try:
                 quote = future.result()
                 results[quote.ticker] = quote
-            except RuntimeError:
-                pass
-    return results
+            except RuntimeError as e:
+                errors[ticker.upper()] = str(e)
+    return results, errors
 
 
 def fetch_history(ticker: str, period: str = "1mo") -> "pd.DataFrame":

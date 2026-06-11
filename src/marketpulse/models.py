@@ -65,3 +65,23 @@ class Portfolio:
     watchlist: list[str] = field(default_factory=list)
     currency: str = "CAD"
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def add_position(self, ticker: str, shares: float, avg_cost: float, note: str = "") -> tuple[Position, bool]:
+        """Add a new position or blend into an existing one (averages the cost).
+
+        Returns (position, blended) where blended is True if an existing
+        position was averaged with the new lot.
+        """
+        ticker = ticker.upper()
+        existing = self.positions.get(ticker)
+        if existing:
+            old_book = existing.shares * existing.avg_cost
+            new_book = shares * avg_cost
+            total_shares = existing.shares + shares
+            new_avg = (old_book + new_book) / total_shares if total_shares else avg_cost
+            pos = Position(ticker=ticker, shares=total_shares, avg_cost=new_avg, note=note or existing.note)
+            self.positions[ticker] = pos
+            return pos, True
+        pos = Position(ticker=ticker, shares=shares, avg_cost=avg_cost, note=note)
+        self.positions[ticker] = pos
+        return pos, False
