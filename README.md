@@ -22,9 +22,8 @@ uv sync
 # Run directly via uv
 uv run marketpulse --help
 
-# Or install into your environment
-uv pip install -e .
-marketpulse --help
+# Or install command globally
+uv tool install --editable .
 ```
 
 ---
@@ -43,12 +42,6 @@ uv run marketpulse tui -r 15       # refresh quotes every 15s
 
 Keys: `1`/`2`/`3` switch between Watchlist, Portfolio, and Chart tabs • `r` refresh now • `q` quit.
 On the Chart tab, type `TICKER [PERIOD]` (e.g. `SPY 1y`) and press Enter.
-
-> **Tip:** install the command globally so you can skip `uv run` entirely:
-> ```bash
-> uv tool install --editable .
-> marketpulse        # from any directory
-> ```
 
 ### `watch` — Live Watchlist Table
 
