@@ -24,29 +24,22 @@ from textual.widgets import (
 from .display import (
     PORTFOLIO_COLUMNS,
     WATCHLIST_COLUMNS,
+    _portfolio_totals,
     history_panel,
     portfolio_row,
     portfolio_summary,
     portfolio_totals_line,
     quote_panel,
+    transactions_table,
     watchlist_failed_row,
     watchlist_row,
 )
-from .fetcher import fetch_history, fetch_quotes
-from .models import Portfolio, Quote
+from .fetcher import fetch_fx_rates, fetch_history, fetch_quotes
+from .models import FxRates, Portfolio, Quote, parse_tickers
 from .storage import get_or_create_portfolio, load_portfolio, save_portfolio
 
 CHART_PERIODS = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"]
 DEFAULT_CHART_PERIOD = "3mo"
-
-
-def _parse_tickers(raw: str) -> list[str]:
-    """Split user input into upper-cased, de-duplicated tickers."""
-    seen = set()
-    return [
-        t.upper() for t in raw.replace(",", " ").split()
-        if not (t.upper() in seen or seen.add(t.upper()))
-    ]
 
 
 # ── Modal screens ─────────────────────────────────────────────────────────────
@@ -104,7 +97,7 @@ class SetupScreen(ModalScreen["Portfolio | None"]):
 
     @on(Button.Pressed, "#setup-save")
     def _save(self) -> None:
-        self._portfolio.watchlist = _parse_tickers(self.query_one("#setup-watchlist", Input).value)
+        self._portfolio.watchlist = parse_tickers(self.query_one("#setup-watchlist", Input).value)
         self.dismiss(self._portfolio)
 
     @on(Button.Pressed, "#setup-skip")
@@ -128,7 +121,7 @@ class AddTickerScreen(ModalScreen["list[str] | None"]):
     @on(Input.Submitted, "#add-ticker-input")
     @on(Button.Pressed, "#add-ticker-ok")
     def _submit(self) -> None:
-        tickers = _parse_tickers(self.query_one("#add-ticker-input", Input).value)
+        tickers = parse_tickers(self.query_one("#add-ticker-input", Input).value)
         self.dismiss(tickers or None)
 
     @on(Button.Pressed, "#add-ticker-cancel")
@@ -136,52 +129,99 @@ class AddTickerScreen(ModalScreen["list[str] | None"]):
         self.dismiss(None)
 
 
-class AddPositionScreen(ModalScreen["tuple[str, float, float, str] | None"]):
-    """Form for a new portfolio position (blends with an existing one on save)."""
+class TradeScreen(ModalScreen["tuple[str, str, float, float, float, str] | None"]):
+    """Form for recording a buy or sell.
+
+    Dismisses with (action, ticker, shares, price, fees, note) or None.
+    """
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
-    def compose(self) -> ComposeResult:
-        with Vertical(classes="modal-box"):
-            yield Label("Add / update position", classes="modal-title")
-            yield Label("Adding a ticker you already hold blends the average cost.", classes="modal-hint")
-            yield Input(placeholder="Ticker  e.g. XEQT.TO", id="pos-ticker")
-            yield Input(placeholder="Shares  e.g. 100", id="pos-shares")
-            yield Input(placeholder="Avg cost per share  e.g. 28.50", id="pos-cost")
-            yield Input(placeholder="Note (optional)", id="pos-note")
-            yield Label("", id="pos-error")
-            with Horizontal(classes="modal-buttons"):
-                yield Button("Add", variant="success", id="pos-ok")
-                yield Button("Cancel", id="pos-cancel")
+    def __init__(self, action: str = "BUY", ticker: str = "", max_shares: float | None = None):
+        super().__init__()
+        self._action = action
+        self._ticker = ticker
+        self._max_shares = max_shares
 
-    @on(Input.Submitted, "#pos-ticker")
-    @on(Input.Submitted, "#pos-shares")
-    @on(Input.Submitted, "#pos-cost")
+    def compose(self) -> ComposeResult:
+        buying = self._action == "BUY"
+        with Vertical(classes="modal-box"):
+            if buying:
+                yield Label("Buy / add to position", classes="modal-title")
+                yield Label("Buying a ticker you already hold blends the average cost.", classes="modal-hint")
+            else:
+                held = f" — {self._max_shares:,.4f} held" if self._max_shares is not None else ""
+                yield Label(f"Sell {self._ticker}{held}", classes="modal-title")
+                yield Label("Realized P&L uses the average-cost method.", classes="modal-hint")
+            yield Input(value=self._ticker, placeholder="Ticker  e.g. XEQT.TO", id="trade-ticker")
+            yield Input(placeholder="Shares  e.g. 100", id="trade-shares")
+            yield Input(placeholder="Price per share  e.g. 28.50", id="trade-price")
+            yield Input(placeholder="Fees (optional)  e.g. 4.95", id="trade-fees")
+            yield Input(placeholder="Note (optional)", id="trade-note")
+            yield Label("", id="trade-error")
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Buy" if buying else "Sell", variant="success" if buying else "error", id="trade-ok")
+                yield Button("Cancel", id="trade-cancel")
+
+    def on_mount(self) -> None:
+        if self._ticker:
+            self.query_one("#trade-shares", Input).focus()
+
+    @on(Input.Submitted, "#trade-ticker")
+    @on(Input.Submitted, "#trade-shares")
+    @on(Input.Submitted, "#trade-price")
+    @on(Input.Submitted, "#trade-fees")
     def _next_field(self) -> None:
         self.focus_next()
 
-    @on(Input.Submitted, "#pos-note")
-    @on(Button.Pressed, "#pos-ok")
+    @on(Input.Submitted, "#trade-note")
+    @on(Button.Pressed, "#trade-ok")
     def _submit(self) -> None:
-        ticker = self.query_one("#pos-ticker", Input).value.strip().upper()
-        error = self.query_one("#pos-error", Label)
+        ticker = self.query_one("#trade-ticker", Input).value.strip().upper()
+        error = self.query_one("#trade-error", Label)
         if not ticker:
             error.update(Text("Ticker is required.", style="red"))
             return
         try:
-            shares = float(self.query_one("#pos-shares", Input).value)
-            avg_cost = float(self.query_one("#pos-cost", Input).value)
+            shares = float(self.query_one("#trade-shares", Input).value)
+            price = float(self.query_one("#trade-price", Input).value)
+            fees = float(self.query_one("#trade-fees", Input).value or 0)
         except ValueError:
-            error.update(Text("Shares and avg cost must be numbers.", style="red"))
+            error.update(Text("Shares, price, and fees must be numbers.", style="red"))
             return
-        if shares <= 0 or avg_cost < 0:
-            error.update(Text("Shares must be positive and avg cost non-negative.", style="red"))
+        if shares <= 0 or price < 0 or fees < 0:
+            error.update(Text("Shares must be positive; price and fees non-negative.", style="red"))
             return
-        note = self.query_one("#pos-note", Input).value.strip()
-        self.dismiss((ticker, shares, avg_cost, note))
+        if self._action == "SELL" and self._max_shares is not None and shares > self._max_shares + 1e-9:
+            error.update(Text(f"Only {self._max_shares:,.4f} shares held.", style="red"))
+            return
+        note = self.query_one("#trade-note", Input).value.strip()
+        self.dismiss((self._action, ticker, shares, price, fees, note))
 
-    @on(Button.Pressed, "#pos-cancel")
+    @on(Button.Pressed, "#trade-cancel")
     def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class HistoryScreen(ModalScreen[None]):
+    """Scrollable transaction ledger for the portfolio."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("h", "close", "Close"),
+        Binding("q", "close", "Close"),
+    ]
+
+    def __init__(self, portfolio: Portfolio):
+        super().__init__()
+        self._portfolio = portfolio
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal-box", id="history-box"):
+            yield VerticalScroll(Static(transactions_table(self._portfolio)))
+            yield Label("esc to close", classes="modal-hint")
+
+    def action_close(self) -> None:
         self.dismiss(None)
 
 
@@ -266,7 +306,7 @@ class MarketPulseApp(App):
         height: auto;
     }
 
-    SetupScreen, AddTickerScreen, AddPositionScreen, ConfirmScreen, QuoteDetailScreen {
+    SetupScreen, AddTickerScreen, TradeScreen, ConfirmScreen, QuoteDetailScreen, HistoryScreen {
         align: center middle;
     }
     .modal-box {
@@ -278,6 +318,14 @@ class MarketPulseApp(App):
     }
     #detail-box {
         width: auto;
+    }
+    #history-box {
+        width: auto;
+        max-width: 110;
+    }
+    #history-box VerticalScroll {
+        height: auto;
+        max-height: 30;
     }
     .modal-box Input {
         margin-bottom: 1;
@@ -305,9 +353,11 @@ class MarketPulseApp(App):
         Binding("1", "show_tab('watchlist')", "Watchlist", show=False),
         Binding("2", "show_tab('portfolio')", "Portfolio", show=False),
         Binding("3", "show_tab('chart')", "Chart", show=False),
-        Binding("a", "add_item", "Add"),
+        Binding("a", "add_item", "Add/Buy"),
+        Binding("s", "sell_item", "Sell"),
         Binding("d", "remove_item", "Remove"),
         Binding("i", "details", "Details"),
+        Binding("h", "history", "History"),
         Binding("left_square_bracket", "cycle_period(-1)", "Period -"),
         Binding("right_square_bracket", "cycle_period(1)", "Period +"),
     ]
@@ -322,6 +372,7 @@ class MarketPulseApp(App):
         self.chart_period = DEFAULT_CHART_PERIOD
         self.quotes: dict[str, Quote] = {}
         self._last_failed: set[str] = set()
+        self._last_fx_failed: set[str] = set()
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
@@ -408,9 +459,29 @@ class MarketPulseApp(App):
         if tab == "watchlist":
             self.push_screen(AddTickerScreen(), self._add_tickers_done)
         elif tab == "portfolio":
-            self.push_screen(AddPositionScreen(), self._add_position_done)
+            self.push_screen(TradeScreen("BUY"), self._trade_done)
         else:
             self.query_one("#chart-input", Input).focus()
+
+    def action_sell_item(self) -> None:
+        if self.query_one(TabbedContent).active != "portfolio":
+            return
+        ticker = self._selected_ticker("#portfolio-table")
+        if ticker is None:
+            return
+        p = load_portfolio(self.portfolio_name)
+        pos = p.positions.get(ticker) if p else None
+        if pos is None:
+            self.notify(f"No position in {ticker}.", severity="warning")
+            return
+        self.push_screen(TradeScreen("SELL", ticker=ticker, max_shares=pos.shares), self._trade_done)
+
+    def action_history(self) -> None:
+        p = load_portfolio(self.portfolio_name)
+        if p is None or not p.transactions:
+            self.notify("No transactions recorded yet.", severity="information")
+            return
+        self.push_screen(HistoryScreen(p))
 
     def _add_tickers_done(self, tickers: list[str] | None) -> None:
         if not tickers:
@@ -425,15 +496,28 @@ class MarketPulseApp(App):
         self.notify(f"Added to watchlist: {', '.join(added)}")
         self.load_watchlist()
 
-    def _add_position_done(self, result: tuple[str, float, float, str] | None) -> None:
+    def _trade_done(self, result: tuple[str, str, float, float, float, str] | None) -> None:
         if result is None:
             return
-        ticker, shares, avg_cost, note = result
+        action, ticker, shares, price, fees, note = result
         p = get_or_create_portfolio(self.portfolio_name)
-        pos, blended = p.add_position(ticker, shares, avg_cost, note)
+        try:
+            if action == "BUY":
+                # Currency is left blank: display falls back to the live quote's
+                # currency, and the CLI 'buy' command can set it explicitly.
+                pos, blended = p.buy(ticker, shares, price, fees=fees, note=note)
+                verb = "Updated (blended)" if blended else "Opened"
+                msg = f"{verb} {pos.ticker}: {pos.shares:,.4f} @ avg {pos.avg_cost:,.2f}"
+            else:
+                realized, pos = p.sell(ticker, shares, price, fees=fees, note=note)
+                sign = "+" if realized >= 0 else ""
+                remaining = "position closed" if pos is None else f"{pos.shares:,.4f} shares remain"
+                msg = f"Sold {shares:,.4f} {ticker}: realized {sign}{realized:,.2f} — {remaining}"
+        except ValueError as e:
+            self.notify(str(e), severity="error")
+            return
         save_portfolio(p)
-        verb = "Updated (blended)" if blended else "Added"
-        self.notify(f"{verb} {pos.ticker}: {pos.shares:,.4f} @ {pos.avg_cost:,.2f}")
+        self.notify(msg)
         self.load_portfolio_view()
         self.load_watchlist()
 
@@ -588,7 +672,10 @@ class MarketPulseApp(App):
             return
         self.call_from_thread(self._set_status, "#portfolio-status", Text("  Updating…", style="cyan"))
         quotes, errors = fetch_quotes(list(p.positions.keys()))
-        self.call_from_thread(self._render_portfolio, p, quotes, errors)
+        currencies = {q.currency for q in quotes.values()}
+        currencies.update(pos.currency for pos in p.positions.values() if pos.currency)
+        fx, fx_errors = fetch_fx_rates(currencies, p.currency)
+        self.call_from_thread(self._render_portfolio, p, quotes, errors, fx, fx_errors)
 
     def _render_portfolio_empty(self) -> None:
         self.query_one("#portfolio-table", DataTable).clear()
@@ -604,33 +691,38 @@ class MarketPulseApp(App):
         )
         self._set_status("#portfolio-status", Text(""))
 
-    def _render_portfolio(self, p: Portfolio, quotes: dict[str, Quote], errors: dict[str, str]) -> None:
+    def _render_portfolio(
+        self,
+        p: Portfolio,
+        quotes: dict[str, Quote],
+        errors: dict[str, str],
+        fx: FxRates,
+        fx_errors: dict[str, str],
+    ) -> None:
         self.quotes.update(quotes)
         table = self.query_one("#portfolio-table", DataTable)
         selected = self._selected_ticker("#portfolio-table")
         table.clear()
-        total_market = sum(
-            pos.market_value(quotes[t.upper()].price)
-            for t, pos in p.positions.items() if t.upper() in quotes
-        )
+        totals = _portfolio_totals(p, quotes, fx)
         keys = []
         for ticker, pos in sorted(p.positions.items()):
-            table.add_row(*portfolio_row(pos, quotes.get(ticker.upper()), total_market), key=ticker)
+            table.add_row(*portfolio_row(pos, quotes.get(ticker.upper()), totals.market, fx), key=ticker)
             keys.append(ticker)
         if selected in keys:
             table.move_cursor(row=keys.index(selected))
-        extra = [portfolio_totals_line(p, quotes)]
+        extra = [portfolio_totals_line(p, quotes, fx)]
         if quotes:
-            extra.append(portfolio_summary(p, quotes))
+            extra.append(portfolio_summary(p, quotes, fx))
         self.query_one("#portfolio-extra", Static).update(Group(*extra))
         self._set_status(
             "#portfolio-status",
             Text(
-                f"  updated {_now()}   (Enter chart · a add · d remove · i details)",
+                f"  updated {_now()}   (Enter chart · a buy · s sell · d remove · i details · h history)",
                 style="dim",
             ),
         )
         self._notify_failures(errors)
+        self._notify_fx_failures(fx_errors)
 
     @work(thread=True, exclusive=True, group="chart")
     def load_chart(self, ticker: str, period: str) -> None:
@@ -653,6 +745,16 @@ class MarketPulseApp(App):
             self.notify(f"Failed to fetch: {', '.join(sorted(failed))}", severity="warning")
         if failed:
             self._last_failed = failed
+
+    def _notify_fx_failures(self, fx_errors: dict[str, str]) -> None:
+        failed = set(fx_errors)
+        if failed and failed != self._last_fx_failed:
+            self.notify(
+                f"No FX rate for: {', '.join(sorted(failed))} — affected positions excluded from totals",
+                severity="warning",
+            )
+        if failed:
+            self._last_fx_failed = failed
 
     def _set_status(self, selector: str, renderable) -> None:
         self.query_one(selector, Static).update(renderable)

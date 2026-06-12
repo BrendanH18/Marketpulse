@@ -1,16 +1,16 @@
 """Rich terminal UI rendering for MarketPulse."""
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+
 import pandas as pd
+from rich import box
+from rich.align import Align
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich.columns import Columns
-from rich.align import Align
-from rich import box
-from rich.style import Style
-from .models import Quote, Portfolio, Position
+
+from .models import FxRates, Portfolio, Position, Quote
 
 console = Console()
 
@@ -101,7 +101,7 @@ def quote_panel(quote: Quote) -> Panel:
     return Panel(group, title=title, border_style=color, expand=False, padding=(0, 1))
 
 
-def _humanize(n: Optional[float]) -> str:
+def _humanize(n: float | None) -> str:
     if n is None:
         return "N/A"
     if n >= 1e12:
@@ -167,9 +167,14 @@ def watchlist_table(quotes: dict[str, Quote], failed: dict[str, str] = None) -> 
 
 WATCHLIST_COLUMNS = ["Ticker", "Name", "Price", "Change", "Change %", "Volume", "Mkt Cap", "Ccy"]
 PORTFOLIO_COLUMNS = [
-    "Ticker", "Name", "Shares", "Avg Cost", "Price", "Day Chg%",
+    "Ticker", "Name", "Shares", "Avg Cost", "Ccy", "Price", "Day Chg%",
     "Day P&L", "Mkt Value", "Book Value", "Gain / Loss", "G/L %", "Weight",
 ]
+
+
+def _native_currency(pos: Position, quote: Quote | None, base: str) -> str:
+    """Resolve the currency a position's prices are denominated in."""
+    return pos.currency or (quote.currency if quote else "") or base
 
 
 def watchlist_row(quote: Quote) -> list[Text]:
@@ -199,10 +204,18 @@ def watchlist_failed_row(ticker: str, reason: str) -> list[Text]:
     ]
 
 
-def portfolio_row(pos: Position, quote: Optional[Quote], total_market: float) -> list[Text]:
-    """One portfolio row as styled Text cells, matching portfolio_table()."""
+def portfolio_row(pos: Position, quote: Quote | None, total_market: float, fx: FxRates) -> list[Text]:
+    """One portfolio row as styled Text cells, matching portfolio_table().
+
+    Per-row figures stay in the position's native currency; `total_market`
+    is in the base currency, so Weight converts the row's market value first.
+    """
     def dash() -> Text:
         return Text("—", style="dim", justify="right")
+
+    ccy = _native_currency(pos, quote, fx.base)
+    fx_ok = fx.rate(ccy) is not None
+    ccy_cell = Text(ccy, style="dim" if fx_ok else "bold red")
 
     if quote is None:
         return [
@@ -210,6 +223,7 @@ def portfolio_row(pos: Position, quote: Optional[Quote], total_market: float) ->
             Text("N/A", style="red dim"),
             Text(f"{pos.shares:,.4f}", justify="right"),
             Text(f"{pos.avg_cost:,.2f}", style="dim", justify="right"),
+            ccy_cell,
             dash(), dash(), dash(), dash(),
             Text(f"{pos.book_value:,.2f}", style="dim", justify="right"),
             dash(), dash(), dash(),
@@ -219,7 +233,11 @@ def portfolio_row(pos: Position, quote: Optional[Quote], total_market: float) ->
     gl = pos.gain_loss(quote.price)
     gl_pct = pos.gain_loss_pct(quote.price)
     day_pl = pos.shares * quote.change
-    weight = (mv / total_market * 100) if total_market else 0
+    mv_base = fx.convert(mv, ccy)
+    if mv_base is not None and total_market:
+        weight_cell = Text(f"{mv_base / total_market * 100:.1f}%", style="dim", justify="right")
+    else:
+        weight_cell = Text("n/a", style="dim", justify="right")
     color = _sign_color(gl)
     day_color = _sign_color(quote.change)
     sign = "+" if gl >= 0 else ""
@@ -230,6 +248,7 @@ def portfolio_row(pos: Position, quote: Optional[Quote], total_market: float) ->
         Text(name, style="dim"),
         Text(f"{pos.shares:,.4f}", justify="right"),
         Text(f"{pos.avg_cost:,.2f}", style="dim", justify="right"),
+        ccy_cell,
         Text(f"{quote.price:,.2f}", style="bold", justify="right"),
         Text(f"{day_sign}{quote.change_pct:.2f}%", style=day_color, justify="right"),
         Text(f"{day_sign}{day_pl:,.2f}", style=day_color, justify="right"),
@@ -237,52 +256,90 @@ def portfolio_row(pos: Position, quote: Optional[Quote], total_market: float) ->
         Text(f"{pos.book_value:,.2f}", style="dim", justify="right"),
         Text(f"{sign}{gl:,.2f}", style=color, justify="right"),
         Text(f"{sign}{gl_pct:.2f}%", style=color, justify="right"),
-        Text(f"{weight:.1f}%", style="dim", justify="right"),
+        weight_cell,
     ]
 
 
-def portfolio_totals_line(portfolio: Portfolio, quotes: dict[str, Quote]) -> Text:
+def portfolio_totals_line(portfolio: Portfolio, quotes: dict[str, Quote], fx: FxRates) -> Text:
     """Compact TOTAL line to render under the portfolio DataTable."""
-    total_market, total_book, total_day, _ = _portfolio_totals(portfolio, quotes)
-    total_gl = total_market - total_book
-    total_gl_pct = (total_gl / total_book * 100) if total_book else 0
+    totals = _portfolio_totals(portfolio, quotes, fx)
+    total_gl = totals.market - totals.book
+    total_gl_pct = (total_gl / totals.book * 100) if totals.book else 0
     gl_color = _sign_color(total_gl)
-    day_color = _sign_color(total_day)
+    day_color = _sign_color(totals.day)
     sign = "+" if total_gl >= 0 else ""
-    day_sign = "+" if total_day >= 0 else ""
+    day_sign = "+" if totals.day >= 0 else ""
     line = Text("  TOTAL  ", style="bold")
-    line.append(f"Mkt {total_market:,.2f}", style=f"bold {gl_color}")
+    line.append(f"Mkt {totals.market:,.2f} {fx.base}", style=f"bold {gl_color}")
     line.append("   ")
-    line.append(f"Book {total_book:,.2f}", style="dim")
+    line.append(f"Book {totals.book:,.2f}", style="dim")
     line.append("   ")
-    line.append(f"Day {day_sign}{total_day:,.2f}", style=f"bold {day_color}")
+    line.append(f"Day {day_sign}{totals.day:,.2f}", style=f"bold {day_color}")
     line.append("   ")
     line.append(f"G/L {sign}{total_gl:,.2f} ({sign}{total_gl_pct:.2f}%)", style=f"bold {gl_color}")
+    excluded = totals.missing_quotes + totals.missing_fx
+    if excluded:
+        line.append(f"   excludes {', '.join(excluded)}", style="dim italic")
     return line
 
 
 # ── Portfolio table ───────────────────────────────────────────────────────────
 
-def _portfolio_totals(portfolio: Portfolio, quotes: dict[str, Quote]) -> tuple[float, float, float, list[str]]:
-    """Return (total_market, total_book, total_day_change, missing_tickers)."""
-    total_market = 0.0
-    total_book = 0.0
-    total_day = 0.0
-    missing = []
+@dataclass
+class Totals:
+    """Portfolio totals in the base currency.
+
+    Positions without a live quote or without an FX rate into the base
+    currency are excluded from all three sums and listed instead — mixed
+    currencies are never silently added together.
+    """
+    market: float = 0.0
+    book: float = 0.0
+    day: float = 0.0
+    missing_quotes: list[str] = field(default_factory=list)
+    missing_fx: list[str] = field(default_factory=list)
+
+
+def _portfolio_totals(portfolio: Portfolio, quotes: dict[str, Quote], fx: FxRates) -> Totals:
+    totals = Totals()
     for ticker, pos in portfolio.positions.items():
-        total_book += pos.book_value
         quote = quotes.get(ticker.upper())
         if quote is None:
-            missing.append(ticker)
+            totals.missing_quotes.append(ticker)
             continue
-        total_market += pos.market_value(quote.price)
-        total_day += pos.shares * quote.change
-    return total_market, total_book, total_day, missing
+        ccy = _native_currency(pos, quote, fx.base)
+        rate = fx.rate(ccy)
+        if rate is None:
+            totals.missing_fx.append(ticker)
+            continue
+        totals.market += pos.market_value(quote.price) * rate
+        totals.book += pos.book_value * rate
+        totals.day += pos.shares * quote.change * rate
+    return totals
 
 
-def portfolio_table(portfolio: Portfolio, quotes: dict[str, Quote]) -> Table:
-    """Render a portfolio holdings table with live P&L."""
-    total_market, total_book, total_day, _ = _portfolio_totals(portfolio, quotes)
+def _realized_pnl_base(portfolio: Portfolio, fx: FxRates) -> tuple[float, list[str]]:
+    """Convert per-currency realized P&L into the base currency.
+
+    Returns (total, unconvertible_currencies)."""
+    total = 0.0
+    missing = []
+    for ccy, amount in portfolio.realized_pnl().items():
+        converted = fx.convert(amount, ccy)
+        if converted is None:
+            missing.append(ccy)
+        else:
+            total += converted
+    return total, missing
+
+
+def portfolio_table(portfolio: Portfolio, quotes: dict[str, Quote], fx: FxRates) -> Table:
+    """Render a portfolio holdings table with live P&L.
+
+    Rows are in each position's native currency; footer totals are converted
+    to the portfolio base currency.
+    """
+    totals = _portfolio_totals(portfolio, quotes, fx)
     show_notes = any(pos.note for pos in portfolio.positions.values())
 
     t = Table(
@@ -297,6 +354,7 @@ def portfolio_table(portfolio: Portfolio, quotes: dict[str, Quote]) -> Table:
     t.add_column("Name", style="dim", max_width=20)
     t.add_column("Shares", justify="right")
     t.add_column("Avg Cost", justify="right", style="dim")
+    t.add_column("Ccy", justify="center")
     t.add_column("Price", justify="right")
     t.add_column("Day Chg%", justify="right")
     t.add_column("Day P&L", justify="right")
@@ -310,11 +368,14 @@ def portfolio_table(portfolio: Portfolio, quotes: dict[str, Quote]) -> Table:
 
     for ticker, pos in sorted(portfolio.positions.items()):
         quote = quotes.get(ticker.upper())
+        ccy = _native_currency(pos, quote, fx.base)
+        fx_ok = fx.rate(ccy) is not None
+        ccy_cell = Text(ccy, style="dim" if fx_ok else "bold red")
         if quote is None:
             row = [
                 Text(ticker, style="bold red"),
                 Text("N/A", style="red dim"),
-                f"{pos.shares:,.4f}", f"{pos.avg_cost:,.2f}",
+                f"{pos.shares:,.4f}", f"{pos.avg_cost:,.2f}", ccy_cell,
                 "—", "—", "—", "—", f"{pos.book_value:,.2f}", "—", "—", "—",
             ]
             if show_notes:
@@ -326,7 +387,11 @@ def portfolio_table(portfolio: Portfolio, quotes: dict[str, Quote]) -> Table:
         gl = pos.gain_loss(quote.price)
         gl_pct = pos.gain_loss_pct(quote.price)
         day_pl = pos.shares * quote.change
-        weight = (mv / total_market * 100) if total_market else 0
+        mv_base = fx.convert(mv, ccy)
+        if mv_base is not None and totals.market:
+            weight_cell = f"{mv_base / totals.market * 100:.1f}%"
+        else:
+            weight_cell = "n/a"
         color = _sign_color(gl)
         day_color = _sign_color(quote.change)
         sign = "+" if gl >= 0 else ""
@@ -337,6 +402,7 @@ def portfolio_table(portfolio: Portfolio, quotes: dict[str, Quote]) -> Table:
             Text(quote.name[:18] + "…" if len(quote.name) > 18 else quote.name, style="dim"),
             f"{pos.shares:,.4f}",
             f"{pos.avg_cost:,.2f}",
+            ccy_cell,
             Text(f"{quote.price:,.2f}", style="bold"),
             Text(f"{day_sign}{quote.change_pct:.2f}%", style=day_color),
             Text(f"{day_sign}{day_pl:,.2f}", style=day_color),
@@ -344,60 +410,113 @@ def portfolio_table(portfolio: Portfolio, quotes: dict[str, Quote]) -> Table:
             f"{pos.book_value:,.2f}",
             Text(f"{sign}{gl:,.2f}", style=color),
             Text(f"{sign}{gl_pct:.2f}%", style=color),
-            f"{weight:.1f}%",
+            weight_cell,
         ]
         if show_notes:
             row.append(pos.note)
         t.add_row(*row)
 
-    total_gl = total_market - total_book
-    total_gl_pct = (total_gl / total_book * 100) if total_book else 0
+    total_gl = totals.market - totals.book
+    total_gl_pct = (total_gl / totals.book * 100) if totals.book else 0
     gl_color = _sign_color(total_gl)
-    day_color = _sign_color(total_day)
+    day_color = _sign_color(totals.day)
     sign = "+" if total_gl >= 0 else ""
-    day_sign = "+" if total_day >= 0 else ""
+    day_sign = "+" if totals.day >= 0 else ""
 
     headers = [str(c.header) for c in t.columns]
-    t.columns[headers.index("Day P&L")].footer = Text(f"{day_sign}{total_day:,.2f}", style=f"bold {day_color}")
-    t.columns[headers.index("Mkt Value")].footer = Text(f"{total_market:,.2f}", style=f"bold {gl_color}")
-    t.columns[headers.index("Book Value")].footer = Text(f"{total_book:,.2f}", style="dim")
+    t.columns[headers.index("Ccy")].footer = Text(fx.base, style="dim")
+    t.columns[headers.index("Day P&L")].footer = Text(f"{day_sign}{totals.day:,.2f}", style=f"bold {day_color}")
+    t.columns[headers.index("Mkt Value")].footer = Text(f"{totals.market:,.2f}", style=f"bold {gl_color}")
+    t.columns[headers.index("Book Value")].footer = Text(f"{totals.book:,.2f}", style="dim")
     t.columns[headers.index("Gain / Loss")].footer = Text(f"{sign}{total_gl:,.2f}", style=f"bold {gl_color}")
     t.columns[headers.index("G/L %")].footer = Text(f"{sign}{total_gl_pct:.2f}%", style=f"bold {gl_color}")
 
     return t
 
 
-def portfolio_summary(portfolio: Portfolio, quotes: dict[str, Quote]) -> Panel:
-    """One-glance summary: total value, day change, total gain/loss."""
-    total_market, total_book, total_day, missing = _portfolio_totals(portfolio, quotes)
-    total_gl = total_market - total_book
-    total_gl_pct = (total_gl / total_book * 100) if total_book else 0
-    prev_value = total_market - total_day
-    day_pct = (total_day / prev_value * 100) if prev_value else 0
+def portfolio_summary(portfolio: Portfolio, quotes: dict[str, Quote], fx: FxRates) -> Panel:
+    """One-glance summary: total value, day change, unrealized and realized P&L."""
+    totals = _portfolio_totals(portfolio, quotes, fx)
+    total_gl = totals.market - totals.book
+    total_gl_pct = (total_gl / totals.book * 100) if totals.book else 0
+    prev_value = totals.market - totals.day
+    day_pct = (totals.day / prev_value * 100) if prev_value else 0
+    realized, realized_missing = _realized_pnl_base(portfolio, fx)
 
     gl_color = _sign_color(total_gl)
-    day_color = _sign_color(total_day)
+    day_color = _sign_color(totals.day)
     gl_sign = "+" if total_gl >= 0 else ""
-    day_sign = "+" if total_day >= 0 else ""
-    day_arrow = "▲" if total_day >= 0 else "▼"
+    day_sign = "+" if totals.day >= 0 else ""
+    day_arrow = "▲" if totals.day >= 0 else "▼"
 
     line = Text("  ")
-    line.append(f"Total Value  {total_market:,.2f} {portfolio.currency}", style="bold")
+    line.append(f"Total Value  {totals.market:,.2f} {fx.base}", style="bold")
     line.append("    •    ", style="dim")
-    line.append(f"Today  {day_arrow} {day_sign}{total_day:,.2f} ({day_sign}{day_pct:.2f}%)", style=f"bold {day_color}")
+    line.append(f"Today  {day_arrow} {day_sign}{totals.day:,.2f} ({day_sign}{day_pct:.2f}%)", style=f"bold {day_color}")
     line.append("    •    ", style="dim")
-    line.append(f"All Time  {gl_sign}{total_gl:,.2f} ({gl_sign}{total_gl_pct:.2f}%)", style=f"bold {gl_color}")
+    line.append(f"Unrealized  {gl_sign}{total_gl:,.2f} ({gl_sign}{total_gl_pct:.2f}%)", style=f"bold {gl_color}")
+    if realized or realized_missing:
+        r_color = _sign_color(realized)
+        r_sign = "+" if realized >= 0 else ""
+        line.append("    •    ", style="dim")
+        line.append(f"Realized  {r_sign}{realized:,.2f}", style=f"bold {r_color}")
 
     from rich.console import Group
     lines = [line]
-    if missing:
-        lines.append(Text(f"  Excludes {', '.join(missing)} (no live price)", style="dim italic"))
+    notes = []
+    if totals.missing_quotes:
+        notes.append(f"{', '.join(totals.missing_quotes)} (no live price)")
+    if totals.missing_fx:
+        notes.append(f"{', '.join(totals.missing_fx)} (no FX rate to {fx.base})")
+    if realized_missing:
+        notes.append(f"realized P&L in {', '.join(realized_missing)} (no FX rate)")
+    if notes:
+        lines.append(Text(f"  Excludes {'; '.join(notes)}", style="dim italic"))
     return Panel(Group(*lines), border_style=gl_color, padding=(0, 1))
+
+
+def transactions_table(portfolio: Portfolio, ticker: str | None = None) -> Table:
+    """Render the transaction ledger, optionally filtered to one ticker."""
+    txns = portfolio.transactions
+    if ticker:
+        ticker = ticker.upper()
+        txns = [txn for txn in txns if txn.ticker == ticker]
+    suffix = f"  [dim]{ticker}[/dim]" if ticker else ""
+    t = Table(
+        title=f"[bold]Transactions: {portfolio.name}[/bold]{suffix}",
+        box=box.SIMPLE_HEAVY,
+        show_header=True,
+        header_style="bold cyan",
+    )
+    t.add_column("Date", style="dim")
+    t.add_column("Action")
+    t.add_column("Ticker", style="bold")
+    t.add_column("Shares", justify="right")
+    t.add_column("Price", justify="right")
+    t.add_column("Fees", justify="right", style="dim")
+    t.add_column("Value", justify="right")
+    t.add_column("Ccy", justify="center", style="dim")
+    t.add_column("Note", style="dim italic")
+
+    for txn in txns:
+        color = "bright_green" if txn.action == "BUY" else "bright_red"
+        t.add_row(
+            txn.date or "—",
+            Text(txn.action, style=f"bold {color}"),
+            txn.ticker,
+            f"{txn.shares:,.4f}",
+            f"{txn.price:,.2f}",
+            f"{txn.fees:,.2f}" if txn.fees else "—",
+            Text(f"{txn.gross_value:,.2f}", style=color),
+            txn.currency or "—",
+            txn.note,
+        )
+    return t
 
 
 # ── History chart ─────────────────────────────────────────────────────────────
 
-def history_panel(ticker: str, history: "pd.DataFrame", period: str, width: Optional[int] = None) -> Panel:
+def history_panel(ticker: str, history: "pd.DataFrame", period: str, width: int | None = None) -> Panel:
     """Render a text-based price chart using block characters."""
     close = history["Close"].dropna()
     if close.empty:

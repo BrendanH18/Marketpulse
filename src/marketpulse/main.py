@@ -1,32 +1,32 @@
 """MarketPulse CLI — entry point."""
 import sys
 import time
-import click
-from rich.console import Console
-from rich.prompt import Prompt, Confirm
-from rich.text import Text
-from rich.panel import Panel
-from rich import print as rprint
 
-from .models import Portfolio
-from .storage import (
-    get_or_create_portfolio,
-    save_portfolio,
-    load_portfolio,
-    list_portfolios,
-    delete_portfolio,
-)
-from .fetcher import fetch_quotes, fetch_quote, fetch_history
+import click
+from rich.panel import Panel
+from rich.prompt import Confirm, Prompt
+from rich.text import Text
+
 from .display import (
+    _sign_color,
+    _sparkline,
     console,
     header,
-    watchlist_table,
-    portfolio_table,
-    portfolio_summary,
-    quote_panel,
     history_panel,
-    _sparkline,
-    _sign_color,
+    portfolio_summary,
+    portfolio_table,
+    quote_panel,
+    transactions_table,
+    watchlist_table,
+)
+from .fetcher import fetch_fx_rates, fetch_history, fetch_quote, fetch_quotes
+from .models import FxRates, Portfolio, parse_tickers
+from .storage import (
+    delete_portfolio,
+    get_or_create_portfolio,
+    list_portfolios,
+    load_portfolio,
+    save_portfolio,
 )
 
 # Windows consoles/pipes often default to cp1252, which can't encode the
@@ -115,11 +115,7 @@ def setup(name):
     current = " ".join(p.watchlist) if p.watchlist else " ".join(DEFAULT_WATCHLIST)
     console.print("\n[bold cyan]Watchlist[/bold cyan] — tickers to track (space-separated).")
     raw = Prompt.ask("Tickers", default=current)
-    seen = set()
-    p.watchlist = [
-        t.upper() for t in raw.replace(",", " ").split()
-        if not (t.upper() in seen or seen.add(t.upper()))
-    ]
+    p.watchlist = parse_tickers(raw)
 
     # Positions
     console.print("\n[bold cyan]Portfolio positions[/bold cyan] — leave ticker blank when done.")
@@ -166,9 +162,7 @@ def watch(tickers, portfolio, refresh):
         if not all_tickers:
             all_tickers = DEFAULT_WATCHLIST
 
-    # Deduplicate while preserving order
-    seen = set()
-    all_tickers = [t for t in all_tickers if not (t.upper() in seen or seen.add(t.upper()))]
+    all_tickers = parse_tickers(" ".join(all_tickers))
 
     def _build():
         quotes, failed = fetch_quotes(all_tickers)
@@ -279,19 +273,75 @@ def portfolio_show(ctx, no_live):
     if p.positions:
         tickers = list(p.positions.keys())
         quotes = {}
+        fx = FxRates(base=p.currency.upper(), rates={p.currency.upper(): 1.0})
         if not no_live:
             with console.status("[cyan]Fetching live prices…[/cyan]", spinner="dots"):
                 quotes, errors = fetch_quotes(tickers)
+                currencies = {q.currency for q in quotes.values()}
+                currencies.update(pos.currency for pos in p.positions.values() if pos.currency)
+                fx, fx_errors = fetch_fx_rates(currencies, p.currency)
             for ticker, reason in errors.items():
                 console.print(f"[yellow]Warning:[/yellow] [dim]{reason}[/dim]")
-        console.print(portfolio_table(p, quotes))
+            for ccy, reason in fx_errors.items():
+                console.print(f"[yellow]Warning:[/yellow] [dim]{reason}[/dim]")
+        console.print(portfolio_table(p, quotes, fx))
         if quotes:
-            console.print(portfolio_summary(p, quotes))
+            console.print(portfolio_summary(p, quotes, fx))
     else:
         console.print(Panel("[dim]No positions yet.[/dim]", title=f"Portfolio: {name}"))
 
     if p.watchlist:
         console.print(f"\n[dim]Watchlist:[/dim] {', '.join(p.watchlist)}")
+
+
+@portfolio.command("buy")
+@click.argument("ticker")
+@click.argument("shares", type=float)
+@click.argument("price", type=float)
+@click.option("--fees", "-f", default=0.0, type=float, help="Commission/fees (added to cost base)")
+@click.option("--date", "-d", default=None, help="Trade date YYYY-MM-DD (default: today)")
+@click.option("--note", "-m", default="", help="Optional note")
+@click.option("--currency", "-c", default="", help="Trade currency (default: the ticker's quote currency)")
+@click.pass_context
+def portfolio_buy(ctx, ticker, shares, price, fees, date, note, currency):
+    """Record a buy: blends the average cost and logs a transaction.
+
+    \b
+    Example:
+      marketpulse portfolio buy XEQT.TO 100 28.50
+      marketpulse portfolio buy AAPL 10 175.00 --fees 4.95 --note "Core holding"
+    """
+    name = ctx.obj["name"]
+    p = get_or_create_portfolio(name)
+
+    ccy = currency.upper()
+    if not ccy:
+        try:
+            ccy = fetch_quote(ticker).currency
+        except RuntimeError as e:
+            console.print(
+                f"[yellow]Warning:[/yellow] [dim]could not fetch {ticker.upper()} ({e}); "
+                f"recording trade in {p.currency}[/dim]"
+            )
+
+    try:
+        pos, blended = p.buy(ticker, shares, price, fees=fees, date=date, currency=ccy, note=note)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
+    save_portfolio(p)
+
+    label = f" {pos.currency}" if pos.currency else ""
+    if blended:
+        console.print(
+            f"[green]Bought[/green] {shares:,.4f} {pos.ticker} @ {price:,.2f}{label} — "
+            f"now {pos.shares:,.4f} shares @ avg {pos.avg_cost:,.2f} (blended)"
+        )
+    else:
+        console.print(
+            f"[green]Bought[/green] {shares:,.4f} {pos.ticker} @ {price:,.2f}{label} — "
+            f"new position @ avg {pos.avg_cost:,.2f}"
+        )
 
 
 @portfolio.command("add")
@@ -301,26 +351,70 @@ def portfolio_show(ctx, no_live):
 @click.option("--note", "-m", default="", help="Optional note")
 @click.pass_context
 def portfolio_add(ctx, ticker, shares, avg_cost, note):
-    """Add or update a position.
+    """Add a position (deprecated alias for 'portfolio buy')."""
+    console.print("[dim]note: 'portfolio add' is an alias for 'portfolio buy'.[/dim]")
+    ctx.invoke(
+        portfolio_buy,
+        ticker=ticker, shares=shares, price=avg_cost,
+        fees=0.0, date=None, note=note, currency="",
+    )
+
+
+@portfolio.command("sell")
+@click.argument("ticker")
+@click.argument("shares", type=float)
+@click.argument("price", type=float)
+@click.option("--fees", "-f", default=0.0, type=float, help="Commission/fees (deducted from proceeds)")
+@click.option("--date", "-d", default=None, help="Trade date YYYY-MM-DD (default: today)")
+@click.option("--note", "-m", default="", help="Optional note")
+@click.pass_context
+def portfolio_sell(ctx, ticker, shares, price, fees, date, note):
+    """Record a sell: logs realized P&L using the average-cost method.
 
     \b
     Example:
-      marketpulse portfolio add XEQT.TO 100 28.50
-      marketpulse portfolio add AAPL 10 175.00 --note "Core holding"
+      marketpulse portfolio sell AAPL 4 200.00 --fees 4.95
     """
     name = ctx.obj["name"]
-    p = get_or_create_portfolio(name)
+    p = load_portfolio(name)
+    if p is None:
+        console.print(f"[red]No portfolio named '{name}'.[/red]")
+        sys.exit(1)
 
-    pos, blended = p.add_position(ticker, shares, avg_cost, note)
-    if blended:
-        console.print(
-            f"[green]Updated[/green] {pos.ticker}: "
-            f"{pos.shares:,.4f} shares @ avg {pos.avg_cost:,.2f} (blended)"
-        )
-    else:
-        console.print(f"[green]Added[/green] {pos.ticker}: {pos.shares:,.4f} shares @ {pos.avg_cost:,.2f}")
-
+    try:
+        realized, pos = p.sell(ticker, shares, price, fees=fees, date=date, note=note)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        sys.exit(1)
     save_portfolio(p)
+
+    ccy = p.transactions[-1].currency or p.currency
+    color = _sign_color(realized)
+    sign = "+" if realized >= 0 else ""
+    console.print(
+        f"[green]Sold[/green] {shares:,.4f} {ticker.upper()} @ {price:,.2f} — "
+        f"realized [{color}]{sign}{realized:,.2f} {ccy}[/{color}]"
+    )
+    if pos is None:
+        console.print("[dim]Position closed.[/dim]")
+    else:
+        console.print(f"[dim]{pos.shares:,.4f} shares remain @ avg {pos.avg_cost:,.2f}.[/dim]")
+
+
+@portfolio.command("history")
+@click.argument("ticker", required=False)
+@click.pass_context
+def portfolio_history(ctx, ticker):
+    """Show the transaction ledger, optionally for one ticker."""
+    name = ctx.obj["name"]
+    p = load_portfolio(name)
+    if p is None:
+        console.print(f"[red]No portfolio named '{name}'.[/red]")
+        return
+    if not p.transactions:
+        console.print("[dim]No transactions recorded yet.[/dim]")
+        return
+    console.print(transactions_table(p, ticker))
 
 
 @portfolio.command("remove")
@@ -372,7 +466,7 @@ def watchlist_remove(ctx, tickers):
         if t in p.watchlist:
             p.watchlist.remove(t)
     save_portfolio(p)
-    console.print(f"[green]Watchlist updated.[/green]")
+    console.print("[green]Watchlist updated.[/green]")
 
 
 @portfolio.command("list")
@@ -416,9 +510,8 @@ def compare(tickers, period):
     Example:
       marketpulse compare XEQT.TO QQQ SPY --period 1y
     """
-    import pandas as pd
-    from rich.table import Table
     from rich import box
+    from rich.table import Table
 
     console.print(header())
     data = {}

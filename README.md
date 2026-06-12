@@ -40,7 +40,7 @@ uv run marketpulse tui -p rrsp     # TUI on a named portfolio
 uv run marketpulse tui -r 15       # refresh quotes every 15s
 ```
 
-Keys: `1`/`2`/`3` switch between Watchlist, Portfolio, and Chart tabs • `r` refresh now • `q` quit.
+Keys: `1`/`2`/`3` switch between Watchlist, Portfolio, and Chart tabs • `r` refresh now • `a` add/buy • `s` sell • `d` remove • `i` quote details • `h` transaction history • `q` quit.
 On the Chart tab, type `TICKER [PERIOD]` (e.g. `SPY 1y`) and press Enter.
 
 ### `watch` — Live Watchlist Table
@@ -92,15 +92,24 @@ Includes return %, max drawdown, and sparklines.
 ### `portfolio` — Manage Holdings
 
 ```bash
-# Add positions (TICKER SHARES AVG_COST_PER_SHARE)
-uv run marketpulse portfolio add XEQT.TO 200 28.50
-uv run marketpulse portfolio add AAPL 15 175.00 --note "Core holding"
+# Record buys (TICKER SHARES PRICE_PER_SHARE) — fees fold into the cost base
+uv run marketpulse portfolio buy XEQT.TO 200 28.50
+uv run marketpulse portfolio buy AAPL 15 175.00 --fees 4.95 --note "Core holding"
 
-# View with live P&L, day change, weights, and a portfolio summary
+# Record sells — realized P&L computed with the average-cost method
+uv run marketpulse portfolio sell AAPL 5 200.00
+
+# Transaction ledger (optionally for one ticker)
+uv run marketpulse portfolio history
+uv run marketpulse portfolio history AAPL
+
+# View with live P&L, day change, weights, and a portfolio summary.
+# Mixed-currency portfolios convert totals into the portfolio's base
+# currency (CAD by default) using live FX rates.
 uv run marketpulse portfolio show
 
 # Use a named portfolio
-uv run marketpulse portfolio -n rrsp add VFV.TO 100 105.00
+uv run marketpulse portfolio -n rrsp buy VFV.TO 100 105.00
 uv run marketpulse portfolio -n rrsp show
 
 # Manage watchlist
@@ -132,6 +141,19 @@ uv run marketpulse portfolio delete rrsp
 ## Data Directory
 
 Portfolios are stored as JSON in `~/.marketpulse/`. Override with `MARKETPULSE_DATA` env var.
+Files saved before transaction support (schema 1) are migrated automatically: existing positions
+get a synthesized "opening balance" BUY so the ledger replays to your current holdings.
+
+---
+
+## Development
+
+```bash
+uv sync                  # includes dev group (pytest, ruff)
+uv run pytest            # test suite
+uv run ruff check .      # lint
+uv run ruff format .     # format
+```
 
 ---
 
