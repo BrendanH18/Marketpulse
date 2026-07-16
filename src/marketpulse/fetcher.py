@@ -1,4 +1,5 @@
 """Market data fetching via yfinance."""
+
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -61,7 +62,7 @@ def _with_retry(fn: Callable[[], T], attempts: int = RETRY_ATTEMPTS, base_delay:
         except Exception as e:
             last_exc = e
             if attempt < attempts - 1:
-                time.sleep(base_delay * (2 ** attempt))
+                time.sleep(base_delay * (2**attempt))
     raise last_exc
 
 
@@ -160,6 +161,7 @@ def fetch_quotes(tickers: list[str], *, use_cache: bool = True) -> tuple[dict[st
 
 def fetch_history(ticker: str, period: str = "1mo") -> "pd.DataFrame":
     """Fetch OHLCV history. period: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y."""
+
     def _once():
         hist = yf.Ticker(ticker).history(period=period)
         return hist

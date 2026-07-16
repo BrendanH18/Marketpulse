@@ -1,4 +1,5 @@
 """Display math: multi-currency portfolio totals never mix currencies silently."""
+
 import pytest
 
 from marketpulse.display import _portfolio_totals
@@ -7,9 +8,16 @@ from marketpulse.models import FxRates, Portfolio, Quote
 
 def _quote(ticker: str, price: float, prev_close: float, currency: str) -> Quote:
     return Quote(
-        ticker=ticker, name=ticker, price=price, prev_close=prev_close,
-        day_high=price, day_low=price, volume=0, market_cap=None,
-        currency=currency, exchange="TEST",
+        ticker=ticker,
+        name=ticker,
+        price=price,
+        prev_close=prev_close,
+        day_high=price,
+        day_low=price,
+        volume=0,
+        market_cap=None,
+        currency=currency,
+        exchange="TEST",
     )
 
 

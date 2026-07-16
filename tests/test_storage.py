@@ -1,4 +1,5 @@
 """Persistence: schema v2 round-trips and legacy (v1) file migration."""
+
 import json
 
 from marketpulse.models import Portfolio

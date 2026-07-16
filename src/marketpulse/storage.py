@@ -1,4 +1,5 @@
 """Persistent storage for portfolios using JSON."""
+
 import json
 import os
 from pathlib import Path

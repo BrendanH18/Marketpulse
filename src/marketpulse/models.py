@@ -1,4 +1,5 @@
 """Data models for MarketPulse."""
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -12,10 +13,7 @@ _SHARE_EPSILON = 1e-9
 def parse_tickers(raw: str) -> list[str]:
     """Split user input into upper-cased, de-duplicated tickers."""
     seen = set()
-    return [
-        t.upper() for t in raw.replace(",", " ").split()
-        if not (t.upper() in seen or seen.add(t.upper()))
-    ]
+    return [t.upper() for t in raw.replace(",", " ").split() if not (t.upper() in seen or seen.add(t.upper()))]
 
 
 def _today() -> str:
@@ -75,6 +73,7 @@ class FxRates:
 
     rates maps currency -> base units per 1 unit of that currency.
     """
+
     base: str
     rates: dict[str, float] = field(default_factory=dict)
 
@@ -145,8 +144,14 @@ class Portfolio:
         ticker = ticker.upper()
         self.transactions.append(
             Transaction(
-                ticker=ticker, action="BUY", shares=shares, price=price,
-                date=date or _today(), fees=fees, currency=currency, note=note,
+                ticker=ticker,
+                action="BUY",
+                shares=shares,
+                price=price,
+                date=date or _today(),
+                fees=fees,
+                currency=currency,
+                note=note,
             )
         )
         new_book = shares * price + fees
@@ -156,14 +161,20 @@ class Portfolio:
             total_shares = existing.shares + shares
             new_avg = (old_book + new_book) / total_shares if total_shares else price
             pos = Position(
-                ticker=ticker, shares=total_shares, avg_cost=new_avg,
-                note=note or existing.note, currency=currency or existing.currency,
+                ticker=ticker,
+                shares=total_shares,
+                avg_cost=new_avg,
+                note=note or existing.note,
+                currency=currency or existing.currency,
             )
             self.positions[ticker] = pos
             return pos, True
         pos = Position(
-            ticker=ticker, shares=shares,
-            avg_cost=new_book / shares, note=note, currency=currency,
+            ticker=ticker,
+            shares=shares,
+            avg_cost=new_book / shares,
+            note=note,
+            currency=currency,
         )
         self.positions[ticker] = pos
         return pos, False
@@ -193,13 +204,17 @@ class Portfolio:
         if existing is None:
             raise ValueError(f"No position in {ticker}.")
         if shares > existing.shares + _SHARE_EPSILON:
-            raise ValueError(
-                f"Cannot sell {shares:,.4f} {ticker} — only {existing.shares:,.4f} held."
-            )
+            raise ValueError(f"Cannot sell {shares:,.4f} {ticker} — only {existing.shares:,.4f} held.")
         self.transactions.append(
             Transaction(
-                ticker=ticker, action="SELL", shares=shares, price=price,
-                date=date or _today(), fees=fees, currency=existing.currency, note=note,
+                ticker=ticker,
+                action="SELL",
+                shares=shares,
+                price=price,
+                date=date or _today(),
+                fees=fees,
+                currency=existing.currency,
+                note=note,
             )
         )
         realized = shares * (price - existing.avg_cost) - fees
@@ -208,8 +223,11 @@ class Portfolio:
             del self.positions[ticker]
             return realized, None
         pos = Position(
-            ticker=ticker, shares=remaining, avg_cost=existing.avg_cost,
-            note=existing.note, currency=existing.currency,
+            ticker=ticker,
+            shares=remaining,
+            avg_cost=existing.avg_cost,
+            note=existing.note,
+            currency=existing.currency,
         )
         self.positions[ticker] = pos
         return realized, pos

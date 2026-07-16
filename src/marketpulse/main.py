@@ -1,4 +1,5 @@
 """MarketPulse CLI — entry point."""
+
 import sys
 import time
 
@@ -46,6 +47,7 @@ DEFAULT_WATCHLIST = ["XEQT.TO", "QQQ", "SPY", "VFV.TO", "AAPL", "NVDA", "BTC-USD
 
 # ── CLI group ─────────────────────────────────────────────────────────────────
 
+
 @click.group(invoke_without_command=True)
 @click.version_option("0.1.0", prog_name="MarketPulse")
 @click.pass_context
@@ -68,6 +70,7 @@ def cli(ctx):
 
 # ── tui ───────────────────────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.option("--portfolio", "-p", default=DEFAULT_PORTFOLIO, help="Portfolio name", show_default=True)
 @click.option("--refresh", "-r", default=30, type=int, help="Auto-refresh interval in seconds", show_default=True)
@@ -81,6 +84,7 @@ def tui(portfolio, refresh):
       q           quit
     """
     from .tui import MarketPulseApp
+
     MarketPulseApp(
         portfolio_name=portfolio,
         default_watchlist=DEFAULT_WATCHLIST,
@@ -89,6 +93,7 @@ def tui(portfolio, refresh):
 
 
 # ── setup ─────────────────────────────────────────────────────────────────────
+
 
 @cli.command()
 @click.option("--name", "-n", default=DEFAULT_PORTFOLIO, help="Portfolio name", show_default=True)
@@ -144,6 +149,7 @@ def setup(name):
 
 # ── watch ─────────────────────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.argument("tickers", nargs=-1)
 @click.option("--portfolio", "-p", default=DEFAULT_PORTFOLIO, help="Portfolio name")
@@ -167,6 +173,7 @@ def watch(tickers, portfolio, refresh):
     def _build():
         quotes, failed = fetch_quotes(all_tickers)
         from rich.console import Group
+
         parts = [
             header(),
             watchlist_table(quotes, failed),
@@ -178,6 +185,7 @@ def watch(tickers, portfolio, refresh):
 
     if refresh > 0:
         from rich.live import Live
+
         try:
             # Live keeps the previous table on screen while the next fetch
             # runs, so refreshes don't flicker
@@ -195,6 +203,7 @@ def watch(tickers, portfolio, refresh):
 
 # ── quote ─────────────────────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.argument("tickers", nargs=-1, required=True)
 def quote(tickers):
@@ -206,6 +215,7 @@ def quote(tickers):
       marketpulse quote BTC-USD ETH-USD
     """
     from rich.columns import Columns
+
     panels = []
     with console.status("[cyan]Fetching…[/cyan]", spinner="dots"):
         for ticker in tickers:
@@ -221,10 +231,13 @@ def quote(tickers):
 
 # ── chart ─────────────────────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.argument("ticker")
 @click.option(
-    "--period", "-p", default="3mo",
+    "--period",
+    "-p",
+    default="3mo",
     type=click.Choice(["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"], case_sensitive=False),
     show_default=True,
     help="History period",
@@ -246,6 +259,7 @@ def chart(ticker, period):
 
 
 # ── portfolio group ───────────────────────────────────────────────────────────
+
 
 @cli.group()
 @click.option("--name", "-n", default=DEFAULT_PORTFOLIO, help="Portfolio name", show_default=True)
@@ -355,8 +369,13 @@ def portfolio_add(ctx, ticker, shares, avg_cost, note):
     console.print("[dim]note: 'portfolio add' is an alias for 'portfolio buy'.[/dim]")
     ctx.invoke(
         portfolio_buy,
-        ticker=ticker, shares=shares, price=avg_cost,
-        fees=0.0, date=None, note=note, currency="",
+        ticker=ticker,
+        shares=shares,
+        price=avg_cost,
+        fees=0.0,
+        date=None,
+        note=note,
+        currency="",
     )
 
 
@@ -496,10 +515,13 @@ def portfolio_delete(name):
 
 # ── compare ───────────────────────────────────────────────────────────────────
 
+
 @cli.command()
 @click.argument("tickers", nargs=-1, required=True)
 @click.option(
-    "--period", "-p", default="1y",
+    "--period",
+    "-p",
+    default="1y",
     type=click.Choice(["1mo", "3mo", "6mo", "1y", "2y", "5y"], case_sensitive=False),
     show_default=True,
 )
@@ -566,8 +588,10 @@ def compare(tickers, period):
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _now() -> str:
     from datetime import datetime
+
     return datetime.now().strftime("%H:%M:%S")
 
 

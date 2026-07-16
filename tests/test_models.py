@@ -1,4 +1,5 @@
 """Money math: average-cost blending, realized P&L, FX conversion, ticker parsing."""
+
 import pytest
 
 from marketpulse.models import FxRates, Portfolio, parse_tickers
@@ -72,9 +73,9 @@ def test_realized_pnl_replays_ledger_per_currency():
     p = Portfolio(name="t", currency="CAD")
     p.buy("AAPL", 10, 100, currency="USD")
     p.buy("AAPL", 10, 120, currency="USD")  # avg 110
-    p.sell("AAPL", 5, 130, fees=5)          # +5*20 - 5 = 95 USD
-    p.buy("XEQT.TO", 50, 28)                # no currency -> folds to CAD
-    p.sell("XEQT.TO", 10, 30)               # +20 CAD
+    p.sell("AAPL", 5, 130, fees=5)  # +5*20 - 5 = 95 USD
+    p.buy("XEQT.TO", 50, 28)  # no currency -> folds to CAD
+    p.sell("XEQT.TO", 10, 30)  # +20 CAD
     pnl = p.realized_pnl()
     assert pnl["USD"] == pytest.approx(95.0)
     assert pnl["CAD"] == pytest.approx(20.0)

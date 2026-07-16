@@ -1,4 +1,5 @@
 """Fetch layer: retry/backoff, TTL caching, FX rates, error contract."""
+
 import pytest
 from conftest import FakeTicker, make_fast_info
 
@@ -29,9 +30,7 @@ def test_permanent_failure_raises_runtime_error_after_all_attempts(ticker_factor
 
 
 def test_quote_cache_hit_skips_network(ticker_factory):
-    calls = ticker_factory(
-        lambda s: FakeTicker(fast_info=make_fast_info(), info={"longName": "Cached"})
-    )
+    calls = ticker_factory(lambda s: FakeTicker(fast_info=make_fast_info(), info={"longName": "Cached"}))
     q1 = fetcher.fetch_quote("AAPL")
     q2 = fetcher.fetch_quote("aapl")  # case-insensitive key
     assert q1 is q2
@@ -39,9 +38,7 @@ def test_quote_cache_hit_skips_network(ticker_factory):
 
 
 def test_quote_cache_expiry_refetches(ticker_factory, monkeypatch):
-    calls = ticker_factory(
-        lambda s: FakeTicker(fast_info=make_fast_info(), info={"longName": "X"})
-    )
+    calls = ticker_factory(lambda s: FakeTicker(fast_info=make_fast_info(), info={"longName": "X"}))
     monkeypatch.setattr(fetcher, "QUOTE_TTL", 0.0)
     fetcher.fetch_quote("AAPL")
     fetcher.fetch_quote("AAPL")
@@ -49,9 +46,7 @@ def test_quote_cache_expiry_refetches(ticker_factory, monkeypatch):
 
 
 def test_cache_bypass_with_use_cache_false(ticker_factory):
-    calls = ticker_factory(
-        lambda s: FakeTicker(fast_info=make_fast_info(), info={"longName": "X"})
-    )
+    calls = ticker_factory(lambda s: FakeTicker(fast_info=make_fast_info(), info={"longName": "X"}))
     fetcher.fetch_quote("AAPL")
     fetcher.fetch_quote("AAPL", use_cache=False)
     assert len(calls) == 2
@@ -71,9 +66,7 @@ def test_fetch_quotes_partitions_successes_and_failures(ticker_factory, no_sleep
 
 
 def test_missing_price_is_an_error_not_a_zero(ticker_factory, no_sleep):
-    ticker_factory(
-        lambda s: FakeTicker(fast_info=make_fast_info(last_price=None), info={})
-    )
+    ticker_factory(lambda s: FakeTicker(fast_info=make_fast_info(last_price=None), info={}))
     with pytest.raises(RuntimeError, match="no price data"):
         fetcher.fetch_quote("GHOST")
 
@@ -86,9 +79,7 @@ def test_fx_rate_identity_needs_no_network(ticker_factory):
 
 
 def test_fx_rate_uses_pair_ticker_and_caches(ticker_factory):
-    calls = ticker_factory(
-        lambda s: FakeTicker(fast_info=make_fast_info(last_price=1.35))
-    )
+    calls = ticker_factory(lambda s: FakeTicker(fast_info=make_fast_info(last_price=1.35)))
     rate = fetcher.fetch_fx_rate("usd", "cad")
     assert rate == pytest.approx(1.35)
     assert calls == ["USDCAD=X"]

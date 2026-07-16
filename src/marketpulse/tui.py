@@ -1,4 +1,5 @@
 """Textual TUI for MarketPulse — interactive watchlist, portfolio, and charts."""
+
 from datetime import datetime
 
 from rich.console import Group
@@ -44,6 +45,7 @@ DEFAULT_CHART_PERIOD = "3mo"
 
 # ── Modal screens ─────────────────────────────────────────────────────────────
 
+
 class SetupScreen(ModalScreen["Portfolio | None"]):
     """First-run wizard: choose watchlist tickers and optionally add positions."""
 
@@ -58,8 +60,7 @@ class SetupScreen(ModalScreen["Portfolio | None"]):
         with Vertical(classes="modal-box", id="setup-box"):
             yield Label("⚡ Welcome to MarketPulse — first-time setup", classes="modal-title")
             yield Label(
-                "Everything can be changed later in-app ('a' add / 'd' remove) "
-                "or with 'marketpulse setup'.",
+                "Everything can be changed later in-app ('a' add / 'd' remove) or with 'marketpulse setup'.",
                 classes="modal-hint",
             )
             yield Label("Watchlist tickers (space-separated):")
@@ -278,6 +279,7 @@ class QuoteDetailScreen(ModalScreen[None]):
 
 # ── Main app ──────────────────────────────────────────────────────────────────
 
+
 class MarketPulseApp(App):
     """Single-window TUI: launch once, browse everything."""
 
@@ -362,8 +364,9 @@ class MarketPulseApp(App):
         Binding("right_square_bracket", "cycle_period(1)", "Period +"),
     ]
 
-    def __init__(self, portfolio_name: str = "default", default_watchlist: list[str] | None = None,
-                 refresh_seconds: int = 30):
+    def __init__(
+        self, portfolio_name: str = "default", default_watchlist: list[str] | None = None, refresh_seconds: int = 30
+    ):
         super().__init__()
         self.portfolio_name = portfolio_name
         self.default_watchlist = default_watchlist or []
@@ -409,9 +412,7 @@ class MarketPulseApp(App):
             )
         )
         if load_portfolio(self.portfolio_name) is None:
-            self.push_screen(
-                SetupScreen(self.portfolio_name, self.default_watchlist), self._setup_done
-            )
+            self.push_screen(SetupScreen(self.portfolio_name, self.default_watchlist), self._setup_done)
         else:
             self._start()
 
@@ -609,9 +610,7 @@ class MarketPulseApp(App):
         self.query_one("#chart-label", Static).update(
             Text(f"  {ticker} · {period}   ([ / ] to change period)", style="bold cyan")
         )
-        self.query_one("#chart-view", Static).update(
-            Text(f"Fetching {ticker} ({period})…", style="cyan")
-        )
+        self.query_one("#chart-view", Static).update(Text(f"Fetching {ticker} ({period})…", style="cyan"))
         self.load_chart(ticker, period)
 
     def _selected_ticker(self, table_id: str) -> str | None:
@@ -729,9 +728,7 @@ class MarketPulseApp(App):
         try:
             hist = fetch_history(ticker, period)
         except RuntimeError as e:
-            self.call_from_thread(
-                self._update_view, "#chart-view", Text(f"Error: {e}", style="red")
-            )
+            self.call_from_thread(self._update_view, "#chart-view", Text(f"Error: {e}", style="red"))
             return
         width = max(self.size.width - 24, 20)
         view = history_panel(ticker, hist, period, width=width)

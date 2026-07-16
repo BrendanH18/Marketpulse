@@ -1,4 +1,5 @@
 """Shared fixtures: isolated data dir, cleared fetch caches, fake yfinance."""
+
 import pytest
 
 from marketpulse import fetcher

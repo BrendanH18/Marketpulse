@@ -1,4 +1,5 @@
 """Rich terminal UI rendering for MarketPulse."""
+
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -16,6 +17,7 @@ console = Console()
 
 
 # ── Colour helpers ────────────────────────────────────────────────────────────
+
 
 def _sign_color(value: float) -> str:
     if value > 0:
@@ -62,6 +64,7 @@ def _sparkline(series: pd.Series, width: int = 20) -> Text:
 
 # ── Quote card ────────────────────────────────────────────────────────────────
 
+
 def quote_panel(quote: Quote) -> Panel:
     """Render a single quote as a rich Panel."""
     color = _sign_color(quote.change)
@@ -70,24 +73,16 @@ def quote_panel(quote: Quote) -> Panel:
     price_line = Text(f"{quote.price:,.2f} {quote.currency}", style=f"bold {color} underline")
     change_line = _fmt_change(quote.change, quote.change_pct)
 
-    low_high = Text(
-        f"L {_fmt_price(quote.day_low)}  ──  H {_fmt_price(quote.day_high)}",
-        style="dim"
-    )
+    low_high = Text(f"L {_fmt_price(quote.day_low)}  ──  H {_fmt_price(quote.day_high)}", style="dim")
     vol_text = Text(f"Vol: {quote.volume:,}", style="dim")
-    mcap_text = Text(
-        f"Mkt Cap: {_humanize(quote.market_cap)}" if quote.market_cap else "",
-        style="dim"
-    )
+    mcap_text = Text(f"Mkt Cap: {_humanize(quote.market_cap)}" if quote.market_cap else "", style="dim")
     week52_text = Text(
         f"52W  {_fmt_price(quote.week52_low)}  ──  {_fmt_price(quote.week52_high)}"
-        if quote.week52_high and quote.week52_low else "",
-        style="dim"
+        if quote.week52_high and quote.week52_low
+        else "",
+        style="dim",
     )
-    timestamp = Text(
-        f"  {quote.timestamp.strftime('%H:%M:%S')}",
-        style="dim italic"
-    )
+    timestamp = Text(f"  {quote.timestamp.strftime('%H:%M:%S')}", style="dim italic")
 
     lines = [name_line, price_line, change_line, low_high, vol_text]
     if mcap_text.plain:
@@ -97,6 +92,7 @@ def quote_panel(quote: Quote) -> Panel:
     lines.append(timestamp)
 
     from rich.console import Group
+
     group = Group(*lines)
     return Panel(group, title=title, border_style=color, expand=False, padding=(0, 1))
 
@@ -105,15 +101,16 @@ def _humanize(n: float | None) -> str:
     if n is None:
         return "N/A"
     if n >= 1e12:
-        return f"{n/1e12:.2f}T"
+        return f"{n / 1e12:.2f}T"
     if n >= 1e9:
-        return f"{n/1e9:.2f}B"
+        return f"{n / 1e9:.2f}B"
     if n >= 1e6:
-        return f"{n/1e6:.2f}M"
+        return f"{n / 1e6:.2f}M"
     return f"{n:,.0f}"
 
 
 # ── Watchlist table ───────────────────────────────────────────────────────────
+
 
 def _short_error(reason: str, limit: int = 40) -> str:
     """Trim a fetch-error message to something table-friendly."""
@@ -158,7 +155,12 @@ def watchlist_table(quotes: dict[str, Quote], failed: dict[str, str] = None) -> 
             t.add_row(
                 Text(ticker, style="bold red"),
                 Text(_short_error(reason), style="red dim"),
-                "—", "—", "—", "—", "—", "—",
+                "—",
+                "—",
+                "—",
+                "—",
+                "—",
+                "—",
             )
     return t
 
@@ -167,8 +169,19 @@ def watchlist_table(quotes: dict[str, Quote], failed: dict[str, str] = None) -> 
 
 WATCHLIST_COLUMNS = ["Ticker", "Name", "Price", "Change", "Change %", "Volume", "Mkt Cap", "Ccy"]
 PORTFOLIO_COLUMNS = [
-    "Ticker", "Name", "Shares", "Avg Cost", "Ccy", "Price", "Day Chg%",
-    "Day P&L", "Mkt Value", "Book Value", "Gain / Loss", "G/L %", "Weight",
+    "Ticker",
+    "Name",
+    "Shares",
+    "Avg Cost",
+    "Ccy",
+    "Price",
+    "Day Chg%",
+    "Day P&L",
+    "Mkt Value",
+    "Book Value",
+    "Gain / Loss",
+    "G/L %",
+    "Weight",
 ]
 
 
@@ -210,6 +223,7 @@ def portfolio_row(pos: Position, quote: Quote | None, total_market: float, fx: F
     Per-row figures stay in the position's native currency; `total_market`
     is in the base currency, so Weight converts the row's market value first.
     """
+
     def dash() -> Text:
         return Text("—", style="dim", justify="right")
 
@@ -224,9 +238,14 @@ def portfolio_row(pos: Position, quote: Quote | None, total_market: float, fx: F
             Text(f"{pos.shares:,.4f}", justify="right"),
             Text(f"{pos.avg_cost:,.2f}", style="dim", justify="right"),
             ccy_cell,
-            dash(), dash(), dash(), dash(),
+            dash(),
+            dash(),
+            dash(),
+            dash(),
             Text(f"{pos.book_value:,.2f}", style="dim", justify="right"),
-            dash(), dash(), dash(),
+            dash(),
+            dash(),
+            dash(),
         ]
 
     mv = pos.market_value(quote.price)
@@ -285,6 +304,7 @@ def portfolio_totals_line(portfolio: Portfolio, quotes: dict[str, Quote], fx: Fx
 
 # ── Portfolio table ───────────────────────────────────────────────────────────
 
+
 @dataclass
 class Totals:
     """Portfolio totals in the base currency.
@@ -293,6 +313,7 @@ class Totals:
     currency are excluded from all three sums and listed instead — mixed
     currencies are never silently added together.
     """
+
     market: float = 0.0
     book: float = 0.0
     day: float = 0.0
@@ -375,8 +396,17 @@ def portfolio_table(portfolio: Portfolio, quotes: dict[str, Quote], fx: FxRates)
             row = [
                 Text(ticker, style="bold red"),
                 Text("N/A", style="red dim"),
-                f"{pos.shares:,.4f}", f"{pos.avg_cost:,.2f}", ccy_cell,
-                "—", "—", "—", "—", f"{pos.book_value:,.2f}", "—", "—", "—",
+                f"{pos.shares:,.4f}",
+                f"{pos.avg_cost:,.2f}",
+                ccy_cell,
+                "—",
+                "—",
+                "—",
+                "—",
+                f"{pos.book_value:,.2f}",
+                "—",
+                "—",
+                "—",
             ]
             if show_notes:
                 row.append(pos.note)
@@ -462,6 +492,7 @@ def portfolio_summary(portfolio: Portfolio, quotes: dict[str, Quote], fx: FxRate
         line.append(f"Realized  {r_sign}{realized:,.2f}", style=f"bold {r_color}")
 
     from rich.console import Group
+
     lines = [line]
     notes = []
     if totals.missing_quotes:
@@ -516,6 +547,7 @@ def transactions_table(portfolio: Portfolio, ticker: str | None = None) -> Table
 
 # ── History chart ─────────────────────────────────────────────────────────────
 
+
 def history_panel(ticker: str, history: "pd.DataFrame", period: str, width: int | None = None) -> Panel:
     """Render a text-based price chart using block characters."""
     close = history["Close"].dropna()
@@ -562,20 +594,19 @@ def history_panel(ticker: str, history: "pd.DataFrame", period: str, width: int 
         lines.append(Text(label, style="dim") + Text("".join(row), style=color))
 
     lines.append(Text(f"{'─' * 10}┼{'─' * width}", style="dim"))
-    lines.append(Text(
-        f"  {period}: {close.index[0].strftime('%Y-%m-%d')} → {close.index[-1].strftime('%Y-%m-%d')}",
-        style="dim"
-    ))
+    lines.append(
+        Text(f"  {period}: {close.index[0].strftime('%Y-%m-%d')} → {close.index[-1].strftime('%Y-%m-%d')}", style="dim")
+    )
 
     from rich.console import Group
+
     spark_label = Text("  spark: ", style="dim") + _sparkline(close, width=min(60, width))
     lines.append(spark_label)
 
     pct_change = (end_price - start_price) / start_price * 100
     sign = "+" if pct_change >= 0 else ""
     summary = Text(
-        f"  {ticker}  {start_price:,.2f} → {end_price:,.2f}  ({sign}{pct_change:.2f}%)",
-        style=f"bold {color}"
+        f"  {ticker}  {start_price:,.2f} → {end_price:,.2f}  ({sign}{pct_change:.2f}%)", style=f"bold {color}"
     )
     lines.append(summary)
 
@@ -583,6 +614,7 @@ def history_panel(ticker: str, history: "pd.DataFrame", period: str, width: int 
 
 
 # ── Header banner ─────────────────────────────────────────────────────────────
+
 
 def header() -> Panel:
     now = datetime.now().strftime("%A, %B %d  %H:%M:%S")
