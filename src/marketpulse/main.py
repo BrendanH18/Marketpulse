@@ -280,9 +280,9 @@ def portfolio_show(ctx, no_live):
                 currencies = {q.currency for q in quotes.values()}
                 currencies.update(pos.currency for pos in p.positions.values() if pos.currency)
                 fx, fx_errors = fetch_fx_rates(currencies, p.currency)
-            for ticker, reason in errors.items():
+            for reason in errors.values():
                 console.print(f"[yellow]Warning:[/yellow] [dim]{reason}[/dim]")
-            for ccy, reason in fx_errors.items():
+            for reason in fx_errors.values():
                 console.print(f"[yellow]Warning:[/yellow] [dim]{reason}[/dim]")
         console.print(portfolio_table(p, quotes, fx))
         if quotes:

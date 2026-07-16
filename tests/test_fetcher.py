@@ -1,8 +1,8 @@
 """Fetch layer: retry/backoff, TTL caching, FX rates, error contract."""
 import pytest
+from conftest import FakeTicker, make_fast_info
 
 from marketpulse import fetcher
-from conftest import FakeTicker, make_fast_info
 
 
 def test_retry_recovers_after_transient_failures(ticker_factory, no_sleep):

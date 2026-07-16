@@ -139,7 +139,7 @@ def watchlist_table(quotes: dict[str, Quote], failed: dict[str, str] = None) -> 
     t.add_column("Mkt Cap", justify="right", style="dim")
     t.add_column("Currency", justify="center", style="dim")
 
-    for ticker, quote in sorted(quotes.items()):
+    for _ticker, quote in sorted(quotes.items()):
         color = _sign_color(quote.change)
         sign = "+" if quote.change >= 0 else ""
         t.add_row(
