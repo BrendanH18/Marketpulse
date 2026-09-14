@@ -150,6 +150,7 @@ class MarketPulseApp(App):
     #pane-alloc Canvas { height: auto; min-height: 4; }
     #pane-movers { height: auto; max-height: 12; }
     #pane-perf { height: 1fr; }
+    #pane-accts { min-width: 60; }
 
     DataTable { height: 1fr; background: $background; scrollbar-size-vertical: 1; }
     DataTable > .datatable--header { background: $background; color: $mp-muted; text-style: bold; }
