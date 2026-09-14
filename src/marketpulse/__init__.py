@@ -1,3 +1,3 @@
-"""MarketPulse — terminal portfolio tracker."""
+"""MarketPulse — terminal investment tracker."""
 
-__version__ = "0.1.0"
+__version__ = "2.0.0"
