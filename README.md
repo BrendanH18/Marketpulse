@@ -14,7 +14,7 @@ A fast, keyboard-first investment tracker for the terminal — with Omarchy them
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/BrendanH18/marketpulse && cd marketpulse
+git clone https://github.com/BrendanH18/Marketpulse && cd Marketpulse
 uv tool install --editable .     # puts `marketpulse` (and the short alias `mp`) on your PATH
 marketpulse                      # open the TUI
 ```
