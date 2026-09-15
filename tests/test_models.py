@@ -1,105 +1,117 @@
-"""Money math: average-cost blending, realized P&L, FX conversion, ticker parsing."""
+from datetime import date, timedelta
 
 import pytest
 
-from marketpulse.models import FxRates, Portfolio, parse_tickers
+from marketpulse.models import (
+    Account,
+    AccountType,
+    Alert,
+    Asset,
+    AssetKind,
+    FxRates,
+    Quote,
+    Transaction,
+    TxnType,
+    guess_currency,
+    parse_date,
+    parse_symbols,
+)
 
 
-def test_buy_opens_position_with_fees_in_cost_base():
-    p = Portfolio(name="t")
-    pos, blended = p.buy("aapl", 10, 100, fees=10)
-    assert not blended
-    assert pos.ticker == "AAPL"
-    assert pos.shares == 10
-    assert pos.avg_cost == pytest.approx(101.0)  # (10*100 + 10) / 10
-    assert len(p.transactions) == 1
-    assert p.transactions[0].action == "BUY"
+def test_parse_date_forms():
+    assert parse_date("2024-01-05") == "2024-01-05"
+    assert parse_date("2024/01/05") == "2024-01-05"
+    assert parse_date("2024-01-05T10:30:00") == "2024-01-05"
+    assert parse_date("") == date.today().isoformat()
+    assert parse_date("today") == date.today().isoformat()
+    assert parse_date("yesterday") == (date.today() - timedelta(days=1)).isoformat()
+    assert parse_date("-3d") == (date.today() - timedelta(days=3)).isoformat()
+    with pytest.raises(ValueError, match="Invalid date"):
+        parse_date("next tuesday")
 
 
-def test_buy_blends_average_cost():
-    p = Portfolio(name="t")
-    p.buy("AAPL", 10, 100)
-    pos, blended = p.buy("AAPL", 10, 120)
-    assert blended
-    assert pos.shares == 20
-    assert pos.avg_cost == pytest.approx(110.0)
+def test_parse_symbols_dedupes_and_uppercases():
+    assert parse_symbols("aapl, msft  AAPL xeqt.to") == ["AAPL", "MSFT", "XEQT.TO"]
 
 
-def test_buy_rejects_nonpositive_shares():
-    p = Portfolio(name="t")
+@pytest.mark.parametrize(
+    ("symbol", "expected"),
+    [("XEQT.TO", "CAD"), ("BTC-USD", "USD"), ("ETH-CAD", "CAD"), ("VOD.L", "GBP"), ("AAPL", "USD"), ("SHOP.V", "CAD")],
+)
+def test_guess_currency(symbol, expected):
+    assert guess_currency(symbol) == expected
+
+
+def test_guess_currency_default():
+    assert guess_currency("AAPL", default="CAD") == "CAD"
+
+
+@pytest.mark.parametrize(
+    ("txn", "message"),
+    [
+        (Transaction(account_id=1, type=TxnType.BUY, quantity=1, price=1), "needs a symbol"),
+        (Transaction(account_id=1, type=TxnType.BUY, symbol="A", quantity=0, price=1), "Quantity"),
+        (Transaction(account_id=1, type=TxnType.SPLIT, symbol="A"), "ratio"),
+        (Transaction(account_id=1, type=TxnType.TRANSFER, symbol="A", quantity=1, target_account_id=1), "different"),
+        (Transaction(account_id=1, type=TxnType.DEPOSIT, amount=-5), "Amount"),
+        (Transaction(account_id=1, type=TxnType.BUY, symbol="A", quantity=1, price=1, fees=-1), "Fees"),
+    ],
+)
+def test_transaction_validation(txn, message):
+    with pytest.raises(ValueError, match=message):
+        txn.validate()
+
+
+def test_deposit_needs_no_symbol():
+    Transaction(account_id=1, type=TxnType.DEPOSIT, amount=100).validate()
+
+
+def test_transaction_normalizes_case():
+    t = Transaction(account_id=1, type="buy".upper(), symbol="xeqt.to", currency="cad", quantity=1, price=1)
+    assert (t.symbol, t.currency, t.type) == ("XEQT.TO", "CAD", TxnType.BUY)
+
+
+def test_fixed_income_accrual():
+    gic = Asset(
+        "GIC",
+        kind=AssetKind.FIXED_INCOME,
+        rate=5,
+        compounding="simple",
+        start_date="2021-01-01",
+        maturity_date="2023-01-01",
+    )
+    assert gic.accrual_factor("2022-01-01") == pytest.approx(1.05)
+    # capped at maturity
+    assert gic.accrual_factor("2030-01-01") == pytest.approx(gic.accrual_factor("2023-01-01"))
+    annual = Asset("B", kind=AssetKind.FIXED_INCOME, rate=10, compounding="annual", start_date="2020-01-01")
+    assert annual.accrual_factor("2021-12-31") == pytest.approx(1.21, rel=1e-3)
+    assert Asset("X").accrual_factor() == 1.0
+
+
+def test_alerts():
+    q = Quote(symbol="AAPL", price=97, prev_close=100)
+    assert Alert("aapl", "below", 98).is_met(q)
+    assert not Alert("AAPL", "above", 98).is_met(q)
+    assert Alert("AAPL", "down_pct", 2).is_met(q)
+    assert not Alert("AAPL", "up_pct", 1).is_met(q)
+    assert Alert("AAPL", "above", 100).describe() == "AAPL ≥ 100.00"
     with pytest.raises(ValueError):
-        p.buy("AAPL", 0, 100)
-    with pytest.raises(ValueError):
-        p.buy("AAPL", -5, 100)
+        Alert("AAPL", "sideways", 1)
 
 
-def test_sell_realizes_average_cost_gain_and_keeps_avg():
-    p = Portfolio(name="t")
-    p.buy("AAPL", 10, 100, fees=10)  # avg 101
-    realized, pos = p.sell("AAPL", 4, 150, fees=2)
-    assert realized == pytest.approx(4 * (150 - 101) - 2)
-    assert pos is not None
-    assert pos.shares == pytest.approx(6)
-    assert pos.avg_cost == pytest.approx(101.0)  # unchanged by the sell
+def test_fx_rates():
+    fx = FxRates(base="CAD", rates={"USD": 1.35})
+    assert fx.convert(10, "USD") == pytest.approx(13.5)
+    assert fx.convert(10, "CAD") == 10
+    assert fx.convert(10, "") == 10
+    assert fx.convert(10, "EUR") is None
 
 
-def test_sell_all_closes_position_but_keeps_realized_pnl():
-    p = Portfolio(name="t", currency="CAD")
-    p.buy("XEQT.TO", 100, 28.50)
-    realized, pos = p.sell("XEQT.TO", 100, 30.00)
-    assert pos is None
-    assert "XEQT.TO" not in p.positions
-    assert realized == pytest.approx(150.0)
-    assert p.realized_pnl() == {"CAD": pytest.approx(150.0)}
+def test_quote_change_handles_zero_prev():
+    assert Quote(symbol="X", price=5, prev_close=0).change_pct == 0.0
 
 
-def test_oversell_rejected():
-    p = Portfolio(name="t")
-    p.buy("AAPL", 10, 100)
-    with pytest.raises(ValueError):
-        p.sell("AAPL", 11, 100)
-    # nothing recorded for the failed sell
-    assert len(p.transactions) == 1
-    assert p.positions["AAPL"].shares == 10
-
-
-def test_sell_unknown_ticker_rejected():
-    p = Portfolio(name="t")
-    with pytest.raises(ValueError):
-        p.sell("AAPL", 1, 100)
-
-
-def test_realized_pnl_replays_ledger_per_currency():
-    p = Portfolio(name="t", currency="CAD")
-    p.buy("AAPL", 10, 100, currency="USD")
-    p.buy("AAPL", 10, 120, currency="USD")  # avg 110
-    p.sell("AAPL", 5, 130, fees=5)  # +5*20 - 5 = 95 USD
-    p.buy("XEQT.TO", 50, 28)  # no currency -> folds to CAD
-    p.sell("XEQT.TO", 10, 30)  # +20 CAD
-    pnl = p.realized_pnl()
-    assert pnl["USD"] == pytest.approx(95.0)
-    assert pnl["CAD"] == pytest.approx(20.0)
-
-
-def test_add_position_is_buy_alias_and_records_transaction():
-    p = Portfolio(name="t")
-    pos, blended = p.add_position("aapl", 10, 100, note="legacy path")
-    assert not blended
-    assert pos.avg_cost == pytest.approx(100.0)
-    assert len(p.transactions) == 1
-    assert p.transactions[0].note == "legacy path"
-
-
-def test_fx_rates_identity_and_missing():
-    fx = FxRates(base="CAD", rates={"CAD": 1.0, "USD": 1.35})
-    assert fx.rate("CAD") == 1.0
-    assert fx.rate("") == 1.0  # unknown currency assumed base
-    assert fx.rate("USD") == 1.35
-    assert fx.rate("EUR") is None
-    assert fx.convert(100, "USD") == pytest.approx(135.0)
-    assert fx.convert(100, "EUR") is None
-
-
-def test_parse_tickers_dedupes_and_uppercases():
-    assert parse_tickers("aapl, msft AAPL  xeqt.to") == ["AAPL", "MSFT", "XEQT.TO"]
-    assert parse_tickers("") == []
+def test_account_type_registered():
+    assert AccountType.TFSA.registered and AccountType.FHSA.registered
+    assert not AccountType.NONREG.registered and not Account(name="t").type.registered
+    assert AccountType.NONREG.label == "Non-registered"

@@ -1,3 +1,7 @@
 CLAUDE.md
 __pycache__/
 *.pyc
+.venv/
+.build/
+.pytest_cache/
+.ruff_cache/
