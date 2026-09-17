@@ -71,6 +71,44 @@ def _hls(hex_color: str) -> tuple[float, float, float]:
     return hue * 360, light, sat
 
 
+def _from_hls(hue: float, light: float, sat: float) -> str:
+    r, g, b = colorsys.hls_to_rgb(hue / 360, light, sat)
+    return "#{:02x}{:02x}{:02x}".format(*(round(max(0.0, min(1.0, x)) * 255) for x in (r, g, b)))
+
+
+def _luminance(hex_color: str) -> float:
+    h = hex_color.lstrip("#")
+
+    def channel(v: float) -> float:
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (channel(int(h[i : i + 2], 16) / 255) for i in (0, 2, 4))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(a: str, b: str) -> float:
+    """WCAG contrast ratio between two hex colours (1 to 21)."""
+    la, lb = _luminance(a), _luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def ensure_contrast(color: str, background: str, *, dark: bool, min_ratio: float = 3.0) -> str:
+    """Nudge `color`'s lightness away from `background` until it reads at `min_ratio`.
+
+    Hue and saturation are kept, so a theme's gain/loss colours stay recognisably
+    green/red — some Omarchy palettes' "muted" is under 2:1 against the background.
+    """
+    hue, light, sat = _hls(color)
+    step = 0.04 if dark else -0.04
+    for _ in range(25):
+        if contrast(color, background) >= min_ratio:
+            return color
+        light = max(0.0, min(1.0, light + step))
+        color = _from_hls(hue, light, sat)
+    return color
+
+
 def distinct_hues(a: str, b: str, min_degrees: float = 60, min_saturation: float = 0.25) -> bool:
     ha, _, sa = _hls(a)
     hb, _, sb = _hls(b)
@@ -93,6 +131,8 @@ def palette_from_colors(name: str, c: dict[str, str]) -> Palette:
     # can't tell gains from losses; substitute a legible universal pair.
     if not distinct_hues(up, down):
         up, down = ("#7ee787", "#ff7b72") if dark else ("#1a7f37", "#cf222e")
+    up, down = ensure_contrast(up, bg, dark=dark), ensure_contrast(down, bg, dark=dark)
+    muted = ensure_contrast(g("dark_foreground", g("muted", fg)), bg, dark=dark)
     accent = g("accent", g("blue", fg))
     series = tuple(
         dict.fromkeys(
@@ -111,7 +151,7 @@ def palette_from_colors(name: str, c: dict[str, str]) -> Palette:
         border=g("muted", g("dark_foreground", fg)),
         foreground=fg,
         bright=g("bright_foreground", fg),
-        muted=g("dark_foreground", g("muted", fg)),
+        muted=muted,
         accent=accent,
         up=up,
         down=down,

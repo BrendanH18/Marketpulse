@@ -5,9 +5,12 @@ from rich.console import Console
 
 from marketpulse import charts, fmt
 from marketpulse.config import Config
+from marketpulse.models import Account, Transaction, TxnType
 from marketpulse.themes import (
     OMARCHY_PALETTES,
+    contrast,
     distinct_hues,
+    ensure_contrast,
     omarchy_active,
     palette_from_colors,
     resolve_palette,
@@ -68,7 +71,18 @@ def test_every_omarchy_palette_builds_distinct_gain_loss_colors():
         p = palette_from_colors(name, colors)
         assert distinct_hues(p.up, p.down), name
         assert p.accent.startswith("#")
+        for role in ("muted", "up", "down"):
+            assert contrast(getattr(p, role), p.background) >= 3, (name, role, getattr(p, role))
         textual_theme(p)
+
+
+def test_low_contrast_muted_is_lifted_but_hue_is_kept():
+    raw = OMARCHY_PALETTES["everforest"]
+    assert contrast(raw["dark_foreground"], raw["background"]) < 3  # the theme as shipped
+    p = palette_from_colors("everforest", raw)
+    assert contrast(p.muted, p.background) >= 3
+    assert contrast("#ffffff", "#000000") == pytest.approx(21)
+    assert ensure_contrast("#c0caf5", "#1a1b26", dark=True) == "#c0caf5"  # already readable: untouched
 
 
 def test_monochrome_theme_gets_fallback_colors():
@@ -123,3 +137,12 @@ def test_market_symbols_filters_by_asset_kind():
         "AAPL": Asset("AAPL", kind=AssetKind.MARKET),
     }
     assert market_symbols(["XEQT.TO", "GIC", "", "HOUSE", "AAPL", "AAPL"], assets) == ["AAPL", "XEQT.TO"]
+
+
+def test_privacy_masks_fees_in_activity_cells():
+    from marketpulse.render import activity_cells
+
+    acct = Account(name="Main", id=1)
+    t = Transaction(account_id=1, type=TxnType.BUY, date="2024-01-02", symbol="AAPL", quantity=1, price=100, fees=9.99)
+    assert "9.99" in activity_cells(t, {1: acct})[8].plain
+    assert "9.99" not in activity_cells(t, {1: acct}, privacy=True)[8].plain

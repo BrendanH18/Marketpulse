@@ -374,7 +374,7 @@ def activity_cells(t: Transaction, accounts: dict[int, Account], *, privacy: boo
         Text(fmt.MASK if privacy and t.quantity else qty),
         Text(fmt.price(t.price) if t.price else DASH, style="" if t.price else "muted"),
         Text(fmt.money(t.gross_value, privacy=privacy) if t.gross_value else DASH),
-        Text(fmt.money(t.fees) if t.fees else DASH, style="muted"),
+        Text(fmt.money(t.fees, privacy=privacy) if t.fees else DASH, style="muted"),
         Text(t.currency or DASH, style="muted"),
         Text(truncate(t.note, 30), style="muted"),
     ]

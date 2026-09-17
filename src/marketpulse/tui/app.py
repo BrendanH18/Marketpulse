@@ -69,7 +69,21 @@ class PortfolioCommands(Provider):
 
     def _entries(self) -> list[tuple[str, str, object]]:
         app: MarketPulseApp = self.app  # type: ignore[assignment]
-        entries: list[tuple[str, str, object]] = [
+        entries = self._actions(app)
+        entries += [
+            (f"Go to {label}", f"Workspace {i}", partial(app.set_workspace, key))
+            for i, (key, label) in enumerate(WORKSPACES, 1)
+        ]
+        entries += [
+            (f"Theme: {pretty_name(n)}", "Omarchy theme", partial(setattr, app, "theme", n)) for n in theme_names()
+        ]
+        entries += [(f"Chart {s}", "Open chart", partial(app.open_chart, s)) for s in app.known_symbols()]
+        return entries
+
+    @staticmethod
+    def _actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:
+        """The fixed actions, shown before the user types anything."""
+        return [
             ("Buy", "Record a buy", partial(app.action_trade, "BUY")),
             ("Sell", "Record a sell", partial(app.action_trade, "SELL")),
             ("Record dividend", "Cash dividend or distribution", partial(app.action_trade, "DIVIDEND")),
@@ -79,6 +93,9 @@ class PortfolioCommands(Provider):
             ("Record interest", "Interest income", partial(app.action_trade, "INTEREST")),
             ("Record split", "Stock split", partial(app.action_trade, "SPLIT")),
             ("Transfer in-kind", "Move shares between accounts", partial(app.action_trade, "TRANSFER")),
+            ("Record return of capital", "Reduces the ACB", partial(app.action_trade, "ROC")),
+            ("Record fee", "Account or management fee", partial(app.action_trade, "FEE")),
+            ("Record valuation", "Mark a manual asset at a price", partial(app.action_trade, "VALUATION")),
             ("New account", "TFSA, RRSP, FHSA, non-registered…", app.action_new_account),
             ("Add GIC or manual asset", "Fixed income, property, private holdings", app.action_add_asset),
             ("Update manual asset value", "Mark a manual asset", app.action_value_asset),
@@ -94,18 +111,9 @@ class PortfolioCommands(Provider):
             ("Undo last transaction", "Delete the most recent entry", app.action_undo),
             ("Help", "Keyboard shortcuts", app.action_help),
         ]
-        entries += [
-            (f"Go to {label}", f"Workspace {i}", partial(app.set_workspace, key))
-            for i, (key, label) in enumerate(WORKSPACES, 1)
-        ]
-        entries += [
-            (f"Theme: {pretty_name(n)}", "Omarchy theme", partial(setattr, app, "theme", n)) for n in theme_names()
-        ]
-        entries += [(f"Chart {s}", "Open chart", partial(app.open_chart, s)) for s in app.known_symbols()]
-        return entries
 
     async def discover(self) -> Hits:
-        for name, help_text, callback in self._entries()[:23]:
+        for name, help_text, callback in self._actions(self.app):  # type: ignore[arg-type]
             yield DiscoveryHit(name, callback, help=help_text)  # type: ignore[arg-type]
 
     async def search(self, query: str) -> Hits:
@@ -546,11 +554,15 @@ class MarketPulseApp(App):
         for alert in fired:
             self.notify(alert.note or alert.describe(), title=f"Alert · {alert.symbol}", severity="warning", timeout=12)
         problems = sorted(set(view.errors.values()))
+        if view.excluded:
+            problems.insert(0, f"Net worth excludes {len(view.excluded)} position(s) without a price or FX rate")
         if problems and problems[0] != self._last_error:
             self.notify(problems[0], title="Market data", severity="warning")
         self._last_error = problems[0] if problems else ""
         self._set_loading(False)
         self.render_market_views()
+        if self.workspace == "income" and self._income_forecast is None:
+            self.load_income()  # `r` clears the forecast; reload it if the user is looking at it
         if self.flash:
             self.set_timer(1.6, self._clear_flash)
 
@@ -804,11 +816,14 @@ class MarketPulseApp(App):
             acct = self.tracker.store.get_account(self.account_filter)
             scope = acct.name if acct else scope
         total = sum(x.value_base or 0 for x in positions)
-        self.query_one(
-            "#pane-holdings"
-        ).border_subtitle = (
-            f"f ▸ {scope} · {len(positions)} positions · {fmt.money(total, v.base, privacy=self.privacy, decimals=0)}"
-        )
+        if table.row_count == 0:
+            subtitle = "No holdings yet — b to buy" if self.account_filter is None else f"f ▸ {scope} · nothing held"
+        else:
+            money = fmt.money(total, v.base, privacy=self.privacy, decimals=0)
+            subtitle = f"f ▸ {scope} · {len(positions)} positions · {money}"
+            if v.excluded:
+                subtitle += f" · ⚠ {len(v.excluded)} excluded"
+        self.query_one("#pane-holdings").border_subtitle = subtitle
         if self._detail_key is None and positions:
             first = self._selected_key(table)
             if first and not first.startswith("cash:"):
@@ -830,7 +845,9 @@ class MarketPulseApp(App):
                     cells[2] = Text(cells[2].plain, style=f"bold {p.background} on {p.up if direction > 0 else p.down}")
             table.add_row(*self._justify(cells, range(2, 5)), key=sym)
         self._restore_cursor(table, selected)
-        self.query_one("#pane-watch").border_subtitle = f"{len(self.watch_symbols)} symbols"
+        self.query_one("#pane-watch").border_subtitle = (
+            f"{len(self.watch_symbols)} symbols" if self.watch_symbols else "Empty — a to add a symbol"
+        )
         if self._watch_key is None and self.watch_symbols:
             self._show_watch(self.watch_symbols[0])
 
@@ -851,7 +868,7 @@ class MarketPulseApp(App):
             shown += 1
         self._restore_cursor(table, selected)
         issues = store.ledger().issues
-        subtitle = f"{shown} of {len(txns)} transactions"
+        subtitle = f"{shown} of {len(txns)} transactions" if txns else "No transactions — n to add one"
         if issues:
             subtitle += f" · ⚠ {len(issues)} ledger issue(s)"
         self.query_one("#pane-activity").border_subtitle = subtitle
@@ -880,7 +897,11 @@ class MarketPulseApp(App):
         selected = self._selected_key(table)
         table.clear()
         quotes = {**(self.view.quotes if self.view else {}), **self.watch_quotes}
-        for a in self.tracker.store.alerts():
+        alerts = self.tracker.store.alerts()
+        self.query_one("#pane-alerts").border_subtitle = (
+            f"{sum(a.active for a in alerts)} armed of {len(alerts)}" if alerts else "No alerts — A to add one"
+        )
+        for a in alerts:
             q = quotes.get(a.symbol)
             state = (
                 Text("● triggered", style="warn")
@@ -1138,11 +1159,13 @@ class MarketPulseApp(App):
             rest = rest[1:]
         self.open_chart(symbol, compare=parse_symbols(" ".join(rest)))
 
-    @work(thread=True, exclusive=True, group="chart")
     def load_chart(self) -> None:
+        self._load_chart(self.query_one(ChartView))
+
+    @work(thread=True, exclusive=True, group="chart")
+    def _load_chart(self, view: ChartView) -> None:
         sym, period, others = self.chart_symbol, self.chart_period, list(self.compare)
         market = self.tracker.market
-        view = self.query_one(ChartView)
         try:
             bars = market.history(sym, period)
             compare = {o: market.history(o, period) for o in others}
@@ -1289,18 +1312,31 @@ class MarketPulseApp(App):
             self.push_screen(ConfirmScreen(f"Delete transaction #{txn.id}?", detail), done)
         elif ws == "watchlist":
             sym = self.context_symbol()
-            if sym:
-                store.remove_watch([sym])
-                self._watch_key = None
-                self.watch_symbols = [s for s in self.watch_symbols if s != sym]
-                self.render_watchlist()
-                self.notify(f"Removed {sym} from watchlist")
+            if not sym:
+                return
+
+            def unwatch(yes: bool) -> None:
+                if yes:
+                    store.remove_watch([sym])
+                    self._watch_key = None
+                    self.watch_symbols = [s for s in self.watch_symbols if s != sym]
+                    self.render_watchlist()
+                    self.notify(f"Removed {sym} from watchlist")
+
+            self.push_screen(ConfirmScreen(f"Remove {sym} from the watchlist?"), unwatch)
         elif ws == "alerts":
             key = self._selected_key(self.query_one("#alerts-table", DataTable))
-            if key:
-                store.delete_alert(int(key))
-                self.render_alerts()
-                self.notify("Alert removed")
+            alert = next((a for a in store.alerts() if str(a.id) == key), None)
+            if alert is None:
+                return
+
+            def remove(yes: bool) -> None:
+                if yes:
+                    store.delete_alert(alert.id)
+                    self.render_alerts()
+                    self.notify("Alert removed")
+
+            self.push_screen(ConfirmScreen(f"Delete alert #{alert.id}?", alert.describe()), remove)
         elif ws == "tax":
             key = self._selected_key(self.query_one("#accounts-table", DataTable))
             acct = store.get_account(int(key)) if key else None
@@ -1362,10 +1398,13 @@ class MarketPulseApp(App):
             if result is None:
                 return
             asset, txn = result
+            existed = asset.symbol in self.tracker.store.assets()
             self.tracker.store.upsert_asset(asset)
             try:
                 self.tracker.add_transaction(txn)
             except ValueError as e:
+                if not existed:
+                    self.tracker.store.delete_asset(asset.symbol)  # don't leave an asset row with no holding
                 self.notify(str(e), severity="error")
                 return
             self.after_change(f"Added {asset.name}")
@@ -1385,23 +1424,32 @@ class MarketPulseApp(App):
             try:
                 sym, amount = parts[0].upper(), float(parts[1].replace(",", ""))
                 when = parse_date(parts[2] if len(parts) > 2 else None)
+                if amount <= 0:
+                    raise ValueError
             except (IndexError, ValueError):
-                self.notify("Use: SYMBOL VALUE [DATE]", severity="error")
+                self.notify("Use: SYMBOL VALUE [DATE] (value must be positive)", severity="error")
+                return
+            if sym not in manual:
+                self.notify(f"{sym} is not a manual asset.", severity="error")
                 return
             holders = [h for h in self.tracker.store.ledger().open_holdings() if h.symbol == sym]
             if not holders:
                 self.notify(f"No holding of {sym}.", severity="error")
                 return
-            self.tracker.store.add_transaction(
-                Transaction(
-                    account_id=holders[0].account_id,
-                    type=TxnType.VALUATION,
-                    date=when,
-                    symbol=sym,
-                    price=amount,
-                    currency=holders[0].currency,
+            try:
+                self.tracker.add_transaction(
+                    Transaction(
+                        account_id=holders[0].account_id,
+                        type=TxnType.VALUATION,
+                        date=when,
+                        symbol=sym,
+                        price=amount,
+                        currency=holders[0].currency,
+                    )
                 )
-            )
+            except ValueError as e:
+                self.notify(str(e), severity="error")
+                return
             self.after_change(f"{sym} valued at {fmt.money(amount)}")
 
         self.push_screen(

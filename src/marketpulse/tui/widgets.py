@@ -52,7 +52,7 @@ _BIG = {
 
 
 def big_width(s: str) -> int:
-    return sum(len(_BIG[c][0]) + 1 for c in s if c in _BIG)
+    return sum(len(_BIG[c][0]) + 1 if c in _BIG else len(c) for c in s)
 
 
 def big_text(s: str, style: str) -> Text:
