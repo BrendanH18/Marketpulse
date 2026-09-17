@@ -147,7 +147,7 @@ class PortfolioView:
 
     @property
     def stale(self) -> bool:
-        return any(q.stale for q in self.quotes.values())
+        return self.fx.stale or any(q.stale for q in self.quotes.values())
 
     @property
     def market_state(self) -> str:

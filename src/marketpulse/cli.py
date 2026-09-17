@@ -18,7 +18,7 @@ from rich.theme import Theme as RichTheme
 
 from . import __version__, fmt, render
 from .config import Config, config_path
-from .market import PERIODS, MarketError
+from .market import BARS_PER_YEAR, PERIOD_INTERVALS, PERIODS, MarketError
 from .models import (
     ALERT_CONDITIONS,
     EPSILON,
@@ -432,7 +432,7 @@ def compare(app: App, symbols: tuple[str, ...], period: str) -> None:
     for s, bars in sorted(data.items(), key=lambda kv: period_return([b.close for b in kv[1]]) or 0, reverse=True):
         closes = [b.close for b in bars]
         ret = period_return(closes)
-        per_year = 252 if PERIODS.index(period) < PERIODS.index("5y") else 52
+        per_year = BARS_PER_YEAR[PERIOD_INTERVALS[period]]
         t.add_row(
             Text(s, style="bright"),
             Text(fmt.price(closes[0]), style="muted"),

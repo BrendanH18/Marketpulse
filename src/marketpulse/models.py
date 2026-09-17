@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from enum import StrEnum
 
 # Tolerance for float share arithmetic (fractional shares accumulate error)
@@ -357,10 +357,16 @@ class Bar:
     low: float
     close: float
     volume: int = 0
+    offset: int = 0  # exchange UTC offset in seconds (Yahoo meta.gmtoffset)
 
     @property
     def date(self) -> str:
-        return datetime.fromtimestamp(self.time).date().isoformat()
+        """Calendar date at the exchange, not on this machine."""
+        return datetime.fromtimestamp(self.time + self.offset, tz=UTC).date().isoformat()
+
+    def local(self) -> datetime:
+        """Bar time as a tz-aware datetime in the exchange's zone."""
+        return datetime.fromtimestamp(self.time, tz=timezone(timedelta(seconds=self.offset)))
 
 
 @dataclass
@@ -369,6 +375,7 @@ class FxRates:
 
     base: str
     rates: dict[str, float] = field(default_factory=dict)
+    stale: bool = False  # any rate came from the offline cache
 
     def rate(self, currency: str) -> float | None:
         if not currency or currency.upper() == self.base:

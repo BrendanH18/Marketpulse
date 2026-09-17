@@ -101,6 +101,7 @@ def test_alerts():
 
 def test_fx_rates():
     fx = FxRates(base="CAD", rates={"USD": 1.35})
+    assert fx.stale is False
     assert fx.convert(10, "USD") == pytest.approx(13.5)
     assert fx.convert(10, "CAD") == 10
     assert fx.convert(10, "") == 10

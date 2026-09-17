@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import calendar
 from collections.abc import Sequence
-from datetime import datetime
 
 from rich import box
 from rich.console import Group, RenderableType
@@ -397,7 +396,7 @@ def activity_table(
 def _x_labels(bars: Sequence[Bar], period: str) -> tuple[str, str]:
     if period in ("1d", "5d"):
         f = "%H:%M" if period == "1d" else "%b %d %H:%M"
-        return datetime.fromtimestamp(bars[0].time).strftime(f), datetime.fromtimestamp(bars[-1].time).strftime(f)
+        return bars[0].local().strftime(f), bars[-1].local().strftime(f)
     return bars[0].date, bars[-1].date
 
 
@@ -466,7 +465,7 @@ def crosshair_text(bars: Sequence[Bar], position: float, period: str) -> Text:
         return Text("")
     i = round(position * (len(bars) - 1))
     b = bars[i]
-    when = datetime.fromtimestamp(b.time).strftime("%Y-%m-%d %H:%M" if period in ("1d", "5d", "1mo") else "%Y-%m-%d")
+    when = b.local().strftime("%Y-%m-%d %H:%M" if period in ("1d", "5d", "1mo") else "%Y-%m-%d")
     first = bars[0].close
     t = Text()
     t.append(f"◆ {when}  ", style="accent")
