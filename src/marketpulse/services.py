@@ -18,7 +18,7 @@ from .analytics import (
 )
 from .config import Config
 from .db import Snapshot, Store
-from .ledger import RoomStatus, contribution_room, replay, superficial_losses
+from .ledger import RoomStatus, contribution_room, replay, replay_by_day, superficial_losses
 from .market import MarketData, MarketError
 from .models import (
     EPSILON,
@@ -33,7 +33,7 @@ from .models import (
     guess_currency,
 )
 from .themes import resolve_palette
-from .valuation import PortfolioView, build_view
+from .valuation import PortfolioView, build_view, market_symbols
 
 
 @dataclass
@@ -77,11 +77,6 @@ class Tracker:
 
     # ── symbols & currencies ──────────────────────────────────────────────────
 
-    def market_symbols(self) -> list[str]:
-        assets = self.store.assets()
-        state = self.store.ledger()
-        return [s for s in state.symbols() if s not in assets or assets[s].kind is AssetKind.MARKET]
-
     def resolve_currency(self, symbol: str, account: Account) -> tuple[str, Quote | None]:
         """Currency for a new trade: asset override, live listing, then a suffix guess."""
         if not symbol:
@@ -120,7 +115,7 @@ class Tracker:
         state = self.store.ledger()
         accounts = self.store.account_map()
         assets = self.store.assets()
-        symbols = [s for s in state.symbols() if s not in assets or assets[s].kind is AssetKind.MARKET]
+        symbols = market_symbols(state.symbols(), assets)
         quotes, errors = self.market.quotes(symbols, use_cache=use_cache) if symbols else ({}, {})
         currencies = {h.currency for h in state.open_holdings()} | {q.currency for q in quotes.values()}
         currencies |= {ccy for (_, ccy) in state.cash_balances()} | {r.currency for r in state.realized}
@@ -208,13 +203,7 @@ class Tracker:
         base = self.base
         start = min(t.date for t in txns)
 
-        market_syms = sorted(
-            {
-                t.symbol
-                for t in txns
-                if t.symbol and (t.symbol not in assets or assets[t.symbol].kind is AssetKind.MARKET)
-            }
-        )
+        market_syms = market_symbols((t.symbol for t in txns), assets)
         closes: dict[str, dict[str, float]] = {}
         listing_ccy: dict[str, str] = {}
         for i, sym in enumerate(market_syms, 1):
@@ -239,18 +228,14 @@ class Tracker:
         last_px: dict[str, float] = {}
         last_fx: dict[str, float] = {base: 1.0}
         snaps: list[Snapshot] = []
-        day = date.fromisoformat(start)
-        end = date.today()
         say("replaying ledger")
-        while day <= end:
-            iso = day.isoformat()
+        for iso, state in replay_by_day(txns, accounts, start, date.today().isoformat()):
             for sym, series in closes.items():
                 if iso in series:
                     last_px[sym] = series[iso]
             for ccy, series in fx_hist.items():
                 if iso in series:
                     last_fx[ccy] = series[iso]
-            state = replay(txns, accounts, until=iso)
             value = book = 0.0
             complete = True
             for h in state.open_holdings():
@@ -285,7 +270,6 @@ class Tracker:
             contributions = sum(a * last_fx.get(c, 0.0) for d, a, c in flows if d <= iso)
             if complete and (value > 0 or snaps):
                 snaps.append(Snapshot(iso, value, book, contributions, base, {"backfilled": True}))
-            day += timedelta(days=1)
         self.store.upsert_snapshots(snaps)
         return len(snaps)
 

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from .ledger import Holding, LedgerState
-from .models import Account, AccountType, Asset, AssetClass, AssetKind, FxRates, Quote
+from .models import Account, Asset, AssetClass, AssetKind, FxRates, Quote
 
 
 @dataclass
@@ -321,12 +321,6 @@ def build_view(
     return view
 
 
-def registered_account_ids(accounts: dict[int, Account], account_type: AccountType) -> set[int]:
-    return {a.id for a in accounts.values() if a.type is account_type}
-
-
-def group_positions(view: PortfolioView) -> dict[str, list[PositionView]]:
-    groups: dict[str, list[PositionView]] = defaultdict(list)
-    for p in view.positions:
-        groups[p.account.name].append(p)
-    return groups
+def market_symbols(symbols: Iterable[str], assets: dict[str, Asset]) -> list[str]:
+    """Symbols priced from the market: no asset row, or an asset of kind MARKET."""
+    return sorted({s for s in symbols if s and (s not in assets or assets[s].kind is AssetKind.MARKET)})

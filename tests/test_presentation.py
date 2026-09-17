@@ -108,3 +108,15 @@ def test_config_roundtrip_ignores_bad_values(tmp_path):
 @pytest.mark.parametrize("value", [0.0, 0.5, 1.0])
 def test_hbar_bounds(value):
     assert len(charts.hbar(value, 7, "x").plain) == 7
+
+
+def test_market_symbols_filters_by_asset_kind():
+    from marketpulse.models import Asset, AssetKind
+    from marketpulse.valuation import market_symbols
+
+    assets = {
+        "GIC": Asset("GIC", kind=AssetKind.FIXED_INCOME),
+        "HOUSE": Asset("HOUSE", kind=AssetKind.MANUAL),
+        "AAPL": Asset("AAPL", kind=AssetKind.MARKET),
+    }
+    assert market_symbols(["XEQT.TO", "GIC", "", "HOUSE", "AAPL", "AAPL"], assets) == ["AAPL", "XEQT.TO"]
