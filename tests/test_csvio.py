@@ -53,12 +53,14 @@ def test_broker_style_headers(store):
         "2024-03-01,Dividend,AAPL,,,,USD,\n"
         "2024-03-02,Mystery,AAPL,1,1,,USD,\n"
         "not a date,Buy,AAPL,1,1,,USD,\n"
+        "31/01/2024 09:30,Buy,AAPL,2,150,,USD,US-style date with a time\n"
     )
     result = import_transactions(store, io.StringIO(text), default_account=acct)
-    assert result.added == 2
+    assert result.added == 3
     assert [line for line, _ in result.skipped] == [4, 5, 6]
     h = store.ledger().open_holdings()[0]
-    assert h.quantity == 5 and h.currency == "USD"
+    assert h.quantity == 7 and h.currency == "USD"
+    assert sorted(t.date for t in store.transactions()) == ["2024-01-05", "2024-01-31", "2024-02-01"]
 
 
 def test_dry_run_and_required_columns(store):
@@ -84,3 +86,16 @@ def test_dry_run_and_required_columns(store):
 )
 def test_parse_type(raw, expected):
     assert parse_type(raw) == expected
+
+
+def test_identical_partial_fills_are_kept(store):
+    acct = store.add_account(Account(name="Main"))
+    row = "2024-01-05,BUY,AAPL,5,150,USD\n"
+    header = "date,type,symbol,quantity,price,currency\n"
+    first = import_transactions(store, io.StringIO(header + row + row), default_account=acct)
+    assert (first.added, first.duplicates) == (2, 0)
+    again = import_transactions(store, io.StringIO(header + row + row), default_account=acct)
+    assert (again.added, again.duplicates) == (0, 2)
+    third = import_transactions(store, io.StringIO(header + row * 3), default_account=acct)
+    assert (third.added, third.duplicates) == (1, 2)
+    assert store.ledger().open_holdings()[0].quantity == 15

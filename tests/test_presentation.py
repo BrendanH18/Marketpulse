@@ -92,7 +92,7 @@ def test_omarchy_active_reads_current_theme(tmp_path):
     assert omarchy_active((tmp_path / "missing",)) is None
 
 
-def test_config_roundtrip_ignores_bad_values(tmp_path):
+def test_config_roundtrip_ignores_bad_values(tmp_path, capsys):
     path = tmp_path / "c.toml"
     cfg = Config(theme="nord", privacy=True, market_strip=["SPY"], capital_gains_inclusion=0.5)
     cfg.save(path)
@@ -103,6 +103,9 @@ def test_config_roundtrip_ignores_bad_values(tmp_path):
     assert (loaded.theme, loaded.refresh_seconds, loaded.privacy, loaded.base_currency) == ("auto", 30, True, "USD")
     path.write_text("not = [valid")
     assert Config.load(path) == Config()
+    assert Config.load(path) == Config()
+    err = capsys.readouterr().err
+    assert err.count("using default settings") == 1 and str(path) in err
 
 
 @pytest.mark.parametrize("value", [0.0, 0.5, 1.0])
