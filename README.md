@@ -63,7 +63,7 @@ marketpulse tax --year 2025                # capital gains, superficial losses, 
 marketpulse allocation --target etf=80 --target fixed_income=15 --target cash=5
 ```
 
-Run `marketpulse --help` or `marketpulse <command> --help` for everything, including `accounts`, `asset`, `watch`, `alerts`, `import`/`export`, `backfill`, `theme`, `config` and `doctor`.
+Run `marketpulse --help` or `marketpulse <command> --help` for everything, including `accounts`, `asset`, `watch`, `alerts`, `import`/`export`, `backup`, `backfill`, `theme`, `config` and `doctor`.
 
 ### Accounts, cash and contribution room
 
@@ -97,6 +97,23 @@ Net worth is snapshotted whenever you look. To rebuild years of daily history fr
 ```bash
 marketpulse backfill
 ```
+
+### Backups
+
+Your ledger is one SQLite file, so MarketPulse keeps copies of it in `~/.marketpulse/backups/`:
+
+- **daily** — taken on startup when the newest backup is more than a day old (the last 14 are kept)
+- **import** — taken right before every CSV import writes anything (the last 14 are kept)
+- **pre-vN** — taken before a schema upgrade (kept until you delete them)
+- **manual** — `marketpulse backup` (kept until you delete them)
+
+```bash
+marketpulse backup                       # back up now
+marketpulse backup now ~/Dropbox/mp.db   # …or to a path of your choice
+marketpulse backup list
+```
+
+Backups use SQLite's online backup API, so they're consistent even while the TUI or menu bar is running. To restore one, quit MarketPulse and copy it over `~/.marketpulse/marketpulse.db`.
 
 ## macOS menu bar
 

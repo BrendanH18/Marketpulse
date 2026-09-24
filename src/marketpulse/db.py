@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +25,19 @@ from .models import (
     parse_date,
 )
 
-SCHEMA_VERSION = 1
+# ── Schema & migrations ───────────────────────────────────────────────────────
+#
+# The schema version lives in SQLite's own header field, `PRAGMA user_version`
+# (an integer SQLite reserves for applications and never touches itself). It
+# is cheap to read, can't drift from the file it describes, and is updated
+# inside the same transaction as each migration, so a crash mid-upgrade leaves
+# the database at the old version rather than half-migrated.
+#
+# `SCHEMA` below is the *baseline* (version 1): the tables MarketPulse 2.0
+# shipped with. It is only ever run with CREATE ... IF NOT EXISTS, so it never
+# alters an existing table. Every later change goes into MIGRATIONS instead.
+
+BASELINE_VERSION = 1
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -89,6 +102,59 @@ CREATE TABLE IF NOT EXISTS targets (bucket TEXT PRIMARY KEY, weight REAL NOT NUL
 CREATE TABLE IF NOT EXISTS quote_cache (symbol TEXT PRIMARY KEY, data TEXT NOT NULL, fetched_at REAL NOT NULL);
 """
 
+# A migration is either a SQL script or a Python function that receives the
+# open connection (for data rewrites that plain SQL can't express).
+Migration = str | Callable[[sqlite3.Connection], None]
+
+# Upgrade steps keyed by the version they migrate the database *to*. To change
+# the schema: add the next integer here (e.g. 2: "ALTER TABLE ... ADD COLUMN
+# ..."), never edit a step that has already shipped, and never edit SCHEMA to
+# alter an existing table: databases created before your change won't see it.
+# Keep the keys contiguous (2, 3, 4, ...) so every database walks the same path.
+MIGRATIONS: dict[int, Migration] = {}
+
+# Where automatic backups go and how many to keep (see Store.backup).
+BACKUP_DIRNAME = "backups"
+AUTO_BACKUP_KEEP = 14  # automatic backups kept per reason (daily, import, ...)
+AUTO_BACKUP_MAX_AGE_HOURS = 24.0  # take a fresh daily backup when the newest is older than this
+
+
+class SchemaError(RuntimeError):
+    """The database can't be opened safely by this version of MarketPulse."""
+
+
+def latest_version(migrations: dict[int, Migration] | None = None) -> int:
+    """The schema version this build of MarketPulse writes."""
+    migrations = MIGRATIONS if migrations is None else migrations
+    return max(migrations, default=BASELINE_VERSION)
+
+
+def _apply_migration(conn: sqlite3.Connection, version: int, step: Migration) -> None:
+    """Run one migration step and stamp the new version, atomically.
+
+    Both the step and the `PRAGMA user_version` bump happen inside a single
+    explicit transaction; if anything raises, it is rolled back and the
+    database stays exactly as it was. (SQLite supports transactional DDL, so
+    this covers CREATE/ALTER/DROP too. The one exception is PRAGMA
+    foreign_keys, which is a no-op inside a transaction: don't toggle it in a
+    migration.)
+    """
+    try:
+        if isinstance(step, str):
+            # executescript() COMMITs any open transaction before it starts, so
+            # the BEGIN/COMMIT has to live inside the script itself.
+            conn.executescript(f"BEGIN;\n{step}\n;\nPRAGMA user_version = {int(version)};\nCOMMIT;")
+        else:
+            conn.execute("BEGIN")
+            step(conn)
+            conn.execute(f"PRAGMA user_version = {int(version)}")
+            conn.execute("COMMIT")
+    except Exception:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
+
+
 _TXN_COLS = "account_id, date, type, symbol, quantity, price, amount, fees, currency, note, ratio, target_account_id"
 
 
@@ -108,6 +174,10 @@ class Store:
 
     def __init__(self, path: Path | str | None = None):
         self.path = Path(path) if path else data_dir() / "marketpulse.db"
+        # Remember whether there was a real database here before we connect
+        # (connecting creates an empty file). A brand-new database has nothing
+        # worth backing up before it is migrated.
+        existed = self.path.exists() and self.path.stat().st_size > 0
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=10)
         self._conn.row_factory = sqlite3.Row
@@ -115,14 +185,141 @@ class Store:
             self._conn.execute("PRAGMA foreign_keys = ON")
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._conn.executescript(SCHEMA)
-            if self.get_meta("schema_version") is None:
-                self.set_meta("schema_version", str(SCHEMA_VERSION))
+            self._migrate(backup_first=existed)
 
     @classmethod
     def open_default(cls) -> Store:
+        """Open ~/.marketpulse/marketpulse.db the way the app does: import any
+        legacy JSON portfolios, then take the daily safety backup if one is due."""
         store = cls()
         migrate_legacy_json(store, store.path.parent)
+        try:
+            store.auto_backup()
+        except (OSError, sqlite3.Error):
+            # A failed backup (full disk, read-only dir) must never stop the
+            # app from opening; `marketpulse doctor` reports the backup age.
+            pass
         return store
+
+    # ── schema version & migrations ───────────────────────────────────────────
+
+    @property
+    def schema_version(self) -> int:
+        with self._lock:
+            return int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+
+    def _migrate(self, *, backup_first: bool) -> None:
+        """Bring the database up to `latest_version()`, one step at a time.
+
+        Version 0 is what SQLite reports for a file that has never been
+        stamped: either a database we just created or one written by
+        MarketPulse 2.0 before versioning existed. Both hold exactly the
+        baseline tables (SCHEMA just ran), so they are stamped as version 1.
+        """
+        current = self.schema_version
+        if current == 0:
+            self._conn.execute(f"PRAGMA user_version = {BASELINE_VERSION}")
+            current = BASELINE_VERSION
+        target = latest_version()
+        if current > target:
+            # Opening a newer file with an older app could silently drop data
+            # the new columns carry, so refuse instead.
+            raise SchemaError(
+                f"{self.path} uses schema version {current}, but this MarketPulse only understands up to "
+                f"{target}. Upgrade MarketPulse to open it."
+            )
+        pending = [v for v in sorted(MIGRATIONS) if current < v <= target]
+        if pending and backup_first:
+            # Snapshot the pre-upgrade file so a bad migration is always recoverable.
+            self.backup(reason=f"pre-v{target}")
+        for version in pending:
+            _apply_migration(self._conn, version, MIGRATIONS[version])
+        # Mirror the version into `meta` for humans poking at the file with the sqlite3 shell.
+        self.set_meta("schema_version", str(self.schema_version))
+
+    # ── backups ───────────────────────────────────────────────────────────────
+    #
+    # Backups are full copies of the database made with SQLite's online backup
+    # API, which produces a consistent snapshot even while the TUI or menu bar
+    # has the file open (a plain file copy could catch a half-written page or
+    # miss data still sitting in the -wal file).
+    #
+    # Files are named  marketpulse-YYYYMMDD-HHMMSS-<reason>.db  so they sort by
+    # time and say why they exist. Reasons:
+    #   manual      `marketpulse backup` — never deleted automatically
+    #   pre-vN      taken before a schema upgrade — never deleted automatically
+    #   daily       taken on startup when the newest backup is >24h old
+    #   import      taken right before a CSV import writes to the ledger
+    # Automatic reasons (daily, import) are pruned to the newest
+    # AUTO_BACKUP_KEEP each; the others are yours to manage.
+
+    _AUTO_REASONS = ("daily", "import")
+
+    @property
+    def backup_dir(self) -> Path:
+        return self.path.parent / BACKUP_DIRNAME
+
+    def backup(self, reason: str = "manual", dest: Path | str | None = None) -> Path:
+        """Write a consistent copy of the database and return its path.
+
+        With `dest`, the copy goes exactly there (and is never pruned);
+        otherwise it goes into the backups directory under a timestamped name.
+        """
+        if dest is None:
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            target = self.backup_dir / f"marketpulse-{stamp}-{reason}.db"
+            # Two backups in the same second (e.g. import right after startup):
+            # add a counter rather than overwrite the first one.
+            n = 2
+            while target.exists():
+                target = self.backup_dir / f"marketpulse-{stamp}-{reason}-{n}.db"
+                n += 1
+        else:
+            target = Path(dest).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        copy = sqlite3.connect(target)
+        try:
+            with self._lock:
+                self._conn.backup(copy)
+        finally:
+            copy.close()
+        if dest is None and reason in self._AUTO_REASONS:
+            self.prune_backups(reason)
+        return target
+
+    def backups(self) -> list[Path]:
+        """Backups in the backups directory, newest first."""
+        if not self.backup_dir.is_dir():
+            return []
+        # The timestamp is at a fixed offset in the name, so sorting by name is sorting by time.
+        return sorted(self.backup_dir.glob("marketpulse-*.db"), key=lambda p: p.name[12:27], reverse=True)
+
+    @staticmethod
+    def backup_reason(path: Path) -> str:
+        """'daily' from marketpulse-20260101-120000-daily.db (or ...-daily-2.db)."""
+        reason = path.stem[28:]
+        head, _, tail = reason.rpartition("-")
+        return head if tail.isdigit() and head else reason
+
+    def prune_backups(self, reason: str, keep: int = AUTO_BACKUP_KEEP) -> list[Path]:
+        """Delete all but the newest `keep` backups taken for `reason`; returns what was removed."""
+        same = [p for p in self.backups() if self.backup_reason(p) == reason]
+        removed = same[keep:]
+        for p in removed:
+            p.unlink(missing_ok=True)
+        return removed
+
+    def auto_backup(self, max_age_hours: float = AUTO_BACKUP_MAX_AGE_HOURS) -> Path | None:
+        """Take the daily backup if the newest backup of any kind is older than
+        `max_age_hours`. Skipped for an empty ledger (nothing to lose yet)."""
+        if not self._query("SELECT 1 FROM transactions LIMIT 1"):
+            return None
+        newest = next(iter(self.backups()), None)
+        if newest is not None:
+            taken = datetime.strptime(newest.name[12:27], "%Y%m%d-%H%M%S")
+            if (datetime.now() - taken).total_seconds() < max_age_hours * 3600:
+                return None
+        return self.backup(reason="daily")
 
     def close(self) -> None:
         with self._lock:

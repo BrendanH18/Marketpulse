@@ -1314,6 +1314,9 @@ def import_cmd(app: App, path: Path, account, dry_run, no_create_accounts) -> No
         fail(str(e))
     verb = "Would import" if dry_run else "Imported"
     app.ok(f"{verb} {result.added} transaction(s); {result.duplicates} duplicate(s) skipped.")
+    if result.backup is not None:
+        # Tell the user how to undo the whole import, not just the last row.
+        app.console.print(Text(f"  pre-import backup: {result.backup}", style="muted"))
     for name in result.accounts_created:
         app.warn(f"created account {name}")
     for line, reason in result.skipped[:15]:
@@ -1335,6 +1338,45 @@ def export_cmd(app: App, path: Path | None) -> None:
     with path.open("w", newline="") as f:
         n = export_transactions(app.store, f)
     app.ok(f"Exported {n} transactions to {path}")
+
+
+@main.group(invoke_without_command=True)
+@click.pass_context
+def backup(ctx: click.Context) -> None:
+    """Back up the database (run with no subcommand to back up now).
+
+    \b
+    Backups are consistent SQLite copies in ~/.marketpulse/backups/. One is
+    also taken automatically each day, before every CSV import and before any
+    schema upgrade. To restore, quit MarketPulse and copy a backup over
+    ~/.marketpulse/marketpulse.db.
+    """
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(backup_now)
+
+
+@backup.command("now")
+@click.argument("path", type=click.Path(dir_okay=False, path_type=Path), required=False)
+@pass_app
+def backup_now(app: App, path: Path | None) -> None:
+    """Back up now (to PATH, or to the backups directory)."""
+    dest = app.store.backup(reason="manual", dest=path)
+    app.ok(f"Backed up to {dest}")
+
+
+@backup.command("list")
+@pass_app
+def backup_list(app: App) -> None:
+    """List backups, newest first."""
+    items = app.store.backups()
+    if not items:
+        app.warn(f"No backups yet in {app.store.backup_dir}")
+        return
+    t = render.table("File", "Reason", ("Size", "right"), title=str(app.store.backup_dir))
+    for p in items:
+        size = Text(f"{p.stat().st_size / 1024:,.0f} KB")
+        t.add_row(Text(p.name), Text(app.store.backup_reason(p), style="muted"), size)
+    app.console.print(t)
 
 
 # ── Appearance & config ───────────────────────────────────────────────────────
@@ -1487,7 +1529,14 @@ def doctor(app: App) -> None:
     )
     row("config", str(config_path()), config_path().exists() or None)
     tr = app.tracker
-    row("database", str(tr.store.path))
+    row("database", f"{tr.store.path} (schema v{tr.store.schema_version})")
+    newest = next(iter(tr.store.backups()), None)
+    if newest is None:
+        row("backups", "none yet — `marketpulse backup`", None)
+    else:
+        age_days = (time.time() - newest.stat().st_mtime) / 86400
+        # Daily backups keep this under a day; a week means they're failing (full disk, permissions…).
+        row("backups", f"{len(tr.store.backups())} · newest {newest.name}", age_days < 7)
     row(
         "ledger",
         f"{len(tr.store.accounts())} accounts · {len(tr.store.transactions())} transactions"

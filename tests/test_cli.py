@@ -87,3 +87,12 @@ def test_config_theme_alerts_export(cli):
     assert "Fired" in cli("alerts", "check").output
     cli("buy", "AAPL", "1", "100")
     assert cli("export").output.startswith("date,account,type")
+
+
+def test_backup_commands(cli, store, tmp_path):
+    assert "No backups yet" in cli("backup", "list").output
+    assert "Backed up to" in cli("backup").output  # bare `backup` backs up now
+    cli("backup", "now", str(tmp_path / "copy.db"))
+    assert (tmp_path / "copy.db").exists()
+    listing = cli("backup", "list").output
+    assert "manual" in listing and "copy.db" not in listing  # explicit paths live outside the backups dir

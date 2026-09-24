@@ -1526,6 +1526,9 @@ class MarketPulseApp(App):
             self.call_from_thread(self.notify, str(e), title="Import failed", severity="error")
             return
         message = f"Imported {result.added} · {result.duplicates} duplicates · {len(result.skipped)} skipped"
+        if result.backup is not None:
+            # Same safety net as the CLI: name the file that undoes this import.
+            message += f"\nbackup: {result.backup.name}"
         self.call_from_thread(self.after_change, message)
 
     def action_export_csv(self) -> None:

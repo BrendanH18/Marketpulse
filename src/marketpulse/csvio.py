@@ -71,6 +71,7 @@ class ImportResult:
     duplicates: int = 0
     skipped: list[tuple[int, str]] = field(default_factory=list)
     accounts_created: list[str] = field(default_factory=list)
+    backup: Path | None = None  # pre-import snapshot of the database (None on a dry run)
 
 
 def _norm(header: str) -> str:
@@ -171,6 +172,12 @@ def import_transactions(
         )
 
     result = ImportResult()
+    if not dry_run:
+        # An import can add hundreds of rows (and new accounts) in one go, and
+        # a mis-mapped CSV is easy to do. Snapshot the ledger first so the
+        # whole import can be reverted by restoring this one file. Taken before
+        # the loop because resolve_account() may already write.
+        result.backup = store.backup(reason="import")
     existing = {
         (t.account_id, t.date, t.type, t.symbol, round(t.quantity, 6), round(t.price, 6), round(t.amount, 2))
         for t in store.transactions()
