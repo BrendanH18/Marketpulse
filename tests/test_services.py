@@ -2,7 +2,10 @@ from datetime import date, timedelta
 
 import pytest
 
-from marketpulse.models import Account, AccountType, Alert, Asset, AssetKind, Transaction, TxnType
+from marketpulse.db import Snapshot
+from marketpulse.ledger import replay
+from marketpulse.models import Account, AccountType, Alert, Asset, AssetKind, FxRates, Quote, Transaction, TxnType
+from marketpulse.valuation import build_view
 
 
 def test_valuation_prices_every_asset_kind(tracker, store):
@@ -133,14 +136,17 @@ def test_add_transaction_uses_listing_currency_and_blocks_oversell(tracker, stor
 
 
 def test_status_payload_titles(tracker, store):
-    acct = store.add_account(Account(name="Main"))
+    acct = store.add_account(Account(name="Main", type=AccountType.TFSA))
     tracker.add_transaction(
         Transaction(account_id=acct.id, type=TxnType.BUY, date="2024-01-01", symbol="AAPL", quantity=1, price=100)
     )
     store.add_watch(["XEQT.TO"])
     payload = tracker.status_payload()
     assert payload["title"].startswith("▲")
-    assert payload["accounts"][0]["type"] == "NONREG"
+    assert payload["accounts"][0]["type"] == "TFSA"
+    acct.archived = True
+    store.update_account(acct)
+    assert tracker.status_payload()["accounts"][0]["type"] == "TFSA"  # archived accounts keep their type
     assert payload["watchlist"][0]["symbol"] == "XEQT.TO"
     assert payload["theme"]["accent"].startswith("#")
     tracker.config.menubar_display = "net_worth"
@@ -215,3 +221,75 @@ def test_tax_years_and_room(tracker, store, fake):
     store.add_transaction(Transaction(account_id=tfsa.id, type=TxnType.DEPOSIT, amount=2000, currency="CAD"))
     ((status, members),) = tracker.room()
     assert status.remaining == pytest.approx(5000) and members[0].name == "TFSA"
+
+
+def _buy(store, acct, day, qty, price, ccy="USD"):
+    store.add_transaction(
+        Transaction(
+            account_id=acct.id, type=TxnType.BUY, date=day, symbol="AAPL", quantity=qty, price=price, currency=ccy
+        )
+    )
+
+
+def test_backfill_converts_flows_at_their_own_fx(tracker, store, fake):
+    days = [(date.today() - timedelta(days=n)).isoformat() for n in (3, 2, 1, 0)]
+    acct = store.add_account(Account(name="Main"))
+    _buy(store, acct, days[0], 10, 100)
+    _buy(store, acct, days[2], 5, 100)
+    fake.set_history("AAPL", dict.fromkeys(days, 100.0))  # flat price: any TWR != 0 is an FX artefact
+    fake.set_history("USDCAD=X", dict(zip(days, [1.3, 1.3, 1.4, 1.5], strict=True)), currency="CAD")
+    assert tracker.backfill() == 4
+    snaps = store.snapshots()
+    assert snaps[0].contributions == pytest.approx(1000 * 1.3)
+    assert snaps[-1].contributions == pytest.approx(1000 * 1.3 + 500 * 1.4)
+    # net worth rises with the rate, and only that shows up as return (not the revalued contributions)
+    assert snaps[-1].net_worth == pytest.approx(1500 * 1.5)
+    perf = tracker.performance(tracker.valuation(record=False))
+    assert perf.twr_pct == pytest.approx(((1300 / 1300) * (1400 / 1300) * (2250 / 2100) - 1) * 100, rel=1e-6)
+
+
+def test_backfill_defers_flow_until_fx_exists(tracker, store, fake):
+    days = [(date.today() - timedelta(days=n)).isoformat() for n in (3, 2, 1, 0)]
+    acct = store.add_account(Account(name="Main"))
+    _buy(store, acct, days[0], 10, 100)
+    fake.set_history("AAPL", dict.fromkeys(days, 100.0))
+    fake.set_history("USDCAD=X", dict.fromkeys(days[1:], 1.3), currency="CAD")  # no rate on the buy day
+    assert tracker.backfill() == 3
+    snaps = store.snapshots()
+    assert snaps[0].date == days[1]
+    assert all(s.contributions == pytest.approx(1300) for s in snaps)  # never 0 × amount
+
+
+def test_record_snapshot_is_incremental(tracker, store):
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    acct = store.add_account(Account(name="Main"))
+    _buy(store, acct, yesterday, 10, 100)
+    _buy(store, acct, date.today().isoformat(), 5, 100)
+    store.upsert_snapshot(Snapshot(yesterday, 1300, 1300, 1300, "CAD", {}))
+    view = tracker.valuation()
+    assert store.latest_snapshot().date == date.today().isoformat()
+    assert store.latest_snapshot().contributions == pytest.approx(1300 + 500 * 1.35)
+    tracker.valuation()  # a second refresh must not compound today's flows again
+    assert store.latest_snapshot().contributions == pytest.approx(1300 + 500 * 1.35)
+    # With no earlier snapshot the whole history converts at spot
+    store.upsert_snapshots([])
+    store._exec("DELETE FROM snapshots")
+    tracker.record_snapshot(view, view.fx)
+    assert store.latest_snapshot().contributions == pytest.approx(1500 * 1.35)
+
+
+def test_stale_fx_marks_view_stale(store):
+    acct = Account(name="Main", id=1)
+    state = replay(
+        [
+            Transaction(
+                account_id=1, type=TxnType.BUY, date="2024-01-02", symbol="AAPL", quantity=1, price=100, currency="USD"
+            )
+        ],
+        {1: acct},
+    )
+    q = Quote(symbol="AAPL", price=100, prev_close=100, currency="USD")
+    fresh = build_view(state, {1: acct}, {}, {"AAPL": q}, FxRates("CAD", {"USD": 1.3}))
+    assert not fresh.stale
+    cached = build_view(state, {1: acct}, {}, {"AAPL": q}, FxRates("CAD", {"USD": 1.3}, stale=True))
+    assert cached.stale

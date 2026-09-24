@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 DEFAULT_MARKET_STRIP = ["^GSPC", "^IXIC", "^GSPTSE", "USDCAD=X", "BTC-USD", "GC=F", "^TNX"]
 DEFAULT_WATCHLIST = ["XEQT.TO", "VFV.TO", "QQQ", "SPY", "AAPL", "NVDA", "BTC-USD"]
+
+
+_warned: set[Path] = set()
 
 
 def data_dir() -> Path:
@@ -50,7 +54,12 @@ class Config:
             return cfg
         try:
             raw = tomllib.loads(path.read_text())
-        except (OSError, tomllib.TOMLDecodeError):
+        except OSError:
+            return cfg
+        except tomllib.TOMLDecodeError as e:
+            if path not in _warned:  # once per process; nothing worse than silently losing every setting
+                _warned.add(path)
+                print(f"warning: {path}: {e}; using default settings", file=sys.stderr)
             return cfg
         known = {f.name: f for f in fields(cls)}
         for key, value in raw.items():

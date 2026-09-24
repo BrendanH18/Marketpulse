@@ -18,7 +18,7 @@ from .analytics import (
 )
 from .config import Config
 from .db import Snapshot, Store
-from .ledger import RoomStatus, contribution_room, replay, superficial_losses
+from .ledger import RoomStatus, contribution_room, replay, replay_by_day, superficial_losses
 from .market import MarketData, MarketError
 from .models import (
     EPSILON,
@@ -33,7 +33,7 @@ from .models import (
     guess_currency,
 )
 from .themes import resolve_palette
-from .valuation import PortfolioView, build_view
+from .valuation import PortfolioView, build_view, market_symbols
 
 
 @dataclass
@@ -77,11 +77,6 @@ class Tracker:
 
     # ── symbols & currencies ──────────────────────────────────────────────────
 
-    def market_symbols(self) -> list[str]:
-        assets = self.store.assets()
-        state = self.store.ledger()
-        return [s for s in state.symbols() if s not in assets or assets[s].kind is AssetKind.MARKET]
-
     def resolve_currency(self, symbol: str, account: Account) -> tuple[str, Quote | None]:
         """Currency for a new trade: asset override, live listing, then a suffix guess."""
         if not symbol:
@@ -120,19 +115,26 @@ class Tracker:
         state = self.store.ledger()
         accounts = self.store.account_map()
         assets = self.store.assets()
-        symbols = [s for s in state.symbols() if s not in assets or assets[s].kind is AssetKind.MARKET]
+        symbols = market_symbols(state.symbols(), assets)
         quotes, errors = self.market.quotes(symbols, use_cache=use_cache) if symbols else ({}, {})
         currencies = {h.currency for h in state.open_holdings()} | {q.currency for q in quotes.values()}
         currencies |= {ccy for (_, ccy) in state.cash_balances()} | {r.currency for r in state.realized}
         currencies |= {i.currency for i in state.income}
+        flows = external_flows(self.store.transactions(), accounts)
+        currencies |= {c for _, _, c in flows}
         fx, fx_errors = self.market.fx_rates(currencies, self.base)
         errors.update({f"FX {k}": v for k, v in fx_errors.items()})
         view = build_view(state, accounts, assets, quotes, fx, errors=errors, account_id=account_id)
         if record and account_id is None and view.positions and not view.stale and not view.excluded:
-            self.record_snapshot(view, fx)
+            self.record_snapshot(view, fx, flows)
         return view
 
     def flows_base(self, fx: FxRates) -> list[tuple[str, float]]:
+        """External flows converted at today's spot rate (a constant-FX view, used for XIRR).
+
+        Snapshot `contributions` convert each flow at the rate on its own date instead,
+        so `Performance.net_contributions` can differ slightly from the latest snapshot.
+        """
         out = []
         for d, amount, ccy in external_flows(self.store.transactions(), self.store.account_map()):
             v = fx.convert(amount, ccy)
@@ -140,8 +142,30 @@ class Tracker:
                 out.append((d, v))
         return out
 
-    def record_snapshot(self, view: PortfolioView, fx: FxRates) -> None:
-        contributions = sum(a for _, a in self.flows_base(fx))
+    def record_snapshot(
+        self, view: PortfolioView, fx: FxRates, flows: list[tuple[str, float, str]] | None = None
+    ) -> None:
+        """Upsert today's snapshot.
+
+        `contributions` is cumulative money in, each flow converted at the FX rate of
+        its own day, so consecutive snapshots differ only by that day's real flows
+        (which is what time-weighted returns strip out). We extend the most recent
+        earlier snapshot with the flows since then at today's spot; only the very first
+        snapshot converts the whole history at spot. Back-dated entries before that
+        snapshot are picked up by `backfill`.
+        """
+        today = date.today().isoformat()
+        if flows is None:
+            flows = external_flows(self.store.transactions(), self.store.account_map())
+        prev = self.store.latest_snapshot(before=today)
+        if prev is not None and prev.currency == view.base:
+            newer = [(a, c) for d, a, c in flows if d > prev.date]
+            converted = [fx.convert(a, c) for a, c in newer]
+            if any(v is None for v in converted):
+                return  # a rate is missing: don't write a snapshot we know is wrong
+            contributions = prev.contributions + sum(converted)
+        else:
+            contributions = sum(a for _, a in self.flows_base(fx))
         detail = {
             "accounts": {b.label: round(b.value, 2) for b in view.by_account},
             "classes": {b.key: round(b.value, 2) for b in view.by_class},
@@ -208,13 +232,7 @@ class Tracker:
         base = self.base
         start = min(t.date for t in txns)
 
-        market_syms = sorted(
-            {
-                t.symbol
-                for t in txns
-                if t.symbol and (t.symbol not in assets or assets[t.symbol].kind is AssetKind.MARKET)
-            }
-        )
+        market_syms = market_symbols((t.symbol for t in txns), assets)
         closes: dict[str, dict[str, float]] = {}
         listing_ccy: dict[str, str] = {}
         for i, sym in enumerate(market_syms, 1):
@@ -235,24 +253,32 @@ class Tracker:
             except MarketError:
                 fx_hist[ccy] = {}
 
-        flows = external_flows(txns, accounts)
+        flows = external_flows(txns, accounts)  # sorted by date
         last_px: dict[str, float] = {}
         last_fx: dict[str, float] = {base: 1.0}
         snaps: list[Snapshot] = []
-        day = date.fromisoformat(start)
-        end = date.today()
+        contributions = 0.0
+        pending = 0  # index of the first flow not yet converted
         say("replaying ledger")
-        while day <= end:
-            iso = day.isoformat()
+        for iso, state in replay_by_day(txns, accounts, start, date.today().isoformat()):
             for sym, series in closes.items():
                 if iso in series:
                     last_px[sym] = series[iso]
             for ccy, series in fx_hist.items():
                 if iso in series:
                     last_fx[ccy] = series[iso]
-            state = replay(txns, accounts, until=iso)
             value = book = 0.0
             complete = True
+            # Each flow converts at the rate in force on its own day; if that rate isn't
+            # known yet the day is incomplete and the flow waits for the next rate.
+            while pending < len(flows) and flows[pending][0] <= iso:
+                _, amount, ccy = flows[pending]
+                rate = last_fx.get(ccy)
+                if rate is None:
+                    complete = False
+                    break
+                contributions += amount * rate
+                pending += 1
             for h in state.open_holdings():
                 rate = last_fx.get(h.currency)
                 asset = assets.get(h.symbol)
@@ -282,10 +308,8 @@ class Tracker:
                 if acct and acct.track_cash and rate is not None:
                     value += amount * rate
                     book += amount * rate
-            contributions = sum(a * last_fx.get(c, 0.0) for d, a, c in flows if d <= iso)
             if complete and (value > 0 or snaps):
                 snaps.append(Snapshot(iso, value, book, contributions, base, {"backfilled": True}))
-            day += timedelta(days=1)
         self.store.upsert_snapshots(snaps)
         return len(snaps)
 
@@ -387,6 +411,7 @@ class Tracker:
         def money(v: float | None) -> float | None:
             return None if v is None else round(v, 2)
 
+        amap = self.store.account_map()
         return {
             "version": 1,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -404,9 +429,7 @@ class Tracker:
             "accounts": [
                 {
                     "name": b.label,
-                    "type": next(
-                        (a.type.value for a in self.store.accounts() if a.name == b.label), AccountType.OTHER.value
-                    ),
+                    "type": (a.type.value if (a := amap.get(int(b.key))) else AccountType.OTHER.value),
                     "value": money(b.value),
                     "day_change": money(b.day_change),
                     "day_change_pct": round(b.day_change_pct, 4),
