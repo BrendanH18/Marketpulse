@@ -1,6 +1,14 @@
 import pytest
 
-from marketpulse.market import SPARK_URL, MarketData, MarketError, _market_state, quote_from_meta
+from marketpulse.market import (
+    BARS_PER_YEAR,
+    PERIOD_INTERVALS,
+    SPARK_URL,
+    MarketData,
+    MarketError,
+    _market_state,
+    quote_from_meta,
+)
 
 
 def spark_calls(fake):
@@ -97,3 +105,30 @@ def test_market_state():
     assert _market_state(periods, now=250) == "CLOSED"
     assert _market_state({"instrumentType": "CRYPTOCURRENCY"}) == "REGULAR"
     assert _market_state({}) == ""
+
+
+def test_fx_rates_stale_when_offline(market, fake):
+    fx, errors = market.fx_rates(["USD"], "CAD")
+    assert fx.rate("USD") == 1.35 and not fx.stale and errors == {}
+    market.clear_cache()
+    fake.offline = True
+    fx, errors = market.fx_rates(["USD"], "CAD")
+    assert fx.stale and fx.rate("USD") == 1.35 and errors == {}
+
+
+def test_bar_date_uses_exchange_offset():
+    # 2024-01-02 23:30 in New York (UTC-5) is already 2024-01-03 in UTC and most of Europe
+    ts = 1704256200
+    bars = MarketData._bars(
+        {"meta": {"gmtoffset": -18000}, "timestamp": [ts], "indicators": {"quote": [{"close": [1.0]}]}}
+    )
+    assert bars[0].date == "2024-01-02"
+    assert bars[0].local().strftime("%H:%M") == "23:30"
+    assert (
+        MarketData._bars({"meta": {}, "timestamp": [ts], "indicators": {"quote": [{"close": [1.0]}]}})[0].date
+        == "2024-01-03"
+    )
+
+
+def test_every_chart_interval_can_be_annualized():
+    assert set(PERIOD_INTERVALS.values()) <= set(BARS_PER_YEAR)

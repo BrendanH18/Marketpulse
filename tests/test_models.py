@@ -26,6 +26,14 @@ def test_parse_date_forms():
     assert parse_date("today") == date.today().isoformat()
     assert parse_date("yesterday") == (date.today() - timedelta(days=1)).isoformat()
     assert parse_date("-3d") == (date.today() - timedelta(days=3)).isoformat()
+    assert parse_date("01/31/2024") == "2024-01-31"  # US broker export
+    assert parse_date("31/01/2024") == "2024-01-31"
+    assert parse_date("31-01-2024 09:30") == "2024-01-31"
+    assert parse_date("05/05/2024") == "2024-05-05"
+    with pytest.raises(ValueError, match="Ambiguous"):
+        parse_date("01/02/2024")
+    with pytest.raises(ValueError, match="Invalid date"):
+        parse_date("31/02/2024")
     with pytest.raises(ValueError, match="Invalid date"):
         parse_date("next tuesday")
 
@@ -55,6 +63,12 @@ def test_guess_currency_default():
         (Transaction(account_id=1, type=TxnType.TRANSFER, symbol="A", quantity=1, target_account_id=1), "different"),
         (Transaction(account_id=1, type=TxnType.DEPOSIT, amount=-5), "Amount"),
         (Transaction(account_id=1, type=TxnType.BUY, symbol="A", quantity=1, price=1, fees=-1), "Fees"),
+        (
+            Transaction(
+                account_id=1, type=TxnType.DEPOSIT, amount=1, date=(date.today() + timedelta(days=1)).isoformat()
+            ),
+            "future",
+        ),
     ],
 )
 def test_transaction_validation(txn, message):
@@ -101,6 +115,7 @@ def test_alerts():
 
 def test_fx_rates():
     fx = FxRates(base="CAD", rates={"USD": 1.35})
+    assert fx.stale is False
     assert fx.convert(10, "USD") == pytest.approx(13.5)
     assert fx.convert(10, "CAD") == 10
     assert fx.convert(10, "") == 10

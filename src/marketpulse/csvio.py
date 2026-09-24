@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
@@ -78,7 +79,8 @@ def _norm(header: str) -> str:
     return re.sub(r"\s+", " ", header.strip().lower().replace("_", " "))
 
 
-def _map_headers(headers: list[str]) -> dict[str, str]:
+def map_headers(headers: list[str]) -> dict[str, str]:
+    """Map MarketPulse field names onto the CSV's actual column headers."""
     normalized = {_norm(h): h for h in headers}
     mapping = {}
     for field_name, aliases in _ALIASES.items():
@@ -164,7 +166,7 @@ def import_transactions(
     reader = csv.DictReader(handle)
     if not reader.fieldnames:
         raise ValueError("CSV has no header row.")
-    cols = _map_headers(list(reader.fieldnames))
+    cols = map_headers(list(reader.fieldnames))
     missing = [f for f in ("date", "type") if f not in cols]
     if missing:
         raise ValueError(
@@ -178,10 +180,14 @@ def import_transactions(
         # whole import can be reverted by restoring this one file. Taken before
         # the loop because resolve_account() may already write.
         result.backup = store.backup(reason="import")
-    existing = {
-        (t.account_id, t.date, t.type, t.symbol, round(t.quantity, 6), round(t.price, 6), round(t.amount, 2))
-        for t in store.transactions()
-    }
+
+    def key(t: Transaction) -> tuple:
+        return (t.account_id, t.date, t.type, t.symbol, round(t.quantity, 6), round(t.price, 6), round(t.amount, 2))
+
+    # A multiset: each file row consumes one matching stored row, so re-importing the
+    # same export is a no-op while genuine repeated fills (two identical partial
+    # executions on one day) are all kept.
+    existing = Counter(key(t) for t in store.transactions())
     pending: list[Transaction] = []
 
     def get(row: dict, name: str) -> str:
@@ -249,19 +255,11 @@ def import_transactions(
         except ValueError as e:
             result.skipped.append((line_no, str(e)))
             continue
-        key = (
-            txn.account_id,
-            txn.date,
-            txn.type,
-            txn.symbol,
-            round(txn.quantity, 6),
-            round(txn.price, 6),
-            round(txn.amount, 2),
-        )
-        if key in existing:
+        k = key(txn)
+        if existing[k] > 0:
+            existing[k] -= 1
             result.duplicates += 1
             continue
-        existing.add(key)
         pending.append(txn)
 
     if not dry_run and pending:

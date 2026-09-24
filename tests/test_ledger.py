@@ -1,6 +1,6 @@
 import pytest
 
-from marketpulse.ledger import CashFlow, contribution_room, replay, tfsa_limit
+from marketpulse.ledger import CashFlow, contribution_room, replay, replay_by_day, tfsa_limit
 from marketpulse.models import Account, AccountType, Transaction, TxnType
 
 ACCOUNTS = {
@@ -228,3 +228,30 @@ def test_dust_sell_of_a_position_never_opened_is_ignored():
     # Used to raise AttributeError (the missing holding was dereferenced).
     s = replay([txn(TxnType.SELL, "2024-01-01", "A", 1e-10, 10)], ACCOUNTS)
     assert not s.realized
+
+
+def test_replay_by_day_matches_replay_until():
+    txns = [
+        txn(TxnType.BUY, "2023-12-20", "A", 10, 100, id=1),  # before start: applied on day one
+        txn(TxnType.DEPOSIT, "2024-01-02", amount=500, account=2, id=2),
+        txn(TxnType.BUY, "2024-01-02", "B", 5, 100, account=2, id=3),  # same day as the deposit
+        txn(TxnType.SELL, "2024-01-04", "A", 4, 120, id=4),
+        txn(TxnType.VALUATION, "2024-01-05", "H", price=99, id=5),
+        txn(TxnType.BUY, "2024-01-09", "C", 1, 1, id=6),  # after end: never applied
+    ]
+
+    def fingerprint(state):
+        return (
+            {k: (round(h.quantity, 9), round(h.book, 6)) for k, h in state.holdings.items()},
+            dict(state.cash),
+            dict(state.valuations),
+            len(state.flows),
+            len(state.realized),
+        )
+
+    days = [iso for iso, _ in replay_by_day(txns, ACCOUNTS, "2024-01-01", "2024-01-06")]
+    assert days == [f"2024-01-0{d}" for d in range(1, 7)]
+    for iso, state in replay_by_day(txns, ACCOUNTS, "2024-01-01", "2024-01-06"):
+        assert fingerprint(state) == fingerprint(replay(txns, ACCOUNTS, until=iso)), iso
+    final = list(replay_by_day(txns, ACCOUNTS, "2024-01-01", "2024-01-06"))[-1][1]
+    assert (1, "C") not in final.holdings

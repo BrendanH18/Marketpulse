@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from enum import StrEnum
 
 # Tolerance for float share arithmetic (fractional shares accumulate error)
@@ -151,8 +151,8 @@ def today() -> str:
 def parse_date(raw: str | date | None) -> str:
     """Normalize user input to ISO YYYY-MM-DD. Raises ValueError on garbage.
 
-    Accepts YYYY-MM-DD, YYYY/MM/DD, full ISO timestamps, and relative forms
-    'today', 'yesterday', '-3d'.
+    Accepts YYYY-MM-DD, YYYY/MM/DD, full ISO timestamps, unambiguous
+    MM/DD/YYYY or DD/MM/YYYY, and relative forms 'today', 'yesterday', '-3d'.
     """
     if raw is None or raw == "":
         return today()
@@ -169,8 +169,20 @@ def parse_date(raw: str | date | None) -> str:
         return date.fromordinal(date.today().toordinal() - int(m.group(1))).isoformat()
     s = s.replace("/", "-")
     try:
+        if m := re.fullmatch(r"(\d{1,2})-(\d{1,2})-(\d{4})(?:[ t].*)?", s):
+            # Broker exports: MM-DD-YYYY (US) or DD-MM-YYYY (elsewhere); only accept it when unambiguous.
+            a, b, year = int(m[1]), int(m[2]), int(m[3])
+            if a > 12 >= b:
+                day, month = a, b
+            elif b > 12 >= a or a == b:
+                month, day = a, b
+            else:
+                raise ValueError(f"Ambiguous date '{raw}' — use YYYY-MM-DD.")
+            return date(year, month, day).isoformat()
         return datetime.fromisoformat(s).date().isoformat()
-    except ValueError:
+    except ValueError as e:
+        if "Ambiguous" in str(e):
+            raise
         raise ValueError(f"Invalid date '{raw}' — use YYYY-MM-DD.") from None
 
 
@@ -295,7 +307,8 @@ class Transaction:
             raise ValueError("Split ratio must be positive (e.g. 2 for a 2-for-1).")
         if t is TxnType.TRANSFER and (self.target_account_id is None or self.target_account_id == self.account_id):
             raise ValueError("Transfer needs a different target account.")
-        parse_date(self.date)
+        if parse_date(self.date) > today():
+            raise ValueError("Date cannot be in the future.")
 
 
 @dataclass
@@ -377,10 +390,16 @@ class Bar:
     low: float
     close: float
     volume: int = 0
+    offset: int = 0  # exchange UTC offset in seconds (Yahoo meta.gmtoffset)
 
     @property
     def date(self) -> str:
-        return datetime.fromtimestamp(self.time).date().isoformat()
+        """Calendar date at the exchange, not on this machine."""
+        return datetime.fromtimestamp(self.time + self.offset, tz=UTC).date().isoformat()
+
+    def local(self) -> datetime:
+        """Bar time as a tz-aware datetime in the exchange's zone."""
+        return datetime.fromtimestamp(self.time, tz=timezone(timedelta(seconds=self.offset)))
 
 
 @dataclass
@@ -389,6 +408,7 @@ class FxRates:
 
     base: str
     rates: dict[str, float] = field(default_factory=dict)
+    stale: bool = False  # any rate came from the offline cache
 
     def rate(self, currency: str) -> float | None:
         if not currency or currency.upper() == self.base:
@@ -414,6 +434,13 @@ class Alert:
         self.symbol = self.symbol.upper()
         if self.condition not in ALERT_CONDITIONS:
             raise ValueError(f"Alert condition must be one of: {', '.join(ALERT_CONDITIONS)}")
+
+    @property
+    def saved_id(self) -> int:
+        """The database id of a stored alert (see Account.saved_id)."""
+        if self.id is None:
+            raise ValueError("Alert hasn't been saved yet.")
+        return self.id
 
     def describe(self) -> str:
         return {

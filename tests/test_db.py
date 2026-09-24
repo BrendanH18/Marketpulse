@@ -64,6 +64,14 @@ def test_alerts_assets_room_targets_snapshots(store):
     store.upsert_snapshot(Snapshot("2026-01-01", 10, 9, 9, "CAD", {"x": 1}))
     store.upsert_snapshot(Snapshot("2026-01-01", 11, 9, 9, "CAD", {}))
     assert [s.net_worth for s in store.snapshots()] == [11]
+    store.upsert_snapshots([])
+    store.upsert_snapshots(
+        [Snapshot("2026-01-01", 12, 9, 9, "CAD", {}), Snapshot("2026-01-02", 13, 9, 9, "CAD", {"backfilled": True})]
+    )
+    assert [(s.date, s.net_worth) for s in store.snapshots()] == [("2026-01-01", 12), ("2026-01-02", 13)]
+    assert store.latest_snapshot().date == "2026-01-02"
+    assert store.latest_snapshot(before="2026-01-02").net_worth == 12
+    assert store.latest_snapshot(before="2026-01-01") is None
 
 
 def test_quote_cache_marks_stale(store):

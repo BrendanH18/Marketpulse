@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import io
 import json
 import platform
@@ -20,7 +21,7 @@ from rich.theme import Theme as RichTheme
 
 from . import __version__, fmt, render
 from .config import Config, config_path
-from .market import PERIODS, MarketError
+from .market import BARS_PER_YEAR, PERIOD_INTERVALS, PERIODS, MarketError
 from .models import (
     ALERT_CONDITIONS,
     EPSILON,
@@ -129,9 +130,26 @@ def fail(message: str) -> NoReturn:
     raise click.ClickException(message)
 
 
+def _date_callback(ctx: click.Context, param: click.Parameter, value: str | None) -> str | None:
+    """Normalize a date option to ISO up front, so a typo is a usage error rather than a traceback."""
+    if value is None:
+        return None
+    try:
+        return parse_date(value)
+    except ValueError as e:
+        raise click.BadParameter(str(e), ctx=ctx, param=param) from None
+
+
 def txn_options(f):
     f = click.option("-m", "--note", default="", help="Free-text note.")(f)
-    f = click.option("-d", "--date", "when", default=None, help="YYYY-MM-DD, 'yesterday' or -3d (default: today).")(f)
+    f = click.option(
+        "-d",
+        "--date",
+        "when",
+        default=None,
+        callback=_date_callback,
+        help="YYYY-MM-DD, 'yesterday' or -3d (default: today).",
+    )(f)
     f = click.option("-a", "--account", default=None, help="Account name, id or type (e.g. TFSA).")(f)
     return f
 
@@ -447,7 +465,7 @@ def compare(app: App, symbols: tuple[str, ...], period: str) -> None:
     for s, bars in sorted(data.items(), key=lambda kv: period_return([b.close for b in kv[1]]) or 0, reverse=True):
         closes = [b.close for b in bars]
         ret = period_return(closes)
-        per_year = 252 if PERIODS.index(period) < PERIODS.index("5y") else 52
+        per_year = BARS_PER_YEAR[PERIOD_INTERVALS[period]]
         t.add_row(
             Text(s, style="bright"),
             Text(fmt.price(closes[0]), style="muted"),
@@ -499,10 +517,7 @@ def _trade(
     acct = app.account(account)
     sym = symbol.upper()
     ccy = currency.upper()
-    try:
-        day = parse_date(when)
-    except ValueError as e:
-        fail(str(e))
+    day = when or date.today().isoformat()
     if price is None or not ccy:
         with app.busy(f"Looking up {sym}…"):
             live_ccy, q = app.tracker.resolve_currency(sym, acct)
@@ -572,10 +587,7 @@ def _cash_event(
     app: App, kind: TxnType, amount: float, symbol: str, account: str | None, when: str | None, currency: str, note: str
 ) -> None:
     acct = app.account(account)
-    try:
-        day = parse_date(when)
-    except ValueError as e:
-        fail(str(e))
+    day = when or date.today().isoformat()
     txn = Transaction(
         account_id=acct.saved_id,
         type=kind,
@@ -698,7 +710,7 @@ def split(app: App, symbol, ratio, account, when, note) -> None:
     help="Market value per unit on the transfer date. Needed for tax when moving between "
     "a taxable and a registered account (defaults to the live price when dated today).",
 )
-@click.option("-d", "--date", "when", default=None)
+@click.option("-d", "--date", "when", default=None, callback=_date_callback)
 @click.option("-m", "--note", default="")
 @pass_app
 def transfer(app: App, symbol, quantity, source, target, price, when, note) -> None:
@@ -799,7 +811,7 @@ def txn_delete(app: App, txn_id: int, yes: bool) -> None:
 
 @txn.command("edit")
 @click.argument("txn_id", type=int)
-@click.option("--date", "when")
+@click.option("--date", "when", callback=_date_callback)
 @click.option("--account")
 @click.option("--symbol")
 @click.option("--quantity", type=float)
@@ -1023,8 +1035,8 @@ def asset_list(app: App) -> None:
 @click.argument("symbol")
 @click.argument("principal", type=float)
 @click.option("--rate", type=float, required=True, help="Annual rate in percent.")
-@click.option("--start", default=None, help="Start date (default today).")
-@click.option("--maturity", required=True, help="Maturity date.")
+@click.option("--start", default=None, callback=_date_callback, help="Start date (default today).")
+@click.option("--maturity", required=True, callback=_date_callback, help="Maturity date.")
 @click.option(
     "--compounding",
     type=click.Choice(["annual", "semiannual", "quarterly", "monthly", "simple"]),
@@ -1078,7 +1090,7 @@ def asset_fixed(app: App, symbol, principal, rate, start, maturity, compounding,
 )
 @click.option("-c", "--currency", default=None)
 @click.option("-a", "--account", default=None)
-@click.option("-d", "--date", "when", default=None, help="Acquisition date.")
+@click.option("-d", "--date", "when", default=None, callback=_date_callback, help="Acquisition date.")
 @pass_app
 def asset_manual(app: App, symbol, value, name, asset_class, currency, account, when) -> None:
     """Add a manually valued asset (property, private shares, collectibles, pension…)."""
@@ -1114,7 +1126,7 @@ def asset_manual(app: App, symbol, value, name, asset_class, currency, account, 
 @asset.command("value")
 @click.argument("symbol")
 @click.argument("value", type=float)
-@click.option("-d", "--date", "when", default=None)
+@click.option("-d", "--date", "when", default=None, callback=_date_callback)
 @pass_app
 def asset_value(app: App, symbol, value, when) -> None:
     """Record a new valuation for a manual asset (per unit)."""
@@ -1346,6 +1358,18 @@ def backfill(app: App) -> None:
     app.ok(f"Rebuilt {n:,} daily snapshots.")
 
 
+def _import_default(app: App, account: str | None, path: Path) -> Account | None:
+    """Account for rows without one. A file with its own account column gets no default,
+    so rows are never silently filed into whichever account happens to be first."""
+    from .csvio import map_headers
+
+    if account:
+        return app.account(account)
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        headers = next(csv.reader(f), [])
+    return None if "account" in map_headers(headers) else app.account(None)
+
+
 @main.command("import")
 @click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("-a", "--account", default=None, help="Account for rows without an account column.")
@@ -1356,7 +1380,7 @@ def import_cmd(app: App, path: Path, account, dry_run, no_create_accounts) -> No
     """Import transactions from a broker or MarketPulse CSV."""
     from .csvio import import_transactions
 
-    default = app.account(account) if account else next(iter(app.store.accounts()), None)
+    default = _import_default(app, account, path)
     try:
         result = import_transactions(
             app.store, path, default_account=default, create_accounts=not no_create_accounts, dry_run=dry_run
@@ -1512,6 +1536,10 @@ def config_set(app: App, key: str, value: tuple[str, ...]) -> None:
         fail("menubar_display must be day_pct, day_change, net_worth or symbol.")
     if key == "chart_period" and parsed not in PERIODS:
         fail(f"chart_period must be one of {', '.join(PERIODS)}")
+    if key == "capital_gains_inclusion" and not (isinstance(parsed, float) and 0 < parsed <= 1):
+        fail("capital_gains_inclusion is a fraction: > 0 and <= 1 (e.g. 0.5).")
+    if key == "refresh_seconds" and isinstance(parsed, int) and parsed < 5:
+        fail("refresh_seconds must be at least 5.")
     setattr(app.config, key, parsed)
     app.config.save()
     app.ok(f"{key} = {parsed!r}")

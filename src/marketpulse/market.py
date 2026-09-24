@@ -13,7 +13,7 @@ import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import quote as urlquote
 
@@ -42,9 +42,23 @@ PERIOD_INTERVALS = {
     "max": "1mo",
 }
 PERIODS = list(PERIOD_INTERVALS)
+# Bars per year for each chart interval (6.5-hour regular session, 252 trading days)
+BARS_PER_YEAR = {"5m": 252 * 78, "30m": 252 * 13, "1h": 252 * 7, "1d": 252, "1wk": 52, "1mo": 12}
 
 # Minor-unit currencies Yahoo uses for some exchanges: (major, divisor)
 _MINOR_UNITS = {"GBp": ("GBP", 100.0), "GBX": ("GBP", 100.0), "ZAc": ("ZAR", 100.0), "ILA": ("ILS", 100.0)}
+
+
+def _gmt_offset(meta: dict) -> int:
+    """Exchange UTC offset in seconds from a chart/spark `meta` block (0 if absent)."""
+    try:
+        return int(meta.get("gmtoffset") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _exchange_date(ts: float, offset: int) -> str:
+    return datetime.fromtimestamp(ts + offset, tz=UTC).date().isoformat()
 
 
 class MarketError(RuntimeError):
@@ -258,6 +272,7 @@ class MarketData:
         wanted = sorted({c.upper() for c in currencies if c and c.upper() != base})
         rates = {base: 1.0}
         errors: dict[str, str] = {}
+        stale = False
         if wanted:
             pairs = {f"{c}{base}=X": c for c in wanted}
             quotes, errs = self.quotes(pairs)
@@ -266,7 +281,8 @@ class MarketData:
                     rates[ccy] = quotes[pair].price
                 else:
                     errors[ccy] = errs.get(pair, "no rate")
-        return FxRates(base=base, rates=rates), errors
+            stale = any(quotes[p].stale for p in pairs if p in quotes)
+        return FxRates(base=base, rates=rates, stale=stale), errors
 
     # ── history ───────────────────────────────────────────────────────────────
 
@@ -283,7 +299,9 @@ class MarketData:
     def _bars(result: dict) -> list[Bar]:
         stamps = result.get("timestamp") or []
         q = ((result.get("indicators") or {}).get("quote") or [{}])[0]
-        scale = _MINOR_UNITS.get((result.get("meta") or {}).get("currency") or "", ("", 1.0))[1]
+        meta = result.get("meta") or {}
+        scale = _MINOR_UNITS.get(meta.get("currency") or "", ("", 1.0))[1]
+        offset = _gmt_offset(meta)
         opens, highs, lows, closes, vols = (q.get(k) or [] for k in ("open", "high", "low", "close", "volume"))
 
         def pick(seq: list, i: int, default: float) -> float:
@@ -303,6 +321,7 @@ class MarketData:
                     pick(lows, i, c) / scale,
                     c / scale,
                     int(pick(vols, i, 0) or 0),
+                    offset,
                 )
             )
         return bars
@@ -325,7 +344,9 @@ class MarketData:
 
     def daily_closes(self, symbol: str, start: str) -> tuple[dict[str, float], str]:
         """Daily closes keyed by ISO date from `start` to today, plus the currency."""
-        t0 = int(datetime.combine(date.fromisoformat(start), datetime.min.time()).timestamp())
+        # A day early, in UTC, so exchanges east of Greenwich keep their first session
+        t0 = int(datetime.combine(date.fromisoformat(start), datetime.min.time(), tzinfo=UTC).timestamp())
+        t0 -= 86400
         result = self._chart(symbol, {"period1": t0, "period2": int(time.time()) + 86400, "interval": "1d"})
         currency = (result.get("meta") or {}).get("currency") or "USD"
         currency = _MINOR_UNITS.get(currency, (currency, 1.0))[0]
@@ -334,10 +355,12 @@ class MarketData:
     def dividends(self, symbol: str, period: str = "1y") -> list[tuple[str, float]]:
         """Per-share cash distributions within `period`, oldest first."""
         result = self._chart(symbol, {"range": period, "interval": "1d", "events": "div"})
-        scale = _MINOR_UNITS.get((result.get("meta") or {}).get("currency") or "", ("", 1.0))[1]
+        meta = result.get("meta") or {}
+        scale = _MINOR_UNITS.get(meta.get("currency") or "", ("", 1.0))[1]
+        offset = _gmt_offset(meta)
         events = ((result.get("events") or {}).get("dividends") or {}).values()
         return sorted(
-            (datetime.fromtimestamp(e["date"]).date().isoformat(), float(e["amount"]) / scale)
+            (_exchange_date(e["date"], offset), float(e["amount"]) / scale)
             for e in events
             if "date" in e and "amount" in e
         )

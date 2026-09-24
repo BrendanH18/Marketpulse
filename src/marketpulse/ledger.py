@@ -8,8 +8,9 @@ and deterministic: no I/O, no market data.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 
 from .models import EPSILON, Account, Transaction, TxnType, guess_currency
 
@@ -98,13 +99,6 @@ class LedgerState:
     def cash_balances(self, account_id: int | None = None) -> dict[tuple[int, str], float]:
         return {k: v for k, v in self.cash.items() if abs(v) > 0.005 and (account_id is None or k[0] == account_id)}
 
-    def realized_by_currency(self, year: int | None = None) -> dict[str, float]:
-        out: dict[str, float] = defaultdict(float)
-        for r in self.realized:
-            if year is None or r.date.startswith(str(year)):
-                out[r.currency] += r.gain
-        return dict(out)
-
 
 def transaction_currency(txn: Transaction, accounts: dict[int, Account]) -> str:
     """The currency a transaction's prices and amounts are in.
@@ -141,6 +135,123 @@ def sort_key(txn: Transaction) -> tuple:
     return (txn.date, order[txn.type], txn.id or 0)
 
 
+def _tracks_cash(accounts: dict[int, Account], account_id: int) -> bool:
+    acct = accounts.get(account_id)
+    return bool(acct and acct.track_cash)
+
+
+def _holding(state: LedgerState, account_id: int, symbol: str, ccy: str) -> Holding:
+    key = (account_id, symbol)
+    h = state.holdings.get(key)
+    if h is None:
+        h = state.holdings[key] = Holding(account_id=account_id, symbol=symbol, currency=ccy)
+    if not h.currency:
+        h.currency = ccy
+    return h
+
+
+def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -> None:
+    """Apply one transaction to `state` in place."""
+    acct = txn.account_id
+    t = txn.type
+    ccy = transaction_currency(txn, accounts)
+    cash_key = (acct, ccy)
+    tracks_cash = _tracks_cash(accounts, acct)
+
+    # `h` is the position a transaction acts on; lookups in the branches
+    # below can come back empty, so it's typed as optional throughout.
+    h: Holding | None
+    if t in (TxnType.BUY, TxnType.DRIP):
+        h = _holding(state, acct, txn.symbol, ccy)
+        if h.quantity <= EPSILON:
+            h.quantity, h.book, h.first_date = 0.0, 0.0, txn.date
+        cost = txn.quantity * txn.price + txn.fees
+        h.quantity += txn.quantity
+        h.book += cost
+        state.fees[ccy] += txn.fees
+        if t is TxnType.DRIP:
+            state.income.append(IncomeEvent(txn.date, acct, txn.symbol, t, txn.quantity * txn.price, ccy))
+        elif tracks_cash:
+            state.cash[cash_key] -= cost
+
+    elif t is TxnType.SELL:
+        h = state.holdings.get((acct, txn.symbol))
+        held = h.quantity if h else 0.0
+        if txn.quantity > held + EPSILON:
+            state.issues.append(
+                LedgerIssue(txn.id, txn.date, f"Sell of {txn.quantity:,.4f} {txn.symbol} exceeds {held:,.4f} held")
+            )
+        if h is None or held <= EPSILON:
+            # Nothing to sell. (Also covers a sub-EPSILON "sell" of a
+            # position that was never opened, which used to crash here.)
+            return
+        qty = min(txn.quantity, held)
+        cost = h.avg_cost * qty
+        proceeds = qty * txn.price - txn.fees
+        state.realized.append(RealizedGain(txn.date, acct, txn.symbol, qty, proceeds, cost, h.currency, txn.id))
+        h.quantity -= qty
+        h.book -= cost
+        if h.quantity <= EPSILON:
+            h.quantity, h.book = 0.0, 0.0
+        state.fees[h.currency] += txn.fees
+        if tracks_cash:
+            state.cash[(acct, h.currency)] += proceeds
+
+    elif t is TxnType.SPLIT:
+        h = state.holdings.get((acct, txn.symbol))
+        if h:
+            h.quantity *= txn.ratio
+
+    elif t is TxnType.ROC:
+        h = state.holdings.get((acct, txn.symbol))
+        if h:
+            excess = txn.amount - h.book
+            h.book = max(h.book - txn.amount, 0.0)
+            if excess > EPSILON:
+                # ACB can't go negative: the excess is a deemed capital gain
+                state.realized.append(RealizedGain(txn.date, acct, txn.symbol, 0.0, excess, 0.0, ccy, txn.id))
+        if tracks_cash:
+            state.cash[cash_key] += txn.amount
+
+    elif t is TxnType.TRANSFER:
+        h = state.holdings.get((acct, txn.symbol))
+        if h is None or h.quantity <= EPSILON or txn.target_account_id is None:
+            state.issues.append(LedgerIssue(txn.id, txn.date, f"Transfer of {txn.symbol} with nothing held"))
+            return
+        qty = min(txn.quantity, h.quantity)
+        moved_book = h.avg_cost * qty
+        h.quantity -= qty
+        h.book -= moved_book
+        dest = _holding(state, txn.target_account_id, txn.symbol, h.currency)
+        if dest.quantity <= EPSILON:
+            dest.first_date = txn.date
+        dest.quantity += qty
+        dest.book += moved_book
+
+    elif t in (TxnType.DIVIDEND, TxnType.INTEREST):
+        state.income.append(IncomeEvent(txn.date, acct, txn.symbol, t, txn.amount, ccy))
+        if tracks_cash:
+            state.cash[cash_key] += txn.amount
+
+    elif t is TxnType.DEPOSIT:
+        state.flows.append(CashFlow(txn.date, acct, txn.amount, ccy))
+        if tracks_cash:
+            state.cash[cash_key] += txn.amount
+
+    elif t is TxnType.WITHDRAWAL:
+        state.flows.append(CashFlow(txn.date, acct, -txn.amount, ccy))
+        if tracks_cash:
+            state.cash[cash_key] -= txn.amount
+
+    elif t is TxnType.FEE:
+        state.fees[ccy] += txn.amount
+        if tracks_cash:
+            state.cash[cash_key] -= txn.amount
+
+    elif t is TxnType.VALUATION:
+        state.valuations[txn.symbol] = (txn.date, txn.price)
+
+
 def replay(
     transactions: list[Transaction],
     accounts: dict[int, Account] | None = None,
@@ -150,125 +261,41 @@ def replay(
     """Replay the ledger (optionally only up to and including `until`)."""
     accounts = accounts or {}
     state = LedgerState()
-
-    def tracks_cash(account_id: int) -> bool:
-        acct = accounts.get(account_id)
-        return bool(acct and acct.track_cash)
-
-    def holding(account_id: int, symbol: str, ccy: str) -> Holding:
-        key = (account_id, symbol)
-        h = state.holdings.get(key)
-        if h is None:
-            h = state.holdings[key] = Holding(account_id=account_id, symbol=symbol, currency=ccy)
-        if not h.currency:
-            h.currency = ccy
-        return h
-
     for txn in sorted(transactions, key=sort_key):
         if until and txn.date > until:
             break
-        acct = txn.account_id
-        t = txn.type
-        ccy = transaction_currency(txn, accounts)
-        cash_key = (acct, ccy)
-
-        # `h` is the position a transaction acts on; lookups in the branches
-        # below can come back empty, so it's typed as optional throughout.
-        h: Holding | None
-        if t in (TxnType.BUY, TxnType.DRIP):
-            h = holding(acct, txn.symbol, ccy)
-            if h.quantity <= EPSILON:
-                h.quantity, h.book, h.first_date = 0.0, 0.0, txn.date
-            cost = txn.quantity * txn.price + txn.fees
-            h.quantity += txn.quantity
-            h.book += cost
-            state.fees[ccy] += txn.fees
-            if t is TxnType.DRIP:
-                state.income.append(IncomeEvent(txn.date, acct, txn.symbol, t, txn.quantity * txn.price, ccy))
-            elif tracks_cash(acct):
-                state.cash[cash_key] -= cost
-
-        elif t is TxnType.SELL:
-            h = state.holdings.get((acct, txn.symbol))
-            held = h.quantity if h else 0.0
-            if txn.quantity > held + EPSILON:
-                state.issues.append(
-                    LedgerIssue(txn.id, txn.date, f"Sell of {txn.quantity:,.4f} {txn.symbol} exceeds {held:,.4f} held")
-                )
-            if h is None or held <= EPSILON:
-                # Nothing to sell. (Also covers a sub-EPSILON "sell" of a
-                # position that was never opened, which used to crash here.)
-                continue
-            qty = min(txn.quantity, held)
-            cost = h.avg_cost * qty
-            proceeds = qty * txn.price - txn.fees
-            state.realized.append(RealizedGain(txn.date, acct, txn.symbol, qty, proceeds, cost, h.currency, txn.id))
-            h.quantity -= qty
-            h.book -= cost
-            if h.quantity <= EPSILON:
-                h.quantity, h.book = 0.0, 0.0
-            state.fees[h.currency] += txn.fees
-            if tracks_cash(acct):
-                state.cash[(acct, h.currency)] += proceeds
-
-        elif t is TxnType.SPLIT:
-            h = state.holdings.get((acct, txn.symbol))
-            if h:
-                h.quantity *= txn.ratio
-
-        elif t is TxnType.ROC:
-            h = state.holdings.get((acct, txn.symbol))
-            if h:
-                excess = txn.amount - h.book
-                h.book = max(h.book - txn.amount, 0.0)
-                if excess > EPSILON:
-                    # ACB can't go negative: the excess is a deemed capital gain
-                    state.realized.append(RealizedGain(txn.date, acct, txn.symbol, 0.0, excess, 0.0, ccy, txn.id))
-            if tracks_cash(acct):
-                state.cash[cash_key] += txn.amount
-
-        elif t is TxnType.TRANSFER:
-            h = state.holdings.get((acct, txn.symbol))
-            if h is None or h.quantity <= EPSILON or txn.target_account_id is None:
-                state.issues.append(LedgerIssue(txn.id, txn.date, f"Transfer of {txn.symbol} with nothing held"))
-                continue
-            qty = min(txn.quantity, h.quantity)
-            moved_book = h.avg_cost * qty
-            h.quantity -= qty
-            h.book -= moved_book
-            dest = holding(txn.target_account_id, txn.symbol, h.currency)
-            if dest.quantity <= EPSILON:
-                dest.first_date = txn.date
-            dest.quantity += qty
-            dest.book += moved_book
-
-        elif t in (TxnType.DIVIDEND, TxnType.INTEREST):
-            state.income.append(IncomeEvent(txn.date, acct, txn.symbol, t, txn.amount, ccy))
-            if tracks_cash(acct):
-                state.cash[cash_key] += txn.amount
-
-        elif t is TxnType.DEPOSIT:
-            state.flows.append(CashFlow(txn.date, acct, txn.amount, ccy))
-            if tracks_cash(acct):
-                state.cash[cash_key] += txn.amount
-
-        elif t is TxnType.WITHDRAWAL:
-            state.flows.append(CashFlow(txn.date, acct, -txn.amount, ccy))
-            if tracks_cash(acct):
-                state.cash[cash_key] -= txn.amount
-
-        elif t is TxnType.FEE:
-            state.fees[ccy] += txn.amount
-            if tracks_cash(acct):
-                state.cash[cash_key] -= txn.amount
-
-        elif t is TxnType.VALUATION:
-            state.valuations[txn.symbol] = (txn.date, txn.price)
-
+        _apply(state, txn, accounts)
     return state
 
 
-# ── Contribution room ──────────────────────────────────────────────────────
+def replay_by_day(
+    transactions: list[Transaction],
+    accounts: dict[int, Account] | None,
+    start: str,
+    end: str,
+) -> Iterator[tuple[str, LedgerState]]:
+    """Yield `(iso_date, state)` for every calendar day from `start` to `end` inclusive.
+
+    Equivalent to `replay(transactions, accounts, until=day)` for each day, but the
+    ledger is sorted and walked once. The *same* `LedgerState` is mutated in place,
+    so read what you need before advancing the iterator. Transactions dated before
+    `start` are applied on the first day; those after `end` are never applied.
+    """
+    accounts = accounts or {}
+    txns = sorted(transactions, key=sort_key)
+    state = LedgerState()
+    i = 0
+    day, last = date.fromisoformat(start), date.fromisoformat(end)
+    while day <= last:
+        iso = day.isoformat()
+        while i < len(txns) and txns[i].date <= iso:
+            _apply(state, txns[i], accounts)
+            i += 1
+        yield iso, state
+        day += timedelta(days=1)
+
+
+# ── Contribution room ─────────────────────────────────────────────────────────
 
 
 # TFSA annual dollar limits (CRA). Room accumulates from the year you turn 18

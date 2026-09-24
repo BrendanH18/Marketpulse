@@ -156,6 +156,11 @@ def _apply_migration(conn: sqlite3.Connection, version: int, step: Migration) ->
 
 
 _TXN_COLS = "account_id, date, type, symbol, quantity, price, amount, fees, currency, note, ratio, target_account_id"
+_SNAPSHOT_UPSERT = (
+    "INSERT INTO snapshots(date, net_worth, book, contributions, currency, detail) VALUES (?,?,?,?,?,?)"
+    " ON CONFLICT(date) DO UPDATE SET net_worth=excluded.net_worth, book=excluded.book,"
+    " contributions=excluded.contributions, currency=excluded.currency, detail=excluded.detail"
+)
 
 
 @dataclass
@@ -615,30 +620,40 @@ class Store:
 
     # ── snapshots ─────────────────────────────────────────────────────────────
 
-    def upsert_snapshot(self, snap: Snapshot) -> None:
-        self._exec(
-            "INSERT INTO snapshots(date, net_worth, book, contributions, currency, detail) VALUES (?,?,?,?,?,?)"
-            " ON CONFLICT(date) DO UPDATE SET net_worth=excluded.net_worth, book=excluded.book,"
-            " contributions=excluded.contributions, currency=excluded.currency, detail=excluded.detail",
-            (snap.date, snap.net_worth, snap.book, snap.contributions, snap.currency, json.dumps(snap.detail)),
+    @staticmethod
+    def _snapshot_params(snap: Snapshot) -> tuple:
+        return (snap.date, snap.net_worth, snap.book, snap.contributions, snap.currency, json.dumps(snap.detail))
+
+    @staticmethod
+    def _snapshot(r: sqlite3.Row) -> Snapshot:
+        return Snapshot(
+            r["date"], r["net_worth"], r["book"], r["contributions"], r["currency"], json.loads(r["detail"])
         )
 
+    def upsert_snapshot(self, snap: Snapshot) -> None:
+        self._exec(_SNAPSHOT_UPSERT, self._snapshot_params(snap))
+
     def upsert_snapshots(self, snaps: list[Snapshot]) -> None:
-        for s in snaps:
-            self.upsert_snapshot(s)
+        """Write many snapshots in one transaction (backfill writes years of days)."""
+        if not snaps:
+            return
+        with self._lock, self._conn:
+            self._conn.executemany(_SNAPSHOT_UPSERT, [self._snapshot_params(s) for s in snaps])
 
     def snapshots(self, since: str | None = None) -> list[Snapshot]:
         rows = self._query(
             "SELECT * FROM snapshots" + (" WHERE date >= ?" if since else "") + " ORDER BY date",
             (since,) if since else (),
         )
-        return [
-            Snapshot(r["date"], r["net_worth"], r["book"], r["contributions"], r["currency"], json.loads(r["detail"]))
-            for r in rows
-        ]
+        return [self._snapshot(r) for r in rows]
 
-    def clear_snapshots(self) -> None:
-        self._exec("DELETE FROM snapshots")
+    def latest_snapshot(self, before: str | None = None) -> Snapshot | None:
+        """Most recent snapshot, optionally strictly before an ISO date."""
+        rows = self._query(
+            "SELECT * FROM snapshots" + (" WHERE date < ?" if before else "") + " ORDER BY date DESC LIMIT 1",
+            (before,) if before else (),
+        )
+        return self._snapshot(rows[0]) if rows else None
 
     # ── contribution room & targets ───────────────────────────────────────────
 

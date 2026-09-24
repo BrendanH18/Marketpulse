@@ -80,6 +80,9 @@ def test_config_theme_alerts_export(cli):
     assert cli("config", "set", "theme", "Kanagawa").exit_code == 0
     assert Config.load(config_path()).theme == "kanagawa"
     assert cli("config", "set", "refresh_seconds", "abc").exit_code == 1
+    assert cli("config", "set", "refresh_seconds", "1").exit_code == 1
+    assert cli("config", "set", "capital_gains_inclusion", "50").exit_code == 1
+    assert cli("config", "set", "capital_gains_inclusion", "0.5").exit_code == 0
     assert cli("config", "set", "privacy", "yes").exit_code == 0
     assert cli("theme", "set", "osaka", "jade").exit_code == 0
     assert cli("theme").exit_code == 0
@@ -118,3 +121,34 @@ def test_fhsa_room_shows_capped_carry_forward(cli, store):
     cli("accounts", "room", "FHSA", "2023", "8000")
     out = cli("tax").output
     assert "Capped" in out and "16,000.00" in out  # never more than $16k in a year
+
+
+def test_bad_dates_are_usage_errors(cli):
+    cli("accounts", "add", "Main")
+    cli("buy", "AAPL", "1", "100")
+    for args in (
+        ("split", "AAPL", "2", "-d", "nope"),
+        ("drip", "AAPL", "1", "100", "-d", "nope"),
+        ("asset", "fixed", "GIC1", "5000", "--rate", "4", "--maturity", "nope"),
+        ("asset", "manual", "HOUSE", "1", "-d", "nope"),
+        ("buy", "AAPL", "1", "100", "-d", "2999-01-01"),
+    ):
+        result = cli(*args)
+        assert result.exit_code in (1, 2) and "date" in result.output.lower(), args
+        assert "Traceback" not in result.output
+    assert cli("split", "AAPL", "2", "-d", "01/31/2024").exit_code == 0
+
+
+def test_import_default_account(cli, store, tmp_path):
+    no_account = tmp_path / "a.csv"
+    no_account.write_text("date,type,symbol,quantity,price\n2024-01-01,BUY,XEQT.TO,1,30\n")
+    with_account = tmp_path / "b.csv"
+    with_account.write_text("date,type,symbol,quantity,price,account\n2024-01-01,BUY,XEQT.TO,1,30,B\n")
+    cli("accounts", "add", "A")
+    assert "Imported 1" in cli("import", str(no_account)).output  # one account: no -a needed
+    cli("accounts", "add", "B")
+    several = cli("import", str(no_account))
+    assert several.exit_code == 1 and "Several accounts" in several.output
+    assert "1 duplicate(s)" in cli("import", str(no_account), "-a", "A").output  # already in A from the first run
+    assert "Imported 1" in cli("import", str(with_account)).output  # rows name their account
+    assert {store.get_account(t.account_id).name for t in store.transactions()} == {"A", "B"}

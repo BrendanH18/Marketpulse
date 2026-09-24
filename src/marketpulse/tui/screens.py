@@ -343,6 +343,10 @@ class AccountForm(BaseForm):
                 yield Label(
                     "Track cash balance — buys debit cash; sells, dividends and deposits credit it", classes="hint"
                 )
+            if a is not None:
+                with Horizontal(classes="field-row switch-row"):
+                    yield Switch(value=a.archived, id="a-archived")
+                    yield Label("Archived — hidden from pickers and totals, history kept", classes="hint")
             yield self.buttons()
 
     def on_mount(self) -> None:
@@ -361,6 +365,8 @@ class AccountForm(BaseForm):
         a.currency = ccy
         a.institution = self.query_one("#a-institution", Input).value.strip()
         a.track_cash = self.query_one("#a-cash", Switch).value
+        if self.account is not None:
+            a.archived = self.query_one("#a-archived", Switch).value
         self.dismiss(a)
 
 
@@ -738,11 +744,25 @@ HELP = [
         "Markets",
         [
             ("enter", "open chart"),
+            ("a", "add to watchlist (watch workspace)"),
             ("w", "add to watchlist"),
+            ("J / K", "reorder watchlist"),
             ("A", "new alert"),
+            ("space", "pause / resume alert"),
             ("[ ]", "chart period"),
             ("c / C", "compare / clear compare"),
             ("← →", "chart crosshair"),
+        ],
+    ),
+    (
+        "Accounts & data",
+        [
+            ("n / e / x", "new / edit / delete account (accounts workspace)"),
+            ("enter", "show an account's holdings"),
+            ("R", "set contribution room"),
+            ("G", "add a GIC or manual asset"),
+            ("V", "update a manual asset's value"),
+            ("i / E", "import / export CSV (activity workspace)"),
         ],
     ),
     (
