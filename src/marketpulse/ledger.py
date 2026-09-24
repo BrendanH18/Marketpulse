@@ -288,7 +288,12 @@ TFSA_LIMITS = {
     2025: 7000,
     2026: 7000,
 }
+# FHSA (first home savings account), from 2023. Each year adds $8,000 of
+# participation room. Unused room carries forward, but only up to $8,000, so
+# the most you can ever put in within one year is $16,000. Contributions over
+# the account's life are capped at $40,000.
 FHSA_ANNUAL_LIMIT = 8000
+FHSA_CARRYFORWARD_LIMIT = 8000
 FHSA_LIFETIME_LIMIT = 40000
 
 
@@ -299,6 +304,13 @@ def tfsa_limit(year: int) -> int:
 
 @dataclass
 class RoomStatus:
+    """Contribution room for one account type, and how it was derived.
+
+    The columns always add up:
+        remaining = starting_room + new_limits + withdrawals_added_back
+                    - contributions - forfeited
+    """
+
     account_type: str
     as_of_year: int
     starting_room: float
@@ -306,6 +318,9 @@ class RoomStatus:
     withdrawals_added_back: float
     new_limits: float
     remaining: float
+    # Room that existed on paper but can't be used: FHSA room above the $8,000
+    # carry-forward, or above what the $40,000 lifetime limit still allows.
+    forfeited: float = 0.0
 
 
 def contribution_room(
@@ -320,18 +335,67 @@ def contribution_room(
     """Remaining room given room known at Jan 1 of `as_of_year`.
 
     TFSA: adds each new year's limit and prior-year withdrawals.
-    FHSA: adds the $8,000 annual limit (lifetime cap is the user's to track).
+    FHSA: see _fhsa_room (annual limit, capped carry-forward, lifetime limit).
     RRSP and others: room is user-supplied; only contributions are subtracted.
     """
     current_year = current_year or date.today().year
-    relevant = [f for f in flows if f.account_id in account_ids and int(f.date[:4]) >= as_of_year]
+    mine = [f for f in flows if f.account_id in account_ids]
+    relevant = [f for f in mine if int(f.date[:4]) >= as_of_year]
     contributions = sum(f.amount for f in relevant if f.amount > 0)
+    if account_type == "FHSA":
+        return _fhsa_room(as_of_year, starting_room, mine, current_year, contributions)
     withdrawals_back = 0.0
     new_limits = 0.0
     if account_type == "TFSA":
         withdrawals_back = sum(-f.amount for f in relevant if f.amount < 0 and int(f.date[:4]) < current_year)
         new_limits = sum(tfsa_limit(y) for y in range(as_of_year + 1, current_year + 1))
-    elif account_type == "FHSA":
-        new_limits = FHSA_ANNUAL_LIMIT * max(current_year - as_of_year, 0)
     remaining = starting_room + new_limits + withdrawals_back - contributions
     return RoomStatus(account_type, as_of_year, starting_room, contributions, withdrawals_back, new_limits, remaining)
+
+
+def _fhsa_room(
+    as_of_year: int, starting_room: float, flows: list[CashFlow], current_year: int, contributions: float
+) -> RoomStatus:
+    """FHSA participation room, walked forward one year at a time.
+
+    `starting_room` is the participation room for `as_of_year` (it already
+    includes any carry-forward into that year). Then, for each later year:
+
+        carry_forward  = min(room last year - contributions last year, $8,000)
+        room this year = $8,000 + carry_forward
+
+    so unused room above $8,000 is forfeited, not banked. The result is
+    finally capped by the lifetime limit: $40,000 minus everything ever
+    contributed to these accounts (all recorded years, not just those since
+    `as_of_year`).
+
+    Not modelled: withdrawals never restore FHSA room (correct: they don't),
+    RRSP-to-FHSA transfers (they use room but aren't deposits), and the
+    account's 15-year / age-71 closing date.
+    """
+    by_year: dict[int, float] = defaultdict(float)
+    for f in flows:
+        if f.amount > 0:
+            by_year[int(f.date[:4])] += f.amount
+
+    room = starting_room
+    new_limits = 0.0
+    forfeited = 0.0
+    for year in range(as_of_year, current_year):
+        unused = max(room - by_year[year], 0.0)
+        carry = min(unused, FHSA_CARRYFORWARD_LIMIT)
+        forfeited += unused - carry
+        # Over-contributing last year leaves room negative; that excess still
+        # counts against this year's new room (and is taxed 1%/month by CRA).
+        overage = min(room - by_year[year], 0.0)
+        room = FHSA_ANNUAL_LIMIT + carry + overage
+        new_limits += FHSA_ANNUAL_LIMIT
+    remaining = room - by_year[current_year]
+
+    lifetime_left = FHSA_LIFETIME_LIMIT - sum(by_year.values())
+    if remaining > lifetime_left:
+        # Annual room beyond what the lifetime limit allows can't be used.
+        # (Negative means the lifetime limit itself has been exceeded.)
+        forfeited += remaining - lifetime_left
+        remaining = lifetime_left
+    return RoomStatus("FHSA", as_of_year, starting_room, contributions, 0.0, new_limits, remaining, forfeited)

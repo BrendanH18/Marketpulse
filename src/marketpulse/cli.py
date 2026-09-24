@@ -33,6 +33,7 @@ from .models import (
     parse_date,
     parse_symbols,
 )
+from .tax import TaxReport
 from .themes import OMARCHY_PALETTES, omarchy_active, pretty_name, resolve_palette, rich_styles
 
 for _stream in (sys.stdout, sys.stderr):
@@ -970,7 +971,8 @@ def accounts_room(app: App, account_type, year, amount) -> None:
         app.console.print(Text("No contribution room recorded yet.", style="muted"))
         return
     app.console.print(
-        render.tax_group([], [], rooms, app.store.account_map(), app.config.base_currency, privacy=app.privacy)
+        # Room only: an empty tax report (no years, no issues) renders just the room table.
+        render.tax_group([], TaxReport(), rooms, app.store.account_map(), app.config.base_currency, privacy=app.privacy)
     )
 
 

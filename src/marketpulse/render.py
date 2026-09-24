@@ -717,33 +717,47 @@ def tax_group(
             w.append(f"   {issue.date} {issue.message}\n", style="muted")
         parts.append(w)
     if rooms:
-        r = table(
+        # Only FHSA room can be forfeited (carry-forward and lifetime caps), so
+        # the column appears only when it has something to say.
+        capped = any(status.forfeited > 0.005 for status, _ in rooms)
+        headers: list[str | tuple[str, str]] = [
             "Type",
             ("Since", "right"),
             ("Start", "right"),
             ("+ Limits", "right"),
             ("+ Back", "right"),
             ("− Contrib.", "right"),
-            ("Remaining", "right"),
-            title="Contribution room",
-        )
+        ]
+        if capped:
+            headers.append(("− Capped", "right"))
+        headers.append(("Remaining", "right"))
+        r = table(*headers, title="Contribution room")
         for status, members in rooms:
             label = Text(status.account_type, style="bright")
             others = [a.name for a in members if a.name.upper() != status.account_type]
             if others:
                 label.append(f"  {', '.join(others)}", style="muted")
-            r.add_row(
+            cells = [
                 label,
                 Text(str(status.as_of_year), style="muted"),
                 Text(fmt.money(status.starting_room, privacy=privacy)),
                 Text(fmt.money(status.new_limits, privacy=privacy), style="muted"),
                 Text(fmt.money(status.withdrawals_added_back, privacy=privacy), style="muted"),
                 Text(fmt.money(status.contributions, privacy=privacy)),
+            ]
+            if capped:
+                cells.append(
+                    Text(fmt.money(status.forfeited, privacy=privacy), style="warn")
+                    if status.forfeited > 0.005
+                    else Text("—", style="muted")
+                )
+            cells.append(
                 Text(
                     fmt.money(status.remaining, privacy=privacy),
                     style="down bold" if status.remaining < 0 else "up bold",
-                ),
+                )
             )
+            r.add_row(*cells)
         parts += [Text(""), r]
     return Group(*parts)
 

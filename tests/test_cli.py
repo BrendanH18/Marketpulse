@@ -111,3 +111,10 @@ def test_tax_report_explains_superficial_losses_and_transfer_issues(cli, store):
     assert "superficial" in out and "50.00 of a 50.00 loss denied" in out
     assert "deemed sale at market value" in out
     assert "spouse or a corporation" in out
+
+
+def test_fhsa_room_shows_capped_carry_forward(cli, store):
+    cli("accounts", "add", "My FHSA", "-t", "FHSA")
+    cli("accounts", "room", "FHSA", "2023", "8000")
+    out = cli("tax").output
+    assert "Capped" in out and "16,000.00" in out  # never more than $16k in a year
