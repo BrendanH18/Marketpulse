@@ -25,7 +25,7 @@ def external_flows(transactions: Sequence[Transaction], accounts: dict[int, Acco
     sell proceeds and cash distributions are money out.
     """
     cash_based = {t.account_id for t in transactions if t.type in (TxnType.DEPOSIT, TxnType.WITHDRAWAL)}
-    cash_based |= {a.id for a in accounts.values() if a.track_cash}
+    cash_based |= {a.saved_id for a in accounts.values() if a.track_cash}
     flows = []
     for t in sorted(transactions, key=lambda t: (t.date, t.id or 0)):
         acct = accounts.get(t.account_id)

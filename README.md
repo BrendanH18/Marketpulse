@@ -187,6 +187,7 @@ Quotes, history, dividends and search come from Yahoo Finance's public endpoints
 uv sync
 uv run pytest          # 100+ tests, no network (a fake Yahoo transport is used)
 uv run ruff check . && uv run ruff format .
+uv run mypy            # type check (config in pyproject.toml; CI runs it too)
 swift build --package-path macos/MarketPulseBar
 ```
 

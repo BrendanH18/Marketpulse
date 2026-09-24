@@ -283,7 +283,7 @@ class MarketData:
     def _bars(result: dict) -> list[Bar]:
         stamps = result.get("timestamp") or []
         q = ((result.get("indicators") or {}).get("quote") or [{}])[0]
-        scale = _MINOR_UNITS.get((result.get("meta") or {}).get("currency"), ("", 1.0))[1]
+        scale = _MINOR_UNITS.get((result.get("meta") or {}).get("currency") or "", ("", 1.0))[1]
         opens, highs, lows, closes, vols = (q.get(k) or [] for k in ("open", "high", "low", "close", "volume"))
 
         def pick(seq: list, i: int, default: float) -> float:
@@ -334,7 +334,7 @@ class MarketData:
     def dividends(self, symbol: str, period: str = "1y") -> list[tuple[str, float]]:
         """Per-share cash distributions within `period`, oldest first."""
         result = self._chart(symbol, {"range": period, "interval": "1d", "events": "div"})
-        scale = _MINOR_UNITS.get((result.get("meta") or {}).get("currency"), ("", 1.0))[1]
+        scale = _MINOR_UNITS.get((result.get("meta") or {}).get("currency") or "", ("", 1.0))[1]
         events = ((result.get("events") or {}).get("dividends") or {}).values()
         return sorted(
             (datetime.fromtimestamp(e["date"]).date().isoformat(), float(e["amount"]) / scale)

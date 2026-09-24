@@ -115,3 +115,11 @@ def test_account_type_registered():
     assert AccountType.TFSA.registered and AccountType.FHSA.registered
     assert not AccountType.NONREG.registered and not Account(name="t").type.registered
     assert AccountType.NONREG.label == "Non-registered"
+
+
+def test_saved_id_refuses_unsaved_objects():
+    assert Account(name="A", id=3).saved_id == 3
+    with pytest.raises(ValueError, match="hasn't been saved"):
+        Account(name="A").saved_id  # noqa: B018 - the property access is the test
+    with pytest.raises(ValueError, match="hasn't been saved"):
+        Transaction(account_id=1, type=TxnType.DEPOSIT, amount=1).saved_id  # noqa: B018

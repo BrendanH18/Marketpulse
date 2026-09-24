@@ -188,6 +188,7 @@ def _price_holding(
             price, prev = price * factor, prev * factor
         return price, prev
     if kind is AssetKind.FIXED_INCOME:
+        assert asset is not None  # only an Asset can make the kind FIXED_INCOME
         today = asset.accrual_factor(on.isoformat())
         yesterday = asset.accrual_factor((on - timedelta(days=1)).isoformat())
         purchase = asset.accrual_factor(h.first_date) if h.first_date else 1.0
@@ -276,17 +277,17 @@ def build_view(
         add(ccy_totals, p.currency, p.currency, value, day, book)
 
     for (acct_id, ccy), amount in state.cash_balances(account_id).items():
-        acct = accounts.get(acct_id)
-        if acct is None or not acct.track_cash:
+        cash_acct = accounts.get(acct_id)
+        if cash_acct is None or not cash_acct.track_cash:
             continue
         amount_base = fx.convert(amount, ccy)
-        view.cash.append(CashView(acct, ccy, amount, amount_base))
+        view.cash.append(CashView(cash_acct, ccy, amount, amount_base))
         if amount_base is None:
-            view.excluded.append(f"{acct.name} cash ({ccy})")
+            view.excluded.append(f"{cash_acct.name} cash ({ccy})")
             continue
         view.net_worth += amount_base
         view.cash_total += amount_base
-        add(acct_totals, acct.id, acct.name, amount_base, 0.0, amount_base)
+        add(acct_totals, cash_acct.id, cash_acct.name, amount_base, 0.0, amount_base)
         add(class_totals, AssetClass.CASH.value, AssetClass.CASH.label, amount_base, 0.0, amount_base)
         add(ccy_totals, ccy, ccy, amount_base, 0.0, amount_base)
 
@@ -322,7 +323,7 @@ def build_view(
 
 
 def registered_account_ids(accounts: dict[int, Account], account_type: AccountType) -> set[int]:
-    return {a.id for a in accounts.values() if a.type is account_type}
+    return {a.saved_id for a in accounts.values() if a.type is account_type}
 
 
 def group_positions(view: PortfolioView) -> dict[str, list[PositionView]]:

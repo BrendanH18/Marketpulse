@@ -365,7 +365,7 @@ class Store:
         return [self._account(r) for r in self._query(sql)]
 
     def account_map(self) -> dict[int, Account]:
-        return {a.id: a for a in self.accounts(include_archived=True)}
+        return {a.saved_id: a for a in self.accounts(include_archived=True)}
 
     def get_account(self, ref: int | str) -> Account | None:
         """Find an account by id, name (case-insensitive) or unique type (e.g. 'tfsa')."""
@@ -444,7 +444,8 @@ class Store:
         )
 
     def transactions(self, account_id: int | None = None, symbol: str | None = None) -> list[Transaction]:
-        where, params = [], []
+        where: list[str] = []
+        params: list[int | str] = []
         if account_id is not None:
             where.append("(account_id = ? OR target_account_id = ?)")
             params += [account_id, account_id]
@@ -723,7 +724,7 @@ def migrate_legacy_json(store: Store, directory: Path) -> list[str]:
                 sym = str(raw["ticker"]).upper()
                 txns.append(
                     Transaction(
-                        account_id=acct.id,
+                        account_id=acct.saved_id,
                         type=TxnType(raw["action"]),
                         date=parse_date(str(raw.get("date") or created)[:10]),
                         symbol=sym,
@@ -741,7 +742,7 @@ def migrate_legacy_json(store: Store, directory: Path) -> list[str]:
                 sym = str(pos["ticker"]).upper()
                 txns.append(
                     Transaction(
-                        account_id=acct.id,
+                        account_id=acct.saved_id,
                         type=TxnType.BUY,
                         date=created,
                         symbol=sym,
@@ -751,14 +752,14 @@ def migrate_legacy_json(store: Store, directory: Path) -> list[str]:
                         note="opening balance (migrated)",
                     )
                 )
-        state = replay(txns, {acct.id: acct})
+        state = replay(txns, {acct.saved_id: acct})
         for h in state.open_holdings():
             pos = positions.get(h.symbol)
             target = float(pos["shares"]) if pos else 0.0
             if h.quantity - target > EPSILON:
                 txns.append(
                     Transaction(
-                        account_id=acct.id,
+                        account_id=acct.saved_id,
                         type=TxnType.SELL,
                         date=datetime.now().date().isoformat(),
                         symbol=h.symbol,

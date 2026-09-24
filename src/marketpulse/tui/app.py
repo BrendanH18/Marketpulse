@@ -1281,9 +1281,9 @@ class MarketPulseApp(App):
                 return
             detail = " ".join(c.plain for c in render.activity_cells(txn, store.account_map())[1:8] if c.plain != "—")
 
-            def done(yes: bool) -> None:
+            def done(yes: bool | None) -> None:
                 if yes:
-                    store.delete_transaction(txn.id)
+                    store.delete_transaction(txn.saved_id)
                     self.after_change(f"Deleted transaction #{txn.id}")
 
             self.push_screen(ConfirmScreen(f"Delete transaction #{txn.id}?", detail), done)
@@ -1308,9 +1308,9 @@ class MarketPulseApp(App):
                 return
             count = len([t for t in store.transactions() if t.account_id == acct.id])
 
-            def confirmed(yes: bool) -> None:
+            def confirmed(yes: bool | None) -> None:
                 if yes:
-                    store.delete_account(acct.id)
+                    store.delete_account(acct.saved_id)
                     self.after_change(f"Deleted {acct.name}")
 
             self.push_screen(
@@ -1329,9 +1329,9 @@ class MarketPulseApp(App):
         last = max(txns, key=lambda t: t.id or 0)
         detail = " ".join(c.plain for c in render.activity_cells(last, store.account_map())[1:8] if c.plain != "—")
 
-        def done(yes: bool) -> None:
+        def done(yes: bool | None) -> None:
             if yes:
-                store.delete_transaction(last.id)
+                store.delete_transaction(last.saved_id)
                 self.after_change(f"Undid transaction #{last.id}")
 
         self.push_screen(ConfirmScreen("Undo the last transaction?", detail), done)
@@ -1473,9 +1473,12 @@ class MarketPulseApp(App):
         if self.workspace == "activity":
             self.query_one("#activity-filter", Input).focus()
             return
-        self.push_screen(
-            SearchScreen(self.tracker, self.known_symbols(), "Open chart"), lambda s: s and self.open_chart(s)
-        )
+
+        def picked(symbol: str | None) -> None:
+            if symbol:  # None/empty when the search was cancelled
+                self.open_chart(symbol)
+
+        self.push_screen(SearchScreen(self.tracker, self.known_symbols(), "Open chart"), picked)
 
     def action_filter_account(self) -> None:
         ids = [None, *(a.id for a in self.tracker.store.accounts())]
@@ -1520,7 +1523,7 @@ class MarketPulseApp(App):
         store = self.tracker.store
         try:
             result = import_transactions(
-                store, Path(path).expanduser(), default_account=(store.accounts() or [None])[0]
+                store, Path(path).expanduser(), default_account=next(iter(store.accounts()), None)
             )
         except (OSError, ValueError) as e:
             self.call_from_thread(self.notify, str(e), title="Import failed", severity="error")

@@ -172,6 +172,9 @@ def replay(
         ccy = transaction_currency(txn, accounts)
         cash_key = (acct, ccy)
 
+        # `h` is the position a transaction acts on; lookups in the branches
+        # below can come back empty, so it's typed as optional throughout.
+        h: Holding | None
         if t in (TxnType.BUY, TxnType.DRIP):
             h = holding(acct, txn.symbol, ccy)
             if h.quantity <= EPSILON:
@@ -192,8 +195,10 @@ def replay(
                 state.issues.append(
                     LedgerIssue(txn.id, txn.date, f"Sell of {txn.quantity:,.4f} {txn.symbol} exceeds {held:,.4f} held")
                 )
-                if h is None or held <= EPSILON:
-                    continue
+            if h is None or held <= EPSILON:
+                # Nothing to sell. (Also covers a sub-EPSILON "sell" of a
+                # position that was never opened, which used to crash here.)
+                continue
             qty = min(txn.quantity, held)
             cost = h.avg_cost * qty
             proceeds = qty * txn.price - txn.fees

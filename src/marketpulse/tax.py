@@ -189,6 +189,7 @@ def compute(
             p.acb += p.pending_denied
             p.pending_denied = 0.0
 
+    p: AcbPool | None  # the pool a transaction acts on (lookups may find none)
     for txn in ordered:
         acct = accounts.get(txn.account_id)
         taxable = is_taxable(acct)

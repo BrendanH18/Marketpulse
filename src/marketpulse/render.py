@@ -7,11 +7,11 @@ active Omarchy palette, so everything re-themes automatically.
 from __future__ import annotations
 
 import calendar
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from rich import box
-from rich.console import Group, RenderableType
+from rich.console import Group, JustifyMethod, RenderableType
 from rich.table import Table
 from rich.text import Text
 
@@ -48,7 +48,11 @@ def mix(fg: str, bg: str, amount: float) -> str:
     return "#" + "".join(f"{round(x * amount + y * (1 - amount)):02x}" for x, y in zip(a, b, strict=True))
 
 
-def table(*headers: str | tuple[str, str], title: str | None = None, expand: bool = False) -> Table:
+# A column is either a bare header (left-aligned) or (header, justify).
+Column = str | tuple[str, JustifyMethod]
+
+
+def table(*headers: Column, title: str | None = None, expand: bool = False) -> Table:
     t = Table(
         box=box.SIMPLE_HEAD,
         header_style="muted",
@@ -60,6 +64,8 @@ def table(*headers: str | tuple[str, str], title: str | None = None, expand: boo
         pad_edge=False,
     )
     for h in headers:
+        name: str
+        justify: JustifyMethod
         name, justify = (h, "left") if isinstance(h, str) else h
         # Descriptive columns give up space (and wrap) first so numbers never truncate
         flexible = name in FLEX_COLUMNS
@@ -346,7 +352,7 @@ def market_state_text(state: str) -> Text:
 
 # ── Activity ──────────────────────────────────────────────────────────────────
 
-ACTIVITY_HEADERS: list[str | tuple[str, str]] = [
+ACTIVITY_HEADERS: list[Column] = [
     ("ID", "right"),
     "Date",
     "Account",
@@ -411,7 +417,7 @@ def price_chart(
     width: int,
     height: int = 14,
     quote: Quote | None = None,
-    compare: dict[str, Sequence[Bar]] | None = None,
+    compare: Mapping[str, Sequence[Bar]] | None = None,
     marker: float | None = None,
 ) -> RenderableType:
     closes = [b.close for b in bars]
@@ -720,7 +726,7 @@ def tax_group(
         # Only FHSA room can be forfeited (carry-forward and lifetime caps), so
         # the column appears only when it has something to say.
         capped = any(status.forfeited > 0.005 for status, _ in rooms)
-        headers: list[str | tuple[str, str]] = [
+        headers: list[Column] = [
             "Type",
             ("Since", "right"),
             ("Start", "right"),
@@ -731,7 +737,7 @@ def tax_group(
         if capped:
             headers.append(("− Capped", "right"))
         headers.append(("Remaining", "right"))
-        r = table(*headers, title="Contribution room")
+        room_table = table(*headers, title="Contribution room")
         for status, members in rooms:
             label = Text(status.account_type, style="bright")
             others = [a.name for a in members if a.name.upper() != status.account_type]
@@ -757,8 +763,8 @@ def tax_group(
                     style="down bold" if status.remaining < 0 else "up bold",
                 )
             )
-            r.add_row(*cells)
-        parts += [Text(""), r]
+            room_table.add_row(*cells)
+        parts += [Text(""), room_table]
     return Group(*parts)
 
 

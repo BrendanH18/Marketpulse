@@ -230,6 +230,19 @@ class Account:
     archived: bool = False
     created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
+    @property
+    def saved_id(self) -> int:
+        """The database id of an account that has been stored.
+
+        `id` is None until Store.add_account() assigns one. Code that needs a
+        real id (to reference the account from a transaction, or delete it)
+        uses this instead, so an unsaved account fails loudly here rather
+        than slipping None into a query that then silently matches nothing.
+        """
+        if self.id is None:
+            raise ValueError(f"Account '{self.name}' hasn't been saved yet.")
+        return self.id
+
 
 @dataclass
 class Transaction:
@@ -251,6 +264,13 @@ class Transaction:
         self.type = TxnType(self.type)
         self.symbol = self.symbol.upper()
         self.currency = self.currency.upper()
+
+    @property
+    def saved_id(self) -> int:
+        """The database id of a stored transaction (see Account.saved_id)."""
+        if self.id is None:
+            raise ValueError("Transaction hasn't been saved yet.")
+        return self.id
 
     @property
     def gross_value(self) -> float:

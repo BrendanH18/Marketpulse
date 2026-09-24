@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
 from rich.text import Text
 from textual import on, work
@@ -39,7 +39,13 @@ class FormError(ValueError):
     pass
 
 
+@overload
+def _num(screen: ModalScreen, selector: str, label: str, default: float = 0.0) -> float: ...
+@overload
+def _num(screen: ModalScreen, selector: str, label: str, default: None) -> float | None: ...
 def _num(screen: ModalScreen, selector: str, label: str, default: float | None = 0.0) -> float | None:
+    """Read a numeric input. Blank gives `default` (so callers passing a
+    float default always get a float back); anything unparsable is a FormError."""
     raw = screen.query_one(selector, Input).value.strip().replace(",", "")
     if not raw:
         return default
@@ -115,8 +121,12 @@ class TransactionForm(BaseForm):
         self.kind = txn.type if txn else kind
         self.symbol = txn.symbol if txn else symbol.upper()
         self.accounts = tracker.store.accounts() or [tracker.store.ensure_default_account(tracker.base)]
-        ids = [a.id for a in self.accounts]
-        self.account_id = txn.account_id if txn else (account_id if account_id in ids else ids[0])
+        ids = [a.saved_id for a in self.accounts]
+        # Editing keeps the transaction's account; otherwise use the requested
+        # account if it still exists, else the first one.
+        self.account_id: int = (
+            txn.account_id if txn else (account_id if account_id is not None and account_id in ids else ids[0])
+        )
         self.symbols = symbols or []
         self.live_price: float | None = None
         self.live_currency = ""
@@ -454,15 +464,23 @@ class AssetForm(BaseForm):
                     maturity_date=maturity,
                 )
             else:
+                # Select.BLANK (nothing chosen) isn't a str: leave the class unset.
+                chosen = self.query_one("#s-class", Select).value
                 asset = Asset(
                     symbol=symbol,
                     kind=AssetKind.MANUAL,
                     name=name,
-                    asset_class=self.query_one("#s-class", Select).value,
+                    asset_class=AssetClass(chosen) if isinstance(chosen, str) else None,
                     currency=ccy,
-                )  # type: ignore[arg-type]
+                )
             txn = Transaction(
-                account_id=acct.id, type=TxnType.BUY, date=start, symbol=symbol, quantity=1, price=value, currency=ccy
+                account_id=acct.saved_id,
+                type=TxnType.BUY,
+                date=start,
+                symbol=symbol,
+                quantity=1,
+                price=value,
+                currency=ccy,
             )
         except (FormError, ValueError, StopIteration) as e:
             self.show_error(str(e))

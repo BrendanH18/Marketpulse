@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import platform
 import shutil
@@ -10,6 +11,7 @@ import time
 from dataclasses import fields, replace
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import click
 from rich.console import Console, Group
@@ -36,11 +38,18 @@ from .models import (
 from .tax import TaxReport
 from .themes import OMARCHY_PALETTES, omarchy_active, pretty_name, resolve_palette, rich_styles
 
+if TYPE_CHECKING:  # for annotations only; the real imports stay lazy
+    from .db import Store
+    from .services import Tracker
+
 for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(errors="replace")
-    except (AttributeError, ValueError):
-        pass
+    # Replace unencodable characters instead of crashing on a non-UTF-8 terminal.
+    # Only real text streams can be reconfigured (pytest/CliRunner swap in others).
+    if isinstance(_stream, io.TextIOWrapper):
+        try:
+            _stream.reconfigure(errors="replace")
+        except ValueError:
+            pass
 
 
 class App:
@@ -51,18 +60,19 @@ class App:
         self.config = Config.load()
         self.palette = resolve_palette(self.config.theme)
         self.console = Console(theme=RichTheme(rich_styles(self.palette)), highlight=False)
-        self._tracker = None
+        self._tracker: Tracker | None = None
 
     @property
-    def tracker(self):
+    def tracker(self) -> Tracker:
         if self._tracker is None:
+            # Imported here so `marketpulse --help` and friends start instantly.
             from .services import Tracker
 
             self._tracker = Tracker.open(self.config)
         return self._tracker
 
     @property
-    def store(self):
+    def store(self) -> Store:
         return self.tracker.store
 
     @property
@@ -105,13 +115,17 @@ class App:
             + ", ".join(a.name for a in accounts)
             + ") or set a default: `marketpulse config set default_account NAME`."
         )
-        raise AssertionError  # unreachable
 
 
 pass_app = click.make_pass_decorator(App, ensure=True)
 
 
-def fail(message: str) -> None:
+def fail(message: str) -> NoReturn:
+    """Abort the command with a friendly error (exit code 1, no traceback).
+
+    Typed NoReturn so the type checker knows code after `fail()` is
+    unreachable, e.g. `if acct is None: fail(...)` narrows acct to Account.
+    """
     raise click.ClickException(message)
 
 
@@ -468,7 +482,6 @@ def _record(app: App, txn: Transaction) -> Transaction:
         return app.tracker.add_transaction(txn)
     except ValueError as e:
         fail(str(e))
-    raise AssertionError
 
 
 def _trade(
@@ -503,7 +516,7 @@ def _trade(
     txn = _record(
         app,
         Transaction(
-            account_id=acct.id,
+            account_id=acct.saved_id,
             type=kind,
             date=day,
             symbol=sym,
@@ -515,7 +528,7 @@ def _trade(
         ),
     )
     state = app.store.ledger()
-    h = state.holdings.get((acct.id, sym))
+    h = state.holdings.get((acct.saved_id, sym))
     verb = "Bought" if kind is TxnType.BUY else "Sold"
     msg = f"{verb} {fmt.qty(quantity)} {sym} @ {fmt.price(price)} {ccy} in {acct.name}"
     if kind is TxnType.SELL:
@@ -564,7 +577,7 @@ def _cash_event(
     except ValueError as e:
         fail(str(e))
     txn = Transaction(
-        account_id=acct.id,
+        account_id=acct.saved_id,
         type=kind,
         date=day,
         symbol=symbol.upper(),
@@ -601,7 +614,7 @@ def drip(app: App, symbol, quantity, price, account, when, note) -> None:
     _record(
         app,
         Transaction(
-            account_id=acct.id,
+            account_id=acct.saved_id,
             type=TxnType.DRIP,
             date=parse_date(when),
             symbol=symbol,
@@ -666,7 +679,7 @@ def split(app: App, symbol, ratio, account, when, note) -> None:
     _record(
         app,
         Transaction(
-            account_id=acct.id, type=TxnType.SPLIT, date=parse_date(when), symbol=symbol, ratio=ratio, note=note
+            account_id=acct.saved_id, type=TxnType.SPLIT, date=parse_date(when), symbol=symbol, ratio=ratio, note=note
         ),
     )
     app.ok(f"Split {symbol.upper()} ×{ratio:g} in {acct.name}")
@@ -715,7 +728,7 @@ def transfer(app: App, symbol, quantity, source, target, price, when, note) -> N
     _record(
         app,
         Transaction(
-            account_id=src.id,
+            account_id=src.saved_id,
             type=TxnType.TRANSFER,
             date=day,
             symbol=symbol,
@@ -761,7 +774,7 @@ def undo(app: App, yes: bool) -> None:
     last = max(txns, key=lambda t: t.id or 0)
     app.console.print(render.activity_table([last], app.store.account_map()))
     if yes or click.confirm("Delete this transaction?"):
-        app.store.delete_transaction(last.id)
+        app.store.delete_transaction(last.saved_id)
         app.ok(f"Deleted transaction #{last.id}.")
 
 
@@ -804,7 +817,7 @@ def txn_edit(app: App, txn_id: int, when, account, symbol, quantity, price, amou
     if when is not None:
         t.date = when
     if account is not None:
-        t.account_id = app.account(account).id
+        t.account_id = app.account(account).saved_id
     for name, value in (
         ("symbol", symbol),
         ("quantity", quantity),
@@ -942,7 +955,7 @@ def accounts_remove(app: App, ref, yes) -> None:
     if yes or click.confirm(
         f"Delete {acct.name} and its {count} transaction(s)? Consider `accounts edit {acct.name} --archive` instead."
     ):
-        app.store.delete_account(acct.id)
+        app.store.delete_account(acct.saved_id)
         app.ok(f"Deleted {acct.name}.")
 
 
@@ -1043,7 +1056,7 @@ def asset_fixed(app: App, symbol, principal, rate, start, maturity, compounding,
     _record(
         app,
         Transaction(
-            account_id=acct.id,
+            account_id=acct.saved_id,
             type=TxnType.BUY,
             date=start_d,
             symbol=symbol,
@@ -1083,7 +1096,7 @@ def asset_manual(app: App, symbol, value, name, asset_class, currency, account, 
     _record(
         app,
         Transaction(
-            account_id=acct.id,
+            account_id=acct.saved_id,
             type=TxnType.BUY,
             date=parse_date(when),
             symbol=symbol,
@@ -1343,7 +1356,7 @@ def import_cmd(app: App, path: Path, account, dry_run, no_create_accounts) -> No
     """Import transactions from a broker or MarketPulse CSV."""
     from .csvio import import_transactions
 
-    default = app.account(account) if account else (app.store.accounts() or [None])[0]
+    default = app.account(account) if account else next(iter(app.store.accounts()), None)
     try:
         result = import_transactions(
             app.store, path, default_account=default, create_accounts=not no_create_accounts, dry_run=dry_run
@@ -1425,7 +1438,6 @@ def _theme_slug(name: str) -> str:
     if slug in ("auto", "omarchy") or slug in OMARCHY_PALETTES:
         return slug
     fail(f"Unknown theme '{name}'. Run `marketpulse theme` to see them all.")
-    raise AssertionError
 
 
 @main.group(invoke_without_command=True)
@@ -1474,6 +1486,7 @@ def config_set(app: App, key: str, value: tuple[str, ...]) -> None:
         fail(f"Unknown setting '{key}'. Known: {', '.join(known)}")
     raw = " ".join(value)
     current = getattr(app.config, key)
+    parsed: object  # bool, int, float, list[str] or str, matching the setting's type
     try:
         if isinstance(current, bool):
             if raw.lower() not in ("true", "false", "yes", "no", "on", "off", "1", "0"):

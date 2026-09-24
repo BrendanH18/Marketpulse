@@ -222,3 +222,9 @@ def test_tfsa_and_rrsp_statuses_also_reconcile():
     flows = [CashFlow("2025-03-01", 2, 5000, "CAD"), CashFlow("2025-06-01", 2, -2000, "CAD")]
     assert _adds_up(contribution_room("TFSA", 2025, 10000, flows, {2}, current_year=2026))
     assert _adds_up(contribution_room("RRSP", 2025, 10000, flows, {2}, current_year=2026))
+
+
+def test_dust_sell_of_a_position_never_opened_is_ignored():
+    # Used to raise AttributeError (the missing holding was dereferenced).
+    s = replay([txn(TxnType.SELL, "2024-01-01", "A", 1e-10, 10)], ACCOUNTS)
+    assert not s.realized

@@ -265,6 +265,7 @@ class Tracker:
                         lr = last_fx.get(lc)
                         px = px * lr / rate if lr is not None and rate else None
                 elif kind is AssetKind.FIXED_INCOME:
+                    assert asset is not None  # only an Asset can make the kind FIXED_INCOME
                     purchase = asset.accrual_factor(h.first_date) if h.first_date else 1.0
                     px = h.avg_cost / purchase * asset.accrual_factor(iso) if purchase else h.avg_cost
                 elif kind is AssetKind.MANUAL:
@@ -355,7 +356,7 @@ class Tracker:
         out = []
         for acct_type, (year, amount) in sorted(self.store.rooms().items()):
             members = [a for a in accounts if a.type.value == acct_type]
-            status = contribution_room(acct_type, year, amount, flows, {a.id for a in members})
+            status = contribution_room(acct_type, year, amount, flows, {a.saved_id for a in members})
             out.append((status, members))
         return out
 
