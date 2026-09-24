@@ -4,7 +4,7 @@ A fast, keyboard-first investment tracker for the terminal — with Omarchy them
 
 - **Everything you own, in one ledger** — stocks, ETFs, crypto, cash, GICs and bonds, and manually valued assets (property, private shares, pensions) across TFSA, RRSP, FHSA, RESP, non-registered and crypto accounts.
 - **Real performance** — money-weighted (XIRR) and time-weighted returns, drawdown, volatility, and a daily net-worth history you can rebuild from your ledger in seconds.
-- **Canadian-aware** — average-cost ACB, capital gains per tax year at trade-date FX, superficial-loss warnings, TFSA/FHSA room that rolls forward on its own.
+- **Canadian-aware** — ACB pooled across your taxable accounts the way CRA computes it, with every purchase and sale converted at its own day's FX; proportional superficial-loss denial; deemed sales for in-kind TFSA/RRSP contributions; TFSA/FHSA room that rolls forward on its own.
 - **Lightweight** — four dependencies, a local SQLite file, no pandas, no account, no telemetry.
 
 ---
@@ -50,7 +50,7 @@ marketpulse buy AAPL 10 229.50 -a TFSA -f 4.95 -d 2026-03-02
 marketpulse sell VFV.TO 5 -a "Non-reg"     # realized gain is printed using average cost
 marketpulse dividend XEQT.TO 38.12 -a TFSA
 marketpulse deposit 7000 -a TFSA
-marketpulse transfer XEQT.TO 50 --from Main --to TFSA
+marketpulse transfer XEQT.TO 50 --from Main --to TFSA   # in-kind contribution (a deemed sale: see Tax below)
 marketpulse undo                           # oops
 
 marketpulse summary                        # dashboard in your scrollback
@@ -85,6 +85,17 @@ marketpulse asset classify XEQT.TO equity     # override any symbol's asset clas
 ```
 
 Fixed income accrues daily at its rate; manual assets use their latest valuation.
+
+### Tax
+
+`marketpulse tax` (and the **accounts** workspace) reports capital gains in your taxable accounts the way CRA computes them:
+
+- **Pooled ACB.** Identical shares are one pool across every non-registered account, so selling XEQT at one broker uses the average cost of all your XEQT. Holdings screens still show each account's own cost.
+- **Each leg at its own FX rate.** A US stock's cost is converted at each purchase date's USD/CAD rate and the proceeds at the sale date's, so currency moves are part of the gain.
+- **Superficial losses** are denied in proportion, as `loss × min(sold, bought within 30 days, still held on day 30) ÷ sold`, counting purchases in *any* account, TFSAs and RRSPs included. The denied amount is added to the replacement shares' ACB (or lost for good if you bought them back in a registered account).
+- **In-kind transfers** into a TFSA/RRSP are deemed sales at market value (losses denied), and transfers out reset the cost to market value. Give the value with `transfer --price` (it defaults to the live price when dated today).
+
+Rows whose FX rate isn't available are shown but left out of the totals. The figures are estimates: purchases by a spouse or a corporation you control can also make a loss superficial, and MarketPulse can't see those.
 
 ### Import and export
 
@@ -182,7 +193,8 @@ swift build --package-path macos/MarketPulseBar
 ```
 src/marketpulse/
   models.py      accounts, transactions, assets, quotes
-  ledger.py      replay engine: holdings, ACB, income, cash, room, superficial losses
+  ledger.py      replay engine: per-account holdings, cost, income, cash, contribution room
+  tax.py         capital gains: pooled ACB, trade-date FX, superficial losses, deemed dispositions
   analytics.py   XIRR, time-weighted returns, drawdown, rebalancing, income, capital gains
   valuation.py   prices the ledger into a portfolio view
   market.py      Yahoo client (batch quotes, history, dividends, search, FX)

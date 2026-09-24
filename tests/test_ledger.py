@@ -1,6 +1,6 @@
 import pytest
 
-from marketpulse.ledger import CashFlow, contribution_room, replay, superficial_losses, tfsa_limit
+from marketpulse.ledger import CashFlow, contribution_room, replay, tfsa_limit
 from marketpulse.models import Account, AccountType, Transaction, TxnType
 
 ACCOUNTS = {
@@ -147,32 +147,6 @@ def test_valuation_marks_manual_assets_and_until_filter():
     ]
     assert replay(txns, ACCOUNTS).valuations["HOUSE"] == ("2024-01-01", 650_000)
     assert "HOUSE" not in replay(txns, ACCOUNTS, until="2023-12-31").valuations
-
-
-def test_superficial_loss_flagged_when_rebought_within_30_days():
-    txns = [
-        txn(TxnType.BUY, "2024-01-01", "A", 10, 100, id=1),
-        txn(TxnType.SELL, "2024-02-01", "A", 10, 80, id=2),
-        txn(TxnType.BUY, "2024-02-15", "A", 10, 81, account=2, id=3),
-    ]
-    warnings = superficial_losses(txns, replay(txns, ACCOUNTS))
-    assert len(warnings) == 1
-    assert warnings[0].rebuy_date == "2024-02-15" and warnings[0].rebuy_account_id == 2
-
-
-def test_gains_and_distant_rebuys_are_not_superficial():
-    gain = [
-        txn(TxnType.BUY, "2024-01-01", "A", 10, 100, id=1),
-        txn(TxnType.SELL, "2024-02-01", "A", 10, 120, id=2),
-        txn(TxnType.BUY, "2024-02-02", "A", 1, 1, id=3),
-    ]
-    assert superficial_losses(gain, replay(gain, ACCOUNTS)) == []
-    later = [
-        txn(TxnType.BUY, "2024-01-01", "A", 10, 100, id=1),
-        txn(TxnType.SELL, "2024-02-01", "A", 10, 80, id=2),
-        txn(TxnType.BUY, "2024-04-01", "A", 1, 1, id=3),
-    ]
-    assert superficial_losses(later, replay(later, ACCOUNTS)) == []
 
 
 def test_tfsa_room_rolls_forward_with_limits_and_withdrawals():

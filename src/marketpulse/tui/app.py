@@ -1014,9 +1014,9 @@ class MarketPulseApp(App):
         if self._tax is None:
             target.update(Text("Building tax report…", style="muted"))
             return
-        years, warnings, rooms = self._tax
+        years, report, rooms = self._tax
         tr = self.tracker
-        body = render.tax_group(years, warnings, rooms, tr.store.account_map(), tr.base, privacy=self.privacy)
+        body = render.tax_group(years, report, rooms, tr.store.account_map(), tr.base, privacy=self.privacy)
         target.update(
             Group(body, Text("\nEstimates only — confirm against broker slips (T5008/T3/T5).", style="muted"))
         )
@@ -1037,9 +1037,9 @@ class MarketPulseApp(App):
 
     @work(thread=True, exclusive=True, group="tax")
     def load_tax(self) -> None:
-        years, warnings = self.tracker.tax_years()
+        years, report = self.tracker.tax_years()
         rooms = self.tracker.room()
-        self.call_from_thread(self._tax_loaded, (years, warnings, rooms))
+        self.call_from_thread(self._tax_loaded, (years, report, rooms))
 
     def _tax_loaded(self, result) -> None:
         self._tax = result

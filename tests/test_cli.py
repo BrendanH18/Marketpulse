@@ -96,3 +96,18 @@ def test_backup_commands(cli, store, tmp_path):
     assert (tmp_path / "copy.db").exists()
     listing = cli("backup", "list").output
     assert "manual" in listing and "copy.db" not in listing  # explicit paths live outside the backups dir
+
+
+def test_tax_report_explains_superficial_losses_and_transfer_issues(cli, store):
+    cli("accounts", "add", "Taxable", "-t", "NONREG")
+    cli("accounts", "add", "My TFSA", "-t", "TFSA")
+    cli("buy", "XEQT.TO", "10", "30", "-a", "Taxable", "-d", "2024-01-02")
+    cli("sell", "XEQT.TO", "10", "25", "-a", "Taxable", "-d", "2024-03-01")  # −$50 loss
+    cli("buy", "XEQT.TO", "10", "25", "-a", "My TFSA", "-d", "2024-03-05")  # …bought back in the TFSA
+    cli("buy", "XEQT.TO", "5", "20", "-a", "Taxable", "-d", "2024-06-03")
+    moved = cli("transfer", "XEQT.TO", "5", "--from", "Taxable", "--to", "My TFSA", "-d", "2024-07-02")
+    assert "no --price given" in moved.output  # back-dated and unpriced: warned, not guessed
+    out = cli("tax", "-y", "2024").output
+    assert "superficial" in out and "50.00 of a 50.00 loss denied" in out
+    assert "deemed sale at market value" in out
+    assert "spouse or a corporation" in out

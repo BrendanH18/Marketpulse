@@ -676,20 +676,51 @@ def split(app: App, symbol, ratio, account, when, note) -> None:
 @click.argument("quantity", type=float)
 @click.option("--from", "source", required=True, help="Source account.")
 @click.option("--to", "target", required=True, help="Destination account.")
+@click.option(
+    "-p",
+    "--price",
+    type=float,
+    default=None,
+    help="Market value per unit on the transfer date. Needed for tax when moving between "
+    "a taxable and a registered account (defaults to the live price when dated today).",
+)
 @click.option("-d", "--date", "when", default=None)
 @click.option("-m", "--note", default="")
 @pass_app
-def transfer(app: App, symbol, quantity, source, target, when, note) -> None:
-    """Move shares between accounts at cost (e.g. in-kind to a TFSA)."""
+def transfer(app: App, symbol, quantity, source, target, price, when, note) -> None:
+    """Move shares between accounts (e.g. in-kind to a TFSA).
+
+    \b
+    Holdings move at cost. For tax, a move from a taxable account into a
+    registered one is a deemed sale at market value (a loss is denied), and
+    a move out of a registered account resets the cost to market value, so
+    give --price for those.
+    """
     src, dst = app.account(source), app.account(target)
+    day = parse_date(when)
+    currency = ""
+    # Only a move across the registered/taxable line has a tax effect.
+    crosses = src.type.registered != dst.type.registered
+    if price is None and crosses:
+        if day == date.today().isoformat():
+            try:
+                q = app.tracker.market.quote(symbol)
+                price, currency = q.price, q.currency
+                app.warn(f"using the live price {fmt.price(q.price)} {q.currency} as the market value")
+            except MarketError:
+                pass
+        if price is None:
+            app.warn("no --price given: the tax report will ask for this transfer's market value")
     _record(
         app,
         Transaction(
             account_id=src.id,
             type=TxnType.TRANSFER,
-            date=parse_date(when),
+            date=day,
             symbol=symbol,
             quantity=quantity,
+            price=price or 0.0,
+            currency=currency,
             target_account_id=dst.id,
             note=note,
         ),
@@ -1268,17 +1299,22 @@ def income(app: App, no_forecast: bool) -> None:
 @click.option("-y", "--year", type=int, default=None)
 @pass_app
 def tax(app: App, year: int | None) -> None:
-    """Capital gains (ACB, trade-date FX), superficial-loss checks and contribution room."""
+    """Capital gains (pooled ACB, trade-date FX), superficial losses and contribution room."""
     tr = app.tracker
     with app.busy("Building tax report…"):
-        years, warnings = tr.tax_years()
+        years, report = tr.tax_years()
         rooms = tr.room()
     app.title("Tax")
     app.console.print(
-        render.tax_group(years, warnings, rooms, tr.store.account_map(), tr.base, privacy=app.privacy, year=year)
+        render.tax_group(years, report, rooms, tr.store.account_map(), tr.base, privacy=app.privacy, year=year)
     )
     app.console.print(
-        Text("\nEstimates only — confirm figures against your broker slips (T5008/T3/T5) before filing.", style="muted")
+        Text(
+            "\nEstimates only — confirm figures against your broker slips (T5008/T3/T5) before filing."
+            "\nPurchases by a spouse or a corporation you control can also make a loss superficial;"
+            " MarketPulse can't see those.",
+            style="muted",
+        )
     )
 
 

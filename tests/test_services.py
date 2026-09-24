@@ -206,10 +206,16 @@ def test_tax_years_and_room(tracker, store, fake):
             currency="USD",
         )
     )
-    fake.set_history("USDCAD=X", {"2025-03-01": 1.4}, currency="CAD")
-    years, warnings = tracker.tax_years()
-    assert years[0].year == 2025 and years[0].net_gain == pytest.approx(70)
-    assert warnings == []
+    # Cost at the buy date's rate (US$100 x 1.30 = C$130), proceeds at the
+    # sale date's (US$150 x 1.40 = C$210): C$80, not the US$50 gain x 1.40 = C$70
+    # that converting only at the sale date would give.
+    fake.set_history("USDCAD=X", {"2025-01-02": 1.3, "2025-03-01": 1.4}, currency="CAD")
+    years, report = tracker.tax_years()
+    assert years[0].year == 2025 and years[0].net_gain == pytest.approx(80)
+    assert report.issues == [] and not years[0].missing_fx
+    # The FX series was requested from a week before the first purchase, not the first sale.
+    fx_calls = [params for url, params in fake.calls if "USDCAD" in url]
+    assert date.fromtimestamp(fx_calls[-1]["period1"]) <= date(2024, 12, 26)
     tfsa = store.add_account(Account(name="TFSA", type=AccountType.TFSA))
     store.set_room("TFSA", date.today().year, 7000)
     store.add_transaction(Transaction(account_id=tfsa.id, type=TxnType.DEPOSIT, amount=2000, currency="CAD"))

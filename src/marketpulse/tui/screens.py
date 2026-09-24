@@ -182,7 +182,9 @@ class TransactionForm(BaseForm):
         show = {
             "k-symbol": k.needs_symbol or k is TxnType.INTEREST,
             "k-qty": k.uses_quantity,
-            "k-price": k in (TxnType.BUY, TxnType.SELL, TxnType.DRIP, TxnType.VALUATION),
+            # A transfer's price is the market value per unit, used by the tax
+            # report when shares cross between taxable and registered accounts.
+            "k-price": k in (TxnType.BUY, TxnType.SELL, TxnType.DRIP, TxnType.VALUATION, TxnType.TRANSFER),
             "k-amount": k.uses_amount,
             "k-ratio": k is TxnType.SPLIT,
             "k-fees": k in (TxnType.BUY, TxnType.SELL),
@@ -192,7 +194,12 @@ class TransactionForm(BaseForm):
             for w in self.query(f".{cls}"):
                 w.display = visible
         price = self.query_one("#f-price", Input)
-        price.placeholder = "Price (blank = live)" if k in (TxnType.BUY, TxnType.SELL) else "Price per unit"
+        if k in (TxnType.BUY, TxnType.SELL):
+            price.placeholder = "Price (blank = live)"
+        elif k is TxnType.TRANSFER:
+            price.placeholder = "Market value / unit (for tax)"
+        else:
+            price.placeholder = "Price per unit"
 
     @on(Select.Changed, "#f-type")
     def _type_changed(self, event: Select.Changed) -> None:
@@ -268,6 +275,9 @@ class TransactionForm(BaseForm):
                     raise FormError("Enter a price (no live quote available).")
                 if day != today():
                     raise FormError("Back-dated trades need an explicit price.")
+                price = self.live_price
+            if k is TxnType.TRANSFER and price is None and day == today() and symbol == self.symbol:
+                # Same convenience as a buy: today's transfer defaults to the live price.
                 price = self.live_price
             target = self.query_one("#f-target", Select).value
             txn = Transaction(

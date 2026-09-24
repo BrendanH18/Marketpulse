@@ -17,9 +17,10 @@ from rich.text import Text
 
 from . import charts, fmt
 from .analytics import IncomeForecast, Performance, RebalanceRow, TaxYear, max_drawdown, period_return
-from .ledger import RoomStatus, SuperficialLossWarning
+from .ledger import RoomStatus
 from .market import SearchResult
 from .models import Account, Bar, Quote, Transaction, TxnType
+from .tax import DENIED_REGISTERED, Disposition, TaxReport
 from .themes import OMARCHY_PALETTES, Palette, palette_from_colors, pretty_name
 from .valuation import Breakdown, PortfolioView, PositionView
 
@@ -604,9 +605,24 @@ def income_group(
     return Group(*parts)
 
 
+def _disposition_note(r: Disposition) -> Text:
+    """Short tag explaining anything unusual about a disposition row."""
+    if not r.complete:
+        return Text("FX missing", style="down")
+    if r.denied_reason == DENIED_REGISTERED:
+        return Text("→ registered, loss denied", style="warn")
+    if r.superficial:
+        return Text("superficial" + (" (window open)" if r.window_open else ""), style="warn")
+    if r.kind == "roc":
+        return Text("ROC > ACB", style="muted")
+    if r.kind == "deemed":
+        return Text("→ registered", style="muted")
+    return Text("")
+
+
 def tax_group(
     years: Sequence[TaxYear],
-    warnings: Sequence[SuperficialLossWarning],
+    report: TaxReport,
     rooms: Sequence[tuple[RoomStatus, list[Account]]],
     accounts: dict[int, Account],
     base: str,
@@ -614,21 +630,28 @@ def tax_group(
     privacy: bool = False,
     year: int | None = None,
 ) -> RenderableType:
+    """The tax report: yearly totals, one year's dispositions, notes, and contribution room.
+
+    Every money figure is already in `base` (pooled ACB, trade-date FX): see tax.py.
+    """
     parts: list[RenderableType] = []
     if years:
         t = table(
             "Year",
             ("Proceeds", "right"),
             ("ACB", "right"),
+            ("Denied", "right"),
             ("Net gain", "right"),
             ("Taxable", "right"),
-            title=f"Capital gains — taxable accounts ({base})",
+            title=f"Capital gains — taxable accounts, pooled ACB ({base})",
         )
         for y in years:
             t.add_row(
                 Text(str(y.year), style="bright"),
                 Text(fmt.money(y.proceeds, privacy=privacy)),
                 Text(fmt.money(y.cost, privacy=privacy), style="muted"),
+                # Losses that don't count this year (superficial / moved into a TFSA or RRSP).
+                Text(fmt.money(y.denied, privacy=privacy) if y.denied else "—", style="warn" if y.denied else "muted"),
                 trend(fmt.money(y.net_gain, sign=True, privacy=privacy), y.net_gain),
                 Text(
                     f"{fmt.money(y.taxable, privacy=privacy)}  ({y.inclusion_rate:.0%})",
@@ -649,36 +672,49 @@ def tax_group(
                 "Ccy",
                 ("FX", "right"),
                 "",
-                title=f"{focus.year} dispositions",
+                title=f"{focus.year} dispositions ({base})",
             )
             for r in focus.rows:
+                acct = accounts.get(r.account_id)
                 d.add_row(
                     Text(r.date, style="muted"),
-                    Text(r.account),
+                    Text(acct.name if acct else "?"),
                     Text(r.symbol, style="bright"),
                     Text(fmt.qty(r.quantity)),
                     Text(fmt.money(r.proceeds, privacy=privacy)),
-                    Text(fmt.money(r.cost, privacy=privacy), style="muted"),
-                    trend(fmt.money(r.gain, sign=True, privacy=privacy), r.gain),
+                    Text(fmt.money(r.acb, privacy=privacy), style="muted"),
+                    trend(fmt.money(r.allowed_gain, sign=True, privacy=privacy), r.allowed_gain),
                     Text(r.currency, style="muted"),
                     Text(f"{r.fx:.4f}" if r.fx else "missing", style="muted" if r.fx else "down"),
-                    Text("superficial?" if r.superficial else "", style="warn"),
+                    _disposition_note(r),
                 )
             parts += [Text(""), d]
     else:
         parts.append(Text("No realized gains in taxable accounts.", style="muted"))
-    if warnings:
-        w = Text(
-            "\n⚠ Possible superficial losses (CRA 30-day rule) — loss denied, add it to the rebuy's ACB:\n",
-            style="warn",
-        )
-        for x in warnings:
-            acct = accounts.get(x.rebuy_account_id)
+
+    # Explain every denied loss: how much, why, and the numbers behind it.
+    superficial = [r for y in years for r in y.rows if r.superficial]
+    if superficial:
+        w = Text("\n⚠ Superficial losses (bought back within 30 days and still held):\n", style="warn")
+        for r in superficial:
             w.append(
-                f"   {x.sale.date} sold {x.sale.symbol} at a loss of {fmt.money(-x.sale.gain, privacy=privacy)} "
-                f"· rebought {x.rebuy_date} in {acct.name if acct else '?'}\n",
+                f"   {r.date} {r.symbol}: {fmt.money(r.denied, privacy=privacy)} of a "
+                f"{fmt.money(-r.gain, privacy=privacy)} loss denied — sold {fmt.qty(r.quantity)}, "
+                f"bought {fmt.qty(r.acquired_in_window)} within 30 days, holding {fmt.qty(r.held_after_window)}"
+                + (" (window still open)" if r.window_open else "")
+                + "\n",
                 style="muted",
             )
+        w.append(
+            "   The denied loss is added to the ACB of the shares you bought back in taxable accounts "
+            "(and lost for shares bought back in a TFSA/RRSP).\n",
+            style="muted",
+        )
+        parts.append(w)
+    if report.issues:
+        w = Text("\n⚠ Needs attention:\n", style="warn")
+        for issue in report.issues:
+            w.append(f"   {issue.date} {issue.message}\n", style="muted")
         parts.append(w)
     if rooms:
         r = table(

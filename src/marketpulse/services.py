@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from . import alerts as alerts_mod
-from . import fmt
+from . import fmt, tax
 from .analytics import (
     Performance,
     TaxYear,
@@ -18,7 +18,7 @@ from .analytics import (
 )
 from .config import Config
 from .db import Snapshot, Store
-from .ledger import RoomStatus, contribution_room, replay, superficial_losses
+from .ledger import RoomStatus, contribution_room, replay, transaction_currency
 from .market import MarketData, MarketError
 from .models import (
     EPSILON,
@@ -32,6 +32,7 @@ from .models import (
     Transaction,
     guess_currency,
 )
+from .tax import TaxReport
 from .themes import resolve_palette
 from .valuation import PortfolioView, build_view
 
@@ -310,34 +311,43 @@ class Tracker:
         )
         return income_forecast(view, self.trailing_dividends(syms))
 
-    def tax_years(self) -> tuple[list[TaxYear], list]:
-        state = self.store.ledger()
-        accounts = self.store.account_map()
+    def tax_years(self) -> tuple[list[TaxYear], TaxReport]:
+        """Capital gains by year, plus the full report (issues, open pools).
+
+        FX: every foreign-currency transaction that touches a taxable account
+        needs its own day's rate (purchases as well as sales), so a daily
+        series is fetched for each such currency from a week before the
+        earliest one. The extra week covers a first trade on a Monday or just
+        after a holiday, which takes the previous close.
+        """
         txns = self.store.transactions()
-        warnings = superficial_losses(txns, state)
-        flagged = {w.sale.txn_id for w in warnings if w.sale.txn_id is not None}
+        accounts = self.store.account_map()
         base = self.base
-        hist: dict[str, dict[str, float]] = {}
-        taxable = [r for r in state.realized if (a := accounts.get(r.account_id)) and not a.type.registered]
-        for ccy in sorted({r.currency for r in taxable if r.currency != base}):
-            start = min(r.date for r in taxable if r.currency == ccy)
-            start = (date.fromisoformat(start) - timedelta(days=7)).isoformat()
+        relevant = [
+            t
+            for t in txns
+            if t.symbol
+            and (
+                tax.is_taxable(accounts.get(t.account_id))
+                or (t.target_account_id is not None and tax.is_taxable(accounts.get(t.target_account_id)))
+            )
+        ]
+        first_seen: dict[str, str] = {}
+        for t in relevant:
+            ccy = transaction_currency(t, accounts)
+            if ccy != base and (ccy not in first_seen or t.date < first_seen[ccy]):
+                first_seen[ccy] = t.date
+        series: dict[str, dict[str, float]] = {}
+        for ccy, first in sorted(first_seen.items()):
+            start = (date.fromisoformat(first) - timedelta(days=7)).isoformat()
             try:
-                hist[ccy], _ = self.market.daily_closes(f"{ccy}{base}=X", start)
+                series[ccy], _ = self.market.daily_closes(f"{ccy}{base}=X", start)
             except MarketError:
-                hist[ccy] = {}
-
-        def fx_on(day: str, ccy: str) -> float | None:
-            if not ccy or ccy == base:
-                return 1.0
-            series = hist.get(ccy) or {}
-            prior = [d for d in series if d <= day]
-            return series[max(prior)] if prior else None
-
-        years = capital_gains(
-            state, accounts, fx_on, inclusion_rate=self.config.capital_gains_inclusion, superficial_txn_ids=flagged
-        )
-        return years, warnings
+                # Offline or unknown pair: affected rows are marked incomplete
+                # and kept out of totals rather than computed with a guess.
+                series[ccy] = {}
+        report = tax.compute(txns, accounts, tax.fx_lookup(series, base))
+        return capital_gains(report, inclusion_rate=self.config.capital_gains_inclusion), report
 
     def room(self) -> list[tuple[RoomStatus, list[Account]]]:
         accounts = self.store.accounts()

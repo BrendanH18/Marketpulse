@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 
 from .models import EPSILON, Account, Transaction, TxnType, guess_currency
 
@@ -106,6 +106,21 @@ class LedgerState:
         return dict(out)
 
 
+def transaction_currency(txn: Transaction, accounts: dict[int, Account]) -> str:
+    """The currency a transaction's prices and amounts are in.
+
+    An explicit currency on the transaction wins. Otherwise a security's
+    currency is guessed from its symbol (XEQT.TO -> CAD) and cash movements
+    use the account's currency. Shared by the ledger and the tax engine so
+    both always agree on what currency a row is in.
+    """
+    acct = accounts.get(txn.account_id)
+    account_ccy = acct.currency if acct else "CAD"
+    if txn.currency:
+        return txn.currency
+    return guess_currency(txn.symbol, account_ccy) if txn.symbol else account_ccy
+
+
 def sort_key(txn: Transaction) -> tuple:
     # Same-day ordering: money in, then buys/splits, then sells, then money out,
     # so a deposit-then-buy entered on one day never looks like an oversell.
@@ -136,10 +151,6 @@ def replay(
     accounts = accounts or {}
     state = LedgerState()
 
-    def account_ccy(account_id: int) -> str:
-        acct = accounts.get(account_id)
-        return acct.currency if acct else "CAD"
-
     def tracks_cash(account_id: int) -> bool:
         acct = accounts.get(account_id)
         return bool(acct and acct.track_cash)
@@ -158,7 +169,7 @@ def replay(
             break
         acct = txn.account_id
         t = txn.type
-        ccy = txn.currency or (guess_currency(txn.symbol, account_ccy(acct)) if txn.symbol else account_ccy(acct))
+        ccy = transaction_currency(txn, accounts)
         cash_key = (acct, ccy)
 
         if t in (TxnType.BUY, TxnType.DRIP):
@@ -252,39 +263,7 @@ def replay(
     return state
 
 
-# ── Canadian tax helpers ──────────────────────────────────────────────────────
-
-
-@dataclass
-class SuperficialLossWarning:
-    sale: RealizedGain
-    rebuy_date: str
-    rebuy_account_id: int
-
-
-def superficial_losses(transactions: list[Transaction], state: LedgerState) -> list[SuperficialLossWarning]:
-    """Flag losses that may be superficial under CRA rules.
-
-    A loss is superficial if the same property is bought (in *any* of your
-    accounts, including registered ones) within 30 days before or after the
-    sale and is still held 30 days after. We flag the rebuy window; the user
-    confirms, since holdings of affiliated persons are outside our view.
-    """
-    buys = [t for t in transactions if t.type in (TxnType.BUY, TxnType.DRIP)]
-    warnings = []
-    for sale in state.realized:
-        if sale.gain >= 0 or sale.quantity <= 0:
-            continue
-        d = date.fromisoformat(sale.date)
-        lo, hi = (d - timedelta(days=30)).isoformat(), (d + timedelta(days=30)).isoformat()
-        for b in buys:
-            if b.symbol == sale.symbol and lo <= b.date <= hi and b.id != sale.txn_id:
-                # a buy on the same day before the sale is the lot being sold, not a rebuy
-                if b.date == sale.date and b.account_id == sale.account_id:
-                    continue
-                warnings.append(SuperficialLossWarning(sale, b.date, b.account_id))
-                break
-    return warnings
+# ── Contribution room ──────────────────────────────────────────────────────
 
 
 # TFSA annual dollar limits (CRA). Room accumulates from the year you turn 18
