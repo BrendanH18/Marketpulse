@@ -11,6 +11,7 @@ from itertools import pairwise
 
 from .ledger import LedgerState
 from .models import EPSILON, Account, Transaction, TxnType, guess_currency
+from .tax import Disposition, TaxReport
 from .valuation import Breakdown, PortfolioView
 
 # ── Money in / money out ──────────────────────────────────────────────────────
@@ -24,7 +25,7 @@ def external_flows(transactions: Sequence[Transaction], accounts: dict[int, Acco
     sell proceeds and cash distributions are money out.
     """
     cash_based = {t.account_id for t in transactions if t.type in (TxnType.DEPOSIT, TxnType.WITHDRAWAL)}
-    cash_based |= {a.id for a in accounts.values() if a.track_cash}
+    cash_based |= {a.saved_id for a in accounts.values() if a.track_cash}
     flows = []
     for t in sorted(transactions, key=lambda t: (t.date, t.id or 0)):
         acct = accounts.get(t.account_id)
@@ -287,86 +288,56 @@ def income_forecast(view: PortfolioView, per_share_ttm: dict[str, float]) -> lis
 
 
 # ── Canadian capital gains ────────────────────────────────────────────────────
-
-
-@dataclass
-class GainRow:
-    date: str
-    account: str
-    symbol: str
-    quantity: float
-    proceeds: float
-    cost: float
-    currency: str
-    fx: float | None
-    superficial: bool = False
-
-    @property
-    def gain(self) -> float:
-        return self.proceeds - self.cost
-
-    @property
-    def gain_base(self) -> float | None:
-        return None if self.fx is None else self.gain * self.fx
+#
+# The heavy lifting (pooled ACB, trade-date FX, superficial losses, deemed
+# dispositions) is in tax.py. This layer only groups its dispositions into
+# calendar tax years and totals them.
 
 
 @dataclass
 class TaxYear:
     year: int
-    rows: list[GainRow] = field(default_factory=list)
+    rows: list[Disposition] = field(default_factory=list)
     inclusion_rate: float = 0.5
 
     @property
+    def counted(self) -> list[Disposition]:
+        """Rows whose figures are fully known (every FX rate available)."""
+        return [r for r in self.rows if r.complete]
+
+    @property
     def proceeds(self) -> float:
-        return sum(r.proceeds * r.fx for r in self.rows if r.fx is not None)
+        return sum(r.proceeds for r in self.counted)
 
     @property
     def cost(self) -> float:
-        return sum(r.cost * r.fx for r in self.rows if r.fx is not None)
+        return sum(r.acb for r in self.counted)
+
+    @property
+    def denied(self) -> float:
+        """Losses disallowed this year (superficial, or moved into a registered plan)."""
+        return sum(r.denied for r in self.counted)
 
     @property
     def net_gain(self) -> float:
-        return sum(r.gain_base for r in self.rows if r.gain_base is not None and not (r.superficial and r.gain < 0))
+        """Net capital gain as reported: gains minus *allowed* losses."""
+        return sum(r.allowed_gain for r in self.counted)
 
     @property
     def taxable(self) -> float:
+        # A net loss isn't taxable this year; it becomes a net capital loss to
+        # carry back 3 years or forward indefinitely (not tracked here).
         return max(self.net_gain, 0.0) * self.inclusion_rate
 
     @property
-    def missing_fx(self) -> list[GainRow]:
-        return [r for r in self.rows if r.fx is None]
+    def missing_fx(self) -> list[Disposition]:
+        return [r for r in self.rows if not r.complete]
 
 
-def capital_gains(
-    state: LedgerState,
-    accounts: dict[int, Account],
-    fx_on: Callable[[str, str], float | None],
-    *,
-    inclusion_rate: float = 0.5,
-    superficial_txn_ids: set[int] | None = None,
-) -> list[TaxYear]:
-    """Realized gains in taxable accounts grouped by year, converted at each
-    trade date's FX rate (as CRA requires). Superficial losses are listed but
-    denied in the net figure."""
-    superficial_txn_ids = superficial_txn_ids or set()
+def capital_gains(report: TaxReport, *, inclusion_rate: float = 0.5) -> list[TaxYear]:
+    """Group a tax report's dispositions by calendar year, newest year first."""
     years: dict[int, TaxYear] = {}
-    for r in state.realized:
-        acct = accounts.get(r.account_id)
-        if acct is None or acct.type.registered:
-            continue
-        y = int(r.date[:4])
-        ty = years.setdefault(y, TaxYear(year=y, inclusion_rate=inclusion_rate))
-        ty.rows.append(
-            GainRow(
-                date=r.date,
-                account=acct.name,
-                symbol=r.symbol,
-                quantity=r.quantity,
-                proceeds=r.proceeds,
-                cost=r.cost,
-                currency=r.currency,
-                fx=fx_on(r.date, r.currency),
-                superficial=r.txn_id in superficial_txn_ids,
-            )
-        )
+    for d in report.dispositions:
+        y = int(d.date[:4])
+        years.setdefault(y, TaxYear(year=y, inclusion_rate=inclusion_rate)).rows.append(d)
     return [years[y] for y in sorted(years, reverse=True)]

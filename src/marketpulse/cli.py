@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import platform
 import shutil
@@ -11,6 +12,7 @@ import time
 from dataclasses import fields, replace
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import click
 from rich.console import Console, Group
@@ -34,13 +36,21 @@ from .models import (
     parse_date,
     parse_symbols,
 )
+from .tax import TaxReport
 from .themes import OMARCHY_PALETTES, omarchy_active, pretty_name, resolve_palette, rich_styles
 
+if TYPE_CHECKING:  # for annotations only; the real imports stay lazy
+    from .db import Store
+    from .services import Tracker
+
 for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(errors="replace")
-    except (AttributeError, ValueError):
-        pass
+    # Replace unencodable characters instead of crashing on a non-UTF-8 terminal.
+    # Only real text streams can be reconfigured (pytest/CliRunner swap in others).
+    if isinstance(_stream, io.TextIOWrapper):
+        try:
+            _stream.reconfigure(errors="replace")
+        except ValueError:
+            pass
 
 
 class App:
@@ -51,18 +61,19 @@ class App:
         self.config = Config.load()
         self.palette = resolve_palette(self.config.theme)
         self.console = Console(theme=RichTheme(rich_styles(self.palette)), highlight=False)
-        self._tracker = None
+        self._tracker: Tracker | None = None
 
     @property
-    def tracker(self):
+    def tracker(self) -> Tracker:
         if self._tracker is None:
+            # Imported here so `marketpulse --help` and friends start instantly.
             from .services import Tracker
 
             self._tracker = Tracker.open(self.config)
         return self._tracker
 
     @property
-    def store(self):
+    def store(self) -> Store:
         return self.tracker.store
 
     @property
@@ -105,13 +116,17 @@ class App:
             + ", ".join(a.name for a in accounts)
             + ") or set a default: `marketpulse config set default_account NAME`."
         )
-        raise AssertionError  # unreachable
 
 
 pass_app = click.make_pass_decorator(App, ensure=True)
 
 
-def fail(message: str) -> None:
+def fail(message: str) -> NoReturn:
+    """Abort the command with a friendly error (exit code 1, no traceback).
+
+    Typed NoReturn so the type checker knows code after `fail()` is
+    unreachable, e.g. `if acct is None: fail(...)` narrows acct to Account.
+    """
     raise click.ClickException(message)
 
 
@@ -485,7 +500,6 @@ def _record(app: App, txn: Transaction) -> Transaction:
         return app.tracker.add_transaction(txn)
     except ValueError as e:
         fail(str(e))
-    raise AssertionError
 
 
 def _trade(
@@ -517,7 +531,7 @@ def _trade(
     txn = _record(
         app,
         Transaction(
-            account_id=acct.id,
+            account_id=acct.saved_id,
             type=kind,
             date=day,
             symbol=sym,
@@ -529,7 +543,7 @@ def _trade(
         ),
     )
     state = app.store.ledger()
-    h = state.holdings.get((acct.id, sym))
+    h = state.holdings.get((acct.saved_id, sym))
     verb = "Bought" if kind is TxnType.BUY else "Sold"
     msg = f"{verb} {fmt.qty(quantity)} {sym} @ {fmt.price(price)} {ccy} in {acct.name}"
     if kind is TxnType.SELL:
@@ -575,7 +589,7 @@ def _cash_event(
     acct = app.account(account)
     day = when or date.today().isoformat()
     txn = Transaction(
-        account_id=acct.id,
+        account_id=acct.saved_id,
         type=kind,
         date=day,
         symbol=symbol.upper(),
@@ -612,7 +626,7 @@ def drip(app: App, symbol, quantity, price, account, when, note) -> None:
     _record(
         app,
         Transaction(
-            account_id=acct.id,
+            account_id=acct.saved_id,
             type=TxnType.DRIP,
             date=parse_date(when),
             symbol=symbol,
@@ -677,7 +691,7 @@ def split(app: App, symbol, ratio, account, when, note) -> None:
     _record(
         app,
         Transaction(
-            account_id=acct.id, type=TxnType.SPLIT, date=parse_date(when), symbol=symbol, ratio=ratio, note=note
+            account_id=acct.saved_id, type=TxnType.SPLIT, date=parse_date(when), symbol=symbol, ratio=ratio, note=note
         ),
     )
     app.ok(f"Split {symbol.upper()} ×{ratio:g} in {acct.name}")
@@ -688,20 +702,51 @@ def split(app: App, symbol, ratio, account, when, note) -> None:
 @click.argument("quantity", type=float)
 @click.option("--from", "source", required=True, help="Source account.")
 @click.option("--to", "target", required=True, help="Destination account.")
+@click.option(
+    "-p",
+    "--price",
+    type=float,
+    default=None,
+    help="Market value per unit on the transfer date. Needed for tax when moving between "
+    "a taxable and a registered account (defaults to the live price when dated today).",
+)
 @click.option("-d", "--date", "when", default=None, callback=_date_callback)
 @click.option("-m", "--note", default="")
 @pass_app
-def transfer(app: App, symbol, quantity, source, target, when, note) -> None:
-    """Move shares between accounts at cost (e.g. in-kind to a TFSA)."""
+def transfer(app: App, symbol, quantity, source, target, price, when, note) -> None:
+    """Move shares between accounts (e.g. in-kind to a TFSA).
+
+    \b
+    Holdings move at cost. For tax, a move from a taxable account into a
+    registered one is a deemed sale at market value (a loss is denied), and
+    a move out of a registered account resets the cost to market value, so
+    give --price for those.
+    """
     src, dst = app.account(source), app.account(target)
+    day = parse_date(when)
+    currency = ""
+    # Only a move across the registered/taxable line has a tax effect.
+    crosses = src.type.registered != dst.type.registered
+    if price is None and crosses:
+        if day == date.today().isoformat():
+            try:
+                q = app.tracker.market.quote(symbol)
+                price, currency = q.price, q.currency
+                app.warn(f"using the live price {fmt.price(q.price)} {q.currency} as the market value")
+            except MarketError:
+                pass
+        if price is None:
+            app.warn("no --price given: the tax report will ask for this transfer's market value")
     _record(
         app,
         Transaction(
-            account_id=src.id,
+            account_id=src.saved_id,
             type=TxnType.TRANSFER,
-            date=parse_date(when),
+            date=day,
             symbol=symbol,
             quantity=quantity,
+            price=price or 0.0,
+            currency=currency,
             target_account_id=dst.id,
             note=note,
         ),
@@ -741,7 +786,7 @@ def undo(app: App, yes: bool) -> None:
     last = max(txns, key=lambda t: t.id or 0)
     app.console.print(render.activity_table([last], app.store.account_map()))
     if yes or click.confirm("Delete this transaction?"):
-        app.store.delete_transaction(last.id)
+        app.store.delete_transaction(last.saved_id)
         app.ok(f"Deleted transaction #{last.id}.")
 
 
@@ -784,7 +829,7 @@ def txn_edit(app: App, txn_id: int, when, account, symbol, quantity, price, amou
     if when is not None:
         t.date = when
     if account is not None:
-        t.account_id = app.account(account).id
+        t.account_id = app.account(account).saved_id
     for name, value in (
         ("symbol", symbol),
         ("quantity", quantity),
@@ -922,7 +967,7 @@ def accounts_remove(app: App, ref, yes) -> None:
     if yes or click.confirm(
         f"Delete {acct.name} and its {count} transaction(s)? Consider `accounts edit {acct.name} --archive` instead."
     ):
-        app.store.delete_account(acct.id)
+        app.store.delete_account(acct.saved_id)
         app.ok(f"Deleted {acct.name}.")
 
 
@@ -951,7 +996,8 @@ def accounts_room(app: App, account_type, year, amount) -> None:
         app.console.print(Text("No contribution room recorded yet.", style="muted"))
         return
     app.console.print(
-        render.tax_group([], [], rooms, app.store.account_map(), app.config.base_currency, privacy=app.privacy)
+        # Room only: an empty tax report (no years, no issues) renders just the room table.
+        render.tax_group([], TaxReport(), rooms, app.store.account_map(), app.config.base_currency, privacy=app.privacy)
     )
 
 
@@ -1022,7 +1068,7 @@ def asset_fixed(app: App, symbol, principal, rate, start, maturity, compounding,
     _record(
         app,
         Transaction(
-            account_id=acct.id,
+            account_id=acct.saved_id,
             type=TxnType.BUY,
             date=start_d,
             symbol=symbol,
@@ -1062,7 +1108,7 @@ def asset_manual(app: App, symbol, value, name, asset_class, currency, account, 
     _record(
         app,
         Transaction(
-            account_id=acct.id,
+            account_id=acct.saved_id,
             type=TxnType.BUY,
             date=parse_date(when),
             symbol=symbol,
@@ -1280,17 +1326,22 @@ def income(app: App, no_forecast: bool) -> None:
 @click.option("-y", "--year", type=int, default=None)
 @pass_app
 def tax(app: App, year: int | None) -> None:
-    """Capital gains (ACB, trade-date FX), superficial-loss checks and contribution room."""
+    """Capital gains (pooled ACB, trade-date FX), superficial losses and contribution room."""
     tr = app.tracker
     with app.busy("Building tax report…"):
-        years, warnings = tr.tax_years()
+        years, report = tr.tax_years()
         rooms = tr.room()
     app.title("Tax")
     app.console.print(
-        render.tax_group(years, warnings, rooms, tr.store.account_map(), tr.base, privacy=app.privacy, year=year)
+        render.tax_group(years, report, rooms, tr.store.account_map(), tr.base, privacy=app.privacy, year=year)
     )
     app.console.print(
-        Text("\nEstimates only — confirm figures against your broker slips (T5008/T3/T5) before filing.", style="muted")
+        Text(
+            "\nEstimates only — confirm figures against your broker slips (T5008/T3/T5) before filing."
+            "\nPurchases by a spouse or a corporation you control can also make a loss superficial;"
+            " MarketPulse can't see those.",
+            style="muted",
+        )
     )
 
 
@@ -1338,6 +1389,9 @@ def import_cmd(app: App, path: Path, account, dry_run, no_create_accounts) -> No
         fail(str(e))
     verb = "Would import" if dry_run else "Imported"
     app.ok(f"{verb} {result.added} transaction(s); {result.duplicates} duplicate(s) skipped.")
+    if result.backup is not None:
+        # Tell the user how to undo the whole import, not just the last row.
+        app.console.print(Text(f"  pre-import backup: {result.backup}", style="muted"))
     for name in result.accounts_created:
         app.warn(f"created account {name}")
     for line, reason in result.skipped[:15]:
@@ -1361,6 +1415,45 @@ def export_cmd(app: App, path: Path | None) -> None:
     app.ok(f"Exported {n} transactions to {path}")
 
 
+@main.group(invoke_without_command=True)
+@click.pass_context
+def backup(ctx: click.Context) -> None:
+    """Back up the database (run with no subcommand to back up now).
+
+    \b
+    Backups are consistent SQLite copies in ~/.marketpulse/backups/. One is
+    also taken automatically each day, before every CSV import and before any
+    schema upgrade. To restore, quit MarketPulse and copy a backup over
+    ~/.marketpulse/marketpulse.db.
+    """
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(backup_now)
+
+
+@backup.command("now")
+@click.argument("path", type=click.Path(dir_okay=False, path_type=Path), required=False)
+@pass_app
+def backup_now(app: App, path: Path | None) -> None:
+    """Back up now (to PATH, or to the backups directory)."""
+    dest = app.store.backup(reason="manual", dest=path)
+    app.ok(f"Backed up to {dest}")
+
+
+@backup.command("list")
+@pass_app
+def backup_list(app: App) -> None:
+    """List backups, newest first."""
+    items = app.store.backups()
+    if not items:
+        app.warn(f"No backups yet in {app.store.backup_dir}")
+        return
+    t = render.table("File", "Reason", ("Size", "right"), title=str(app.store.backup_dir))
+    for p in items:
+        size = Text(f"{p.stat().st_size / 1024:,.0f} KB")
+        t.add_row(Text(p.name), Text(app.store.backup_reason(p), style="muted"), size)
+    app.console.print(t)
+
+
 # ── Appearance & config ───────────────────────────────────────────────────────
 
 
@@ -1369,7 +1462,6 @@ def _theme_slug(name: str) -> str:
     if slug in ("auto", "omarchy") or slug in OMARCHY_PALETTES:
         return slug
     fail(f"Unknown theme '{name}'. Run `marketpulse theme` to see them all.")
-    raise AssertionError
 
 
 @main.group(invoke_without_command=True)
@@ -1418,6 +1510,7 @@ def config_set(app: App, key: str, value: tuple[str, ...]) -> None:
         fail(f"Unknown setting '{key}'. Known: {', '.join(known)}")
     raw = " ".join(value)
     current = getattr(app.config, key)
+    parsed: object  # bool, int, float, list[str] or str, matching the setting's type
     try:
         if isinstance(current, bool):
             if raw.lower() not in ("true", "false", "yes", "no", "on", "off", "1", "0"):
@@ -1443,9 +1536,9 @@ def config_set(app: App, key: str, value: tuple[str, ...]) -> None:
         fail("menubar_display must be day_pct, day_change, net_worth or symbol.")
     if key == "chart_period" and parsed not in PERIODS:
         fail(f"chart_period must be one of {', '.join(PERIODS)}")
-    if key == "capital_gains_inclusion" and not 0 < parsed <= 1:
+    if key == "capital_gains_inclusion" and not (isinstance(parsed, float) and 0 < parsed <= 1):
         fail("capital_gains_inclusion is a fraction: > 0 and <= 1 (e.g. 0.5).")
-    if key == "refresh_seconds" and parsed < 5:
+    if key == "refresh_seconds" and isinstance(parsed, int) and parsed < 5:
         fail("refresh_seconds must be at least 5.")
     setattr(app.config, key, parsed)
     app.config.save()
@@ -1515,7 +1608,14 @@ def doctor(app: App) -> None:
     )
     row("config", str(config_path()), config_path().exists() or None)
     tr = app.tracker
-    row("database", str(tr.store.path))
+    row("database", f"{tr.store.path} (schema v{tr.store.schema_version})")
+    newest = next(iter(tr.store.backups()), None)
+    if newest is None:
+        row("backups", "none yet — `marketpulse backup`", None)
+    else:
+        age_days = (time.time() - newest.stat().st_mtime) / 86400
+        # Daily backups keep this under a day; a week means they're failing (full disk, permissions…).
+        row("backups", f"{len(tr.store.backups())} · newest {newest.name}", age_days < 7)
     row(
         "ledger",
         f"{len(tr.store.accounts())} accounts · {len(tr.store.transactions())} transactions"

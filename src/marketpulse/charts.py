@@ -127,7 +127,8 @@ def braille_chart(
             if line[r][c]:
                 ch, st = chr(0x2800 | line[r][c]), styles[owner[r][c] % len(styles)]
             elif fill[r][c]:
-                ch, st = chr(0x2800 | fill[r][c]), fill_style
+                # fill cells only exist when fill_style was given; `or` just satisfies the type
+                ch, st = chr(0x2800 | fill[r][c]), fill_style or ""
             elif r == base_row:
                 ch, st = ("┈" if c % 2 == 0 else " "), axis_style
             else:

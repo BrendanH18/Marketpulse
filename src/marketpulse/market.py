@@ -300,7 +300,7 @@ class MarketData:
         stamps = result.get("timestamp") or []
         q = ((result.get("indicators") or {}).get("quote") or [{}])[0]
         meta = result.get("meta") or {}
-        scale = _MINOR_UNITS.get(meta.get("currency"), ("", 1.0))[1]
+        scale = _MINOR_UNITS.get(meta.get("currency") or "", ("", 1.0))[1]
         offset = _gmt_offset(meta)
         opens, highs, lows, closes, vols = (q.get(k) or [] for k in ("open", "high", "low", "close", "volume"))
 
@@ -356,7 +356,7 @@ class MarketData:
         """Per-share cash distributions within `period`, oldest first."""
         result = self._chart(symbol, {"range": period, "interval": "1d", "events": "div"})
         meta = result.get("meta") or {}
-        scale = _MINOR_UNITS.get(meta.get("currency"), ("", 1.0))[1]
+        scale = _MINOR_UNITS.get(meta.get("currency") or "", ("", 1.0))[1]
         offset = _gmt_offset(meta)
         events = ((result.get("events") or {}).get("dividends") or {}).values()
         return sorted(

@@ -1,6 +1,6 @@
 import pytest
 
-from marketpulse.ledger import CashFlow, contribution_room, replay, replay_by_day, superficial_losses, tfsa_limit
+from marketpulse.ledger import CashFlow, contribution_room, replay, replay_by_day, tfsa_limit
 from marketpulse.models import Account, AccountType, Transaction, TxnType
 
 ACCOUNTS = {
@@ -149,32 +149,6 @@ def test_valuation_marks_manual_assets_and_until_filter():
     assert "HOUSE" not in replay(txns, ACCOUNTS, until="2023-12-31").valuations
 
 
-def test_superficial_loss_flagged_when_rebought_within_30_days():
-    txns = [
-        txn(TxnType.BUY, "2024-01-01", "A", 10, 100, id=1),
-        txn(TxnType.SELL, "2024-02-01", "A", 10, 80, id=2),
-        txn(TxnType.BUY, "2024-02-15", "A", 10, 81, account=2, id=3),
-    ]
-    warnings = superficial_losses(txns, replay(txns, ACCOUNTS))
-    assert len(warnings) == 1
-    assert warnings[0].rebuy_date == "2024-02-15" and warnings[0].rebuy_account_id == 2
-
-
-def test_gains_and_distant_rebuys_are_not_superficial():
-    gain = [
-        txn(TxnType.BUY, "2024-01-01", "A", 10, 100, id=1),
-        txn(TxnType.SELL, "2024-02-01", "A", 10, 120, id=2),
-        txn(TxnType.BUY, "2024-02-02", "A", 1, 1, id=3),
-    ]
-    assert superficial_losses(gain, replay(gain, ACCOUNTS)) == []
-    later = [
-        txn(TxnType.BUY, "2024-01-01", "A", 10, 100, id=1),
-        txn(TxnType.SELL, "2024-02-01", "A", 10, 80, id=2),
-        txn(TxnType.BUY, "2024-04-01", "A", 1, 1, id=3),
-    ]
-    assert superficial_losses(later, replay(later, ACCOUNTS)) == []
-
-
 def test_tfsa_room_rolls_forward_with_limits_and_withdrawals():
     flows = [CashFlow("2025-03-01", 2, 5000, "CAD"), CashFlow("2025-06-01", 2, -2000, "CAD")]
     next_year = contribution_room("TFSA", 2025, 10000, flows, {2}, current_year=2026)
@@ -194,6 +168,66 @@ def test_tfsa_limits():
     assert tfsa_limit(2015) == 10000
     assert tfsa_limit(2008) == 0
     assert tfsa_limit(2031) == 7000
+
+
+def _adds_up(status):
+    """RoomStatus's columns must always reconcile to `remaining`."""
+    return status.remaining == pytest.approx(
+        status.starting_room
+        + status.new_limits
+        + status.withdrawals_added_back
+        - status.contributions
+        - status.forfeited
+    )
+
+
+def test_fhsa_carry_forward_is_capped_at_one_year_of_room():
+    # Opened 2023 with $8,000 and never used. 2024: $8,000 + $8,000 carried = $16,000.
+    # 2025 and 2026: still $16,000, as the extra $8,000 each year is forfeited, not banked.
+    s = contribution_room("FHSA", 2023, 8000, [], {7}, current_year=2026)
+    assert s.remaining == pytest.approx(16000)  # MarketPulse 2.0 said $32,000
+    assert s.new_limits == 24000 and s.forfeited == pytest.approx(16000)
+    assert _adds_up(s)
+
+
+def test_fhsa_room_after_regular_contributions():
+    flows = [CashFlow("2023-06-01", 7, 8000, "CAD"), CashFlow("2024-06-01", 7, 5000, "CAD")]
+    s = contribution_room("FHSA", 2023, 8000, flows, {7}, current_year=2025)
+    # 2024: $8,000 new, $3,000 unused → 2025: $8,000 + $3,000 = $11,000.
+    assert s.remaining == pytest.approx(11000) and s.forfeited == 0 and _adds_up(s)
+
+
+def test_fhsa_over_contribution_eats_into_next_years_room():
+    flows = [CashFlow("2025-03-01", 7, 10000, "CAD")]
+    s = contribution_room("FHSA", 2025, 8000, flows, {7}, current_year=2026)
+    assert s.remaining == pytest.approx(6000) and _adds_up(s)
+    same_year = contribution_room("FHSA", 2025, 8000, flows, {7}, current_year=2025)
+    assert same_year.remaining == pytest.approx(-2000)  # over-contributed right now
+
+
+def test_fhsa_lifetime_limit_caps_annual_room():
+    # $28,000 already in over 2023–2025, so only $12,000 of the $40,000 is left,
+    # even though CRA's notice says $16,000 of annual room for 2026.
+    flows = [
+        CashFlow("2023-06-01", 7, 8000, "CAD"),
+        CashFlow("2024-06-01", 7, 8000, "CAD"),
+        CashFlow("2025-06-01", 7, 12000, "CAD"),
+    ]
+    s = contribution_room("FHSA", 2026, 16000, flows, {7}, current_year=2026)
+    assert s.remaining == pytest.approx(12000) and s.forfeited == pytest.approx(4000)
+    assert s.contributions == 0 and _adds_up(s)  # only 2026 onward counts as "this period"
+
+
+def test_tfsa_and_rrsp_statuses_also_reconcile():
+    flows = [CashFlow("2025-03-01", 2, 5000, "CAD"), CashFlow("2025-06-01", 2, -2000, "CAD")]
+    assert _adds_up(contribution_room("TFSA", 2025, 10000, flows, {2}, current_year=2026))
+    assert _adds_up(contribution_room("RRSP", 2025, 10000, flows, {2}, current_year=2026))
+
+
+def test_dust_sell_of_a_position_never_opened_is_ignored():
+    # Used to raise AttributeError (the missing holding was dereferenced).
+    s = replay([txn(TxnType.SELL, "2024-01-01", "A", 1e-10, 10)], ACCOUNTS)
+    assert not s.realized
 
 
 def test_replay_by_day_matches_replay_until():

@@ -1035,9 +1035,9 @@ class MarketPulseApp(App):
         if self._tax is None:
             target.update(Text("Building tax report…", style="muted"))
             return
-        years, warnings, rooms = self._tax
+        years, report, rooms = self._tax
         tr = self.tracker
-        body = render.tax_group(years, warnings, rooms, tr.store.account_map(), tr.base, privacy=self.privacy)
+        body = render.tax_group(years, report, rooms, tr.store.account_map(), tr.base, privacy=self.privacy)
         target.update(
             Group(body, Text("\nEstimates only — confirm against broker slips (T5008/T3/T5).", style="muted"))
         )
@@ -1058,9 +1058,9 @@ class MarketPulseApp(App):
 
     @work(thread=True, exclusive=True, group="tax")
     def load_tax(self) -> None:
-        years, warnings = self.tracker.tax_years()
+        years, report = self.tracker.tax_years()
         rooms = self.tracker.room()
-        self.call_from_thread(self._tax_loaded, (years, warnings, rooms))
+        self.call_from_thread(self._tax_loaded, (years, report, rooms))
 
     def _tax_loaded(self, result) -> None:
         self._tax = result
@@ -1304,9 +1304,9 @@ class MarketPulseApp(App):
                 return
             detail = " ".join(c.plain for c in render.activity_cells(txn, store.account_map())[1:8] if c.plain != "—")
 
-            def done(yes: bool) -> None:
+            def done(yes: bool | None) -> None:
                 if yes:
-                    store.delete_transaction(txn.id)
+                    store.delete_transaction(txn.saved_id)
                     self.after_change(f"Deleted transaction #{txn.id}")
 
             self.push_screen(ConfirmScreen(f"Delete transaction #{txn.id}?", detail), done)
@@ -1315,7 +1315,7 @@ class MarketPulseApp(App):
             if not sym:
                 return
 
-            def unwatch(yes: bool) -> None:
+            def unwatch(yes: bool | None) -> None:
                 if yes:
                     store.remove_watch([sym])
                     self._watch_key = None
@@ -1330,9 +1330,9 @@ class MarketPulseApp(App):
             if alert is None:
                 return
 
-            def remove(yes: bool) -> None:
+            def remove(yes: bool | None) -> None:
                 if yes:
-                    store.delete_alert(alert.id)
+                    store.delete_alert(alert.saved_id)
                     self.render_alerts()
                     self.notify("Alert removed")
 
@@ -1344,9 +1344,9 @@ class MarketPulseApp(App):
                 return
             count = len([t for t in store.transactions() if t.account_id == acct.id])
 
-            def confirmed(yes: bool) -> None:
+            def confirmed(yes: bool | None) -> None:
                 if yes:
-                    store.delete_account(acct.id)
+                    store.delete_account(acct.saved_id)
                     self.after_change(f"Deleted {acct.name}")
 
             self.push_screen(
@@ -1365,9 +1365,9 @@ class MarketPulseApp(App):
         last = max(txns, key=lambda t: t.id or 0)
         detail = " ".join(c.plain for c in render.activity_cells(last, store.account_map())[1:8] if c.plain != "—")
 
-        def done(yes: bool) -> None:
+        def done(yes: bool | None) -> None:
             if yes:
-                store.delete_transaction(last.id)
+                store.delete_transaction(last.saved_id)
                 self.after_change(f"Undid transaction #{last.id}")
 
         self.push_screen(ConfirmScreen("Undo the last transaction?", detail), done)
@@ -1521,9 +1521,12 @@ class MarketPulseApp(App):
         if self.workspace == "activity":
             self.query_one("#activity-filter", Input).focus()
             return
-        self.push_screen(
-            SearchScreen(self.tracker, self.known_symbols(), "Open chart"), lambda s: s and self.open_chart(s)
-        )
+
+        def picked(symbol: str | None) -> None:
+            if symbol:  # None/empty when the search was cancelled
+                self.open_chart(symbol)
+
+        self.push_screen(SearchScreen(self.tracker, self.known_symbols(), "Open chart"), picked)
 
     def action_filter_account(self) -> None:
         ids = [None, *(a.id for a in self.tracker.store.accounts())]
@@ -1568,12 +1571,15 @@ class MarketPulseApp(App):
         store = self.tracker.store
         try:
             result = import_transactions(
-                store, Path(path).expanduser(), default_account=(store.accounts() or [None])[0]
+                store, Path(path).expanduser(), default_account=next(iter(store.accounts()), None)
             )
         except (OSError, ValueError) as e:
             self.call_from_thread(self.notify, str(e), title="Import failed", severity="error")
             return
         message = f"Imported {result.added} · {result.duplicates} duplicates · {len(result.skipped)} skipped"
+        if result.backup is not None:
+            # Same safety net as the CLI: name the file that undoes this import.
+            message += f"\nbackup: {result.backup.name}"
         self.call_from_thread(self.after_change, message)
 
     def action_export_csv(self) -> None:
