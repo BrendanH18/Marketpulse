@@ -92,6 +92,37 @@ def test_config_theme_alerts_export(cli):
     assert cli("export").output.startswith("date,account,type")
 
 
+def test_backup_commands(cli, store, tmp_path):
+    assert "No backups yet" in cli("backup", "list").output
+    assert "Backed up to" in cli("backup").output  # bare `backup` backs up now
+    cli("backup", "now", str(tmp_path / "copy.db"))
+    assert (tmp_path / "copy.db").exists()
+    listing = cli("backup", "list").output
+    assert "manual" in listing and "copy.db" not in listing  # explicit paths live outside the backups dir
+
+
+def test_tax_report_explains_superficial_losses_and_transfer_issues(cli, store):
+    cli("accounts", "add", "Taxable", "-t", "NONREG")
+    cli("accounts", "add", "My TFSA", "-t", "TFSA")
+    cli("buy", "XEQT.TO", "10", "30", "-a", "Taxable", "-d", "2024-01-02")
+    cli("sell", "XEQT.TO", "10", "25", "-a", "Taxable", "-d", "2024-03-01")  # −$50 loss
+    cli("buy", "XEQT.TO", "10", "25", "-a", "My TFSA", "-d", "2024-03-05")  # …bought back in the TFSA
+    cli("buy", "XEQT.TO", "5", "20", "-a", "Taxable", "-d", "2024-06-03")
+    moved = cli("transfer", "XEQT.TO", "5", "--from", "Taxable", "--to", "My TFSA", "-d", "2024-07-02")
+    assert "no --price given" in moved.output  # back-dated and unpriced: warned, not guessed
+    out = cli("tax", "-y", "2024").output
+    assert "superficial" in out and "50.00 of a 50.00 loss denied" in out
+    assert "deemed sale at market value" in out
+    assert "spouse or a corporation" in out
+
+
+def test_fhsa_room_shows_capped_carry_forward(cli, store):
+    cli("accounts", "add", "My FHSA", "-t", "FHSA")
+    cli("accounts", "room", "FHSA", "2023", "8000")
+    out = cli("tax").output
+    assert "Capped" in out and "16,000.00" in out  # never more than $16k in a year
+
+
 def test_bad_dates_are_usage_errors(cli):
     cli("accounts", "add", "Main")
     cli("buy", "AAPL", "1", "100")

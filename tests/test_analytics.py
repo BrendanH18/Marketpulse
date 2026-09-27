@@ -3,7 +3,6 @@ from datetime import date
 import pytest
 
 from marketpulse.analytics import (
-    capital_gains,
     external_flows,
     income_by_month,
     max_drawdown,
@@ -14,7 +13,7 @@ from marketpulse.analytics import (
     xirr,
 )
 from marketpulse.ledger import replay
-from marketpulse.models import Account, AccountType, Transaction, TxnType
+from marketpulse.models import Account, Transaction, TxnType
 from marketpulse.valuation import Breakdown
 
 
@@ -63,71 +62,6 @@ def test_rebalance_suggests_trades():
     deltas = {r.bucket: round(r.delta) for r in rows}
     assert deltas == {"etf": -20, "fixed_income": 40, "cash": -20}
     assert rows[0].bucket == "fixed_income"
-
-
-def test_capital_gains_skip_registered_and_convert_at_trade_date():
-    accounts = {1: Account(name="Taxable", id=1), 2: Account(name="TFSA", id=2, type=AccountType.TFSA)}
-    txns = [
-        Transaction(
-            account_id=1,
-            type=TxnType.BUY,
-            date="2024-01-01",
-            symbol="AAPL",
-            quantity=10,
-            price=100,
-            currency="USD",
-            id=1,
-        ),
-        Transaction(
-            account_id=1,
-            type=TxnType.SELL,
-            date="2024-06-01",
-            symbol="AAPL",
-            quantity=10,
-            price=150,
-            currency="USD",
-            id=2,
-        ),
-        Transaction(
-            account_id=2,
-            type=TxnType.BUY,
-            date="2024-01-01",
-            symbol="XEQT.TO",
-            quantity=10,
-            price=10,
-            currency="CAD",
-            id=3,
-        ),
-        Transaction(
-            account_id=2,
-            type=TxnType.SELL,
-            date="2024-06-01",
-            symbol="XEQT.TO",
-            quantity=10,
-            price=20,
-            currency="CAD",
-            id=4,
-        ),
-    ]
-    years = capital_gains(replay(txns, accounts), accounts, lambda day, ccy: 1.4 if ccy == "USD" else 1.0)
-    assert len(years) == 1 and len(years[0].rows) == 1
-    assert years[0].net_gain == pytest.approx(700)
-    assert years[0].taxable == pytest.approx(350)
-
-
-def test_superficial_losses_are_denied_in_net_gain():
-    accounts = {1: Account(name="Taxable", id=1)}
-    txns = [
-        Transaction(
-            account_id=1, type=TxnType.BUY, date="2024-01-01", symbol="A", quantity=1, price=100, currency="CAD", id=1
-        ),
-        Transaction(
-            account_id=1, type=TxnType.SELL, date="2024-02-01", symbol="A", quantity=1, price=60, currency="CAD", id=2
-        ),
-    ]
-    years = capital_gains(replay(txns, accounts), accounts, lambda d, c: 1.0, superficial_txn_ids={2})
-    assert years[0].rows[0].superficial
-    assert years[0].net_gain == 0
 
 
 def test_income_by_month_buckets():

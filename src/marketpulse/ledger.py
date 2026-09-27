@@ -100,6 +100,21 @@ class LedgerState:
         return {k: v for k, v in self.cash.items() if abs(v) > 0.005 and (account_id is None or k[0] == account_id)}
 
 
+def transaction_currency(txn: Transaction, accounts: dict[int, Account]) -> str:
+    """The currency a transaction's prices and amounts are in.
+
+    An explicit currency on the transaction wins. Otherwise a security's
+    currency is guessed from its symbol (XEQT.TO -> CAD) and cash movements
+    use the account's currency. Shared by the ledger and the tax engine so
+    both always agree on what currency a row is in.
+    """
+    acct = accounts.get(txn.account_id)
+    account_ccy = acct.currency if acct else "CAD"
+    if txn.currency:
+        return txn.currency
+    return guess_currency(txn.symbol, account_ccy) if txn.symbol else account_ccy
+
+
 def sort_key(txn: Transaction) -> tuple:
     # Same-day ordering: money in, then buys/splits, then sells, then money out,
     # so a deposit-then-buy entered on one day never looks like an oversell.
@@ -118,11 +133,6 @@ def sort_key(txn: Transaction) -> tuple:
         TxnType.WITHDRAWAL: 8,
     }
     return (txn.date, order[txn.type], txn.id or 0)
-
-
-def _account_ccy(accounts: dict[int, Account], account_id: int) -> str:
-    acct = accounts.get(account_id)
-    return acct.currency if acct else "CAD"
 
 
 def _tracks_cash(accounts: dict[int, Account], account_id: int) -> bool:
@@ -144,12 +154,13 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
     """Apply one transaction to `state` in place."""
     acct = txn.account_id
     t = txn.type
-    ccy = txn.currency or (
-        guess_currency(txn.symbol, _account_ccy(accounts, acct)) if txn.symbol else _account_ccy(accounts, acct)
-    )
+    ccy = transaction_currency(txn, accounts)
     cash_key = (acct, ccy)
     tracks_cash = _tracks_cash(accounts, acct)
 
+    # `h` is the position a transaction acts on; lookups in the branches
+    # below can come back empty, so it's typed as optional throughout.
+    h: Holding | None
     if t in (TxnType.BUY, TxnType.DRIP):
         h = _holding(state, acct, txn.symbol, ccy)
         if h.quantity <= EPSILON:
@@ -170,8 +181,10 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
             state.issues.append(
                 LedgerIssue(txn.id, txn.date, f"Sell of {txn.quantity:,.4f} {txn.symbol} exceeds {held:,.4f} held")
             )
-            if h is None or held <= EPSILON:
-                return
+        if h is None or held <= EPSILON:
+            # Nothing to sell. (Also covers a sub-EPSILON "sell" of a
+            # position that was never opened, which used to crash here.)
+            return
         qty = min(txn.quantity, held)
         cost = h.avg_cost * qty
         proceeds = qty * txn.price - txn.fees
@@ -282,39 +295,7 @@ def replay_by_day(
         day += timedelta(days=1)
 
 
-# ── Canadian tax helpers ──────────────────────────────────────────────────────
-
-
-@dataclass
-class SuperficialLossWarning:
-    sale: RealizedGain
-    rebuy_date: str
-    rebuy_account_id: int
-
-
-def superficial_losses(transactions: list[Transaction], state: LedgerState) -> list[SuperficialLossWarning]:
-    """Flag losses that may be superficial under CRA rules.
-
-    A loss is superficial if the same property is bought (in *any* of your
-    accounts, including registered ones) within 30 days before or after the
-    sale and is still held 30 days after. We flag the rebuy window; the user
-    confirms, since holdings of affiliated persons are outside our view.
-    """
-    buys = [t for t in transactions if t.type in (TxnType.BUY, TxnType.DRIP)]
-    warnings = []
-    for sale in state.realized:
-        if sale.gain >= 0 or sale.quantity <= 0:
-            continue
-        d = date.fromisoformat(sale.date)
-        lo, hi = (d - timedelta(days=30)).isoformat(), (d + timedelta(days=30)).isoformat()
-        for b in buys:
-            if b.symbol == sale.symbol and lo <= b.date <= hi and b.id != sale.txn_id:
-                # a buy on the same day before the sale is the lot being sold, not a rebuy
-                if b.date == sale.date and b.account_id == sale.account_id:
-                    continue
-                warnings.append(SuperficialLossWarning(sale, b.date, b.account_id))
-                break
-    return warnings
+# ── Contribution room ─────────────────────────────────────────────────────────
 
 
 # TFSA annual dollar limits (CRA). Room accumulates from the year you turn 18
@@ -339,7 +320,12 @@ TFSA_LIMITS = {
     2025: 7000,
     2026: 7000,
 }
+# FHSA (first home savings account), from 2023. Each year adds $8,000 of
+# participation room. Unused room carries forward, but only up to $8,000, so
+# the most you can ever put in within one year is $16,000. Contributions over
+# the account's life are capped at $40,000.
 FHSA_ANNUAL_LIMIT = 8000
+FHSA_CARRYFORWARD_LIMIT = 8000
 FHSA_LIFETIME_LIMIT = 40000
 
 
@@ -350,6 +336,13 @@ def tfsa_limit(year: int) -> int:
 
 @dataclass
 class RoomStatus:
+    """Contribution room for one account type, and how it was derived.
+
+    The columns always add up:
+        remaining = starting_room + new_limits + withdrawals_added_back
+                    - contributions - forfeited
+    """
+
     account_type: str
     as_of_year: int
     starting_room: float
@@ -357,6 +350,9 @@ class RoomStatus:
     withdrawals_added_back: float
     new_limits: float
     remaining: float
+    # Room that existed on paper but can't be used: FHSA room above the $8,000
+    # carry-forward, or above what the $40,000 lifetime limit still allows.
+    forfeited: float = 0.0
 
 
 def contribution_room(
@@ -371,18 +367,67 @@ def contribution_room(
     """Remaining room given room known at Jan 1 of `as_of_year`.
 
     TFSA: adds each new year's limit and prior-year withdrawals.
-    FHSA: adds the $8,000 annual limit (lifetime cap is the user's to track).
+    FHSA: see _fhsa_room (annual limit, capped carry-forward, lifetime limit).
     RRSP and others: room is user-supplied; only contributions are subtracted.
     """
     current_year = current_year or date.today().year
-    relevant = [f for f in flows if f.account_id in account_ids and int(f.date[:4]) >= as_of_year]
+    mine = [f for f in flows if f.account_id in account_ids]
+    relevant = [f for f in mine if int(f.date[:4]) >= as_of_year]
     contributions = sum(f.amount for f in relevant if f.amount > 0)
+    if account_type == "FHSA":
+        return _fhsa_room(as_of_year, starting_room, mine, current_year, contributions)
     withdrawals_back = 0.0
     new_limits = 0.0
     if account_type == "TFSA":
         withdrawals_back = sum(-f.amount for f in relevant if f.amount < 0 and int(f.date[:4]) < current_year)
         new_limits = sum(tfsa_limit(y) for y in range(as_of_year + 1, current_year + 1))
-    elif account_type == "FHSA":
-        new_limits = FHSA_ANNUAL_LIMIT * max(current_year - as_of_year, 0)
     remaining = starting_room + new_limits + withdrawals_back - contributions
     return RoomStatus(account_type, as_of_year, starting_room, contributions, withdrawals_back, new_limits, remaining)
+
+
+def _fhsa_room(
+    as_of_year: int, starting_room: float, flows: list[CashFlow], current_year: int, contributions: float
+) -> RoomStatus:
+    """FHSA participation room, walked forward one year at a time.
+
+    `starting_room` is the participation room for `as_of_year` (it already
+    includes any carry-forward into that year). Then, for each later year:
+
+        carry_forward  = min(room last year - contributions last year, $8,000)
+        room this year = $8,000 + carry_forward
+
+    so unused room above $8,000 is forfeited, not banked. The result is
+    finally capped by the lifetime limit: $40,000 minus everything ever
+    contributed to these accounts (all recorded years, not just those since
+    `as_of_year`).
+
+    Not modelled: withdrawals never restore FHSA room (correct: they don't),
+    RRSP-to-FHSA transfers (they use room but aren't deposits), and the
+    account's 15-year / age-71 closing date.
+    """
+    by_year: dict[int, float] = defaultdict(float)
+    for f in flows:
+        if f.amount > 0:
+            by_year[int(f.date[:4])] += f.amount
+
+    room = starting_room
+    new_limits = 0.0
+    forfeited = 0.0
+    for year in range(as_of_year, current_year):
+        unused = max(room - by_year[year], 0.0)
+        carry = min(unused, FHSA_CARRYFORWARD_LIMIT)
+        forfeited += unused - carry
+        # Over-contributing last year leaves room negative; that excess still
+        # counts against this year's new room (and is taxed 1%/month by CRA).
+        overage = min(room - by_year[year], 0.0)
+        room = FHSA_ANNUAL_LIMIT + carry + overage
+        new_limits += FHSA_ANNUAL_LIMIT
+    remaining = room - by_year[current_year]
+
+    lifetime_left = FHSA_LIFETIME_LIMIT - sum(by_year.values())
+    if remaining > lifetime_left:
+        # Annual room beyond what the lifetime limit allows can't be used.
+        # (Negative means the lifetime limit itself has been exceeded.)
+        forfeited += remaining - lifetime_left
+        remaining = lifetime_left
+    return RoomStatus("FHSA", as_of_year, starting_room, contributions, 0.0, new_limits, remaining, forfeited)

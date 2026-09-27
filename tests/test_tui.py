@@ -3,6 +3,7 @@
 import asyncio
 
 from marketpulse.models import Account, Asset, AssetKind, Transaction, TxnType
+from marketpulse.tax import TaxReport
 from marketpulse.tui.app import MarketPulseApp
 from marketpulse.tui.screens import AccountForm, ConfirmScreen, PromptScreen, TransactionForm
 from marketpulse.tui.widgets import WORKSPACES, big_text, big_width
@@ -37,6 +38,11 @@ def test_every_workspace_renders_and_a_buy_can_be_recorded(tracker, store):
                 await pilot.press(str(i))
                 await pilot.pause()
                 assert app.workspace == key
+            # The tax workspace loads its report in a worker: make sure it
+            # finished and rendered with the pooled-ACB report shape.
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app._tax is not None and isinstance(app._tax[1], TaxReport)
             await pilot.press("2")
             await pilot.press("b")
             await pilot.pause()

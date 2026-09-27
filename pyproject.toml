@@ -24,6 +24,7 @@ packages = ["src/marketpulse"]
 
 [dependency-groups]
 dev = [
+    "mypy>=2.3.1",
     "pytest>=8.0",
     "ruff>=0.8",
 ]
@@ -41,3 +42,12 @@ select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["marketpulse"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+# Check the bodies of functions without annotations too (most CLI/TUI glue).
+check_untyped_defs = true
+# Keep `# type: ignore` honest: fail when one is no longer needed.
+warn_unused_ignores = true
+warn_redundant_casts = true
