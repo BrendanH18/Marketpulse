@@ -18,8 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
       - name: Install dependencies
@@ -44,8 +44,8 @@ jobs:
           - os: macos-15
             python: "3.14"
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
       - name: Install dependencies
@@ -57,8 +57,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v5
       - name: Build source distribution and wheel
         run: uv build --no-sources
       - name: Verify installed package
@@ -74,6 +74,6 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build menu bar companion
         run: swift build -c release --package-path macos/MarketPulseBar
