@@ -1,12 +1,13 @@
 """Headless TUI smoke tests against the fake market."""
 
 import asyncio
+from unittest.mock import patch
 
 from marketpulse.models import Account, Asset, AssetKind, Transaction, TxnType
 from marketpulse.tax import TaxReport
 from marketpulse.tui.app import MarketPulseApp
 from marketpulse.tui.screens import AccountForm, ConfirmScreen, PromptScreen, TransactionForm
-from marketpulse.tui.widgets import WORKSPACES, big_text, big_width
+from marketpulse.tui.widgets import WORKSPACES, TopBar, big_text, big_width
 
 
 def run(coro):
@@ -80,6 +81,29 @@ def test_big_digits():
     assert big_width("$1,234") == len(big_text("$1,234", "x").plain.split("\n")[0])
     assert big_width("1,234 SEK") == len(big_text("1,234 SEK", "x").plain.split("\n")[0])
     assert big_text("12", "x").plain.count("\n") == 2
+
+
+def test_clock_tick_during_shutdown(tracker, monkeypatch):
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        close_all = app._close_all
+
+        async def close_all_with_pending_tick():
+            await close_all()
+            assert not app.is_running
+            # Force the CI race: widgets are gone, but the app's timers have
+            # not yet been stopped by _close_messages().
+            app._tick()
+
+        monkeypatch.setattr(app, "_close_all", close_all_with_pending_tick)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            with patch.object(app.query_one(TopBar), "refresh") as refresh:
+                app._tick()
+                refresh.assert_called_once_with()
+
+    run(scenario())
 
 
 def test_income_forecast_survives_refresh_and_deletes_confirm(tracker, store):
