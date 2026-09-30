@@ -4,29 +4,75 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --locked --dev --python 3.11
       - name: Lint
-        run: uv run ruff check .
+        run: uv run --locked ruff check .
       - name: Format check
-        run: uv run ruff format --check .
+        run: uv run --locked ruff format --check .
       - name: Type check
-        run: uv run mypy
+        run: uv run --locked mypy
+
+  test:
+    name: Test (Python ${{ matrix.python }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: macos-15
+            python: "3.14"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --dev --python ${{ matrix.python }}
       - name: Test
-        run: uv run pytest -q
+        run: uv run --locked pytest -q
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build source distribution and wheel
+        run: uv build --no-sources
+      - name: Verify installed package
+        run: |
+          uv venv --python 3.11 .package-smoke
+          uv pip install --python .package-smoke/bin/python dist/*.whl
+          .package-smoke/bin/marketpulse --help
+          .package-smoke/bin/marketpulse --version
+          .package-smoke/bin/mp --version
+          .package-smoke/bin/python -c 'from importlib.metadata import version; from marketpulse import __version__; assert version("marketpulse") == __version__'
 
   menubar:
     runs-on: macos-15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Build menu bar companion

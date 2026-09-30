@@ -1,210 +1,192 @@
-# ⚡ MarketPulse
+# MarketPulse
 
-A fast, keyboard-first investment tracker for the terminal — with Omarchy themes, braille charts, Canadian account and tax smarts, and a native macOS menu bar companion.
+**Your portfolio, in the terminal.** A keyboard-first investment tracker with a
+local ledger, market data, Canadian account support, and a native macOS menu bar companion.
 
-- **Everything you own, in one ledger** — stocks, ETFs, crypto, cash, GICs and bonds, and manually valued assets (property, private shares, pensions) across TFSA, RRSP, FHSA, RESP, non-registered and crypto accounts.
-- **Real performance** — money-weighted (XIRR) and time-weighted returns, drawdown, volatility, and a daily net-worth history you can rebuild from your ledger in seconds.
-- **Canadian-aware** — ACB pooled across your taxable accounts the way CRA computes it, with every purchase and sale converted at its own day's FX; proportional superficial-loss denial; deemed sales for in-kind TFSA/RRSP contributions; TFSA/FHSA room that rolls forward on its own.
-- **Lightweight** — four dependencies, a local SQLite file, no pandas, no account, no telemetry.
+[![CI](https://github.com/BrendanH18/Marketpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/BrendanH18/Marketpulse/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
----
+[Get started](#get-started) · [User guide](docs/usage.md) ·
+[Configuration](docs/configuration.md) · [Contributing](CONTRIBUTING.md)
 
-## Install
+![MarketPulse dashboard with a sample portfolio](docs/assets/dashboard.svg)
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+*The dashboard above uses fictional accounts and market data.*
+
+## What it does
+
+- **One portfolio ledger:** stocks, ETFs, crypto, cash, GICs, bonds, and manually
+  valued assets across registered and taxable accounts.
+- **Portfolio analysis:** net worth, allocation, income, money-weighted returns
+  (XIRR), time-weighted returns, drawdown, and volatility.
+- **Canadian account support:** TFSA, RRSP, FHSA, RESP, and other account types;
+  contribution-room tracking and estimated capital gains using pooled ACB.
+- **A terminal workspace:** eight views, braille charts, a command palette,
+  watchlists, price alerts, and bundled Omarchy themes.
+- **Scriptable commands:** CSV import and export, JSON status, backups, and
+  integrations for Waybar, tmux, and macOS.
+- **Local storage:** one SQLite database, four direct runtime dependencies,
+  no MarketPulse account, and no application telemetry.
+
+MarketPulse records transactions you enter or import. It does not connect to
+your brokerage or place trades. Quotes may be delayed, and tax reports are
+estimates; review them against your own records before relying on them.
+
+## Get started
+
+You need **Python 3.11+**, [uv](https://docs.astral.sh/uv/getting-started/installation/),
+and a terminal with Unicode and color support. Linux and macOS are the primary
+platforms; the menu bar companion requires macOS 14+ and the Xcode Command Line Tools.
+
+Install from a source checkout:
 
 ```bash
-git clone https://github.com/BrendanH18/Marketpulse && cd Marketpulse
-uv tool install --editable .     # puts `marketpulse` (and the short alias `mp`) on your PATH
-marketpulse                      # open the TUI
+git clone https://github.com/BrendanH18/Marketpulse.git
+cd Marketpulse
+uv tool install --python 3.11 --editable .
+marketpulse --version
 ```
 
-Existing MarketPulse 0.1 portfolios in `~/.marketpulse/*.json` are imported automatically on first run (the JSON files are left untouched).
+Both `marketpulse` and `mp` launch the same application. If the command is not
+found, run `uv tool update-shell` and open a new terminal.
 
-## The TUI
-
-`marketpulse` opens a tiling, Omarchy-style workspace UI: a Waybar-like top bar, panes that light up with your theme's accent when focused, and live quotes that flash as they change.
-
-| Key | Workspace | What's there |
-|-----|-----------|--------------|
-| `1` | **dash** | Big-digit net worth, today/unrealized/income/returns tiles, net-worth chart (`,` `.` change range), allocation (`g` cycles class/account/currency), movers, market strip |
-| `2` | **holdings** | Every position with day change, gain and weight; position detail with a 3-month chart and recent activity (`f` filters by account) |
-| `3` | **watch** | Watchlist with intraday sparklines and 52-week ranges (`a` add, `x` remove, `J`/`K` reorder) |
-| `4` | **chart** | Braille price chart with crosshair (`←`/`→`), periods (`[`/`]`), comparisons (`c`, or type `NVDA 1y vs QQQ SPY`) |
-| `5` | **activity** | The full ledger — `n` new, `e` edit, `x` delete, `u` undo, `/` filter, `i` import CSV, `E` export |
-| `6` | **income** | Dividends and interest by month and source, plus a forward 12-month estimate with yield on cost |
-| `7` | **accounts** | Accounts, capital gains by year, superficial-loss checks, contribution room (`R`), GICs and manual assets (`G`, `V`) |
-| `8` | **alerts** | Price and %-move alerts that notify once and re-arm (`space` pauses) |
-
-Everywhere: `b` buy · `s` sell · `D` dividend · `A` alert · `w` watch · `/` search any symbol · `p` privacy mode · `t` next theme · `r` refresh · `ctrl+p` command palette · `?` help.
-
-Buying with the price left blank uses the live quote, and the form shows the current price and what you already hold as you type.
-
-## The CLI
-
-Every feature is scriptable. A few highlights:
+Create an account and record your first transaction:
 
 ```bash
-marketpulse buy XEQT.TO 20                 # buy at the live price (one account? no -a needed)
-marketpulse buy AAPL 10 229.50 -a TFSA -f 4.95 -d 2026-03-02
-marketpulse sell VFV.TO 5 -a "Non-reg"     # realized gain is printed using average cost
-marketpulse dividend XEQT.TO 38.12 -a TFSA
-marketpulse deposit 7000 -a TFSA
-marketpulse transfer XEQT.TO 50 --from Main --to TFSA   # in-kind contribution (a deemed sale: see Tax below)
-marketpulse undo                           # oops
-
-marketpulse summary                        # dashboard in your scrollback
-marketpulse holdings -a TFSA
-marketpulse chart NVDA -p 1y --vs QQQ
-marketpulse compare XEQT.TO VEQT.TO VFV.TO -p 5y
-marketpulse perf                           # XIRR, time-weighted, drawdown, volatility
-marketpulse income                         # history + forward estimate
-marketpulse tax --year 2025                # capital gains, superficial losses, room
-marketpulse allocation --target etf=80 --target fixed_income=15 --target cash=5
+marketpulse accounts add "My TFSA" --type TFSA
+marketpulse buy XEQT.TO 20 30.00 --account "My TFSA" --date 2024-01-02
+marketpulse
 ```
 
-Run `marketpulse --help` or `marketpulse <command> --help` for everything, including `accounts`, `asset`, `watch`, `alerts`, `import`/`export`, `backup`, `backfill`, `theme`, `config` and `doctor`.
+This example records a historical purchase at CAD 30 per share. Replace it with
+your own transaction details. Omit the price to record a purchase at the current
+quote. Accounts track holdings by default; add `--track-cash` if you also want
+deposits, purchases, and sales reflected in a cash balance.
 
-### Accounts, cash and contribution room
+To explore the importer with fictional data in a separate portfolio:
 
 ```bash
-marketpulse accounts add "Wealthsimple TFSA" -t TFSA --track-cash
-marketpulse accounts room TFSA 2026 21500     # room CRA reported for Jan 1, 2026
-marketpulse accounts                          # values, day change, weights
+MARKETPULSE_DATA="$PWD/.marketpulse/demo" marketpulse accounts add "Demo TFSA" --type TFSA --track-cash
+MARKETPULSE_DATA="$PWD/.marketpulse/demo" marketpulse accounts add "Demo Taxable" --type NONREG
+MARKETPULSE_DATA="$PWD/.marketpulse/demo" marketpulse import examples/transactions.csv --dry-run
+MARKETPULSE_DATA="$PWD/.marketpulse/demo" marketpulse import examples/transactions.csv
+MARKETPULSE_DATA="$PWD/.marketpulse/demo" marketpulse
 ```
 
-With `--track-cash`, buys debit the account's cash and sells, dividends and deposits credit it. Without it, an account is treated as fully invested — perfect if you only want to track holdings.
+The demo uses your normal display configuration and fetches current market data.
+Its portfolio is separate from your default database.
 
-### GICs, bonds and everything else
+### Updating
+
+Quit the TUI and menu bar companion, then update from your checkout:
 
 ```bash
-marketpulse asset fixed EQB-GIC-27 10000 --rate 4.1 --start 2025-03-01 --maturity 2027-03-01 -a TFSA
-marketpulse asset manual COTTAGE 450000 --class real_estate -a Property
-marketpulse asset value COTTAGE 480000        # new valuation whenever you like
-marketpulse asset classify XEQT.TO equity     # override any symbol's asset class
+marketpulse backup
+git pull --ff-only
+uv tool install --python 3.11 --editable --reinstall .
 ```
 
-Fixed income accrues daily at its rate; manual assets use their latest valuation.
+Re-run `marketpulse menubar install` to rebuild an installed companion.
 
-### Tax
+## Find your way around
 
-`marketpulse tax` (and the **accounts** workspace) reports capital gains in your taxable accounts the way CRA computes them:
+Run `marketpulse` to open the TUI. Press `?` for help or `ctrl+p` for the command palette.
 
-- **Pooled ACB.** Identical shares are one pool across every non-registered account, so selling XEQT at one broker uses the average cost of all your XEQT. Holdings screens still show each account's own cost.
-- **Each leg at its own FX rate.** A US stock's cost is converted at each purchase date's USD/CAD rate and the proceeds at the sale date's, so currency moves are part of the gain.
-- **Superficial losses** are denied in proportion, as `loss × min(sold, bought within 30 days, still held on day 30) ÷ sold`, counting purchases in *any* account, TFSAs and RRSPs included. The denied amount is added to the replacement shares' ACB (or lost for good if you bought them back in a registered account).
-- **In-kind transfers** into a TFSA/RRSP are deemed sales at market value (losses denied), and transfers out reset the cost to market value. Give the value with `transfer --price` (it defaults to the live price when dated today).
+| Key | Workspace | What you can do |
+| --- | --- | --- |
+| `1` | Dashboard | View net worth, allocation, returns, and market movers |
+| `2` | Holdings | Browse positions, account filters, and recent activity |
+| `3` | Watchlist | Follow symbols, sparklines, and 52-week ranges |
+| `4` | Chart | Explore price history and compare symbols |
+| `5` | Activity | Add, edit, delete, import, and export ledger entries |
+| `6` | Income | Review dividends, interest, and estimated future income |
+| `7` | Accounts | Manage accounts, assets, contribution room, and tax estimates |
+| `8` | Alerts | Manage price and percentage-change notifications |
 
-Rows whose FX rate isn't available are shown but left out of the totals. The figures are estimates: purchases by a spouse or a corporation you control can also make a loss superficial, and MarketPulse can't see those.
+Common shortcuts: `b` buy, `s` sell, `/` search, `r` refresh, `p` privacy mode,
+`t` next theme, and `q` quit. See the [user guide](docs/usage.md) for workspace shortcuts.
 
-### Import and export
-
-`marketpulse import activities.csv -a TFSA` understands the common broker column names (date/trade date, action/type, symbol, quantity, price, amount, commission, currency, account) and skips duplicates and anything it can't interpret — with the reason. `--dry-run` previews. `marketpulse export` writes the whole ledger.
-
-### History
-
-Net worth is snapshotted whenever you look. To rebuild years of daily history from your ledger and historical prices:
+## Use it from the command line
 
 ```bash
-marketpulse backfill
+marketpulse summary
+marketpulse holdings --account "My TFSA"
+marketpulse chart NVDA --period 1y --vs QQQ
+marketpulse perf
+marketpulse income
+marketpulse tax --year 2025
+marketpulse import activities.csv --account "My TFSA" --dry-run
+marketpulse export ledger.csv
+marketpulse backup
 ```
 
-### Backups
+Use `marketpulse --help` to list commands and `marketpulse <command> --help`
+for arguments and options. The [user guide](docs/usage.md) covers cash tracking,
+manual assets, transfers, contribution room, alerts, and integrations.
 
-Your ledger is one SQLite file, so MarketPulse keeps copies of it in `~/.marketpulse/backups/`:
+## macOS and Omarchy
 
-- **daily** — taken on startup when the newest backup is more than a day old (the last 14 are kept)
-- **import** — taken right before every CSV import writes anything (the last 14 are kept)
-- **pre-vN** — taken before a schema upgrade (kept until you delete them)
-- **manual** — `marketpulse backup` (kept until you delete them)
-
-```bash
-marketpulse backup                       # back up now
-marketpulse backup now ~/Dropbox/mp.db   # …or to a path of your choice
-marketpulse backup list
-```
-
-Backups use SQLite's online backup API, so they're consistent even while the TUI or menu bar is running. To restore one, quit MarketPulse and copy it over `~/.marketpulse/marketpulse.db`.
-
-## macOS menu bar
+On macOS, install the native SwiftUI companion from your editable checkout:
 
 ```bash
+xcode-select --install  # if the Command Line Tools are not installed
 marketpulse menubar install
 ```
 
-Builds a tiny native SwiftUI app into `~/Applications/MarketPulse Bar.app` and launches it. It shows your day change (or net worth, or any symbol) in the menu bar; the popover has a net-worth chart, accounts, movers, watchlist sparklines and alerts, all in your MarketPulse theme. **⌥⌘M** opens the full TUI in Ghostty, iTerm, kitty, WezTerm or Terminal. Settings include refresh interval, terminal, and launch at login.
+The companion shows portfolio status in the menu bar and a popover with accounts,
+movers, charts, and alerts. Press `⌥⌘M` to open the TUI. Settings include display
+mode, refresh interval, terminal selection, and launch at login.
 
-Requires the Xcode Command Line Tools (`xcode-select --install`). `marketpulse menubar uninstall` removes it.
+On Omarchy, `theme = "auto"` follows your active theme. Elsewhere, it defaults
+to Tokyo Night. Select a bundled palette with `marketpulse theme set kanagawa`.
+For Waybar and other status bars, see [integrations](docs/usage.md#integrations).
 
-## Omarchy
+## Your data and configuration
 
-MarketPulse ships every built-in [Omarchy](https://omarchy.org) theme — Tokyo Night, Catppuccin, Everforest, Gruvbox, Kanagawa, Nord, Osaka Jade, Ristretto, Rose Pine, Matte Black, Hackerman, Lumon, Retro 82 and the rest — and with `theme = "auto"` it follows whatever theme Omarchy has active. Themes whose red and green are too similar to tell gains from losses get a legible substitute pair.
+| Location | Purpose | Override |
+| --- | --- | --- |
+| `~/.marketpulse/marketpulse.db` | Ledger, accounts, watchlist, alerts, cached quotes, and snapshots | `MARKETPULSE_DATA` sets the **directory** |
+| `~/.marketpulse/backups/` | Database backups | Follows the data directory |
+| `~/.config/marketpulse/config.toml` | Display and reporting settings | `MARKETPULSE_CONFIG` sets the **file**; `XDG_CONFIG_HOME` sets the default config root |
 
-```bash
-marketpulse theme                 # preview every palette
-marketpulse theme set kanagawa
-```
+Market data requests go to Yahoo Finance's public endpoints. Your ledger is
+stored locally, but symbol lookups require network access. Cached quotes can be
+shown as stale when the network is unavailable.
 
-Waybar module:
+Privacy mode masks amounts in the interface; it does not encrypt the database
+or remove amounts from JSON and CSV exports. See [data and backups](docs/data.md)
+for backup retention, restoration, migration, and privacy details.
 
-```jsonc
-"custom/marketpulse": {
-  "exec": "marketpulse status --waybar",
-  "return-type": "json",
-  "interval": 60,
-  "on-click": "xdg-terminal-exec marketpulse"
-}
-```
+Run `marketpulse doctor` to inspect your setup, or see
+[configuration and troubleshooting](docs/configuration.md).
 
-`status --short` prints a one-liner for tmux, sketchybar or your prompt, and `status --json` is the full machine-readable payload.
+## Contribute
 
-## Configuration
-
-`~/.config/marketpulse/config.toml` (or `$MARKETPULSE_CONFIG`) — edit with `marketpulse config edit` or set keys directly:
-
-| Key | Default | |
-|-----|---------|-|
-| `theme` | `"auto"` | Omarchy theme slug, or `auto` |
-| `base_currency` | `"CAD"` | Totals and reports are converted into this |
-| `refresh_seconds` | `30` | TUI quote refresh |
-| `privacy` | `false` | Mask amounts everywhere (`p` in the TUI) |
-| `default_account` | `""` | Used when `-a` is omitted and you have several accounts |
-| `chart_period` | `"3mo"` | Default chart range |
-| `market_strip` | S&P, Nasdaq, TSX, USD/CAD, BTC, gold, 10Y | Dashboard ticker strip |
-| `capital_gains_inclusion` | `0.5` | Used by the tax report |
-| `menubar_display` | `"day_pct"` | `day_pct`, `day_change`, `net_worth` or `symbol` |
-| `menubar_symbol` | `""` | Symbol shown when `menubar_display = "symbol"` |
-
-Data lives in `~/.marketpulse/marketpulse.db` (override with `MARKETPULSE_DATA`). `marketpulse doctor` checks your setup.
-
-## Market data
-
-Quotes, history, dividends and search come from Yahoo Finance's public endpoints via `curl_cffi`. Quotes are fetched in batches, cached briefly, and the last known prices are shown (marked offline) when the network is unavailable. Data may be delayed; this is a personal tracker, not a trading tool, and tax figures are estimates to check against your slips.
-
-## Development
+Bug reports, documentation improvements, and focused pull requests are welcome.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, architecture,
+and guidance on changes to the ledger and database.
 
 ```bash
-uv sync
-uv run pytest          # 100+ tests, no network (a fake Yahoo transport is used)
-uv run ruff check . && uv run ruff format .
-uv run mypy            # type check (config in pyproject.toml; CI runs it too)
-swift build --package-path macos/MarketPulseBar
+uv sync --locked --dev --python 3.11
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked mypy
+uv run --locked pytest -q
 ```
 
-```
-src/marketpulse/
-  models.py      accounts, transactions, assets, quotes
-  ledger.py      replay engine: per-account holdings, cost, income, cash, contribution room
-  tax.py         capital gains: pooled ACB, trade-date FX, superficial losses, deemed dispositions
-  analytics.py   XIRR, time-weighted returns, drawdown, rebalancing, income, capital gains
-  valuation.py   prices the ledger into a portfolio view
-  market.py      Yahoo client (batch quotes, history, dividends, search, FX)
-  db.py          SQLite store + legacy JSON migration
-  services.py    Tracker facade used by the CLI, TUI and menu bar
-  themes.py      Omarchy palettes → Textual + Rich themes
-  charts.py      braille charts, sparklines, bars
-  render.py      shared Rich renderables
-  cli.py         Click commands
-  tui/           Textual app, widgets and forms
-macos/MarketPulseBar/   SwiftUI menu bar companion
-```
+The test suite uses a fake market transport and isolated data paths. CI checks
+Python 3.11–3.14 on Linux, tests on macOS, builds Python distributions, and
+compiles the Swift companion.
+
+Use [GitHub Issues](https://github.com/BrendanH18/Marketpulse/issues) for bugs
+and feature requests. Follow the [Code of Conduct](CODE_OF_CONDUCT.md); report
+vulnerabilities through the private channels in [SECURITY.md](SECURITY.md).
+
+## License and acknowledgments
+
+MarketPulse is licensed under the [MIT License](LICENSE).
+Bundled palettes come from [Omarchy](https://github.com/basecamp/omarchy);
+see [third-party notices](THIRD_PARTY_NOTICES.md) for attribution and license terms.
+The terminal interface is built with [Textual](https://github.com/Textualize/textual)
+and [Rich](https://github.com/Textualize/rich).

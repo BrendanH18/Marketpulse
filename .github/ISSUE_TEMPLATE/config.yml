@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/BrendanH18/Marketpulse/blob/main/SECURITY.md
+    about: Use the private reporting channels in the security policy.
