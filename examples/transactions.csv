@@ -1,0 +1,7 @@
+date,account,type,symbol,quantity,price,amount,fees,currency,note,ratio,target_account
+2024-01-02,Demo TFSA,DEPOSIT,,,,10000,,CAD,Fictional opening deposit,,
+2024-01-03,Demo TFSA,BUY,XEQT.TO,100,30,,4.95,CAD,Fictional ETF purchase,,
+2024-02-01,Demo TFSA,BUY,VFV.TO,20,110,,,CAD,Fictional ETF purchase,,
+2024-03-28,Demo TFSA,DIVIDEND,XEQT.TO,,,22.00,,CAD,Fictional distribution,,
+2024-04-02,Demo Taxable,BUY,AAPL,5,175,,1.00,USD,Fictional stock purchase,,
+2024-06-03,Demo Taxable,SELL,AAPL,1,190,,1.00,USD,Fictional partial sale,,

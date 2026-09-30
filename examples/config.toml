@@ -1,0 +1,13 @@
+# Copy to ~/.config/marketpulse/config.toml, or point MARKETPULSE_CONFIG here.
+theme = "auto"
+base_currency = "CAD"
+refresh_seconds = 30
+privacy = false
+benchmark = "XEQT.TO"
+chart_period = "3mo"
+default_account = ""
+market_strip = ["^GSPC", "^IXIC", "^GSPTSE", "USDCAD=X", "BTC-USD", "GC=F", "^TNX"]
+capital_gains_inclusion = 0.5
+menubar_display = "day_pct"
+menubar_symbol = ""
+terminal = "auto"

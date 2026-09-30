@@ -390,7 +390,9 @@ class MarketPulseApp(App):
         self.set_class(event.size.width < 130, "-narrow")
 
     def _tick(self) -> None:
-        self.query_one(TopBar).refresh()
+        # Shutdown removes widgets before stopping the app's timers.
+        if self.is_running:
+            self.query_one(TopBar).refresh()
 
     # ── helpers ───────────────────────────────────────────────────────────────
 

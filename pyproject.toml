@@ -1,15 +1,37 @@
 [project]
 name = "marketpulse"
-version = "2.0.0"
+dynamic = ["version"]
 description = "A fast, keyboard-first terminal investment tracker with live market data, Omarchy themes and a macOS menu bar companion"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+authors = [{ name = "Brendan Hallas" }]
+keywords = ["portfolio", "investment-tracker", "terminal", "tui", "canada"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
 dependencies = [
     "click>=8.1",
     "curl-cffi>=0.7",
     "rich>=13.7",
     "textual>=8.2.7",
 ]
+
+[project.urls]
+Homepage = "https://github.com/BrendanH18/Marketpulse"
+Documentation = "https://github.com/BrendanH18/Marketpulse#readme"
+Repository = "https://github.com/BrendanH18/Marketpulse"
+Issues = "https://github.com/BrendanH18/Marketpulse/issues"
 
 [project.scripts]
 marketpulse = "marketpulse.cli:main"
@@ -21,6 +43,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/marketpulse"]
+
+[tool.hatch.version]
+path = "src/marketpulse/__init__.py"
 
 [dependency-groups]
 dev = [

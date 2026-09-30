@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a reproducible problem with fictional or redacted data.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. Report vulnerabilities through SECURITY.md.
+        Do not attach real portfolio databases or unredacted financial records.
+  - type: input
+    id: version
+    attributes:
+      label: MarketPulse version or commit
+      description: Run marketpulse --version; include a commit if using a checkout.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Python version, terminal, and installation method.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include commands or a small fictional CSV when useful.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include relevant error messages or redacted screenshots.
+    validations:
+      required: true
