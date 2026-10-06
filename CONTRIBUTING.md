@@ -131,7 +131,7 @@ origin and license for any third-party code or assets you add.
    the CLI use this single source. Refresh `uv.lock` if dependencies changed.
 3. Review installation and upgrade instructions, migration backups, and any
    changed JSON fields used by the companion. Confirm the README git-tag
-   examples match the tag you are about to publish (for example `v2.0.1`).
+   examples match the tag you are about to publish (for example `v2.1.0`).
 4. Build and install the wheel in a fresh environment; check both `marketpulse`
    and `mp`. On macOS, also verify the companion from an editable checkout.
 5. Prepare release notes describing changes and any upgrade requirements.

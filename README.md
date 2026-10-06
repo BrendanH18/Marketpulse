@@ -43,10 +43,10 @@ platforms; the menu bar companion requires macOS 14+ and the Xcode Command Line 
 
 Install a pinned release so you are not tracking `main`. Prefer the tag shown on
 the [latest GitHub Release](https://github.com/BrendanH18/Marketpulse/releases)
-(examples below use `v2.0.1`):
+(examples below use `v2.1.0`):
 
 ```bash
-uv tool install --python 3.11 git+https://github.com/BrendanH18/Marketpulse.git@v2.0.1
+uv tool install --python 3.11 git+https://github.com/BrendanH18/Marketpulse.git@v2.1.0
 marketpulse --version
 ```
 
@@ -55,7 +55,7 @@ Without uv, the same pin works with pip in a virtual environment:
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-pip install git+https://github.com/BrendanH18/Marketpulse.git@v2.0.1
+pip install git+https://github.com/BrendanH18/Marketpulse.git@v2.1.0
 marketpulse --version
 ```
 
@@ -105,7 +105,7 @@ Quit the TUI and menu bar companion, back up, then reinstall from the newer tag
 
 ```bash
 marketpulse backup
-uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v2.0.1
+uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v2.1.0
 ```
 
 To remove a `uv tool` install:
