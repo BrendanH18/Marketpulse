@@ -150,13 +150,16 @@ Package metadata in `pyproject.toml` is ready for a wheel (`marketpulse` / `mp`
 entry points, MIT license, classifiers). Publishing still needs a maintainer
 action:
 
-1. Create a PyPI project named `marketpulse` (or claim the name) and a trusted
-   publisher or API token.
-2. After tagging a release: `uv build --no-sources` then
-   `uv publish` (or `twine upload dist/*`) with the token.
-3. Switch the README primary install to
+1. Create a PyPI project named `marketpulse` (or claim the name).
+2. **Manual publish (API token):** create a PyPI API token, then after tagging a
+   release run `uv build --no-sources` and `uv publish` (or
+   `twine upload dist/*`) with that token.
+3. **Trusted publisher (CI/OIDC only):** configure a PyPI trusted publisher for
+   this repo’s release workflow when automating uploads from CI; do not combine
+   that path with local `uv publish` / `twine` (those need a token).
+4. Switch the README primary install to
    `uv tool install --python 3.11 marketpulse` and keep the git-tag commands as
    a fallback for pinned source installs.
 
-Do not automate PyPI from CI until a tagged release path is stable and secrets
-are configured.
+Do not automate PyPI from CI until a tagged release path is stable and OIDC or
+secrets are configured.
