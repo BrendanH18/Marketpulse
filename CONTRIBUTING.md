@@ -116,13 +116,49 @@ origin and license for any third-party code or assets you add.
 
 ## Maintainer release checklist
 
-1. Run the checks above and confirm CI passes.
+Ship version bumps and changelog updates through a pull request. Do not
+force-push `main`. Tag and publish the GitHub Release only after the release
+commit is on `main` and CI is green.
+
+1. Run the checks above and confirm CI passes on the release PR.
 2. Update `__version__` in `src/marketpulse/__init__.py`; package metadata and
    the CLI use this single source. Refresh `uv.lock` if dependencies changed.
-3. Review installation and upgrade instructions, migration backups, and any
-   changed JSON fields used by the companion.
-4. Build and install the wheel in a fresh environment; check both `marketpulse`
-   and `mp`. On macOS, also verify the companion from an editable checkout.
-5. Prepare release notes describing changes and any upgrade requirements.
+3. Update [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog) with user-visible
+   changes and upgrade notes (backup before upgrade, schema migrations, any
+   companion JSON contract changes).
+4. Review installation and upgrade instructions in the README and
+   [docs/data.md](docs/data.md).
+5. Build and install the wheel in a fresh environment; check both `marketpulse`
+   and `mp`, and confirm `marketpulse --version` matches `__version__`. On
+   macOS, also verify the companion from an editable checkout.
+6. Merge the release PR to `main` (fast-forward or merge commit — no force-push).
+7. On the merge commit, create an annotated tag matching `__version__` and push
+   it (example for 2.0.1):
+
+   ```bash
+   git checkout main
+   git pull --ff-only origin main
+   git tag -a v2.0.1 -m "MarketPulse 2.0.1"
+   git push origin v2.0.1
+   ```
+
+8. Publish a GitHub Release for that tag. Paste the matching CHANGELOG section,
+   including upgrade / backup guidance:
+
+   ```bash
+   gh release create v2.0.1 --title "MarketPulse 2.0.1" --notes-file CHANGELOG.md
+   ```
+
+   Prefer editing the release body down to the `## [2.0.1]` section (with
+   upgrade notes) rather than pasting the entire changelog history.
+9. Verify a fresh clone/install from the tag reports the expected version:
+
+   ```bash
+   git clone --branch v2.0.1 https://github.com/BrendanH18/Marketpulse.git
+   cd Marketpulse
+   uv tool install --python 3.11 --editable .
+   marketpulse --version
+   ```
 
 The repository does not automatically publish packages or create releases.
+PyPI publishing is tracked separately and is not part of this checklist.
