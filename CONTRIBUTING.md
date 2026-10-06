@@ -142,15 +142,20 @@ commit is on `main` and CI is green.
    git push origin v2.0.1
    ```
 
-8. Publish a GitHub Release for that tag. Paste the matching CHANGELOG section,
-   including upgrade / backup guidance:
+8. Publish a GitHub Release for that tag. Feed **only** the matching CHANGELOG
+   section (including upgrade / backup guidance) — do not pass the whole
+   `CHANGELOG.md` to `--notes-file`, or Unreleased / older sections will ship
+   as release notes:
 
    ```bash
-   gh release create v2.0.1 --title "MarketPulse 2.0.1" --notes-file CHANGELOG.md
+   VERSION=2.0.1
+   awk -v ver="$VERSION" '
+     $0 ~ "^## \\[" ver "\\]" {keep=1; print; next}
+     keep && /^## \[/ {exit}
+     keep {print}
+   ' CHANGELOG.md | gh release create "v$VERSION" --title "MarketPulse $VERSION" --notes-file -
    ```
 
-   Prefer editing the release body down to the `## [2.0.1]` section (with
-   upgrade notes) rather than pasting the entire changelog history.
 9. Verify a fresh clone/install from the tag reports the expected version:
 
    ```bash
