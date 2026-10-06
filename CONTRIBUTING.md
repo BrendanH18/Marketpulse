@@ -20,12 +20,22 @@ data and no network requests, run `uv run --locked python scripts/render_preview
 
 ## Development setup
 
+End users should install a **pinned release tag** (see [README Get started](README.md#get-started)).
+This section is for contributors working on the code.
+
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Git:
 
 ```bash
 git clone https://github.com/BrendanH18/Marketpulse.git
 cd Marketpulse
 uv sync --locked --dev --python 3.11
+```
+
+To run the installed CLI/TUI against your checkout (including the macOS menu bar
+companion, which needs the Swift sources on disk), use an editable tool install:
+
+```bash
+uv tool install --python 3.11 --editable .
 ```
 
 Use an isolated portfolio for manual testing:
@@ -127,7 +137,8 @@ commit is on `main` and CI is green.
    changes and upgrade notes (backup before upgrade, schema migrations, any
    companion JSON contract changes).
 4. Review installation and upgrade instructions in the README and
-   [docs/data.md](docs/data.md).
+   [docs/data.md](docs/data.md). Confirm the README git-tag examples match the
+   tag you are about to publish (for example `v2.1.0`).
 5. Build and install the wheel in a fresh environment; check both `marketpulse`
    and `mp`, and confirm `marketpulse --version` matches `__version__`. On
    macOS, also verify the companion from an editable checkout.
@@ -159,14 +170,33 @@ commit is on `main` and CI is green.
    ' CHANGELOG.md | gh release create "v$VERSION" --title "MarketPulse $VERSION" --notes-file -
    ```
 
-9. Verify a fresh clone/install from the tag reports the expected version:
+9. Verify a fresh install from the tag reports the expected version (prefer the
+   non-editable git-tag path from the README; editable clone is fine for the
+   macOS companion):
 
    ```bash
-   git clone --branch v2.1.0 https://github.com/BrendanH18/Marketpulse.git
-   cd Marketpulse
-   uv tool install --python 3.11 --editable .
+   uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v2.1.0
    marketpulse --version
    ```
 
 The repository does not automatically publish packages or create releases.
-PyPI publishing is tracked separately and is not part of this checklist.
+
+### Publishing to PyPI (follow-up)
+
+Package metadata in `pyproject.toml` is ready for a wheel (`marketpulse` / `mp`
+entry points, MIT license, classifiers). Publishing still needs a maintainer
+action:
+
+1. Create a PyPI project named `marketpulse` (or claim the name).
+2. **Manual publish (API token):** create a PyPI API token, then after tagging a
+   release run `uv build --no-sources` and `uv publish` (or
+   `twine upload dist/*`) with that token.
+3. **Trusted publisher (CI/OIDC only):** configure a PyPI trusted publisher for
+   this repo’s release workflow when automating uploads from CI; do not combine
+   that path with local `uv publish` / `twine` (those need a token).
+4. Switch the README primary install to
+   `uv tool install --python 3.11 marketpulse` and keep the git-tag commands as
+   a fallback for pinned source installs.
+
+Do not automate PyPI from CI until a tagged release path is stable and OIDC or
+secrets are configured.

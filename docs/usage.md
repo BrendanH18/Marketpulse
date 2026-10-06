@@ -146,7 +146,8 @@ shows the available actions.
 
 `marketpulse menubar install` builds and launches
 `~/Applications/MarketPulse Bar.app`. It needs macOS 14+, a Swift toolchain, and
-an **editable source checkout**: the Python wheel does not bundle the Swift project.
+an **editable source checkout**: a git-tag or wheel install does not bundle the
+Swift project. See [CONTRIBUTING.md](../CONTRIBUTING.md) for the editable setup.
 `marketpulse menubar uninstall` removes the application.
 
 The installer records the CLI's absolute path and, when set, `MARKETPULSE_DATA`.
