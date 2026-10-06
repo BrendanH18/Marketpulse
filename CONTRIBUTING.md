@@ -20,12 +20,22 @@ data and no network requests, run `uv run --locked python scripts/render_preview
 
 ## Development setup
 
+End users should install a **pinned release tag** (see [README Get started](README.md#get-started)).
+This section is for contributors working on the code.
+
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Git:
 
 ```bash
 git clone https://github.com/BrendanH18/Marketpulse.git
 cd Marketpulse
 uv sync --locked --dev --python 3.11
+```
+
+To run the installed CLI/TUI against your checkout (including the macOS menu bar
+companion, which needs the Swift sources on disk), use an editable tool install:
+
+```bash
+uv tool install --python 3.11 --editable .
 ```
 
 Use an isolated portfolio for manual testing:
@@ -120,9 +130,33 @@ origin and license for any third-party code or assets you add.
 2. Update `__version__` in `src/marketpulse/__init__.py`; package metadata and
    the CLI use this single source. Refresh `uv.lock` if dependencies changed.
 3. Review installation and upgrade instructions, migration backups, and any
-   changed JSON fields used by the companion.
+   changed JSON fields used by the companion. Confirm the README git-tag
+   examples match the tag you are about to publish (for example `v2.0.1`).
 4. Build and install the wheel in a fresh environment; check both `marketpulse`
    and `mp`. On macOS, also verify the companion from an editable checkout.
 5. Prepare release notes describing changes and any upgrade requirements.
+6. Create an annotated git tag and GitHub Release. Verify a clean install:
+
+   ```bash
+   uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@vX.Y.Z
+   marketpulse --version
+   ```
 
 The repository does not automatically publish packages or create releases.
+
+### Publishing to PyPI (follow-up)
+
+Package metadata in `pyproject.toml` is ready for a wheel (`marketpulse` / `mp`
+entry points, MIT license, classifiers). Publishing still needs a maintainer
+action:
+
+1. Create a PyPI project named `marketpulse` (or claim the name) and a trusted
+   publisher or API token.
+2. After tagging a release: `uv build --no-sources` then
+   `uv publish` (or `twine upload dist/*`) with the token.
+3. Switch the README primary install to
+   `uv tool install --python 3.11 marketpulse` and keep the git-tag commands as
+   a fallback for pinned source installs.
+
+Do not automate PyPI from CI until a tagged release path is stable and secrets
+are configured.

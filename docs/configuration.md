@@ -56,12 +56,12 @@ settings separate as well, also set `MARKETPULSE_CONFIG` to another TOML file.
 
 | Symptom | What to check |
 | --- | --- |
-| `marketpulse: command not found` | Run `uv tool update-shell`, reopen the terminal, and check `uv tool list` |
+| `marketpulse: command not found` | For a `uv tool` install, run `uv tool update-shell`, reopen the terminal, and check `uv tool list`. For a pip/venv install, activate the environment first. |
 | Several accounts / ambiguous account | Select a full name with `--account`, or set `default_account` |
 | Quotes unavailable or stale | Check connectivity, symbol spelling, and `marketpulse doctor`; Yahoo may throttle or change its endpoints |
 | Missing history or FX | Review report warnings; cached quotes do not supply missing historical data |
 | Configuration changes seem ignored | Check `MARKETPULSE_CONFIG` and `XDG_CONFIG_HOME`, validate TOML types, and restart the app |
-| Swift sources not found | Install from a source checkout with `uv tool install --editable .` |
+| Swift sources not found | The menu bar companion needs an editable source checkout (`uv tool install --editable .`); a git-tag or wheel install does not include the Swift project |
 | Swift compiler not found | On macOS, install Xcode Command Line Tools with `xcode-select --install` |
 | Menu bar uses an old CLI path | Re-run `marketpulse menubar install` from the current environment |
 | Terminal characters look incorrect | Use a UTF-8 locale and a font with Unicode/braille support |

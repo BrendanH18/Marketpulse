@@ -39,17 +39,35 @@ You need **Python 3.11+**, [uv](https://docs.astral.sh/uv/getting-started/instal
 and a terminal with Unicode and color support. Linux and macOS are the primary
 platforms; the menu bar companion requires macOS 14+ and the Xcode Command Line Tools.
 
-Install from a source checkout:
+### Install from a release tag
+
+Install a pinned release so you are not tracking `main`. Prefer the tag shown on
+the [latest GitHub Release](https://github.com/BrendanH18/Marketpulse/releases)
+(examples below use `v2.0.1`):
 
 ```bash
-git clone https://github.com/BrendanH18/Marketpulse.git
-cd Marketpulse
-uv tool install --python 3.11 --editable .
+uv tool install --python 3.11 git+https://github.com/BrendanH18/Marketpulse.git@v2.0.1
 marketpulse --version
 ```
 
-Both `marketpulse` and `mp` launch the same application. If the command is not
-found, run `uv tool update-shell` and open a new terminal.
+Without uv, the same pin works with pip in a virtual environment:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install git+https://github.com/BrendanH18/Marketpulse.git@v2.0.1
+marketpulse --version
+```
+
+Both `marketpulse` and `mp` launch the same application. If a `uv tool` install
+is not found on your `PATH`, run `uv tool update-shell` and open a new terminal.
+
+MarketPulse is not on PyPI yet. When a package is published, the install becomes
+`uv tool install --python 3.11 marketpulse` (or `pip install marketpulse`).
+Until then, the git-tag commands above are the supported versioned path.
+
+For contributors and for building the macOS menu bar companion, use an editable
+source checkout documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Create an account and record your first transaction:
 
@@ -64,9 +82,12 @@ your own transaction details. Omit the price to record a purchase at the current
 quote. Accounts track holdings by default; add `--track-cash` if you also want
 deposits, purchases, and sales reflected in a cash balance.
 
-To explore the importer with fictional data in a separate portfolio:
+To explore the importer with fictional data in a separate portfolio (clone the
+repo once so `examples/transactions.csv` is available):
 
 ```bash
+git clone https://github.com/BrendanH18/Marketpulse.git
+cd Marketpulse
 MARKETPULSE_DATA="$PWD/.marketpulse/demo" marketpulse accounts add "Demo TFSA" --type TFSA --track-cash
 MARKETPULSE_DATA="$PWD/.marketpulse/demo" marketpulse accounts add "Demo Taxable" --type NONREG
 MARKETPULSE_DATA="$PWD/.marketpulse/demo" marketpulse import examples/transactions.csv --dry-run
@@ -77,17 +98,23 @@ MARKETPULSE_DATA="$PWD/.marketpulse/demo" marketpulse
 The demo uses your normal display configuration and fetches current market data.
 Its portfolio is separate from your default database.
 
-### Updating
+### Updating and uninstalling
 
-Quit the TUI and menu bar companion, then update from your checkout:
+Quit the TUI and menu bar companion, back up, then reinstall from the newer tag
+(replace both tags with the ones you are moving between):
 
 ```bash
 marketpulse backup
-git pull --ff-only
-uv tool install --python 3.11 --editable --reinstall .
+uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v2.0.1
 ```
 
-Re-run `marketpulse menubar install` to rebuild an installed companion.
+To remove a `uv tool` install:
+
+```bash
+uv tool uninstall marketpulse
+```
+
+Re-run `marketpulse menubar install` after upgrading an editable companion checkout.
 
 ## Find your way around
 
@@ -127,9 +154,13 @@ manual assets, transfers, contribution room, alerts, and integrations.
 
 ## macOS and Omarchy
 
-On macOS, install the native SwiftUI companion from your editable checkout:
+On macOS, install the native SwiftUI companion from an **editable source checkout**
+(the published wheel / git-tag install does not bundle the Swift project):
 
 ```bash
+git clone https://github.com/BrendanH18/Marketpulse.git
+cd Marketpulse
+uv tool install --python 3.11 --editable .
 xcode-select --install  # if the Command Line Tools are not installed
 marketpulse menubar install
 ```
