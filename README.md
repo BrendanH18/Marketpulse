@@ -9,7 +9,7 @@ local ledger, market data, Canadian account support, and a native macOS menu bar
 
 [Get started](#get-started) · [User guide](docs/usage.md) ·
 [Configuration](docs/configuration.md) · [Roadmap](docs/roadmap.md) ·
-[Contributing](CONTRIBUTING.md)
+[Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 
 ![MarketPulse dashboard with a sample portfolio](docs/assets/dashboard.svg)
 
