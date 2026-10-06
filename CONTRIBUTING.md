@@ -133,13 +133,13 @@ commit is on `main` and CI is green.
    macOS, also verify the companion from an editable checkout.
 6. Merge the release PR to `main` (fast-forward or merge commit — no force-push).
 7. On the merge commit, create an annotated tag matching `__version__` and push
-   it (example for 2.0.1):
+   it (example for 2.1.0):
 
    ```bash
    git checkout main
    git pull --ff-only origin main
-   git tag -a v2.0.1 -m "MarketPulse 2.0.1"
-   git push origin v2.0.1
+   git tag -a v2.1.0 -m "MarketPulse 2.1.0"
+   git push origin v2.1.0
    ```
 
 8. Publish a GitHub Release for that tag. Feed **only** the matching CHANGELOG
@@ -148,7 +148,7 @@ commit is on `main` and CI is green.
    as release notes:
 
    ```bash
-   VERSION=2.0.1
+   VERSION=2.1.0
    awk -v ver="$VERSION" '
      $0 ~ "^## \\[" ver "\\]" {keep=1; print; next}
      keep && /^## \[/ {exit}
@@ -159,7 +159,7 @@ commit is on `main` and CI is green.
 9. Verify a fresh clone/install from the tag reports the expected version:
 
    ```bash
-   git clone --branch v2.0.1 https://github.com/BrendanH18/Marketpulse.git
+   git clone --branch v2.1.0 https://github.com/BrendanH18/Marketpulse.git
    cd Marketpulse
    uv tool install --python 3.11 --editable .
    marketpulse --version

@@ -7,11 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.1] - 2026-10-06
+## [2.1.0] - 2026-10-06
 
-First tagged release after MarketPulse 2.0. Cuts a pin-able build from `main`
-after the September 2.0.1-era improvements, Canadian tax engine, data-safety
-work, and documentation/CI professionalization.
+First tagged release after MarketPulse 2.0. Minor bump (not a patch): this cut
+ships new backward-compatible public functionality from the September post-2.0
+work — Canadian tax engine, schema/backup workflows, CLI/TUI hardening, and
+documentation/CI professionalization — so SemVer calls for `2.1.0`.
 
 ### Added
 
@@ -57,7 +58,7 @@ work, and documentation/CI professionalization.
    ```bash
    marketpulse backup
    git fetch --tags
-   git checkout v2.0.1
+   git checkout v2.1.0
    uv tool install --python 3.11 --editable --reinstall .
    marketpulse --version
    ```
@@ -72,6 +73,6 @@ Initial 2.0 overhaul: transaction ledger engine, SQLite store, Yahoo market
 client, Omarchy-styled Textual TUI, and native macOS menu bar companion.
 See PR [#3](https://github.com/BrendanH18/Marketpulse/pull/3).
 
-[Unreleased]: https://github.com/BrendanH18/Marketpulse/compare/v2.0.1...HEAD
-[2.0.1]: https://github.com/BrendanH18/Marketpulse/compare/08b9aff...v2.0.1
+[Unreleased]: https://github.com/BrendanH18/Marketpulse/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/BrendanH18/Marketpulse/compare/08b9aff...v2.1.0
 [2.0.0]: https://github.com/BrendanH18/Marketpulse/tree/08b9aff
