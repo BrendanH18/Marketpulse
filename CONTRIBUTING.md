@@ -132,12 +132,15 @@ commit is on `main` and CI is green.
    and `mp`, and confirm `marketpulse --version` matches `__version__`. On
    macOS, also verify the companion from an editable checkout.
 6. Merge the release PR to `main` (fast-forward or merge commit — no force-push).
-7. On the merge commit, create an annotated tag matching `__version__` and push
-   it (example for 2.1.0):
+7. On the release PR merge commit, create an annotated tag matching `__version__`
+   and push it (example for 2.1.0). Do not tag whatever happens to be at the tip
+   of `main` if other commits landed afterward:
 
    ```bash
-   git checkout main
-   git pull --ff-only origin main
+   RELEASE_MERGE_SHA="REPLACE_WITH_RELEASE_PR_MERGE_SHA"
+   git fetch origin main
+   git checkout --detach "$RELEASE_MERGE_SHA"
+   test "$(git rev-parse HEAD)" = "$RELEASE_MERGE_SHA"
    git tag -a v2.1.0 -m "MarketPulse 2.1.0"
    git push origin v2.1.0
    ```
