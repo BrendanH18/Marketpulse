@@ -8,8 +8,8 @@ local ledger, market data, Canadian account support, and a native macOS menu bar
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 [Get started](#get-started) · [User guide](docs/usage.md) ·
-[Configuration](docs/configuration.md) · [Changelog](CHANGELOG.md) ·
-[Contributing](CONTRIBUTING.md)
+[Configuration](docs/configuration.md) · [Roadmap](docs/roadmap.md) ·
+[Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 
 ![MarketPulse dashboard with a sample portfolio](docs/assets/dashboard.svg)
 
