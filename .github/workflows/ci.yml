@@ -75,5 +75,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Install backend for native bridge checks
+        run: uv sync --locked --dev --python 3.11
       - name: Build menu bar companion
         run: swift build -c release --package-path macos/MarketPulseBar
+      - name: Check native app bridge
+        run: uv run --locked python scripts/check_native_bridge.py

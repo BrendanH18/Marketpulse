@@ -68,6 +68,7 @@ On macOS, changes to the companion should also pass:
 
 ```bash
 swift build -c release --package-path macos/MarketPulseBar
+uv run --locked python scripts/check_native_bridge.py
 ```
 
 CI runs lint, formatting, type checks, Python tests on Linux and macOS, Python

@@ -6,6 +6,16 @@ struct MarketPulseBarApp: App {
     @StateObject private var model = StatusModel()
 
     var body: some Scene {
+        Window("MarketPulse", id: "portfolio") {
+            PortfolioWindow(model: model)
+        }
+        .defaultSize(width: 1200, height: 850)
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("Import CSV…") { model.chooseImport() }.keyboardShortcut("i").disabled(!model.canEdit)
+                Button("Export ledger…") { model.exportLedger() }.keyboardShortcut("e").disabled(!model.canEdit)
+            }
+        }
         MenuBarExtra {
             PopoverView(model: model)
         } label: {
@@ -276,6 +286,7 @@ struct SettingsPanel: View {
             Text("Theme follows `marketpulse theme set …`").foregroundStyle(palette.muted).font(.system(size: 10, design: .monospaced))
         }
         .onAppear { model.loginEnabled = LoginItem.enabled }
+        .disabled(model.demo)
     }
 }
 
@@ -289,10 +300,15 @@ final class HoverState: ObservableObject {
 struct ActionBar: View {
     @ObservedObject var model: StatusModel
     let palette: Palette
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 6) {
-            BarButton(symbol: "terminal", label: "Open", hint: "⌥⌘M", palette: palette) { model.openTUI() }
+            BarButton(symbol: "macwindow", label: "Portfolio", hint: nil, palette: palette) {
+                openWindow(id: "portfolio")
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            }
+            BarButton(symbol: "terminal", label: nil, hint: nil, palette: palette) { model.openTUI() }
             BarButton(symbol: "arrow.clockwise", label: nil, hint: nil, palette: palette) { model.refresh() }
             BarButton(symbol: (model.status?.privacy ?? false) ? "eye.slash" : "eye", label: nil, hint: nil, palette: palette) { model.togglePrivacy() }
             BarButton(symbol: model.showSettings ? "xmark" : "gearshape", label: nil, hint: nil, palette: palette) { model.showSettings.toggle() }

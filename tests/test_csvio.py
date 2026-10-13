@@ -99,3 +99,39 @@ def test_identical_partial_fills_are_kept(store):
     third = import_transactions(store, io.StringIO(header + row * 3), default_account=acct)
     assert (third.added, third.duplicates) == (1, 2)
     assert store.ledger().open_holdings()[0].quantity == 15
+
+
+def test_preview_new_accounts_matches_import_without_writing(store):
+    import io
+
+    from marketpulse.csvio import import_transactions
+
+    csv = "date,account,type,symbol,quantity,price,currency\n2024-01-01,New TFSA,BUY,XEQT.TO,2,30,CAD\n"
+    preview = import_transactions(store, io.StringIO(csv), dry_run=True)
+    assert preview.added == 1
+    assert preview.skipped == []
+    assert preview.accounts_created == ["New TFSA"]
+    assert store.accounts() == []
+    assert store.transactions() == []
+    assert store.backups() == []
+    result = import_transactions(store, io.StringIO(csv))
+    assert result.added == preview.added
+    assert result.skipped == preview.skipped
+    assert result.accounts_created == preview.accounts_created
+
+
+def test_preview_transfer_to_new_account_matches_import(store):
+    import io
+
+    from marketpulse.csvio import import_transactions
+
+    csv = (
+        "date,account,type,symbol,quantity,price,currency,target_account\n"
+        "2024-01-01,New TFSA,BUY,XEQT.TO,2,30,CAD,\n"
+        "2024-01-02,New TFSA,TRANSFER,XEQT.TO,1,30,CAD,New RRSP\n"
+    )
+    preview = import_transactions(store, io.StringIO(csv), dry_run=True)
+    result = import_transactions(store, io.StringIO(csv))
+    assert preview.added == result.added == 2
+    assert preview.accounts_created == result.accounts_created == ["New TFSA", "New RRSP"]
+    assert preview.skipped == result.skipped == []

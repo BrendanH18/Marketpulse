@@ -2,7 +2,10 @@
 
 [Back to the README](../README.md) · [User guide](usage.md) · [Contributing](../CONTRIBUTING.md)
 
-MarketPulse’s near-term focus is **local-first Canadian ledger correctness and distribution trust**, not UI chrome.
+MarketPulse's focus is local ledger correctness, dependable automation, and a
+native macOS workspace. The new app reuses the existing ledger and keeps the TUI
+available. See the [native app guide](desktop.md) and [project review](project-review.md)
+for the implemented work and remaining priorities.
 
 **GitHub issues are the source of truth** for agents and humans. This page is only a pointer; claim and track work on the issues themselves.
 

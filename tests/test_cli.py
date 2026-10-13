@@ -152,3 +152,42 @@ def test_import_default_account(cli, store, tmp_path):
     assert "1 duplicate(s)" in cli("import", str(no_account), "-a", "A").output  # already in A from the first run
     assert "Imported 1" in cli("import", str(with_account)).output  # rows name their account
     assert {store.get_account(t.account_id).name for t in store.transactions()} == {"A", "B"}
+
+
+def test_desktop_snapshot_and_one_shot_automation(cli, store):
+    cli("buy", "AAPL", "1", "100")
+    payload = json.loads(cli("desktop", "snapshot").output)
+    assert payload["positions"][0]["symbol"] == "AAPL"
+    assert payload["automation"]["backup"] is not None
+    cycle = cli("automation", "run", "--once", "--json", "--quiet")
+    assert cycle.exit_code == 0
+    assert json.loads(cycle.output)["errors"] == []
+
+
+def test_desktop_import_preview_is_read_only_and_structured(cli, store, tmp_path):
+    path = tmp_path / "named.csv"
+    path.write_text("date,account,type,symbol,quantity,price\n2024-01-01,New TFSA,BUY,XEQT.TO,2,30\n")
+    result = cli("desktop", "import", str(path), "--dry-run")
+    payload = json.loads(result.output)
+    assert payload["added"] == 1 and payload["accounts_created"] == ["New TFSA"]
+    assert payload["backup"] is None
+    assert store.accounts() == []
+    assert store.transactions() == []
+    imported = json.loads(cli("desktop", "import", str(path)).output)
+    assert imported["added"] == 1 and imported["backup"]
+
+
+def test_desktop_preview_requires_default_account_without_creating_one(cli, store, tmp_path):
+    path = tmp_path / "unnamed.csv"
+    path.write_text("date,type,symbol,quantity,price\n2024-01-01,BUY,XEQT.TO,2,30\n")
+    result = cli("desktop", "import", str(path), "--dry-run")
+    assert result.exit_code == 1 and "Select an account" in result.output
+    assert store.accounts() == []
+
+
+def test_alert_invalid_threshold_is_a_friendly_error(cli):
+    for value in ("nan", "inf", "-1", "0"):
+        result = cli("alerts", "add", "--", "AAPL", "above", value)
+        assert result.exit_code == 1
+        assert "finite and positive" in result.output
+        assert "Traceback" not in result.output

@@ -1,0 +1,30 @@
+import Foundation
+
+// Compiled alongside the app's actual model files; works with Command Line Tools alone.
+@main
+struct NativeBridgeCheck {
+  static func main() throws {
+    let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    let payload = try decoder.decode(DesktopPayload.self, from: data)
+    precondition(payload.version == 1 && payload.demo)
+    precondition(payload.accounts.count == 3 && payload.positions.count == 5)
+    precondition(payload.status.history.count == 181 && payload.incomeMonths.count == 12)
+    precondition(payload.warnings.isEmpty && payload.automation.backup == nil)
+    precondition(payload.status.netWorth! > 0)
+    precondition(payload.positions.allSatisfy { $0.value != nil })
+
+    let preview = Data(
+      #"{"added":2,"duplicates":1,"skipped":[[4,"Invalid date"]],"accounts_created":["TFSA"],"backup":null}"#
+        .utf8)
+    let result = try decoder.decode(ImportPreview.self, from: preview)
+    precondition(result.added == 2 && result.duplicates == 1)
+    precondition(result.skipped.first?.line == 4 && result.skipped.first?.reason == "Invalid date")
+    precondition(result.accountsCreated == ["TFSA"] && result.backup == nil)
+    precondition(Format.money(12345, "CAD", privacy: true) == Format.mask)
+    precondition(Format.money(nil, "CAD", privacy: true) == "—")
+    precondition(Format.pct(-1.25) == "-1.25%")
+    print("Native bridge checks passed: real Python demo, import result, privacy formatting")
+  }
+}

@@ -8,6 +8,7 @@ so there is exactly one source of truth.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -293,6 +294,8 @@ class Transaction:
 
     def validate(self) -> None:
         t = self.type
+        if not all(math.isfinite(v) for v in (self.quantity, self.price, self.amount, self.fees, self.ratio)):
+            raise ValueError("Transaction numbers must be finite.")
         if t.needs_symbol and not self.symbol:
             raise ValueError(f"{t} needs a symbol.")
         if t.uses_quantity and self.quantity <= 0:
@@ -434,6 +437,10 @@ class Alert:
         self.symbol = self.symbol.upper()
         if self.condition not in ALERT_CONDITIONS:
             raise ValueError(f"Alert condition must be one of: {', '.join(ALERT_CONDITIONS)}")
+        if not self.symbol.strip():
+            raise ValueError("Alert needs a symbol.")
+        if not math.isfinite(self.threshold) or self.threshold <= 0:
+            raise ValueError("Alert threshold must be finite and positive.")
 
     @property
     def saved_id(self) -> int:

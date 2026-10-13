@@ -189,6 +189,7 @@ def import_transactions(
     # executions on one day) are all kept.
     existing = Counter(key(t) for t in store.transactions())
     pending: list[Transaction] = []
+    preview_accounts: dict[str, Account] = {}
 
     def get(row: dict, name: str) -> str:
         col = cols.get(name)
@@ -198,12 +199,24 @@ def import_transactions(
         if not name:
             return default_account
         acct = store.get_account(name)
-        if acct is None and create_accounts and not dry_run:
+        if acct is None and create_accounts:
             guessed = next((t for t in AccountType if t.value.lower() in name.lower()), AccountType.NONREG)
-            acct = store.add_account(
-                Account(name=name, type=guessed, currency=default_account.currency if default_account else "CAD")
-            )
-            result.accounts_created.append(name)
+            if dry_run:
+                key = name.casefold()
+                if key not in preview_accounts:
+                    preview_accounts[key] = Account(
+                        name=name,
+                        type=guessed,
+                        currency=default_account.currency if default_account else "CAD",
+                        id=-(len(preview_accounts) + 1),
+                    )
+                    result.accounts_created.append(name)
+                acct = preview_accounts[key]
+            else:
+                acct = store.add_account(
+                    Account(name=name, type=guessed, currency=default_account.currency if default_account else "CAD")
+                )
+                result.accounts_created.append(name)
         return acct
 
     for line_no, row in enumerate(reader, start=2):
@@ -232,7 +245,7 @@ def import_transactions(
         if txn_type.uses_amount and not amount and qty and price:
             amount = qty * price
         target_name = get(row, "target_account")
-        target = store.get_account(target_name) if target_name else None
+        target = resolve_account(target_name) if target_name else None
         txn = Transaction(
             account_id=acct.id,
             type=txn_type,

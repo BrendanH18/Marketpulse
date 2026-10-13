@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A native macOS portfolio window with charts, holdings/activity search,
+  account/transaction/alert forms, CSV preview/import, export, income, and
+  automation status. Install from an editable checkout with `marketpulse desktop install`.
+- Versioned `desktop snapshot` JSON bridge and a fictional read-only `--demo`.
+- Shared maintenance cycle and `automation run` worker (continuous or `--once`)
+  for refresh, daily snapshots, alert checks, and daily safety backups.
+- Native checks that decode the real Python demo payload and CI coverage for them.
+
+### Fixed
+
+- Transaction validation rejects NaN/infinity; alerts require a finite positive threshold.
+- CSV dry runs model accounts and transfer destinations without writing them.
+- macOS installation preserves configuration overrides and clears obsolete paths.
+- Native CLI subprocesses time out instead of leaving refresh stuck indefinitely.
+
+No database migration is required. The existing `status --json` contract is unchanged.
+
 ## [2.1.0] - 2026-10-06
 
 First tagged release after MarketPulse 2.0. Minor bump (not a patch): this cut

@@ -387,12 +387,14 @@ class Tracker:
 
     # ── menu bar / scripting payload ──────────────────────────────────────────
 
-    def status_payload(self, view: PortfolioView | None = None, *, history_days: int = 30) -> dict:
+    def status_payload(
+        self, view: PortfolioView | None = None, *, history_days: int = 30, evaluate_alerts: bool = True
+    ) -> dict:
         view = view or self.valuation()
         privacy = self.config.privacy
         watch_syms, wq, _ = self.watchlist_quotes()
         active_alerts = self.store.alerts()
-        fired = self.check_alerts({**view.quotes, **wq}, notify=True)
+        fired = self.check_alerts({**view.quotes, **wq}, notify=True) if evaluate_alerts else []
         palette = resolve_palette(self.config.theme)
 
         display = self.config.menubar_display
