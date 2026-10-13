@@ -15,6 +15,13 @@ struct NativeBridgeCheck {
     precondition(payload.status.netWorth! > 0)
     precondition(payload.positions.allSatisfy { $0.value != nil })
 
+    let transactions = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
+    for row in try decoder.decode([ValuedTransaction].self, from: transactions) {
+      precondition(
+        row.transaction.value == row.expectedValue,
+        "Activity value differs for \(row.transaction.type)")
+    }
+
     let preview = Data(
       #"{"added":2,"duplicates":1,"skipped":[[4,"Invalid date"]],"accounts_created":["TFSA"],"backup":null}"#
         .utf8)
@@ -25,6 +32,13 @@ struct NativeBridgeCheck {
     precondition(Format.money(12345, "CAD", privacy: true) == Format.mask)
     precondition(Format.money(nil, "CAD", privacy: true) == "—")
     precondition(Format.pct(-1.25) == "-1.25%")
-    print("Native bridge checks passed: real Python demo, import result, privacy formatting")
+    print(
+      "Native bridge checks passed: real Python demo, activity values, import result, privacy formatting"
+    )
   }
+}
+
+private struct ValuedTransaction: Decodable {
+  let transaction: DesktopTransaction
+  let expectedValue: Double
 }

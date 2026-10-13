@@ -36,6 +36,17 @@ final class StatusModel: ObservableObject {
     didSet { if !demo { UserDefaults.standard.set(terminal, forKey: "terminal") } }
   }
   let demo = CommandLine.arguments.contains("--demo")
+  private var portfolioController: PortfolioWindowController?
+  var menuBarOnly: Bool { Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool ?? false }
+
+  // macOS 14 lacks SwiftUI's scene launch suppression. Create its window only
+  // when explicitly requested, or on desktop-mode startup.
+  func openLegacyPortfolio() {
+    if portfolioController == nil { portfolioController = PortfolioWindowController(model: self) }
+    portfolioController?.showWindow(nil)
+    NSApplication.shared.activate(ignoringOtherApps: true)
+  }
+
   private var timer: Timer?
   var canEdit: Bool { !demo && !loading && !saving && desktop != nil }
 

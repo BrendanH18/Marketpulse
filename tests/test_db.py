@@ -151,3 +151,27 @@ def test_fresh_install_seeds_watchlist():
     store = Store.open_default()
     assert store.watchlist() == DEFAULT_WATCHLIST
     assert store.ensure_default_account().name == "Main"
+
+
+def test_reopens_legacy_invalid_alerts_without_changing_rows(store):
+    legacy = [("", 100), ("  ", 100), ("AAPL", 0), ("AAPL", -1)]
+    for symbol, threshold in legacy:
+        store._exec("INSERT INTO alerts(symbol, condition, threshold) VALUES (?, 'above', ?)", (symbol, threshold))
+    valid = store.add_alert(Alert("AAPL", "above", 150))
+    reopened = Store(store.path)
+    try:
+        alerts = reopened.alerts()
+        assert len(alerts) == len(legacy) + 1
+        assert [a.id for a in alerts if a.active] == [valid.id]
+        assert [a.id for a in reopened.alerts(active_only=True)] == [valid.id]
+        assert all(a.describe() for a in alerts)
+        assert reopened._query("SELECT count(*) AS n FROM alerts WHERE active = 1")[0]["n"] == len(legacy) + 1
+    finally:
+        reopened.close()
+
+
+def test_add_alert_validates_even_when_object_has_an_id(store):
+    restored = Alert("AAPL", "above", 0, id=1)
+    with pytest.raises(ValueError, match="finite and positive"):
+        store.add_alert(restored)
+    assert store.alerts() == []

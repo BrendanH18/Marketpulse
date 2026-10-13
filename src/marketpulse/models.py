@@ -437,6 +437,14 @@ class Alert:
         self.symbol = self.symbol.upper()
         if self.condition not in ALERT_CONDITIONS:
             raise ValueError(f"Alert condition must be one of: {', '.join(ALERT_CONDITIONS)}")
+        # Stored alerts predate the stricter checks. Store.alerts keeps invalid
+        # legacy rows readable (and inactive); new alerts must still pass validation.
+        if self.id is None:
+            self.validate()
+
+    def validate(self) -> None:
+        if self.condition not in ALERT_CONDITIONS:
+            raise ValueError(f"Alert condition must be one of: {', '.join(ALERT_CONDITIONS)}")
         if not self.symbol.strip():
             raise ValueError("Alert needs a symbol.")
         if not math.isfinite(self.threshold) or self.threshold <= 0:

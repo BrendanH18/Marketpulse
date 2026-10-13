@@ -580,7 +580,7 @@ class Store:
 
     def alerts(self, active_only: bool = False) -> list[Alert]:
         sql = "SELECT * FROM alerts" + (" WHERE active = 1" if active_only else "") + " ORDER BY symbol, id"
-        return [
+        alerts = [
             Alert(
                 id=r["id"],
                 symbol=r["symbol"],
@@ -592,8 +592,17 @@ class Store:
             )
             for r in self._query(sql)
         ]
+        for alert in alerts:
+            try:
+                alert.validate()
+            except ValueError:
+                # Preserve legacy rows for inspection/removal, but never evaluate
+                # or notify on a blank symbol or invalid threshold. No data rewrite.
+                alert.active = False
+        return [a for a in alerts if a.active] if active_only else alerts
 
     def add_alert(self, alert: Alert) -> Alert:
+        alert.validate()
         cur = self._exec(
             "INSERT INTO alerts(symbol, condition, threshold, note, active, triggered_at) VALUES (?,?,?,?,?,?)",
             (alert.symbol, alert.condition, alert.threshold, alert.note, int(alert.active), alert.triggered_at),

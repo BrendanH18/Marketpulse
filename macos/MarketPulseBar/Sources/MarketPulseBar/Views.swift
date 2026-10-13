@@ -6,15 +6,12 @@ struct MarketPulseBarApp: App {
     @StateObject private var model = StatusModel()
 
     var body: some Scene {
-        Window("MarketPulse", id: "portfolio") {
-            PortfolioWindow(model: model)
-        }
-        .defaultSize(width: 1200, height: 850)
-        .commands {
-            CommandGroup(after: .newItem) {
-                Button("Import CSV…") { model.chooseImport() }.keyboardShortcut("i").disabled(!model.canEdit)
-                Button("Export ledger…") { model.exportLedger() }.keyboardShortcut("e").disabled(!model.canEdit)
+        if #available(macOS 15.0, *) {
+            Window("MarketPulse", id: "portfolio") {
+                PortfolioWindow(model: model)
             }
+            .defaultSize(width: 1200, height: 850)
+            .defaultLaunchBehavior(model.menuBarOnly ? .suppressed : .presented)
         }
         MenuBarExtra {
             PopoverView(model: model)
@@ -23,8 +20,17 @@ struct MarketPulseBarApp: App {
                 Image(systemName: "waveform.path.ecg")
                 Text(model.menuTitle).monospacedDigit()
             }
+            .onAppear {
+                if #unavailable(macOS 15.0), !model.menuBarOnly { model.openLegacyPortfolio() }
+            }
         }
         .menuBarExtraStyle(.window)
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("Import CSV…") { model.chooseImport() }.keyboardShortcut("i").disabled(!model.canEdit)
+                Button("Export ledger…") { model.exportLedger() }.keyboardShortcut("e").disabled(!model.canEdit)
+            }
+        }
     }
 }
 
@@ -305,8 +311,12 @@ struct ActionBar: View {
     var body: some View {
         HStack(spacing: 6) {
             BarButton(symbol: "macwindow", label: "Portfolio", hint: nil, palette: palette) {
-                openWindow(id: "portfolio")
-                NSApplication.shared.activate(ignoringOtherApps: true)
+                if #available(macOS 15.0, *) {
+                    openWindow(id: "portfolio")
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                } else {
+                    model.openLegacyPortfolio()
+                }
             }
             BarButton(symbol: "terminal", label: nil, hint: nil, palette: palette) { model.openTUI() }
             BarButton(symbol: "arrow.clockwise", label: nil, hint: nil, palette: palette) { model.refresh() }

@@ -89,3 +89,59 @@ def test_demo_never_opens_real_tracker(monkeypatch, tmp_path, notifications):
     assert len(payload["status"]["history"]) == 181
     assert not (tmp_path / "data").exists()
     assert notifications == []
+
+
+@pytest.mark.parametrize(("held", "watched"), [(True, False), (False, True), (True, True)])
+def test_alert_reuses_fresh_portfolio_quote_after_redundant_request_failure(
+    tracker, fake, notifications, monkeypatch, held, watched
+):
+    from marketpulse.market import SPARK_URL, MarketError
+
+    if held:
+        holding(tracker.store)
+    tracker.store.add_alert(Alert("AAPL", "above", 150))
+    if watched:
+        tracker.store.add_watch(["AAPL"])
+    original = fake.get_json
+    requests = 0
+
+    def fail_repeat(url, params):
+        nonlocal requests
+        if url == SPARK_URL and "AAPL" in params["symbols"].split(","):
+            requests += 1
+            if requests > 1:
+                raise MarketError("transient refresh failure")
+        return original(url, params)
+
+    monkeypatch.setattr(fake, "get_json", fail_repeat)
+    report = run_cycle(tracker, fresh=True).report
+    assert report["fired"] == ["AAPL ≥ 150.00"]
+    assert len(notifications) == 1
+    assert requests == (2 if held and watched else 1)
+
+
+def test_desktop_bridge_includes_all_snapshot_history(tracker):
+    from marketpulse.db import Snapshot
+
+    for day, currency in [
+        ("1900-01-01", "CAD"),
+        ("2010-01-01", "CAD"),
+        (date.today().isoformat(), "CAD"),
+        ("2000-01-01", "USD"),
+    ]:
+        tracker.store.upsert_snapshot(Snapshot(day, 100, 90, 90, currency, {}))
+    payload = snapshot(tracker)
+    assert [s["date"] for s in payload["status"]["history"]] == ["1900-01-01", "2010-01-01", date.today().isoformat()]
+    # The existing menu-bar status contract still defaults to thirty days.
+    assert [s["date"] for s in tracker.status_payload()["history"]] == [date.today().isoformat()]
+
+
+def test_legacy_invalid_alerts_do_not_stop_desktop_refresh(tracker, notifications):
+    tracker.store._exec("INSERT INTO alerts(symbol, condition, threshold) VALUES ('AAPL', 'above', 0)")
+    tracker.store._exec("INSERT INTO alerts(symbol, condition, threshold) VALUES ('', 'above', 100)")
+    tracker.store.add_alert(Alert("AAPL", "above", 150))
+    payload = snapshot(tracker)
+    assert payload["automation"]["fired"] == ["AAPL ≥ 150.00"]
+    assert len(notifications) == 1
+    assert sum(a["active"] for a in payload["alerts"]) == 1
+    json.dumps(payload, allow_nan=False)

@@ -33,10 +33,13 @@ def run_cycle(tracker: Tracker, *, fresh: bool = False, notify: bool = True) -> 
     _, watch, watch_errors = tracker.watchlist_quotes(use_cache=not fresh)
     # Include alert-only symbols, even when neither held nor watched.
     active = tracker.store.alerts(active_only=True)
-    quotes, alert_errors = (
-        tracker.market.quotes([a.symbol for a in active], use_cache=not fresh) if active else ({}, {})
-    )
-    fired = tracker.check_alerts({**view.quotes, **watch, **quotes}, notify=notify)
+    quotes = dict(view.quotes)
+    # A failed watchlist refresh must not replace a fresh holding quote with stale fallback data.
+    quotes.update({s: q for s, q in watch.items() if s not in quotes or not q.stale})
+    missing = sorted({a.symbol for a in active} - quotes.keys())
+    extra, alert_errors = tracker.market.quotes(missing, use_cache=not fresh) if missing else ({}, {})
+    quotes.update(extra)
+    fired = tracker.check_alerts(quotes, notify=notify)
     errors += [f"{s}: {e}" for s, e in {**view.errors, **watch_errors, **alert_errors}.items()]
     backups = tracker.store.backups()
     latest = tracker.store.latest_snapshot()

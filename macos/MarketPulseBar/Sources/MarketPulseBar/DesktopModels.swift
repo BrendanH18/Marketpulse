@@ -56,7 +56,7 @@ struct DesktopTransaction: Decodable, Identifiable {
   let fees: Double
   let currency: String
   let note: String
-  var value: Double { ["BUY", "SELL", "DRIP"].contains(type) ? quantity * price : amount }
+  var value: Double { ["BUY", "SELL", "DRIP", "TRANSFER"].contains(type) ? quantity * price : amount }
 }
 
 struct AllocationBucket: Decodable, Identifiable {

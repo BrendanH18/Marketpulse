@@ -24,7 +24,7 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
     return {
         "version": 1,
         "demo": False,
-        "status": tracker.status_payload(view, history_days=3650, evaluate_alerts=False),
+        "status": tracker.status_payload(view, history_days=None, evaluate_alerts=False),
         "accounts": [asdict(a) for a in tracker.store.accounts()],
         "positions": [
             {

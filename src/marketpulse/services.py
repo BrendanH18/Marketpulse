@@ -388,7 +388,7 @@ class Tracker:
     # ── menu bar / scripting payload ──────────────────────────────────────────
 
     def status_payload(
-        self, view: PortfolioView | None = None, *, history_days: int = 30, evaluate_alerts: bool = True
+        self, view: PortfolioView | None = None, *, history_days: int | None = 30, evaluate_alerts: bool = True
     ) -> dict:
         view = view or self.valuation()
         privacy = self.config.privacy
@@ -415,7 +415,7 @@ class Tracker:
         else:
             title = f"{fmt.arrow(view.day_change)} {fmt.pct(view.day_change_pct)}"
 
-        since = (date.today() - timedelta(days=history_days)).isoformat()
+        since = (date.today() - timedelta(days=history_days)).isoformat() if history_days is not None else None
         history = [
             {"date": s.date, "value": round(s.net_worth, 2)}
             for s in self.store.snapshots(since)

@@ -302,6 +302,7 @@ private struct OverviewWorkspace: View {
   let canEdit: Bool
   private var s: StatusPayload { payload.status }
   private var points: [HistoryPoint] {
+    if draft.period == 0 { return s.history }
     let since = Calendar.current.date(byAdding: .day, value: -draft.period, to: .now) ?? .now
     let iso = ISO8601DateFormatter().string(from: since).prefix(10)
     return s.history.filter { $0.date >= iso }
@@ -342,7 +343,7 @@ private struct OverviewWorkspace: View {
               Text("3M").tag(90)
               Text("6M").tag(180)
               Text("1Y").tag(365)
-              Text("ALL").tag(36500)
+              Text("ALL").tag(0)
             }.pickerStyle(.segmented).frame(width: 270)
           }
           if s.privacy {
