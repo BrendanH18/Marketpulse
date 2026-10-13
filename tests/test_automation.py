@@ -145,3 +145,79 @@ def test_legacy_invalid_alerts_do_not_stop_desktop_refresh(tracker, notification
     assert len(notifications) == 1
     assert sum(a["active"] for a in payload["alerts"]) == 1
     json.dumps(payload, allow_nan=False)
+
+
+def test_unquotable_symbol_is_reported_but_does_not_fail_one_shot_run(tracker, monkeypatch):
+    holding(tracker.store)
+    tracker.store.add_watch(["DELISTED"])
+    report = run_cycle(tracker, fresh=True).report
+    assert report["errors"] == []
+    assert report["quote_errors"] == ["DELISTED: symbol not found"]
+    monkeypatch.setattr("marketpulse.services.Tracker.open", classmethod(lambda cls, config=None: tracker))
+    result = CliRunner().invoke(main, ["automation", "run", "--once", "--json", "--quiet"], catch_exceptions=False)
+    assert result.exit_code == 0
+    assert json.loads(result.output)["quote_errors"] == ["DELISTED: symbol not found"]
+
+
+def test_failed_backup_still_fails_one_shot_run(tracker, monkeypatch):
+    holding(tracker.store)
+
+    def fail_backup():
+        raise OSError("disk full")
+
+    monkeypatch.setattr(tracker.store, "auto_backup", fail_backup)
+    monkeypatch.setattr("marketpulse.services.Tracker.open", classmethod(lambda cls, config=None: tracker))
+    result = CliRunner().invoke(main, ["automation", "run", "--once", "--json", "--quiet"], catch_exceptions=False)
+    assert result.exit_code == 1
+    assert json.loads(result.output)["errors"] == ["Backup failed: disk full"]
+
+
+def test_desktop_bridge_hides_archived_accounts(tracker):
+    store = tracker.store
+    active = holding(store)
+    old = store.add_account(Account(name="Old RRSP"))
+    store.add_transaction(
+        Transaction(account_id=old.saved_id, type=TxnType.BUY, symbol="AAPL", quantity=1, price=150, currency="USD")
+    )
+    store.add_transaction(
+        Transaction(
+            account_id=active.saved_id,
+            type=TxnType.TRANSFER,
+            symbol="AAPL",
+            quantity=1,
+            price=150,
+            currency="USD",
+            target_account_id=old.saved_id,
+        )
+    )
+    old.archived = True
+    store.update_account(old)
+    payload = snapshot(tracker)
+    assert [a["name"] for a in payload["accounts"]] == ["Investing"]
+    assert {p["account_id"] for p in payload["positions"]} == {active.saved_id}
+    assert {t["account_id"] for t in payload["activity"]} == {active.saved_id}
+    assert [a["name"] for a in payload["status"]["accounts"]] == ["Investing"]
+    # The active account's own transfer keeps its destination; hidden value stays in totals and is flagged.
+    assert next(t for t in payload["activity"] if t["type"] == "TRANSFER")["target_account"] == "Old RRSP"
+    assert payload["status"]["net_worth"] == pytest.approx(810)  # 3 AAPL @ 270, one share in the archived account
+    assert any("Archived account Old RRSP still holds value" in w for w in payload["warnings"])
+
+
+def test_desktop_activity_amounts_are_signed_by_cash_direction(tracker):
+    acct = holding(tracker.store)
+    for kind, amount in [(TxnType.DEPOSIT, 1000), (TxnType.WITHDRAWAL, 50), (TxnType.FEE, 5), (TxnType.INTEREST, 2)]:
+        tracker.store.add_transaction(Transaction(account_id=acct.saved_id, type=kind, amount=amount, currency="USD"))
+    tracker.store.add_transaction(
+        Transaction(account_id=acct.saved_id, type=TxnType.SPLIT, symbol="AAPL", ratio=2, currency="USD")
+    )
+    rows = {t["type"]: t for t in snapshot(tracker)["activity"]}
+    signed = {k: (r["direction"], r["value"]) for k, r in rows.items()}
+    assert signed == {
+        "BUY": (-1, 300),
+        "DEPOSIT": (1, 1000),
+        "WITHDRAWAL": (-1, 50),
+        "FEE": (-1, 5),
+        "INTEREST": (1, 2),
+        "SPLIT": (0, 0),
+    }
+    assert rows["SPLIT"]["ratio"] == 2

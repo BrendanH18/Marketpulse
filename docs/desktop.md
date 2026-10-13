@@ -28,7 +28,10 @@ under your control in Automation.
   asset allocation, account balances, and recent activity.
 - **Holdings:** search, account filters, value/symbol ordering, and native/base
   currency labels. Missing prices remain unavailable rather than becoming zero.
-- **Activity:** searchable ledger entries and amounts in the original currency.
+- **Activity:** searchable ledger entries and amounts in the original currency,
+  signed from the account's point of view: **+** money in (sells, deposits,
+  income), **−** money out (buys, withdrawals, fees). DRIPs and transfers move
+  shares rather than cash and carry no sign; splits show their ratio.
 - **Accounts:** account creation, holdings/cash tracking details, and entered
   contribution-room summaries.
 - **Watchlist:** add/remove symbols and create/delete price or daily-change alerts.
@@ -38,9 +41,17 @@ under your control in Automation.
 
 Use **⌘N** to record a transaction, **⌘R** to refresh, **⌘I** to import, and **⌘E**
 to export. Import first previews new entries, duplicates, skipped lines, and new
-accounts. Select a default account for files without an account column. Clicking
-Import adds the valid new entries, skipping the reported invalid ones, and takes
-a safety backup first.
+accounts. The preview runs the real import against a temporary copy of your
+ledger, so it reports exactly what Import will do. The app imports its own copy
+of the file taken when you chose it, so later edits to the file don't apply.
+Select a default account for files without an account column. Clicking Import
+adds the valid new entries, skipping the reported invalid ones, and takes a
+safety backup first.
+
+Archived accounts never appear in the app: not in lists, pickers, holdings,
+activity, or the menu bar. Their history stays in the ledger. Value an archived
+account still holds remains in your totals, and the app warns you about it so
+you can move or sell those holdings, or unarchive the account.
 
 Privacy mode masks portfolio amounts and quantities, and hides amount-bearing
 charts. Quotes and percentage changes remain visible. CSV and JSON exports
@@ -58,6 +69,9 @@ snapshot when valuation is fresh and complete, and takes a daily backup when
 the latest backup is at least 24 hours old. Missing or stale prices are visible;
 stale quotes do not fire alerts or create performance snapshots.
 
+If the portfolio window's data can't be refreshed, the menu bar falls back to
+`marketpulse status --json` and keeps working; the window shows the error.
+
 Closing the window leaves the menu bar running. Quitting the app stops its
 maintenance timer. Only enable launch at login if you want that behavior.
 For a terminal worker or an external scheduler:
@@ -69,7 +83,9 @@ marketpulse automation run --once --json --quiet
 ```
 
 Continuous execution retries failed cycles at the next interval. One-shot runs
-exit nonzero when a cycle fails or reports errors. Use one worker per ledger to
+exit nonzero only when the cycle fails (for example, the backup couldn't be
+written). A symbol or exchange rate the provider can't quote is listed under
+`quote_errors` and doesn't fail the run. Use one worker per ledger to
 avoid duplicate alert notifications. Automation does not create ledger entries.
 Backups are local; see [data and restoration](data.md) for retention and recovery.
 

@@ -61,16 +61,16 @@ struct TransactionSheet: View {
       "BUY": "buy", "SELL": "sell", "DEPOSIT": "deposit", "WITHDRAWAL": "withdraw",
       "DIVIDEND": "dividend", "INTEREST": "interest", "FEE": "fee",
     ][draft.type]!
-    var args = [command]
-    if needsSymbol { args += [draft.symbol.trimmingCharacters(in: .whitespaces).uppercased()] }
-    args += trade ? [draft.quantity, draft.price, "--fees", draft.fees] : [draft.amount]
     let f = DateFormatter()
     f.dateFormat = "yyyy-MM-dd"
     f.locale = Locale(identifier: "en_US_POSIX")
-    args += ["--account", draft.account, "--date", f.string(from: draft.date), "--note", draft.note]
+    var options = ["--account", draft.account, "--date", f.string(from: draft.date), "--note", draft.note]
+    if trade { options += ["--fees", draft.fees] }
     // Blank lets the CLI infer the listing currency, so a USD stock in a CAD account stays USD.
-    if !currency.isEmpty { args += ["--currency", currency] }
-    return args
+    if !currency.isEmpty { options += ["--currency", currency] }
+    var values = needsSymbol ? [draft.symbol.trimmingCharacters(in: .whitespaces).uppercased()] : []
+    values += trade ? [draft.quantity, draft.price] : [draft.amount]
+    return [command] + options + ["--"] + values
   }
 }
 
@@ -106,10 +106,10 @@ struct AccountSheet: View {
         Button("Create account") {
           let args =
             [
-              "accounts", "add", draft.name.trimmingCharacters(in: .whitespaces), "--type",
-              draft.type, "--currency", draft.currency.uppercased(), "--institution",
-              draft.institution,
+              "accounts", "add", "--type", draft.type, "--currency", draft.currency.uppercased(),
+              "--institution", draft.institution,
             ] + (draft.cash ? ["--track-cash"] : [])
+            + ["--", draft.name.trimmingCharacters(in: .whitespaces)]
           Task { if await model.perform(args, success: "Account created") { dismiss() } }
         }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
           .disabled(
@@ -149,8 +149,9 @@ struct AlertSheet: View {
           Task {
             if await model.perform(
               [
-                "alerts", "add", draft.symbol.uppercased(), draft.condition, draft.threshold,
-                "--note", draft.note,
+                "alerts", "add", "--note", draft.note, "--",
+                draft.symbol.trimmingCharacters(in: .whitespaces).uppercased(), draft.condition,
+                draft.threshold,
               ], success: "Price alert created")
             {
               dismiss()
@@ -167,11 +168,10 @@ struct AlertSheet: View {
 
 struct ImportSheet: View {
   @ObservedObject var model: StatusModel
-  @Environment(\.dismiss) private var dismiss
   var body: some View {
     SheetLayout(
       title: "A clearer way to import",
-      subtitle: model.importURL?.lastPathComponent ?? "CSV import", model: model
+      subtitle: model.importName.isEmpty ? "CSV import" : model.importName, model: model
     ) {
       Picker("Default account for rows without one", selection: $model.importAccount) {
         Text("Use accounts named in the CSV").tag("")
@@ -204,17 +204,15 @@ struct ImportSheet: View {
           .font(.callout).foregroundStyle(.secondary).padding(.vertical, 16)
       }
       HStack {
-        Button("Cancel") {
-          model.importPreview = nil
-          dismiss()
-        }.keyboardShortcut(.cancelAction).disabled(model.saving)
+        Button("Cancel") { model.closeImport() }.keyboardShortcut(.cancelAction).disabled(
+          model.saving)
         Spacer()
         if model.saving { ProgressView().controlSize(.small) }
         Button("Import \(model.importPreview?.added ?? 0) entries") {
           Task { await model.commitImport() }
         }
         .buttonStyle(.borderedProminent).disabled(
-          model.saving || (model.importPreview?.added ?? 0) == 0)
+          !model.canEdit || (model.importPreview?.added ?? 0) == 0)
       }
     }
   }

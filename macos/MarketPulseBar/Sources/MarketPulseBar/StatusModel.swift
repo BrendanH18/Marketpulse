@@ -17,6 +17,7 @@ final class StatusModel: ObservableObject {
   @Published var loginEnabled = LoginItem.enabled
   @Published var loginError: String?
   @Published var importURL: URL?
+  @Published var importName = ""
   @Published var importPreview: ImportPreview?
   @Published var importAccount = ""
   @Published var showImport = false
@@ -92,10 +93,11 @@ final class StatusModel: ObservableObject {
     let generation = reloadGeneration
     loading = true
     defer { if generation == reloadGeneration { loading = false } }
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    let desktopError: String
     do {
       let data = try await CLI.run(["desktop", "snapshot"] + (demo ? ["--demo"] : ["--fresh"]))
-      let decoder = JSONDecoder()
-      decoder.keyDecodingStrategy = .convertFromSnakeCase
       let payload = try decoder.decode(DesktopPayload.self, from: data)
       guard payload.version == 1 else {
         throw CLIError.failed("Unsupported desktop bridge version. Reinstall the app.")
@@ -106,24 +108,44 @@ final class StatusModel: ObservableObject {
       status = payload.status
       errorMessage = nil
       lastUpdated = Date()
+      return
     } catch let error as DecodingError {
+      desktopError = "Unexpected portfolio data (\(error)). Update MarketPulse and reinstall the app."
+    } catch {
+      desktopError = error.localizedDescription
+    }
+    // The menu bar must not depend on the desktop bridge: fall back to the stable
+    // `status --json` API. Never in the demo, which must not touch the real ledger.
+    guard !demo else {
+      if generation == reloadGeneration { errorMessage = desktopError }
+      return
+    }
+    do {
+      let fallback = try decoder.decode(
+        StatusPayload.self, from: try await CLI.run(["status", "--json"]))
       guard generation == reloadGeneration else { return }
-      errorMessage =
-        "Unexpected portfolio data (\(error)). Update MarketPulse and reinstall the app."
+      status = fallback
+      lastUpdated = Date()
+      errorMessage = "The portfolio window couldn't refresh: \(desktopError)"
     } catch {
       guard generation == reloadGeneration else { return }
-      errorMessage = error.localizedDescription
+      errorMessage = desktopError
     }
   }
 
   @discardableResult
   func perform(_ args: [String], success: String) async -> Bool {
+    await perform(args) { _ in success }
+  }
+
+  /// Runs a write command, then reloads. `success` builds the confirmation from the command's output.
+  private func perform(_ args: [String], success: (Data) -> String) async -> Bool {
     guard !demo && !saving else { return false }
     saving = true
     defer { saving = false }
     do {
-      _ = try await CLI.run(args)
-      message = success
+      let output = try await CLI.run(args)
+      message = success(output)
       await reload()
       return true
     } catch {
@@ -151,10 +173,32 @@ final class StatusModel: ObservableObject {
     panel.allowedContentTypes = [.commaSeparatedText, .plainText]
     panel.allowsMultipleSelection = false
     guard panel.runModal() == .OK, let url = panel.url else { return }
-    importURL = url
+    // Preview and import read the same private copy, so edits to the original file
+    // after previewing can't change what gets imported.
+    let pinned = FileManager.default.temporaryDirectory
+      .appendingPathComponent("marketpulse-import-\(UUID().uuidString).csv")
+    do {
+      try FileManager.default.copyItem(at: url, to: pinned)
+    } catch {
+      errorMessage = "Couldn't read \(url.lastPathComponent): \(error.localizedDescription)"
+      return
+    }
+    closeImport()
+    importURL = pinned
+    importName = url.lastPathComponent
+    showImport = true
+  }
+
+  func closeImport() {
+    if let importURL { try? FileManager.default.removeItem(at: importURL) }
+    importURL = nil
     importPreview = nil
     importAccount = ""
-    showImport = true
+    showImport = false
+  }
+
+  private var importArguments: [String] {
+    importAccount.isEmpty ? [] : ["--account", importAccount]
   }
 
   func previewImport() async {
@@ -163,10 +207,7 @@ final class StatusModel: ObservableObject {
     importPreview = nil
     defer { saving = false }
     do {
-      let args =
-        ["desktop", "import", url.path, "--dry-run"]
-        + (importAccount.isEmpty ? [] : ["--account", importAccount])
-      let data = try await CLI.run(args)
+      let data = try await CLI.run(["desktop", "import", "--dry-run"] + importArguments + ["--", url.path])
       let decoder = JSONDecoder()
       decoder.keyDecodingStrategy = .convertFromSnakeCase
       importPreview = try decoder.decode(ImportPreview.self, from: data)
@@ -176,12 +217,19 @@ final class StatusModel: ObservableObject {
 
   func commitImport() async {
     guard let url = importURL, let preview = importPreview, preview.added > 0 else { return }
-    let args =
-      ["desktop", "import", url.path] + (importAccount.isEmpty ? [] : ["--account", importAccount])
-    if await perform(args, success: "CSV imported. A safety backup was created first.") {
-      showImport = false
-      importPreview = nil
+    let imported = await perform(["desktop", "import"] + importArguments + ["--", url.path]) { data in
+      let decoder = JSONDecoder()
+      decoder.keyDecodingStrategy = .convertFromSnakeCase
+      let result = try? decoder.decode(ImportPreview.self, from: data)
+      guard let result, result.added == preview.added, result.duplicates == preview.duplicates,
+        result.skipped == preview.skipped, result.accountsCreated == preview.accountsCreated
+      else {
+        // Only possible if the ledger changed between preview and import.
+        return "CSV imported, but the ledger changed after the preview: \(result?.added ?? 0) entries added. Review Activity."
+      }
+      return "Imported \(result.added) entries. A safety backup was created first."
     }
+    if imported { closeImport() }
   }
 
   func exportLedger() {

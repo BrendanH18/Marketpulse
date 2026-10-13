@@ -13,6 +13,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, TextIO
 
 from .models import Account, AccountType, Transaction, TxnType, guess_currency, parse_date
@@ -158,12 +159,27 @@ def import_transactions(
     create_accounts: bool = True,
     dry_run: bool = False,
 ) -> ImportResult:
-    if isinstance(source, Path | str):
-        text = Path(source).read_text(encoding="utf-8-sig")
-        handle: TextIO = io.StringIO(text)
-    else:
-        handle = source
-    reader = csv.DictReader(handle)
+    text = Path(source).read_text(encoding="utf-8-sig") if isinstance(source, Path | str) else source.read()
+    if not dry_run:
+        return _import(store, text, default_account=default_account, create_accounts=create_accounts, backup=True)
+    # A preview runs the real import against a throwaway copy of the ledger, so its
+    # counts, new accounts and skipped lines are exactly what the import will produce.
+    from .db import Store
+
+    with TemporaryDirectory(prefix="marketpulse-preview-") as tmp:
+        scratch = Store(store.backup(dest=Path(tmp) / "preview.db"))
+        try:
+            return _import(
+                scratch, text, default_account=default_account, create_accounts=create_accounts, backup=False
+            )
+        finally:
+            scratch.close()
+
+
+def _import(
+    store: Store, text: str, *, default_account: Account | None, create_accounts: bool, backup: bool
+) -> ImportResult:
+    reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames:
         raise ValueError("CSV has no header row.")
     cols = map_headers(list(reader.fieldnames))
@@ -174,7 +190,7 @@ def import_transactions(
         )
 
     result = ImportResult()
-    if not dry_run:
+    if backup:
         # An import can add hundreds of rows (and new accounts) in one go, and
         # a mis-mapped CSV is easy to do. Snapshot the ledger first so the
         # whole import can be reverted by restoring this one file. Taken before
@@ -189,7 +205,6 @@ def import_transactions(
     # executions on one day) are all kept.
     existing = Counter(key(t) for t in store.transactions())
     pending: list[Transaction] = []
-    preview_accounts: dict[str, Account] = {}
 
     def get(row: dict, name: str) -> str:
         col = cols.get(name)
@@ -201,22 +216,10 @@ def import_transactions(
         acct = store.get_account(name)
         if acct is None and create_accounts:
             guessed = next((t for t in AccountType if t.value.lower() in name.lower()), AccountType.NONREG)
-            if dry_run:
-                key = name.casefold()
-                if key not in preview_accounts:
-                    preview_accounts[key] = Account(
-                        name=name,
-                        type=guessed,
-                        currency=default_account.currency if default_account else "CAD",
-                        id=-(len(preview_accounts) + 1),
-                    )
-                    result.accounts_created.append(name)
-                acct = preview_accounts[key]
-            else:
-                acct = store.add_account(
-                    Account(name=name, type=guessed, currency=default_account.currency if default_account else "CAD")
-                )
-                result.accounts_created.append(name)
+            acct = store.add_account(
+                Account(name=name, type=guessed, currency=default_account.currency if default_account else "CAD")
+            )
+            result.accounts_created.append(name)
         return acct
 
     for line_no, row in enumerate(reader, start=2):
@@ -275,7 +278,7 @@ def import_transactions(
             continue
         pending.append(txn)
 
-    if not dry_run and pending:
+    if pending:
         store.add_transactions(pending)
     result.added = len(pending)
     return result

@@ -56,7 +56,13 @@ struct DesktopTransaction: Decodable, Identifiable {
   let fees: Double
   let currency: String
   let note: String
-  var value: Double { ["BUY", "SELL", "DRIP", "TRANSFER"].contains(type) ? quantity * price : amount }
+  let ratio: Double
+  /// Unsigned headline value, computed by the Python ledger (`Transaction.gross_value`).
+  let value: Double
+  /// +1 money into the account, -1 money out, 0 for share-only entries (DRIP, split, transfer).
+  let direction: Int
+  let targetAccount: String
+  var signedValue: Double { direction < 0 ? -value : value }
 }
 
 struct AllocationBucket: Decodable, Identifiable {
@@ -91,10 +97,13 @@ struct AutomationReport: Decodable {
   let snapshotDate: String?
   let backup: String?
   let fired: [String]
+  /// The cycle itself failed (e.g. no backup).
   let errors: [String]
+  /// Symbols or FX rates the provider couldn't quote; not a failure.
+  let quoteErrors: [String]
 }
 
-struct ImportPreview: Decodable {
+struct ImportPreview: Decodable, Equatable {
   let added: Int
   let duplicates: Int
   // Python emits [lineNumber, reason] tuples, which require an unkeyed decoder.
@@ -103,7 +112,7 @@ struct ImportPreview: Decodable {
   let backup: String?
 }
 
-struct ImportIssue: Decodable, Identifiable {
+struct ImportIssue: Decodable, Identifiable, Equatable {
   var id: Int { line }
   let line: Int
   let reason: String

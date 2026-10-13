@@ -4,11 +4,10 @@ import json
 import subprocess
 import sys
 import tempfile
-from dataclasses import asdict
 from pathlib import Path
 
-from marketpulse.desktop import demo_snapshot
-from marketpulse.models import Transaction, TxnType
+from marketpulse.desktop import activity_row, demo_snapshot
+from marketpulse.models import Account, Transaction, TxnType
 
 root = Path(__file__).resolve().parents[1]
 sources = root / "macos/MarketPulseBar/Sources/MarketPulseBar"
@@ -20,9 +19,15 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     fixture.write_text(json.dumps(demo_snapshot(), allow_nan=False))
     transactions = Path(tmp) / "transactions.json"
     rows = []
+    target = {2: Account(name="RRSP", id=2)}
     for kind in TxnType:
-        txn = Transaction(id=1, account_id=1, type=kind, symbol="AAPL", quantity=3, price=12, amount=7, currency="USD")
-        rows.append({"transaction": asdict(txn), "expected_value": txn.gross_value})
+        txn = Transaction(
+            id=1, account_id=1, type=kind, symbol="AAPL", quantity=3, price=12, amount=7, currency="USD", ratio=2
+        )
+        if kind is TxnType.TRANSFER:
+            txn.target_account_id = 2
+        signed = txn.cash_direction * txn.gross_value if txn.cash_direction else txn.gross_value
+        rows.append({"transaction": activity_row(txn, target), "expected_signed_value": signed})
     transactions.write_text(json.dumps(rows, allow_nan=False))
     subprocess.run(
         [

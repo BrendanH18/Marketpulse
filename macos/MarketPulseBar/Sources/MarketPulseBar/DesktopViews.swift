@@ -86,12 +86,15 @@ struct PortfolioWindow: View {
             notice(
               "Demo portfolio · Fictional data · Read-only", icon: "sparkles", color: Studio.mint)
           }
-          if payload.status.stale || !payload.warnings.isEmpty {
+          if payload.status.stale {
             notice(
-              payload.status.stale
-                ? "Cached quotes are in use. Values may be out of date."
-                : payload.warnings.joined(separator: " · "),
-              icon: "wifi.exclamationmark", color: .orange)
+              "Cached quotes are in use. Values may be out of date.", icon: "wifi.exclamationmark",
+              color: .orange)
+          }
+          if !payload.warnings.isEmpty {
+            notice(
+              payload.warnings.joined(separator: " · "), icon: "exclamationmark.circle",
+              color: .orange)
           }
           workspace(payload)
         } else if model.loading {
@@ -146,7 +149,9 @@ struct PortfolioWindow: View {
       case .alert: AlertSheet(model: model)
       }
     }
-    .sheet(isPresented: $model.showImport) { ImportSheet(model: model) }
+    .sheet(isPresented: $model.showImport, onDismiss: { model.closeImport() }) {
+      ImportSheet(model: model)
+    }
   }
 
   private var sidebar: some View {
@@ -471,8 +476,9 @@ private struct OverviewWorkspace: View {
                 Studio.muted)
               Spacer()
               Text(t.date).font(.system(size: 10)).foregroundStyle(Studio.muted)
-              Text(Format.money(t.value, t.currency, privacy: s.privacy)).font(.system(size: 12))
-                .monospacedDigit().frame(width: 120, alignment: .trailing)
+              Text(activityAmount(t, privacy: s.privacy)).font(.system(size: 12))
+                .monospacedDigit().foregroundStyle(activityColor(t))
+                .frame(width: 120, alignment: .trailing)
             }
           }
         }
@@ -492,6 +498,15 @@ private func monthLabel(_ raw: String) -> String {
 }
 private func accountName(_ id: Int, _ payload: DesktopPayload) -> String {
   payload.accounts.first { $0.id == id }?.name ?? "Account #\(id)"
+}
+/// Signed from the account's point of view: + money in, − money out. Splits show their ratio,
+/// and share-only entries (DRIP, transfers) carry no sign.
+private func activityAmount(_ t: DesktopTransaction, privacy: Bool) -> String {
+  if t.type == "SPLIT" { return t.ratio > 0 ? "×\(t.ratio.formatted())" : "—" }
+  return Format.money(t.signedValue, t.currency, privacy: privacy, sign: t.direction != 0)
+}
+private func activityColor(_ t: DesktopTransaction) -> Color {
+  t.direction == 0 ? Studio.muted : Studio.trend(t.signedValue)
 }
 
 private struct AccountFilter: View {
@@ -587,17 +602,23 @@ private struct ActivityWorkspace: View {
       HStack {
         AccountFilter(accounts: payload.accounts, selected: $accountFilter)
         Spacer()
-        Text("\(rows.count) transactions · Amounts in original currency").font(.system(size: 11))
+        Text("\(rows.count) transactions · + money in, − money out, in original currency").font(
+          .system(size: 11))
           .foregroundStyle(Studio.muted)
       }.padding(.horizontal, 30)
       Table(rows) {
         TableColumn("Date", value: \.date).width(100)
         TableColumn("Type") { t in Text(t.type.capitalized).foregroundStyle(Studio.mint) }.width(90)
         TableColumn("Symbol", value: \.symbol).width(85)
-        TableColumn("Account") { t in Text(accountName(t.accountId, payload)) }.width(
-          min: 130, ideal: 160)
+        TableColumn("Account") { t in
+          Text(
+            t.targetAccount.isEmpty
+              ? accountName(t.accountId, payload)
+              : "\(accountName(t.accountId, payload)) → \(t.targetAccount)")
+        }.width(min: 130, ideal: 160)
         TableColumn("Amount") { t in
-          Text(Format.money(t.value, t.currency, privacy: payload.status.privacy)).monospacedDigit()
+          Text(activityAmount(t, privacy: payload.status.privacy)).monospacedDigit()
+            .foregroundStyle(activityColor(t))
         }.width(120)
         TableColumn("Note", value: \.note)
       }.scrollContentBackground(.hidden)
@@ -677,7 +698,10 @@ private struct WatchlistWorkspace: View {
           Button("Watch", systemImage: "plus") {
             let s = draft.symbol
             Task {
-              if await model.perform(["watch", "add", s], success: "Added to watchlist") {
+              if await model.perform(
+                ["watch", "add", "--", s.trimmingCharacters(in: .whitespaces).uppercased()],
+                success: "Added to watchlist")
+              {
                 draft.symbol = ""
               }
             }
@@ -699,7 +723,8 @@ private struct WatchlistWorkspace: View {
               ).frame(width: 80)
               Button {
                 Task {
-                  await model.perform(["watch", "rm", q.symbol], success: "Removed from watchlist")
+                  await model.perform(
+                    ["watch", "rm", "--", q.symbol], success: "Removed from watchlist")
                 }
               } label: {
                 Image(systemName: "minus.circle")
@@ -831,6 +856,13 @@ private struct AutomationWorkspace: View {
           Surface("Needs attention") {
             ForEach(errors, id: \.self) {
               Text($0).foregroundStyle(Studio.red).textSelection(.enabled)
+            }
+          }
+        }
+        if let errors = model.desktop?.automation.quoteErrors, !errors.isEmpty {
+          Surface("Quotes unavailable") {
+            ForEach(errors, id: \.self) {
+              Text($0).foregroundStyle(.orange).textSelection(.enabled)
             }
           }
         }

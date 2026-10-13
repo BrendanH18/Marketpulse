@@ -450,6 +450,8 @@ class Tracker:
                     "weight": round(b.weight, 2),
                 }
                 for b in view.by_account
+                # Archived accounts are hidden from lists; any value they still hold stays in the totals.
+                if not ((a := amap.get(int(b.key))) and a.archived)
             ],
             "movers": [
                 {
@@ -459,7 +461,7 @@ class Tracker:
                     "change_pct": round(p.day_change_pct or 0.0, 4),
                     "currency": p.currency,
                 }
-                for p in view.movers(5)
+                for p in view.movers(5, hide_archived=True)
             ],
             "watchlist": [
                 {

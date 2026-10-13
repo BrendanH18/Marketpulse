@@ -20,11 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Transaction validation rejects NaN/infinity; alerts require a finite positive threshold.
-- CSV dry runs model accounts and transfer destinations without writing them.
+- CSV previews (`--dry-run`) run the real import against a temporary copy of the
+  ledger, so they always match the import exactly.
 - macOS installation preserves configuration overrides and clears obsolete paths.
 - Native CLI subprocesses time out instead of leaving refresh stuck indefinitely.
 
-No database migration is required. The existing `status --json` contract is unchanged.
+### Changed
+
+- `status --json` no longer lists archived accounts (or their movers). Value an
+  archived account still holds remains in `net_worth`.
+
+No database migration is required.
 
 ## [2.1.0] - 2026-10-06
 

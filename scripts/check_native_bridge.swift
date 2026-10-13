@@ -12,15 +12,21 @@ struct NativeBridgeCheck {
     precondition(payload.accounts.count == 3 && payload.positions.count == 5)
     precondition(payload.status.history.count == 181 && payload.incomeMonths.count == 12)
     precondition(payload.warnings.isEmpty && payload.automation.backup == nil)
+    precondition(payload.automation.errors.isEmpty && payload.automation.quoteErrors.isEmpty)
     precondition(payload.status.netWorth! > 0)
     precondition(payload.positions.allSatisfy { $0.value != nil })
 
     let transactions = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     for row in try decoder.decode([ValuedTransaction].self, from: transactions) {
       precondition(
-        row.transaction.value == row.expectedValue,
+        row.transaction.signedValue == row.expectedSignedValue,
         "Activity value differs for \(row.transaction.type)")
+      precondition(
+        (row.transaction.type == "TRANSFER") == (row.transaction.targetAccount == "RRSP"),
+        "Transfer target differs for \(row.transaction.type)")
     }
+    precondition(payload.activity.contains { $0.type == "BUY" && $0.signedValue < 0 })
+    precondition(payload.activity.contains { $0.type == "DIVIDEND" && $0.signedValue > 0 })
 
     let preview = Data(
       #"{"added":2,"duplicates":1,"skipped":[[4,"Invalid date"]],"accounts_created":["TFSA"],"backup":null}"#
@@ -40,5 +46,5 @@ struct NativeBridgeCheck {
 
 private struct ValuedTransaction: Decodable {
   let transaction: DesktopTransaction
-  let expectedValue: Double
+  let expectedSignedValue: Double
 }

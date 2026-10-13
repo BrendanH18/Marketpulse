@@ -1745,6 +1745,7 @@ def automation_run(app: App, once: bool, interval: int, as_json: bool, quiet: bo
             else:
                 click.echo(json.dumps(report, indent=2, allow_nan=False))
             if once:
+                # Only a failed cycle is an error; an unquotable symbol is reported, not fatal.
                 if report.get("failed") or report.get("errors"):
                     raise click.exceptions.Exit(1)
                 break

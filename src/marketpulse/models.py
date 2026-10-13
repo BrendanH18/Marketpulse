@@ -257,6 +257,18 @@ class Account:
         return self.id
 
 
+_CASH_DIRECTION = {
+    TxnType.BUY: -1,
+    TxnType.SELL: 1,
+    TxnType.DIVIDEND: 1,
+    TxnType.INTEREST: 1,
+    TxnType.DEPOSIT: 1,
+    TxnType.WITHDRAWAL: -1,
+    TxnType.FEE: -1,
+    TxnType.ROC: 1,
+}
+
+
 @dataclass
 class Transaction:
     account_id: int
@@ -291,6 +303,12 @@ class Transaction:
         if self.type.uses_quantity:
             return self.quantity * self.price
         return self.amount
+
+    @property
+    def cash_direction(self) -> int:
+        """+1 when money comes into the account, -1 when it leaves, 0 for share-only entries
+        (DRIP, splits, transfers, valuations) that move no cash."""
+        return _CASH_DIRECTION.get(self.type, 0)
 
     def validate(self) -> None:
         t = self.type

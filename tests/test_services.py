@@ -146,7 +146,10 @@ def test_status_payload_titles(tracker, store):
     assert payload["accounts"][0]["type"] == "TFSA"
     acct.archived = True
     store.update_account(acct)
-    assert tracker.status_payload()["accounts"][0]["type"] == "TFSA"  # archived accounts keep their type
+    archived = tracker.status_payload()
+    assert archived["accounts"] == []  # archived accounts are hidden from the list...
+    assert archived["net_worth"] == payload["net_worth"]  # ...but value they still hold stays in totals
+    assert archived["movers"] == []
     assert payload["watchlist"][0]["symbol"] == "XEQT.TO"
     assert payload["theme"]["accent"].startswith("#")
     tracker.config.menubar_display = "net_worth"

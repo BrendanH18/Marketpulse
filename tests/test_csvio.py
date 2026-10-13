@@ -135,3 +135,30 @@ def test_preview_transfer_to_new_account_matches_import(store):
     assert preview.added == result.added == 2
     assert preview.accounts_created == result.accounts_created == ["New TFSA", "New RRSP"]
     assert preview.skipped == result.skipped == []
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        # A type-named account resolves to the account created earlier in the same file.
+        "2024-01-01,New TFSA,BUY,XEQT.TO,2,30,CAD,\n2024-01-02,TFSA,BUY,XEQT.TO,1,30,CAD,\n",
+        # Case-insensitive account names, an in-file duplicate, and a bad row.
+        "2024-01-01,Cash,DEPOSIT,,,,CAD,\n2024-01-01,cash,BUY,VFV.TO,1,100,CAD,\n2024-01-01,cash,BUY,VFV.TO,1,100,CAD,\n"
+        "2024-13-01,Cash,BUY,VFV.TO,1,100,CAD,\n",
+        # Transfers into accounts the file creates.
+        "2024-01-01,A,BUY,XEQT.TO,2,30,CAD,\n2024-01-02,A,TRANSFER,XEQT.TO,1,30,CAD,RRSP\n",
+    ],
+)
+def test_preview_is_exactly_the_real_import(store, rows):
+    import io
+
+    from marketpulse.csvio import import_transactions
+
+    csv = "date,account,type,symbol,quantity,price,currency,target_account\n" + rows
+    store.add_account(Account(name="Existing"))
+    before = (store.accounts(include_archived=True), store.transactions())
+    preview = import_transactions(store, io.StringIO(csv), dry_run=True)
+    assert (store.accounts(include_archived=True), store.transactions(), store.backups()) == (*before, [])
+    result = import_transactions(store, io.StringIO(csv))
+    result.backup = None
+    assert preview == result

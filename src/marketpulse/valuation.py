@@ -162,8 +162,14 @@ class PortfolioView:
                 return s
         return ""
 
-    def movers(self, n: int = 5) -> list[PositionView]:
-        priced = [p for p in self.positions if p.day_change_pct is not None and p.kind is AssetKind.MARKET]
+    def movers(self, n: int = 5, *, hide_archived: bool = False) -> list[PositionView]:
+        priced = [
+            p
+            for p in self.positions
+            if p.day_change_pct is not None
+            and p.kind is AssetKind.MARKET
+            and not (hide_archived and p.account.archived)
+        ]
         seen: dict[str, PositionView] = {}
         for p in sorted(priced, key=lambda p: abs(p.day_change_pct or 0), reverse=True):
             seen.setdefault(p.symbol, p)
