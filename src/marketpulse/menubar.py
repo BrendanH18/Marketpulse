@@ -55,6 +55,10 @@ def build_and_install(log=print, *, desktop: bool = False) -> Path:
     macos.mkdir(parents=True)
     (app / "Contents" / "Resources").mkdir()
     shutil.copy2(binary, macos / "MarketPulseBar")
+    # Dock, Finder and Login Items icon (regenerate with scripts/make_app_icon.swift).
+    icon = PROJECT_DIR / "AppIcon.icns"
+    if icon.is_file():
+        shutil.copy2(icon, app / "Contents" / "Resources" / "AppIcon.icns")
     from . import __version__
 
     with open(app / "Contents" / "Info.plist", "wb") as f:
@@ -64,6 +68,7 @@ def build_and_install(log=print, *, desktop: bool = False) -> Path:
                 "CFBundleDisplayName": APP_NAME,
                 "CFBundleIdentifier": BUNDLE_ID,
                 "CFBundleExecutable": "MarketPulseBar",
+                "CFBundleIconFile": "AppIcon",
                 "CFBundlePackageType": "APPL",
                 "CFBundleShortVersionString": __version__,
                 "CFBundleVersion": __version__,

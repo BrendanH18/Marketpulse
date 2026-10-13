@@ -126,7 +126,9 @@ class Tracker:
         fx, fx_errors = self.market.fx_rates(currencies, self.base)
         errors.update({f"FX {k}": v for k, v in fx_errors.items()})
         view = build_view(state, accounts, assets, quotes, fx, errors=errors, account_id=account_id)
-        if record and account_id is None and view.positions and not view.stale and not view.excluded:
+        # Leaving out an archived account's holdings would record a fake drop in value.
+        complete = not view.stale and not view.excluded and not view.archived_with_value
+        if record and account_id is None and view.positions and complete:
             self.record_snapshot(view, fx, flows)
         return view
 
@@ -450,8 +452,6 @@ class Tracker:
                     "weight": round(b.weight, 2),
                 }
                 for b in view.by_account
-                # Archived accounts are hidden from lists; any value they still hold stays in the totals.
-                if not ((a := amap.get(int(b.key))) and a.archived)
             ],
             "movers": [
                 {
@@ -461,7 +461,7 @@ class Tracker:
                     "change_pct": round(p.day_change_pct or 0.0, 4),
                     "currency": p.currency,
                 }
-                for p in view.movers(5, hide_archived=True)
+                for p in view.movers(5)
             ],
             "watchlist": [
                 {

@@ -38,8 +38,21 @@ struct NativeBridgeCheck {
     precondition(Format.money(12345, "CAD", privacy: true) == Format.mask)
     precondition(Format.money(nil, "CAD", privacy: true) == "—")
     precondition(Format.pct(-1.25) == "-1.25%")
+    let french = Locale(identifier: "fr_CA")
+    let german = Locale(identifier: "de_DE")
+    let english = Locale(identifier: "en_CA")
+    precondition(NumberInput.parse("12,5", locale: french) == 12.5)
+    precondition(NumberInput.parse("1.000", locale: german) == 1000)
+    precondition(NumberInput.parse("12.5", locale: german) == 12.5)
+    precondition(NumberInput.parse("1,000", locale: english) == 1000)
+    precondition(NumberInput.parse("12,5", locale: english) == nil)
+    precondition(NumberInput.parse("inf", locale: english) == nil)
+    precondition(NumberInput.cli("12,5", locale: french) == "12.5")
+    precondition(NumberInput.hint("12.50", locale: english) == nil)
+    precondition(NumberInput.hint("1.000", locale: german)?.hasPrefix("Reads as") == true)
+    precondition(NumberInput.hint("12,5", locale: english)?.hasPrefix("Enter a number") == true)
     print(
-      "Native bridge checks passed: real Python demo, activity values, import result, privacy formatting"
+      "Native bridge checks passed: real Python demo, activity values, import result, privacy formatting, number entry"
     )
   }
 }

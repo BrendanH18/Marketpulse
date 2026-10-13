@@ -197,10 +197,11 @@ def test_desktop_bridge_hides_archived_accounts(tracker):
     assert {p["account_id"] for p in payload["positions"]} == {active.saved_id}
     assert {t["account_id"] for t in payload["activity"]} == {active.saved_id}
     assert [a["name"] for a in payload["status"]["accounts"]] == ["Investing"]
-    # The active account's own transfer keeps its destination; hidden value stays in totals and is flagged.
+    # The active account's own transfer keeps its destination; value left in the archived account is flagged.
     assert next(t for t in payload["activity"] if t["type"] == "TRANSFER")["target_account"] == "Old RRSP"
-    assert payload["status"]["net_worth"] == pytest.approx(810)  # 3 AAPL @ 270, one share in the archived account
-    assert any("Archived account Old RRSP still holds value" in w for w in payload["warnings"])
+    assert payload["status"]["net_worth"] == pytest.approx(270)  # only the active account's 1 AAPL @ 270
+    assert any("Archived account Old RRSP still holds" in w for w in payload["warnings"])
+    assert payload["automation"]["snapshot_date"] is None
 
 
 def test_desktop_activity_amounts_are_signed_by_cash_direction(tracker):

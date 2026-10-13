@@ -24,11 +24,10 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
     status = tracker.status_payload(view, history_days=None, evaluate_alerts=False)
     # Alerts were already evaluated by the cycle; report what it fired, as `status --json` does.
     status["fired"] = cycle.report["fired"]
-    # Archived accounts never appear in the app. Their history stays in the ledger,
-    # and any value they still hold is flagged because it remains in the totals.
+    # Archived accounts never appear in the app (valuation already leaves out their
+    # holdings); their own transactions are hidden too, though the ledger keeps them.
     amap = tracker.store.account_map()
     archived = {i for i, a in amap.items() if a.archived}
-    holding_archived = [b.label for b in view.by_account if int(b.key) in archived and round(b.value, 2)]
     return {
         "version": 1,
         "demo": False,
@@ -54,7 +53,6 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
                 "stale": p.stale,
             }
             for p in view.positions
-            if p.account.saved_id not in archived
         ],
         "activity": [
             activity_row(t, amap) for t in reversed(tracker.store.transactions()) if t.account_id not in archived
@@ -67,13 +65,16 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         "warnings": [
             *[f"{i.date}: {i.message}" for i in state.issues],
             *[f"Excluded from totals: {s}" for s in view.excluded],
-            *[
-                f"Archived account {name} still holds value, which is included in totals. "
-                "Move or sell its holdings, or unarchive it."
-                for name in holding_archived
-            ],
+            *[archived_warning(name) for name in view.archived_with_value],
         ],
     }
+
+
+def archived_warning(name: str) -> str:
+    return (
+        f"Archived account {name} still holds investments or cash. They're left out of your totals, "
+        "and daily snapshots are paused. Move or sell them, or unarchive the account."
+    )
 
 
 def activity_row(t: Transaction, accounts: dict[int, Account]) -> dict:

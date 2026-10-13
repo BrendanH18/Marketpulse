@@ -147,8 +147,8 @@ def test_status_payload_titles(tracker, store):
     acct.archived = True
     store.update_account(acct)
     archived = tracker.status_payload()
-    assert archived["accounts"] == []  # archived accounts are hidden from the list...
-    assert archived["net_worth"] == payload["net_worth"]  # ...but value they still hold stays in totals
+    assert archived["accounts"] == []  # archived accounts are hidden from lists and totals
+    assert archived["net_worth"] == 0
     assert archived["movers"] == []
     assert payload["watchlist"][0]["symbol"] == "XEQT.TO"
     assert payload["theme"]["accent"].startswith("#")
@@ -302,3 +302,40 @@ def test_stale_fx_marks_view_stale(store):
     assert not fresh.stale
     cached = build_view(state, {1: acct}, {}, {"AAPL": q}, FxRates("CAD", {"USD": 1.3}, stale=True))
     assert cached.stale
+
+
+def test_archived_accounts_are_left_out_of_totals_and_pause_snapshots(tracker, store):
+    main = store.add_account(Account(name="Main", track_cash=True))
+    old = store.add_account(Account(name="Old", track_cash=True))
+    for acct in (main, old):
+        tracker.add_transaction(Transaction(account_id=acct.id, type=TxnType.DEPOSIT, amount=500, currency="CAD"))
+        tracker.add_transaction(
+            Transaction(account_id=acct.id, type=TxnType.BUY, symbol="AAPL", quantity=1, price=100, currency="USD")
+        )
+    both = tracker.valuation(record=False)
+    old.archived = True
+    store.update_account(old)
+    view = tracker.valuation()
+    assert view.net_worth == pytest.approx(both.net_worth / 2)
+    assert {p.account.name for p in view.positions} == {"Main"}
+    assert {c.account.name for c in view.cash} == {"Main"}
+    assert [b.label for b in view.by_account] == ["Main"]
+    assert view.archived_with_value == ["Old"]
+    assert store.snapshots() == []  # a fake drop in value is never recorded
+    # Asking for the archived account explicitly still shows it.
+    assert tracker.valuation(account_id=old.id, record=False).net_worth == pytest.approx(both.net_worth / 2)
+
+
+def test_emptied_archived_account_does_not_pause_snapshots(tracker, store):
+    main = store.add_account(Account(name="Main"))
+    old = store.add_account(Account(name="Old", track_cash=True))
+    tracker.add_transaction(Transaction(account_id=old.id, type=TxnType.DEPOSIT, amount=100, currency="CAD"))
+    tracker.add_transaction(Transaction(account_id=old.id, type=TxnType.WITHDRAWAL, amount=100, currency="CAD"))
+    tracker.add_transaction(
+        Transaction(account_id=main.id, type=TxnType.BUY, symbol="AAPL", quantity=1, price=100, currency="USD")
+    )
+    old.archived = True
+    store.update_account(old)
+    view = tracker.valuation()
+    assert view.archived_with_value == []
+    assert len(store.snapshots()) == 1

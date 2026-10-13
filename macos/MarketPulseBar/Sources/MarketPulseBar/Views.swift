@@ -3,34 +3,44 @@ import SwiftUI
 
 @main
 struct MarketPulseBarApp: App {
-    @StateObject private var model = StatusModel()
+    // The delegate owns the model so it can reopen the portfolio window from the Dock.
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        if #available(macOS 15.0, *) {
-            Window("MarketPulse", id: "portfolio") {
-                PortfolioWindow(model: model)
-            }
-            .defaultSize(width: 1200, height: 850)
-            .defaultLaunchBehavior(model.menuBarOnly ? .suppressed : .presented)
-        }
         MenuBarExtra {
-            PopoverView(model: model)
+            PopoverView(model: delegate.model)
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "waveform.path.ecg")
-                Text(model.menuTitle).monospacedDigit()
-            }
-            .onAppear {
-                if #unavailable(macOS 15.0), !model.menuBarOnly { model.openLegacyPortfolio() }
-            }
+            MenuBarLabel(model: delegate.model)
         }
         .menuBarExtraStyle(.window)
         .commands {
             CommandGroup(after: .newItem) {
-                Button("Import CSV…") { model.chooseImport() }.keyboardShortcut("i").disabled(!model.canEdit)
-                Button("Export ledger…") { model.exportLedger() }.keyboardShortcut("e").disabled(!model.canEdit)
+                LedgerFileCommands(model: delegate.model)
             }
         }
+    }
+}
+
+struct MenuBarLabel: View {
+    @ObservedObject var model: StatusModel
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "waveform.path.ecg")
+            Text(model.menuTitle).monospacedDigit()
+        }
+    }
+}
+
+/// Menu items that track whether editing is currently possible.
+struct LedgerFileCommands: View {
+    @ObservedObject var model: StatusModel
+
+    var body: some View {
+        Button("Open Portfolio") { model.showPortfolio() }.keyboardShortcut("0")
+        Divider()
+        Button("Import CSV…") { model.chooseImport() }.keyboardShortcut("i").disabled(!model.canEdit)
+        Button("Export ledger…") { model.exportLedger() }.keyboardShortcut("e").disabled(!model.canEdit)
     }
 }
 
@@ -318,17 +328,11 @@ final class HoverState: ObservableObject {
 struct ActionBar: View {
     @ObservedObject var model: StatusModel
     let palette: Palette
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 6) {
             BarButton(symbol: "macwindow", label: "Portfolio", hint: nil, palette: palette) {
-                if #available(macOS 15.0, *) {
-                    openWindow(id: "portfolio")
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                } else {
-                    model.openLegacyPortfolio()
-                }
+                model.showPortfolio()
             }
             BarButton(symbol: "terminal", label: nil, hint: nil, palette: palette) { model.openTUI() }
             BarButton(symbol: "arrow.clockwise", label: nil, hint: nil, palette: palette) { model.refresh() }

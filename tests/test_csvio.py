@@ -162,3 +162,27 @@ def test_preview_is_exactly_the_real_import(store, rows):
     result = import_transactions(store, io.StringIO(csv))
     result.backup = None
     assert preview == result
+
+
+def test_rows_for_archived_accounts_are_skipped_in_preview_and_import(store):
+    old = store.add_account(Account(name="Old RRSP", type=AccountType.RRSP))
+    old.archived = True
+    store.update_account(old)
+    store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    csv = (
+        "date,account,type,symbol,quantity,price,currency,target_account\n"
+        "2024-01-01,Old RRSP,BUY,XEQT.TO,2,30,CAD,\n"
+        "2024-01-01,TFSA,BUY,XEQT.TO,2,30,CAD,\n"
+        "2024-01-02,TFSA,TRANSFER,XEQT.TO,1,30,CAD,old rrsp\n"
+    )
+    preview = import_transactions(store, io.StringIO(csv), dry_run=True)
+    result = import_transactions(store, io.StringIO(csv))
+    result.backup = None
+    assert preview == result
+    assert result.added == 1
+    assert result.skipped == [(2, "account 'Old RRSP' is archived"), (4, "account 'Old RRSP' is archived")]
+    assert {t.account_id for t in store.transactions()} == {store.get_account("TFSA").id}
+
+    # A default account that has since been archived is refused the same way.
+    rows = import_transactions(store, io.StringIO("date,type,amount\n2024-01-01,DEPOSIT,100\n"), default_account=old)
+    assert rows.added == 0 and rows.skipped == [(2, "account 'Old RRSP' is archived")]

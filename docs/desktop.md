@@ -49,9 +49,16 @@ adds the valid new entries, skipping the reported invalid ones, and takes a
 safety backup first.
 
 Archived accounts never appear in the app: not in lists, pickers, holdings,
-activity, or the menu bar. Their history stays in the ledger. Value an archived
-account still holds remains in your totals, and the app warns you about it so
-you can move or sell those holdings, or unarchive the account.
+activity, totals, or the menu bar. Their history stays in the ledger, and income,
+realized gains, contribution room, and tax reports still count it. If an archived
+account still holds investments or cash, MarketPulse leaves them out of net worth,
+warns you, and pauses daily snapshots so your history never records a false drop;
+move or sell them, or unarchive the account. CSV rows that name an archived
+account are skipped with that reason, in both the preview and the import.
+
+Number fields accept your system's format (`12,5` in French or German, as well as
+`12.5`). When an entry could be read more than one way, such as `1.000`, the form
+shows how it reads it before you save.
 
 Privacy mode masks portfolio amounts and quantities, and hides amount-bearing
 charts. Quotes and percentage changes remain visible. CSV and JSON exports
@@ -72,7 +79,8 @@ stale quotes do not fire alerts or create performance snapshots.
 If the portfolio window's data can't be refreshed, the menu bar falls back to
 `marketpulse status --json` and keeps working; the window shows the error.
 
-Closing the window leaves the menu bar running. Quitting the app stops its
+Closing the window leaves the menu bar running. Click the Dock icon, choose
+**Open Portfolio** (⌘0), or use the menu bar's **Portfolio** button to bring it back. Quitting the app stops its
 maintenance timer. Only enable launch at login if you want that behavior.
 For a terminal worker or an external scheduler:
 

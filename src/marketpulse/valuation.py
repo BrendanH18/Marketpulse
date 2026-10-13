@@ -123,6 +123,8 @@ class PortfolioView:
     income_ytd: float = 0.0
     fees_total: float = 0.0
     excluded: list[str] = field(default_factory=list)
+    # Archived accounts that still hold something; kept out of the totals above.
+    archived_with_value: list[str] = field(default_factory=list)
     by_account: list[Breakdown] = field(default_factory=list)
     by_class: list[Breakdown] = field(default_factory=list)
     by_currency: list[Breakdown] = field(default_factory=list)
@@ -162,14 +164,8 @@ class PortfolioView:
                 return s
         return ""
 
-    def movers(self, n: int = 5, *, hide_archived: bool = False) -> list[PositionView]:
-        priced = [
-            p
-            for p in self.positions
-            if p.day_change_pct is not None
-            and p.kind is AssetKind.MARKET
-            and not (hide_archived and p.account.archived)
-        ]
+    def movers(self, n: int = 5) -> list[PositionView]:
+        priced = [p for p in self.positions if p.day_change_pct is not None and p.kind is AssetKind.MARKET]
         seen: dict[str, PositionView] = {}
         for p in sorted(priced, key=lambda p: abs(p.day_change_pct or 0), reverse=True):
             seen.setdefault(p.symbol, p)
@@ -221,9 +217,15 @@ def build_view(
     on = on or date.today()
     year = str(on.year)
     view = PortfolioView(base=fx.base, fx=fx, quotes=quotes, errors=dict(errors or {}))
+    # Archived accounts are hidden from pickers and totals (their history is kept).
+    # Asking for one explicitly by account_id still shows it.
+    archived_with_value: set[str] = set()
 
     for h in state.open_holdings(account_id):
         acct = accounts.get(h.account_id) or Account(name=f"#{h.account_id}", id=h.account_id)
+        if account_id is None and acct.archived:
+            archived_with_value.add(acct.name)
+            continue
         asset = assets.get(h.symbol)
         quote = quotes.get(h.symbol)
         kind = asset.kind if asset else AssetKind.MARKET
@@ -286,6 +288,10 @@ def build_view(
         cash_acct = accounts.get(acct_id)
         if cash_acct is None or not cash_acct.track_cash:
             continue
+        if account_id is None and cash_acct.archived:
+            if round(amount, 2):
+                archived_with_value.add(cash_acct.name)
+            continue
         amount_base = fx.convert(amount, ccy)
         view.cash.append(CashView(cash_acct, ccy, amount, amount_base))
         if amount_base is None:
@@ -316,6 +322,7 @@ def build_view(
                 view.income_ytd += v
     view.fees_total = sum(conv(v, ccy) for ccy, v in state.fees.items())
 
+    view.archived_with_value = sorted(archived_with_value)
     total = view.net_worth
     for p in view.positions:
         if p.value_base is not None and total:

@@ -249,6 +249,10 @@ def _import(
             amount = qty * price
         target_name = get(row, "target_account")
         target = resolve_account(target_name) if target_name else None
+        # Archived accounts are closed to new entries; their rows would vanish from view.
+        if closed := next((a for a in (acct, target) if a is not None and a.archived), None):
+            result.skipped.append((line_no, f"account '{closed.name}' is archived"))
+            continue
         txn = Transaction(
             account_id=acct.id,
             type=txn_type,

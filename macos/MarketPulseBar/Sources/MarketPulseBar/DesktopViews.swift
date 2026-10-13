@@ -58,7 +58,6 @@ enum DesktopSheet: String, Identifiable {
 struct PortfolioWindow: View {
   @StateObject private var draft = PortfolioWindowDraft()
   @ObservedObject var model: StatusModel
-  @Environment(\.openWindow) private var openWindow
 
   var body: some View {
     NavigationSplitView {
@@ -358,7 +357,7 @@ private struct OverviewWorkspace: View {
             ContentUnavailableView(
               "Your history starts here", systemImage: "chart.xyaxis.line",
               description: Text(
-                "Daily snapshots appear after fresh, complete valuations. Use marketpulse backfill to rebuild historical values."
+                "MarketPulse saves a snapshot of your portfolio each day it runs with fresh prices. Your chart fills in from there."
               )
             ).frame(height: 215)
           } else {
@@ -574,7 +573,7 @@ private struct HoldingsWorkspace: View {
           Text(p.dayChangePct.map(Format.pct) ?? "—").foregroundStyle(Studio.trend(p.dayChangePct))
             .monospacedDigit()
         }.width(75)
-      }.scrollContentBackground(.hidden)
+      }.scrollContentBackground(.hidden).alternatingRowBackgrounds(.disabled)
         .overlay {
           if rows.isEmpty {
             ContentUnavailableView(
@@ -621,7 +620,7 @@ private struct ActivityWorkspace: View {
             .foregroundStyle(activityColor(t))
         }.width(120)
         TableColumn("Note", value: \.note)
-      }.scrollContentBackground(.hidden)
+      }.scrollContentBackground(.hidden).alternatingRowBackgrounds(.disabled)
         .overlay {
           if rows.isEmpty {
             ContentUnavailableView("No matching activity", systemImage: "arrow.left.arrow.right")

@@ -40,12 +40,11 @@ final class StatusModel: ObservableObject {
   private var portfolioController: PortfolioWindowController?
   var menuBarOnly: Bool { Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool ?? false }
 
-  // macOS 14 lacks SwiftUI's scene launch suppression. Create its window only
-  // when explicitly requested, or on desktop-mode startup.
-  func openLegacyPortfolio() {
-    if portfolioController == nil { portfolioController = PortfolioWindowController(model: self) }
-    portfolioController?.showWindow(nil)
-    NSApplication.shared.activate(ignoringOtherApps: true)
+  /// Shows the portfolio window, creating it on first use.
+  func showPortfolio() {
+    let controller = portfolioController ?? PortfolioWindowController(model: self)
+    portfolioController = controller
+    controller.present()
   }
 
   private var timer: Timer?

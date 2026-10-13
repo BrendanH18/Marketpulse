@@ -558,6 +558,9 @@ class MarketPulseApp(App):
         problems = sorted(set(view.errors.values()))
         if view.excluded:
             problems.insert(0, f"Net worth excludes {len(view.excluded)} position(s) without a price or FX rate")
+        if view.archived_with_value:
+            names = ", ".join(view.archived_with_value)
+            problems.insert(0, f"Net worth excludes archived {names}, which still holds value; snapshots paused")
         if problems and problems[0] != self._last_error:
             self.notify(problems[0], title="Market data", severity="warning")
         self._last_error = problems[0] if problems else ""

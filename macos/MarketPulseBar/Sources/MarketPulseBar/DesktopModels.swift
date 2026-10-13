@@ -122,3 +122,35 @@ struct ImportIssue: Decodable, Identifiable, Equatable {
     reason = try values.decode(String.self)
   }
 }
+
+/// Number entry in the user's own format ("12,5" in French or German) as well as "12.5".
+/// The CLI always receives a plain "." decimal.
+enum NumberInput {
+  static func parse(_ raw: String, locale: Locale = .current) -> Double? {
+    let text = raw.trimmingCharacters(in: .whitespaces)
+    guard !text.isEmpty else { return nil }
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.locale = locale
+    // Locale first, so "1.000" is one thousand in German rather than 1.
+    guard let value = formatter.number(from: text)?.doubleValue ?? Double(text), value.isFinite
+    else { return nil }
+    return value
+  }
+
+  /// Shown under a field when the entry isn't a plain number, so "1.000" or "1,000" is never
+  /// read differently from what the user meant without them seeing it.
+  static func hint(_ raw: String, locale: Locale = .current) -> String? {
+    let text = raw.trimmingCharacters(in: .whitespaces)
+    guard !text.isEmpty else { return nil }
+    guard let value = parse(text, locale: locale) else {
+      return "Enter a number, like \(12.5.formatted(.number.locale(locale)))."
+    }
+    if Double(text) == value { return nil }
+    return "Reads as \(value.formatted(.number.locale(locale).precision(.fractionLength(0...8))))"
+  }
+
+  static func cli(_ raw: String, locale: Locale = .current) -> String {
+    parse(raw, locale: locale).map { String($0) } ?? raw
+  }
+}

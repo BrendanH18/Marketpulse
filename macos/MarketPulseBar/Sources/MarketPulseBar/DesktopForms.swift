@@ -32,11 +32,11 @@ struct TransactionSheet: View {
         DatePicker("Date", selection: $draft.date, in: ...Date.now, displayedComponents: .date)
         if needsSymbol { TextField("Symbol", text: $draft.symbol, prompt: Text("XEQT.TO")) }
         if trade {
-          TextField("Quantity", text: $draft.quantity)
-          TextField("Price per share", text: $draft.price)
-          TextField("Fees", text: $draft.fees)
+          NumberField(title: "Quantity", text: $draft.quantity)
+          NumberField(title: "Price per share", text: $draft.price)
+          NumberField(title: "Fees", text: $draft.fees)
         } else {
-          TextField("Amount", text: $draft.amount)
+          NumberField(title: "Amount", text: $draft.amount)
         }
         TextField("Transaction currency", text: $draft.currency, prompt: Text("Automatic"))
         Text(
@@ -65,11 +65,11 @@ struct TransactionSheet: View {
     f.dateFormat = "yyyy-MM-dd"
     f.locale = Locale(identifier: "en_US_POSIX")
     var options = ["--account", draft.account, "--date", f.string(from: draft.date), "--note", draft.note]
-    if trade { options += ["--fees", draft.fees] }
+    if trade { options += ["--fees", NumberInput.cli(draft.fees)] }
     // Blank lets the CLI infer the listing currency, so a USD stock in a CAD account stays USD.
     if !currency.isEmpty { options += ["--currency", currency] }
     var values = needsSymbol ? [draft.symbol.trimmingCharacters(in: .whitespaces).uppercased()] : []
-    values += trade ? [draft.quantity, draft.price] : [draft.amount]
+    values += (trade ? [draft.quantity, draft.price] : [draft.amount]).map { NumberInput.cli($0) }
     return [command] + options + ["--"] + values
   }
 }
@@ -137,8 +137,8 @@ struct AlertSheet: View {
           Text("Daily gain (%)").tag("up_pct")
           Text("Daily decline (%)").tag("down_pct")
         }
-        TextField(
-          draft.condition.contains("pct") ? "Percentage" : "Price in listing currency",
+        NumberField(
+          title: draft.condition.contains("pct") ? "Percentage" : "Price in listing currency",
           text: $draft.threshold)
         TextField("Note (optional)", text: $draft.note)
       }.formStyle(.grouped)
@@ -151,7 +151,7 @@ struct AlertSheet: View {
               [
                 "alerts", "add", "--note", draft.note, "--",
                 draft.symbol.trimmingCharacters(in: .whitespaces).uppercased(), draft.condition,
-                draft.threshold,
+                NumberInput.cli(draft.threshold),
               ], success: "Price alert created")
             {
               dismiss()
@@ -244,13 +244,20 @@ private struct SheetLayout<Content: View>: View {
   }
 }
 
-private func positive(_ value: String) -> Bool {
-  guard let n = Double(value) else { return false }
-  return n.isFinite && n > 0
-}
-private func nonnegative(_ value: String) -> Bool {
-  guard let n = Double(value) else { return false }
-  return n.isFinite && n >= 0
+private func positive(_ value: String) -> Bool { (NumberInput.parse(value) ?? 0) > 0 }
+private func nonnegative(_ value: String) -> Bool { (NumberInput.parse(value) ?? -1) >= 0 }
+
+/// A number field that explains how it reads the entry, instead of silently disabling Save.
+private struct NumberField: View {
+  let title: String
+  @Binding var text: String
+  var body: some View {
+    TextField(title, text: $text)
+    if let hint = NumberInput.hint(text) {
+      Text(hint).font(.caption).foregroundStyle(
+        NumberInput.parse(text) == nil ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+    }
+  }
 }
 
 private final class TransactionSheetDraft: ObservableObject {

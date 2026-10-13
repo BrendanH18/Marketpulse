@@ -302,6 +302,9 @@ def summary(view: PortfolioView, perf: Performance | None = None, *, privacy: bo
     parts: list[RenderableType] = [head, Text(""), grid]
     if view.excluded:
         parts.append(Text(f"excludes {', '.join(sorted(set(view.excluded)))} (no price or FX rate)", style="warn"))
+    if view.archived_with_value:
+        names = ", ".join(view.archived_with_value)
+        parts.append(Text(f"excludes archived {names}, which still holds value; snapshots paused", style="warn"))
     return Group(*parts)
 
 
