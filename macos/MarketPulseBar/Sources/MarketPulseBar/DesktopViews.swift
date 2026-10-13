@@ -486,6 +486,10 @@ private struct OverviewWorkspace: View {
 private func chartDate(_ raw: String) -> Date {
   ISO8601DateFormatter().date(from: raw + "T12:00:00Z") ?? .now
 }
+private func monthLabel(_ raw: String) -> String {
+  guard let date = ISO8601DateFormatter().date(from: raw + "-15T12:00:00Z") else { return raw }
+  return date.formatted(.dateTime.month(.abbreviated).year(.twoDigits))
+}
 private func accountName(_ id: Int, _ payload: DesktopPayload) -> String {
   payload.accounts.first { $0.id == id }?.name ?? "Account #\(id)"
 }
@@ -759,7 +763,7 @@ private struct IncomeWorkspace: View {
             ContentUnavailableView("Income hidden", systemImage: "eye.slash").frame(height: 230)
           } else {
             Chart(payload.incomeMonths) { p in
-              BarMark(x: .value("Month", String(p.date.suffix(5))), y: .value("Income", p.value))
+              BarMark(x: .value("Month", monthLabel(p.date)), y: .value("Income", p.value))
                 .foregroundStyle(Studio.mint.gradient).cornerRadius(5)
             }
             .frame(height: 230)

@@ -21,10 +21,13 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
     cycle = run_cycle(tracker, fresh=fresh)
     view = cycle.view
     state = tracker.store.ledger()
+    status = tracker.status_payload(view, history_days=None, evaluate_alerts=False)
+    # Alerts were already evaluated by the cycle; report what it fired, as `status --json` does.
+    status["fired"] = cycle.report["fired"]
     return {
         "version": 1,
         "demo": False,
-        "status": tracker.status_payload(view, history_days=None, evaluate_alerts=False),
+        "status": status,
         "accounts": [asdict(a) for a in tracker.store.accounts()],
         "positions": [
             {

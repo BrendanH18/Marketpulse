@@ -126,8 +126,8 @@ struct Dashboard: View {
                 }
             }
 
-            if status.history.count > 1 {
-                HistoryChart(points: status.history, palette: palette)
+            if status.recentHistory.count > 1 {
+                HistoryChart(points: status.recentHistory, palette: palette)
             }
 
             HStack(spacing: 10) {
@@ -192,6 +192,18 @@ struct Dashboard: View {
                 Text("! \(error)").foregroundStyle(palette.muted).font(.system(size: 10, design: .monospaced)).lineLimit(2)
             }
         }
+    }
+}
+
+extension StatusPayload {
+    /// The desktop bridge sends every snapshot; the popover keeps its 30-day sparkline.
+    var recentHistory: [HistoryPoint] {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        let since = formatter.string(from: Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .now)
+        return history.filter { $0.date >= since }
     }
 }
 

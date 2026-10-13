@@ -48,7 +48,9 @@ final class StatusModel: ObservableObject {
   }
 
   private var timer: Timer?
-  var canEdit: Bool { !demo && !loading && !saving && desktop != nil }
+  private var reloadGeneration = 0
+  // A background refresh doesn't block edits: the edit's own reload supersedes it.
+  var canEdit: Bool { !demo && !saving && desktop != nil }
 
   init() {
     let defaults = UserDefaults.standard
@@ -86,8 +88,10 @@ final class StatusModel: ObservableObject {
   }
 
   private func reload() async {
+    reloadGeneration += 1
+    let generation = reloadGeneration
     loading = true
-    defer { loading = false }
+    defer { if generation == reloadGeneration { loading = false } }
     do {
       let data = try await CLI.run(["desktop", "snapshot"] + (demo ? ["--demo"] : ["--fresh"]))
       let decoder = JSONDecoder()
@@ -96,21 +100,25 @@ final class StatusModel: ObservableObject {
       guard payload.version == 1 else {
         throw CLIError.failed("Unsupported desktop bridge version. Reinstall the app.")
       }
+      // An older refresh that finishes late must not overwrite data reloaded after an edit.
+      guard generation == reloadGeneration else { return }
       desktop = payload
       status = payload.status
       errorMessage = nil
       lastUpdated = Date()
     } catch let error as DecodingError {
+      guard generation == reloadGeneration else { return }
       errorMessage =
         "Unexpected portfolio data (\(error)). Update MarketPulse and reinstall the app."
     } catch {
+      guard generation == reloadGeneration else { return }
       errorMessage = error.localizedDescription
     }
   }
 
   @discardableResult
   func perform(_ args: [String], success: String) async -> Bool {
-    guard canEdit else { return false }
+    guard !demo && !saving else { return false }
     saving = true
     defer { saving = false }
     do {

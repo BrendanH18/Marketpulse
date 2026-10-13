@@ -6,8 +6,9 @@ struct TransactionSheet: View {
   @Environment(\.dismiss) private var dismiss
   private var trade: Bool { draft.type == "BUY" || draft.type == "SELL" }
   private var needsSymbol: Bool { trade || draft.type == "DIVIDEND" }
+  private var currency: String { draft.currency.trimmingCharacters(in: .whitespaces).uppercased() }
   private var valid: Bool {
-    !draft.account.isEmpty
+    !draft.account.isEmpty && (currency.isEmpty || currency.count == 3)
       && (!needsSymbol || !draft.symbol.trimmingCharacters(in: .whitespaces).isEmpty)
       && (trade
         ? positive(draft.quantity) && nonnegative(draft.price) && nonnegative(draft.fees)
@@ -28,10 +29,6 @@ struct TransactionSheet: View {
           Text("Choose account").tag("")
           ForEach(model.desktop?.accounts ?? []) { Text($0.name).tag(String($0.id)) }
         }
-        .onChange(of: draft.account) { _, value in
-          draft.currency =
-            model.desktop?.accounts.first { String($0.id) == value }?.currency ?? "CAD"
-        }
         DatePicker("Date", selection: $draft.date, in: ...Date.now, displayedComponents: .date)
         if needsSymbol { TextField("Symbol", text: $draft.symbol, prompt: Text("XEQT.TO")) }
         if trade {
@@ -41,9 +38,9 @@ struct TransactionSheet: View {
         } else {
           TextField("Amount", text: $draft.amount)
         }
-        TextField("Transaction currency", text: $draft.currency)
+        TextField("Transaction currency", text: $draft.currency, prompt: Text("Automatic"))
         Text(
-          "Use the currency of the transaction's price, which can differ from the account currency."
+          "Leave blank to use the symbol's listing currency (or the account's for cash entries). Enter one if the price is in another currency."
         ).font(.caption).foregroundStyle(.secondary)
         TextField("Note (optional)", text: $draft.note)
       }.formStyle(.grouped)
@@ -70,10 +67,9 @@ struct TransactionSheet: View {
     let f = DateFormatter()
     f.dateFormat = "yyyy-MM-dd"
     f.locale = Locale(identifier: "en_US_POSIX")
-    args += [
-      "--account", draft.account, "--date", f.string(from: draft.date), "--currency",
-      draft.currency.uppercased(), "--note", draft.note,
-    ]
+    args += ["--account", draft.account, "--date", f.string(from: draft.date), "--note", draft.note]
+    // Blank lets the CLI infer the listing currency, so a USD stock in a CAD account stays USD.
+    if !currency.isEmpty { args += ["--currency", currency] }
     return args
   }
 }
@@ -267,7 +263,7 @@ private final class TransactionSheetDraft: ObservableObject {
   @Published var price = ""
   @Published var amount = ""
   @Published var fees = "0"
-  @Published var currency = "CAD"
+  @Published var currency = ""
   @Published var note = ""
   @Published var date = Date.now
 }

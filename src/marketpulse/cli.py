@@ -1705,6 +1705,8 @@ def desktop_import(app: App, path: Path, account: str | None, dry_run: bool) -> 
             raise ValueError("Selected account no longer exists.")
         if not account and "account" not in map_headers(headers):
             accounts = app.store.accounts()
+            if not accounts:
+                raise ValueError("Create an account first, or use a CSV with an account column.")
             if len(accounts) != 1:
                 raise ValueError("Select an account for CSV files without an account column.")
             default = accounts[0]
