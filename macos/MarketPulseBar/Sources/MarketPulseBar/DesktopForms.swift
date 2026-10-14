@@ -43,18 +43,30 @@ struct TransactionSheet: View {
           "Leave blank to use the symbol's listing currency (or the account's for cash entries). Enter one if the price is in another currency."
         ).font(.caption).foregroundStyle(.secondary)
         TextField("Note (optional)", text: $draft.note)
-      }.formStyle(.grouped)
+      }.formStyle(.grouped).disabled(model.saving || draft.request != nil)
+      if draft.request != nil && !model.saving {
+        Text("The save outcome is unknown. Retry the same entry before changing or closing it.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
       HStack {
-        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving)
+        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving || draft.request != nil)
         Spacer()
         if model.saving { ProgressView().controlSize(.small) }
-        Button("Save transaction") {
-          Task { if await model.perform(arguments, success: "Transaction recorded") { dismiss() } }
+        Button(draft.request == nil ? "Save transaction" : "Retry save") {
+          let attempt = draft.request ?? TransactionSaveRequest(arguments: arguments)
+          draft.request = attempt
+          Task {
+            switch await model.recordTransaction(attempt) {
+            case .recorded, .recovered: dismiss()
+            case .notRecorded: draft.request = nil
+            case .unknown: break
+            }
+          }
         }
         .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(
           !valid || !model.canEdit)
       }
-    }
+    }.interactiveDismissDisabled(model.saving || draft.request != nil)
   }
   private var arguments: [String] {
     let command = [
@@ -261,6 +273,7 @@ private struct NumberField: View {
 }
 
 private final class TransactionSheetDraft: ObservableObject {
+  @Published var request: TransactionSaveRequest?
   @Published var type = "BUY"
   @Published var account = ""
   @Published var symbol = ""

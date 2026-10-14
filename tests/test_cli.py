@@ -1,9 +1,11 @@
 import json
+from uuid import uuid4
 
+import click
 import pytest
 from click.testing import CliRunner
 
-from marketpulse.cli import main
+from marketpulse.cli import App, main
 from marketpulse.config import Config, config_path
 
 
@@ -33,6 +35,83 @@ def test_trading_flow(cli, store):
     assert "BUY" in cli("activity").output
     assert "Deleted transaction" in cli("undo", "-y").output
     assert len(store.transactions()) == 2
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("buy", "AAPL", "1", "100"),
+        ("sell", "AAPL", "1", "100"),
+        ("deposit", "100"),
+        ("withdraw", "100"),
+        ("dividend", "AAPL", "100"),
+        ("interest", "100"),
+        ("fee", "100"),
+    ],
+)
+def test_native_save_retries_after_confirmation_failure(cli, store, monkeypatch, command):
+    cli("accounts", "add", "Fictional TFSA", "--type", "TFSA")
+    if command[0] == "sell":
+        cli("buy", "AAPL", "1", "90")
+    before = len(store.transactions())
+    request_id = str(uuid4())
+    args = (command[0], "--request-id", request_id, *command[1:])
+
+    def fail_confirmation(self, message):
+        raise click.ClickException("Simulated post-commit confirmation failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(App, "ok", fail_confirmation)
+        failed = cli(*args)
+    assert failed.exit_code == 1 and "confirmation failure" in failed.output
+    assert len(store.transactions()) == before + 1
+    status = json.loads(cli("desktop", "transaction-status", request_id).output)
+    assert status == {"recorded": True, "transaction_id": store.transactions()[-1].id}
+    # A SELL retry must bypass the now-empty position's oversell guard too.
+    retry = cli(*args)
+    assert retry.exit_code == 0 and "Transaction already recorded" in retry.output
+    assert len(store.transactions()) == before + 1
+
+
+def test_request_reuse_rejects_changed_intent_and_allows_intentional_duplicates(cli, store):
+    request_id = str(uuid4())
+    assert cli("deposit", "100", "--request-id", request_id).exit_code == 0
+    changed = cli("deposit", "200", "--request-id", request_id)
+    assert changed.exit_code == 1 and "different transaction" in changed.output
+    assert cli("fee", "100", "--request-id", request_id).exit_code == 1
+    assert len(store.transactions()) == 1
+    assert cli("deposit", "100", "--request-id", str(uuid4())).exit_code == 0
+    assert cli("deposit", "100").exit_code == 0  # ordinary terminal behavior stays unchanged
+    assert len(store.transactions()) == 3
+
+
+def test_request_status_is_offline_and_unsaved_requests_can_be_corrected(cli, store, fake):
+    cli("accounts", "add", "Fictional TFSA")
+    request_id = str(uuid4())
+    failed = cli("buy", "AAPL", "0", "100", "--currency", "USD", "--request-id", request_id)
+    assert failed.exit_code == 1
+    fake.offline = True
+    calls = len(fake.calls)
+    assert json.loads(cli("desktop", "transaction-status", request_id).output) == {
+        "recorded": False,
+        "transaction_id": None,
+    }
+    assert len(fake.calls) == calls
+    assert cli("buy", "AAPL", "1", "100", "--currency", "USD", "--request-id", request_id).exit_code == 0
+
+
+def test_retry_does_not_resolve_changed_market_data_or_recreate_deleted_entry(cli, store, fake, monkeypatch):
+    request_id = str(uuid4())
+    args = ("buy", "AAPL", "1", "--request-id", request_id)
+    assert cli(*args).exit_code == 0
+    txn = store.transactions()[0]
+    store.delete_transaction(txn.saved_id)
+    store.delete_account(txn.account_id)
+    fake.offline = True
+    calls = len(fake.calls)
+    # Receipt survives edits/deletions and bypasses account creation and quote lookup.
+    assert cli(*args).exit_code == 0
+    assert len(fake.calls) == calls and store.transactions() == [] and store.accounts() == []
 
 
 def test_account_resolution_errors(cli, store):

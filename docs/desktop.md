@@ -60,6 +60,20 @@ Number fields accept your system's format (`12,5` in French or German, as well a
 `12.5`). When an entry could be read more than one way, such as `1.000`, the form
 shows how it reads it before you save.
 
+Transaction saves have a unique request identity. If the command fails after saving,
+the app checks its receipt and confirms "Transaction recorded. Its confirmation failed."
+If it cannot check the outcome, the form keeps the original entry locked and offers
+**Retry save**, which reuses the same request and cannot add a duplicate. When a receipt
+check confirms nothing was saved, you can correct or cancel the entry normally. If you
+force-quit during an uncertain save, check Activity before entering it in a new form.
+
+For clients using the CLI, transaction commands accept `--request-id <uuid>`;
+`marketpulse desktop transaction-status <uuid>` returns `recorded` and `transaction_id`
+without fetching prices. Reusing an ID with a different command or arguments is refused.
+Receipts are stored atomically with entries in SQLite's existing `meta` table, retained
+even if an entry is edited/deleted, and included in backups. No schema migration is
+required. Commands without a request ID keep their existing output and exit behavior.
+
 Privacy mode masks portfolio amounts and quantities, and hides amount-bearing
 charts. Quotes and percentage changes remain visible. CSV and JSON exports
 contain the original data. The desktop app currently uses a dedicated dark

@@ -3,7 +3,7 @@ import Foundation
 // Compiled alongside the app's actual model files; works with Command Line Tools alone.
 @main
 struct NativeBridgeCheck {
-  static func main() throws {
+  static func main() async throws {
     let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
     let decoder = JSONDecoder()
     decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -53,8 +53,43 @@ struct NativeBridgeCheck {
     precondition(NumberInput.hint("12.50", locale: english) == nil)
     precondition(NumberInput.hint("1.000", locale: german)?.hasPrefix("Reads as") == true)
     precondition(NumberInput.hint("12,5", locale: english)?.hasPrefix("Enter a number") == true)
+    let receipt = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[3]))
+    let request = TransactionSaveRequest(
+      arguments: ["deposit", "--note", "--a literal note", "--", "12.5"],
+      id: "00000000-0000-0000-0000-000000000055")
+    precondition(request.arguments == [
+      "deposit", "--request-id", request.id, "--note", "--a literal note", "--", "12.5",
+    ])
+    let failed = NSError(domain: "Save confirmation failed", code: 1)
+    var calls: [[String]] = []
+    let recovered = await request.submit { args in
+      calls.append(args)
+      if args == request.statusArguments { return receipt }
+      throw failed
+    }
+    precondition(recovered == .recovered)
+    precondition(calls == [request.arguments, request.statusArguments])
+    let notRecorded = await request.submit { args in
+      if args == request.statusArguments { return Data(#"{"recorded":false,"transaction_id":null}"#.utf8) }
+      throw failed
+    }
+    precondition(notRecorded == .notRecorded(failed.localizedDescription))
+    let unknown = await request.submit { _ in throw failed }
+    guard case .unknown(let warning) = unknown else { preconditionFailure("Unknown save unlocked the form") }
+    precondition(warning.contains("Retry save"))
+    let malformed = await request.submit { args in
+      if args == request.statusArguments { return Data(#"{"recorded":true,"transaction_id":null}"#.utf8) }
+      throw failed
+    }
+    guard case .unknown = malformed else { preconditionFailure("Invalid receipt unlocked the form") }
+    // Retrying an unknown outcome uses the original immutable ID and arguments.
+    let retry = await request.submit { args in
+      precondition(args == request.arguments)
+      return Data()
+    }
+    precondition(retry == .recorded)
     print(
-      "Native bridge checks passed: real Python demo, activity values, import result, privacy formatting, number entry"
+      "Native bridge checks passed: real Python demo, activity values, import result, privacy formatting, number entry, transaction save recovery"
     )
   }
 }

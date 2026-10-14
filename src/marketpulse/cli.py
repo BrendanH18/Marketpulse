@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import platform
@@ -11,6 +12,7 @@ import sys
 import time
 from dataclasses import fields, replace
 from datetime import date
+from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
@@ -36,6 +38,7 @@ from .models import (
     parse_date,
     parse_symbols,
 )
+from .requests import AlreadyRecorded, check_request, receipt, record_once
 from .tax import TaxReport
 from .themes import OMARCHY_PALETTES, omarchy_active, pretty_name, resolve_palette, rich_styles
 
@@ -62,6 +65,8 @@ class App:
         self.palette = resolve_palette(self.config.theme)
         self.console = Console(theme=RichTheme(rich_styles(self.palette)), highlight=False)
         self._tracker: Tracker | None = None
+        self.request_id: str | None = None
+        self.request_fingerprint = ""
 
     @property
     def tracker(self) -> Tracker:
@@ -141,6 +146,29 @@ def _date_callback(ctx: click.Context, param: click.Parameter, value: str | None
 
 
 def txn_options(f):
+    original = f
+
+    @wraps(original)
+    def requested(*args, **kwargs):
+        ctx = click.get_current_context()
+        app = ctx.ensure_object(App)
+        request_id = kwargs.pop("request_id", None)
+        app.request_id = str(request_id) if request_id is not None else None
+        if app.request_id is None:
+            return original(*args, **kwargs)
+        # Fingerprint the user's parsed command, before inferred quotes/currency or
+        # current holdings can change. Replays skip resolution and validation entirely.
+        intent = json.dumps([ctx.command.name, kwargs], sort_keys=True)
+        app.request_fingerprint = hashlib.sha256(intent.encode()).hexdigest()
+        try:
+            check_request(app.store, app.request_id, app.request_fingerprint)
+            return original(*args, **kwargs)
+        except AlreadyRecorded as saved:
+            app.ok(f"Transaction already recorded (#{saved.transaction_id}).")
+        except ValueError as e:
+            fail(str(e))
+
+    f = click.option("--request-id", type=click.UUID, help="Retry identity for a native transaction save.")(requested)
     f = click.option("-m", "--note", default="", help="Free-text note.")(f)
     f = click.option(
         "-d",
@@ -497,6 +525,10 @@ def search(app: App, query: tuple[str, ...]) -> None:
 
 def _record(app: App, txn: Transaction) -> Transaction:
     try:
+        if app.request_id is not None:
+            return record_once(
+                app.store, app.request_id, app.request_fingerprint, lambda: app.tracker.add_transaction(txn)
+            )
         return app.tracker.add_transaction(txn)
     except ValueError as e:
         fail(str(e))
@@ -1658,6 +1690,15 @@ def doctor(app: App) -> None:
 @main.group()
 def desktop() -> None:
     """Native macOS portfolio app and its versioned JSON bridge."""
+
+
+@desktop.command("transaction-status")
+@click.argument("request_id", type=click.UUID)
+@pass_app
+def desktop_transaction_status(app: App, request_id) -> None:
+    """Check a save receipt without replaying the ledger or requesting market data."""
+    saved = receipt(app.store, str(request_id))
+    click.echo(json.dumps({"recorded": saved is not None, "transaction_id": saved.transaction_id if saved else None}))
 
 
 @desktop.command("snapshot")
