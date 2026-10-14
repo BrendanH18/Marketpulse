@@ -28,7 +28,18 @@ for the implemented work and remaining priorities.
 | Later | [#25](https://github.com/BrendanH18/Marketpulse/issues/25) | Optional at-rest encryption |
 | Later | [#26](https://github.com/BrendanH18/Marketpulse/issues/26) | Windows packaging and platform polish |
 
+## Native app (App 1.0)
+
+The downloadable app has its own epic, [#32](https://github.com/BrendanH18/Marketpulse/issues/32),
+with child issues #33–#53. The goal, decisions (open source, unsigned builds, Mac then
+Windows), and phases are in the [App 1.0 plan](app-plan.md). Verify app changes with the
+[QA checklist](qa.md).
+
 ## For agents
+
+Read [AGENTS.md](../AGENTS.md) first: it covers claiming issues, branches, checks, and the
+handoff protocol for switching between agents mid-task.
+
 
 1. Pick **one** open issue from the table (prefer higher priority).
 2. Treat that issue’s scope and acceptance checkboxes as the contract.
