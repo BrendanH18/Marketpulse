@@ -124,6 +124,8 @@ final class StatusModel: ObservableObject {
         StatusPayload.self, from: try await CLI.run(["status", "--json"]))
       guard generation == reloadGeneration else { return }
       status = fallback
+      // The window keeps its last payload; it must still honour the current privacy setting.
+      applyPrivacy(fallback.privacy)
       lastUpdated = Date()
       errorMessage = "The portfolio window couldn't refresh: \(desktopError)"
     } catch {
@@ -161,9 +163,22 @@ final class StatusModel: ObservableObject {
     if demo {
       // Demo is read-only, including configuration writes.
       message = "Demo is read-only. Privacy mode is available in your real portfolio."
-    } else {
-      setConfig("privacy", (status?.privacy ?? false) ? "false" : "true")
+      return
     }
+    let enable = !(status?.privacy ?? false)
+    Task {
+      if await perform(["config", "set", "privacy", enable ? "true" : "false"], success: "Settings updated") {
+        // Applied locally too, so a failed refresh can't leave cached amounts on screen.
+        applyPrivacy(enable)
+      }
+    }
+  }
+
+  /// Every view reads privacy from `status` or `desktop.status`. Keeping both identical means
+  /// the toolbar can never say "hidden" while a cached payload still shows amounts.
+  private func applyPrivacy(_ enabled: Bool) {
+    status?.privacy = enabled
+    desktop?.status.privacy = enabled
   }
 
   func chooseImport() {

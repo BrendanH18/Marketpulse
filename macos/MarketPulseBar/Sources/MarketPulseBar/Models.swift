@@ -7,7 +7,7 @@ struct StatusPayload: Decodable {
     let generatedAt: String
     let title: String
     let base: String
-    let privacy: Bool
+    var privacy: Bool  // kept in step with the desktop payload by StatusModel.applyPrivacy
     let stale: Bool
     let marketState: String
     let netWorth: Double?

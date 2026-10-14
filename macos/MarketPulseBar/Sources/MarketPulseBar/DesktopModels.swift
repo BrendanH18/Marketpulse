@@ -4,7 +4,7 @@ import Foundation
 struct DesktopPayload: Decodable {
   let version: Int
   let demo: Bool
-  let status: StatusPayload
+  var status: StatusPayload
   let accounts: [DesktopAccount]
   let positions: [DesktopPosition]
   let activity: [DesktopTransaction]
