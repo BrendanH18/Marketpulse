@@ -12,7 +12,7 @@ real portfolio, and never toggle **Launch at login** on the QA app.
 ```bash
 uv sync --locked --dev
 uv run --locked python scripts/qa_app.py --fresh      # desktop mode; add --menubar for menu bar mode
-/tmp/marketpulse-qa/launch.sh                          # opens "MarketPulse QA"
+"$TMPDIR/marketpulse-qa/launch.sh"                     # opens "MarketPulse QA"
 ```
 
 `--fresh` resets the scratch ledger, settings, and the QA app's preferences, and the
@@ -20,7 +20,7 @@ script quits any QA copy that's still running, so switching between desktop and 
 bar mode always tests the new build. It refuses an `--out` folder that overlaps your real data or
 settings, one it didn't create itself, one owned by another user, or one containing symbolic
 links, so it can never touch a real portfolio. It builds a separate app (`dev.marketpulse.qa`) with its own data in
-`/tmp/marketpulse-qa`, so your installed app, its settings, and `~/.marketpulse`
+`$TMPDIR/marketpulse-qa` (your per-user temp folder), so your installed app, its settings, and `~/.marketpulse`
 are untouched. Wait about 5 seconds for the first refresh (it fetches live quotes).
 
 The seeded ledger has two active accounts (**Everyday TFSA**, **Cash Account**), an
@@ -52,7 +52,7 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
 9. **Record a transaction (⌘N).** The account picker has no Old RRSP. Record a BUY
    of AAPL in Everyday TFSA with the currency left blank ("Automatic"); Activity
    shows it in US dollars, negative.
-10. **Import (⌘I).** Choose `/tmp/marketpulse-qa/sample-import.csv` (⌘⇧G to type
+10. **Import (⌘I).** Choose the sample CSV path the script printed (⌘⇧G to type
     the path), default account Everyday TFSA, Preview: 2 new, 0 duplicates, 2
     skipped (line 3 archived account, line 5 invalid date), new account New FHSA.
     Import shows "Imported 2 entries…". Previewing again shows 0 new, 2 duplicates.
@@ -73,7 +73,7 @@ Quit the QA app with ⌘Q when done.
 Some computer-use tools only see the app's own window, not the Dock or the system
 menu bar. Then:
 
-- **Reopen (13):** run `/tmp/marketpulse-qa/launch.sh` again instead of clicking the
+- **Reopen (13):** run `"$TMPDIR/marketpulse-qa/launch.sh"` again instead of clicking the
   Dock. Relaunching a running app sends the same reopen event as a Dock click.
 - **Dock icon (1) and menu bar (12):** report them as UNVERIFIED and say why. A
   person should check them before a release.
@@ -82,4 +82,4 @@ menu bar. Then:
 
 Post results on the PR (or the issue being verified) as a table of items 1–14 with
 PASS / FAIL / UNVERIFIED and evidence, then any bugs with exact steps to reproduce.
-Clean up with `rm -rf /tmp/marketpulse-qa`.
+Clean up with `rm -rf "$TMPDIR/marketpulse-qa"`.

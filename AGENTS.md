@@ -60,7 +60,7 @@ All must pass before you mark a PR ready. Paste the results, not a summary of th
 Build the throwaway QA app on a fictional ledger and follow [docs/qa.md](docs/qa.md):
 
 ```bash
-uv run --locked python scripts/qa_app.py --fresh && /tmp/marketpulse-qa/launch.sh
+uv run --locked python scripts/qa_app.py --fresh && "$TMPDIR/marketpulse-qa/launch.sh"
 ```
 
 If you have computer use, run the checklist and post the PASS / FAIL / UNVERIFIED

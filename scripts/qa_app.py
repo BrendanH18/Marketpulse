@@ -3,9 +3,10 @@ computer-use QA. Never touches your real ledger, settings, or installed app.
 
     uv run --locked python scripts/qa_app.py              # desktop mode (Dock icon)
     uv run --locked python scripts/qa_app.py --menubar    # menu bar mode
-    uv run --locked python scripts/qa_app.py --out /tmp/mp-qa --fresh
+    uv run --locked python scripts/qa_app.py --out ~/mp-qa --fresh
 
-Then run the printed `launch.sh`, and follow docs/qa.md.
+The default folder is in your per-user temp directory ($TMPDIR on macOS), which other
+users can't write to. Then run the printed `launch.sh`, and follow docs/qa.md.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import date, timedelta
 from pathlib import Path
@@ -160,13 +162,21 @@ def main() -> None:
     if sys.platform != "darwin":
         raise SystemExit("The QA app is macOS-only.")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", type=Path, default=Path("/tmp/marketpulse-qa"))
+    # Per-user (not the shared /tmp), so no other account can plant links in it.
+    parser.add_argument("--out", type=Path, default=Path(tempfile.gettempdir()) / "marketpulse-qa")
     parser.add_argument("--menubar", action="store_true", help="Menu bar mode (no Dock icon, no window at launch).")
     parser.add_argument("--fresh", action="store_true", help="Reset the scratch ledger, settings, and app defaults.")
     args = parser.parse_args()
     out: Path = args.out.expanduser().resolve()
     check_out(out)
-    out.mkdir(parents=True, exist_ok=True)
+    if not out.exists():
+        try:
+            out.mkdir(parents=True)  # fails if anything (say, a symlink) appeared here since the check
+        except FileExistsError:
+            raise SystemExit(f"{out} appeared while setting up. Choose another folder.") from None
+    if out.is_symlink() or not out.is_dir():
+        raise SystemExit(f"{out} changed while setting up. Choose another folder.")
+    check_out(out)  # again, on what's actually there now
     (out / MARKER).write_text("Created by scripts/qa_app.py (MarketPulse QA). Safe to delete.\n", encoding="utf-8")
     data = out / "data"
     # A QA copy that's still running keeps its old mode (desktop vs menu bar) and state,
