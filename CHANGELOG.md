@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Native transaction saves use durable request receipts: a confirmation failure or timeout
+  can be recovered or retried without recording the transaction twice.
 - The native window reopens from the Dock and shows its toolbar on macOS 14.
 - Transaction validation rejects NaN/infinity; alerts require a finite positive threshold.
 - CSV previews (`--dry-run`) run the real import against a temporary copy of the

@@ -65,6 +65,16 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     Portfolio** (⌘0) also brings it back.
 14. **General.** No crash, hang, endless spinner, clipped or overlapping text, or
     unreadable contrast. Note anything that looks unfinished.
+15. **Failed transaction save.** With a QA-only CLI wrapper, let a transaction
+    command finish successfully, then return an error. Save a fictional deposit:
+    the sheet closes, the message reads "Transaction recorded. Its confirmation
+    failed.", and Activity contains exactly one entry. Repeat while the wrapper
+    also fails `desktop transaction-status`: fields and Cancel stay disabled,
+    **Retry save** remains available, and the sheet cannot be dismissed. Restore
+    the wrapper and retry: exactly one entry remains. Also reject a transaction
+    before executing it while leaving receipt checks working: the form unlocks
+    for correction/cancellation and Activity has no new entry. Never change the
+    real CLI or point the wrapper at a real ledger.
 
 Quit the QA app with ⌘Q when done.
 
@@ -80,6 +90,6 @@ menu bar. Then:
 
 ## Reporting
 
-Post results on the PR (or the issue being verified) as a table of items 1–14 with
+Post results on the PR (or the issue being verified) as a table of items 1–15 with
 PASS / FAIL / UNVERIFIED and evidence, then any bugs with exact steps to reproduce.
 Clean up with `rm -rf "$TMPDIR/marketpulse-qa"`.

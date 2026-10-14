@@ -1,10 +1,12 @@
 """Compile native models and check them against an actual offline Python payload."""
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from uuid import uuid4
 
 from marketpulse.desktop import activity_row, demo_snapshot
 from marketpulse.models import Account, Transaction, TxnType
@@ -29,6 +31,26 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
         signed = txn.cash_direction * txn.gross_value if txn.cash_direction else txn.gross_value
         rows.append({"transaction": activity_row(txn, target), "expected_signed_value": signed})
     transactions.write_text(json.dumps(rows, allow_nan=False))
+    # Exercise the actual receipt CLI on an isolated fictional ledger, with no quotes needed.
+    request_id = str(uuid4())
+    env = {
+        **os.environ,
+        "MARKETPULSE_DATA": str(Path(tmp) / "data"),
+        "MARKETPULSE_CONFIG": str(Path(tmp) / "config.toml"),
+    }
+    cli = [sys.executable, "-c", "from marketpulse.cli import main; main()"]
+    subprocess.run(
+        cli + ["deposit", "--request-id", request_id, "--currency", "CAD", "--", "12.5"],
+        env=env,
+        capture_output=True,
+        check=True,
+    )
+    receipt = Path(tmp) / "receipt.json"
+    receipt.write_bytes(
+        subprocess.run(
+            cli + ["desktop", "transaction-status", request_id], env=env, capture_output=True, check=True
+        ).stdout
+    )
     subprocess.run(
         [
             "swiftc",
@@ -40,4 +62,4 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
         ],
         check=True,
     )
-    subprocess.run([str(binary), str(fixture), str(transactions)], check=True)
+    subprocess.run([str(binary), str(fixture), str(transactions), str(receipt)], check=True)

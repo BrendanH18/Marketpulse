@@ -139,6 +139,23 @@ final class StatusModel: ObservableObject {
     await perform(args) { _ in success }
   }
 
+  func recordTransaction(_ request: TransactionSaveRequest) async -> TransactionSaveResult {
+    guard !demo && !saving else { return .unknown("Another save is in progress.") }
+    saving = true
+    defer { saving = false }
+    let result = await request.submit(using: CLI.run)
+    switch result {
+    case .recorded, .recovered:
+      errorMessage = nil
+      message = result == .recovered
+        ? "Transaction recorded. Its confirmation failed." : "Transaction recorded"
+      await reload()
+    case .notRecorded(let error), .unknown(let error):
+      errorMessage = error
+    }
+    return result
+  }
+
   /// Runs a write command, then reloads. `afterWrite` runs as soon as the command succeeds,
   /// before the reload; `success` builds the confirmation from the command's output.
   private func perform(

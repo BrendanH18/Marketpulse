@@ -1,5 +1,50 @@
 import Foundation
 
+/// One immutable save intent. An uncertain attempt always retries these exact arguments and ID.
+struct TransactionSaveRequest {
+  let id: String
+  let arguments: [String]
+  var statusArguments: [String] { ["desktop", "transaction-status", id] }
+
+  init(arguments: [String], id: String = UUID().uuidString) {
+    self.id = id
+    self.arguments = [arguments[0], "--request-id", id] + arguments.dropFirst()
+  }
+
+  func submit(using run: ([String]) async throws -> Data) async -> TransactionSaveResult {
+    do {
+      _ = try await run(arguments)
+      return .recorded
+    } catch {
+      let failure = error.localizedDescription
+      do {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let status = try decoder.decode(TransactionSaveStatus.self, from: await run(statusArguments))
+        if status.recorded && status.transactionId != nil { return .recovered }
+        if !status.recorded && status.transactionId == nil { return .notRecorded(failure) }
+      } catch {
+        // A failed/malformed receipt check is an unknown outcome, never permission to create a new request.
+      }
+      return .unknown(
+        "\(failure)\nCouldn't confirm whether this transaction was saved. Retry save to check the same request safely."
+      )
+    }
+  }
+}
+
+enum TransactionSaveResult: Equatable {
+  case recorded
+  case recovered
+  case notRecorded(String)
+  case unknown(String)
+}
+
+private struct TransactionSaveStatus: Decodable {
+  let recorded: Bool
+  let transactionId: Int?
+}
+
 /// Version 1 of `marketpulse desktop snapshot`; separate from the stable status API.
 struct DesktopPayload: Decodable {
   let version: Int
