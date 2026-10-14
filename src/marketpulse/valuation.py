@@ -125,10 +125,17 @@ class PortfolioView:
     excluded: list[str] = field(default_factory=list)
     # Archived accounts that still hold something; kept out of the totals above.
     archived_with_value: list[str] = field(default_factory=list)
+    archived_value: float = 0.0  # what they hold, in base currency (priced parts only)
     by_account: list[Breakdown] = field(default_factory=list)
     by_class: list[Breakdown] = field(default_factory=list)
     by_currency: list[Breakdown] = field(default_factory=list)
     as_of: datetime = field(default_factory=datetime.now)
+
+    @property
+    def value_for_returns(self) -> float:
+        """Net worth plus what archived accounts still hold. Returns compare value with every
+        contribution, including those made to accounts archived since, so both must cover them."""
+        return self.net_worth + self.archived_value
 
     @property
     def holdings_value(self) -> float:
@@ -223,9 +230,9 @@ def build_view(
 
     for h in state.open_holdings(account_id):
         acct = accounts.get(h.account_id) or Account(name=f"#{h.account_id}", id=h.account_id)
-        if account_id is None and acct.archived:
+        hidden = account_id is None and acct.archived
+        if hidden:
             archived_with_value.add(acct.name)
-            continue
         asset = assets.get(h.symbol)
         quote = quotes.get(h.symbol)
         kind = asset.kind if asset else AssetKind.MARKET
@@ -241,24 +248,26 @@ def build_view(
         else:
             klass = quote.asset_class if quote else AssetClass.OTHER
         name = (asset.name if asset and asset.name else "") or (quote.name if quote else "") or h.symbol
-        view.positions.append(
-            PositionView(
-                account=acct,
-                symbol=h.symbol,
-                name=name,
-                kind=kind,
-                asset_class=klass,
-                quantity=h.quantity,
-                avg_cost=h.avg_cost,
-                book=h.book,
-                currency=h.currency,
-                first_date=h.first_date,
-                price=price,
-                prev_close=prev,
-                quote=quote,
-                fx_rate=fx.rate(h.currency),
-            )
+        position = PositionView(
+            account=acct,
+            symbol=h.symbol,
+            name=name,
+            kind=kind,
+            asset_class=klass,
+            quantity=h.quantity,
+            avg_cost=h.avg_cost,
+            book=h.book,
+            currency=h.currency,
+            first_date=h.first_date,
+            price=price,
+            prev_close=prev,
+            quote=quote,
+            fx_rate=fx.rate(h.currency),
         )
+        if hidden:
+            view.archived_value += position.value_base or 0.0
+        else:
+            view.positions.append(position)
 
     acct_totals: dict[int, Breakdown] = {}
     class_totals: dict[str, Breakdown] = {}
@@ -288,11 +297,12 @@ def build_view(
         cash_acct = accounts.get(acct_id)
         if cash_acct is None or not cash_acct.track_cash:
             continue
+        amount_base = fx.convert(amount, ccy)
         if account_id is None and cash_acct.archived:
             if round(amount, 2):
                 archived_with_value.add(cash_acct.name)
+            view.archived_value += amount_base or 0.0
             continue
-        amount_base = fx.convert(amount, ccy)
         view.cash.append(CashView(cash_acct, ccy, amount, amount_base))
         if amount_base is None:
             view.excluded.append(f"{cash_acct.name} cash ({ccy})")

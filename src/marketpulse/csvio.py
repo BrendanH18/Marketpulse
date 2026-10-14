@@ -14,6 +14,7 @@ import json
 import re
 from collections import Counter
 from dataclasses import asdict, dataclass, field
+from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, TextIO
@@ -166,11 +167,19 @@ def import_transactions(
     """Import (or preview) CSV rows. A commit given `expect_fingerprint` from its preview
     refuses to write anything if the file or the ledger changed in between."""
     text = Path(source).read_text(encoding="utf-8-sig") if isinstance(source, Path | str) else source.read()
-    fingerprint = import_fingerprint(store, text, default_account, create_accounts)
     if not dry_run:
-        if expect_fingerprint is not None and expect_fingerprint != fingerprint:
-            raise ValueError("The ledger or the file changed since the preview. Preview the import again.")
-        result = _import(store, text, default_account=default_account, create_accounts=create_accounts, backup=True)
+        # One transaction from the check to the last write: no other process can change the
+        # ledger in between, and a failure leaves no half-import (or new accounts) behind.
+        with store.transaction():
+            if default_account is not None:
+                # It may have changed since the caller read it (e.g. been archived).
+                default_account = store.get_account(default_account.saved_id)
+                if default_account is None:
+                    raise ValueError("The selected account no longer exists.")
+            fingerprint = import_fingerprint(store, text, default_account, create_accounts)
+            if expect_fingerprint is not None and expect_fingerprint != fingerprint:
+                raise ValueError("The ledger or the file changed since the preview. Preview the import again.")
+            result = _import(store, text, default_account=default_account, create_accounts=create_accounts, backup=True)
         result.fingerprint = fingerprint
         return result
     # A preview runs the real import against a throwaway copy of the ledger, so its
@@ -180,6 +189,8 @@ def import_transactions(
     with TemporaryDirectory(prefix="marketpulse-preview-") as tmp:
         scratch = Store(store.backup(dest=Path(tmp) / "preview.db"))
         try:
+            # Fingerprint the exact copy the preview runs on, not the live ledger a moment later.
+            fingerprint = import_fingerprint(scratch, text, default_account, create_accounts)
             result = _import(
                 scratch, text, default_account=default_account, create_accounts=create_accounts, backup=False
             )
@@ -190,8 +201,10 @@ def import_transactions(
 
 
 def import_fingerprint(store: Store, text: str, default_account: Account | None, create_accounts: bool) -> str:
-    """Everything an import's outcome depends on: the file, the options, and the ledger."""
+    """Everything an import's outcome depends on: the file, the options, the ledger, and the
+    day (dates in the future are rejected, so a preview from yesterday may no longer hold)."""
     inputs = {
+        "today": date.today().isoformat(),
         "csv": text,
         "default_account": default_account.id if default_account else None,
         "create_accounts": create_accounts,

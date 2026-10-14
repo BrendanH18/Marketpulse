@@ -371,3 +371,30 @@ def test_backfill_refuses_while_an_archived_account_holds_value(tracker, store, 
     by_day = {s.date: s.net_worth for s in store.snapshots()}
     assert by_day[days[0]] == pytest.approx(200)  # both accounts held 1 AAPL @ 100 (FX 1.0)
     assert by_day[days[3]] == pytest.approx(100)
+
+
+def test_archiving_an_account_with_holdings_does_not_fake_a_loss(tracker, store):
+    main = store.add_account(Account(name="Main"))
+    old = store.add_account(Account(name="Old"))
+    for acct in (main, old):
+        tracker.add_transaction(
+            Transaction(
+                account_id=acct.id,
+                type=TxnType.BUY,
+                date="2024-01-02",
+                symbol="AAPL",
+                quantity=1,
+                price=100,
+                currency="USD",
+            )
+        )
+    before_view = tracker.valuation(record=False)
+    before = tracker.performance(before_view)
+    old.archived = True
+    store.update_account(old)
+    view = tracker.valuation(record=False)
+    after = tracker.performance(view)
+    assert view.net_worth == pytest.approx(before_view.net_worth / 2)  # hidden from totals...
+    assert view.value_for_returns == pytest.approx(before_view.net_worth)  # ...but not from returns
+    assert after.total_gain == pytest.approx(before.total_gain)
+    assert after.xirr_pct == pytest.approx(before.xirr_pct)

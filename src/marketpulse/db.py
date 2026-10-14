@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -184,6 +185,7 @@ class Store:
         # worth backing up before it is migrated.
         existed = self.path.exists() and self.path.stat().st_size > 0
         self._lock = threading.RLock()
+        self._in_transaction = False
         self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=10)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
@@ -285,7 +287,17 @@ class Store:
         copy = sqlite3.connect(target)
         try:
             with self._lock:
-                self._conn.backup(copy)
+                if self._in_transaction:
+                    # The backup API can't read through a connection with its own transaction
+                    # open (it waits forever); a second connection reads the committed state
+                    # alongside it (WAL), which is the state before this transaction's writes.
+                    source = sqlite3.connect(self.path)
+                    try:
+                        source.backup(copy)
+                    finally:
+                        source.close()
+                else:
+                    self._conn.backup(copy)
         finally:
             copy.close()
         if dest is None and reason in self._AUTO_REASONS:
@@ -330,8 +342,37 @@ class Store:
         with self._lock:
             self._conn.close()
 
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Run several writes as one: other processes can't write in between (BEGIN IMMEDIATE
+        takes the write lock up front), and everything commits together or not at all."""
+        with self._lock:
+            if self._in_transaction:
+                raise RuntimeError("Transactions don't nest.")
+            self._conn.execute("BEGIN IMMEDIATE")
+            self._in_transaction = True
+            try:
+                yield
+            except BaseException:
+                self._conn.rollback()
+                raise
+            else:
+                self._conn.commit()
+            finally:
+                self._in_transaction = False
+
+    @contextmanager
+    def _write(self) -> Iterator[None]:
+        """Each write commits on its own, unless it's part of an open `transaction()`."""
+        with self._lock:
+            if self._in_transaction:
+                yield
+            else:
+                with self._conn:
+                    yield
+
     def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
-        with self._lock, self._conn:
+        with self._write():
             return self._conn.execute(sql, params)
 
     def _query(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
@@ -487,7 +528,7 @@ class Store:
 
     def add_transactions(self, txns: list[Transaction]) -> int:
         params = [self._txn_params(t) for t in txns]
-        with self._lock, self._conn:
+        with self._write():
             self._conn.executemany(f"INSERT INTO transactions({_TXN_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", params)
         return len(params)
 
@@ -552,7 +593,7 @@ class Store:
     def add_watch(self, symbols: list[str]) -> list[str]:
         current = self.watchlist()
         added = [s.upper() for s in symbols if s.upper() not in current]
-        with self._lock, self._conn:
+        with self._write():
             for i, sym in enumerate(dict.fromkeys(added)):
                 self._conn.execute(
                     "INSERT OR IGNORE INTO watchlist(symbol, position) VALUES (?, ?)", (sym, len(current) + i)
@@ -562,7 +603,7 @@ class Store:
     def remove_watch(self, symbols: list[str]) -> list[str]:
         current = set(self.watchlist())
         removed = [s.upper() for s in symbols if s.upper() in current]
-        with self._lock, self._conn:
+        with self._write():
             self._conn.executemany("DELETE FROM watchlist WHERE symbol = ?", [(s,) for s in removed])
         return removed
 
@@ -573,7 +614,7 @@ class Store:
         i = items.index(symbol)
         j = max(0, min(len(items) - 1, i + delta))
         items.insert(j, items.pop(i))
-        with self._lock, self._conn:
+        with self._write():
             self._conn.executemany("UPDATE watchlist SET position = ? WHERE symbol = ?", list(enumerate(items)))
 
     # ── alerts ────────────────────────────────────────────────────────────────
@@ -646,7 +687,7 @@ class Store:
         """Write many snapshots in one transaction (backfill writes years of days)."""
         if not snaps:
             return
-        with self._lock, self._conn:
+        with self._write():
             self._conn.executemany(_SNAPSHOT_UPSERT, [self._snapshot_params(s) for s in snaps])
 
     def snapshots(self, since: str | None = None) -> list[Snapshot]:
@@ -680,7 +721,7 @@ class Store:
         return {r["bucket"]: r["weight"] for r in self._query("SELECT * FROM targets ORDER BY bucket")}
 
     def set_targets(self, targets: dict[str, float]) -> None:
-        with self._lock, self._conn:
+        with self._write():
             self._conn.execute("DELETE FROM targets")
             self._conn.executemany("INSERT INTO targets(bucket, weight) VALUES (?, ?)", list(targets.items()))
 
@@ -692,7 +733,7 @@ class Store:
             data = asdict(q)
             data.pop("stale", None)
             rows.append((q.symbol, json.dumps(data), q.fetched_at))
-        with self._lock, self._conn:
+        with self._write():
             self._conn.executemany(
                 "INSERT INTO quote_cache(symbol, data, fetched_at) VALUES (?,?,?) ON CONFLICT(symbol)"
                 " DO UPDATE SET data=excluded.data, fetched_at=excluded.fetched_at",

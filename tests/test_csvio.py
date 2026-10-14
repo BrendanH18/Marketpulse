@@ -250,3 +250,68 @@ def test_rows_for_archived_accounts_are_skipped_in_preview_and_import(store):
     # A default account that has since been archived is refused the same way.
     rows = import_transactions(store, io.StringIO("date,type,amount\n2024-01-01,DEPOSIT,100\n"), default_account=old)
     assert rows.added == 0 and rows.skipped == [(2, "account 'Old RRSP' is archived")]
+
+
+def test_a_failed_import_leaves_nothing_behind(store, monkeypatch):
+    csv = "date,account,type,symbol,quantity,price,currency\n2024-01-01,Brand New,BUY,XEQT.TO,2,30,CAD\n"
+
+    def crash(_pending):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(store, "add_transactions", crash)
+    with pytest.raises(OSError):
+        import_transactions(store, io.StringIO(csv))
+    assert store.accounts(include_archived=True) == [] and store.transactions() == []
+
+
+def test_other_writers_wait_while_an_import_runs(store, monkeypatch):
+    import sqlite3
+
+    csv = "date,account,type,symbol,quantity,price,currency\n2024-01-01,TFSA,BUY,XEQT.TO,2,30,CAD\n"
+    blocked = []
+    real_backup = store.backup
+
+    def backup_then_try_another_writer(*args, **kwargs):
+        path = real_backup(*args, **kwargs)
+        other = sqlite3.connect(store.path, timeout=0.05)
+        try:
+            other.execute(
+                "INSERT INTO accounts(name, type, currency, created_at) VALUES ('Sneaky', 'NONREG', 'CAD', '')"
+            )
+        except sqlite3.OperationalError as e:
+            blocked.append(str(e))
+        finally:
+            other.close()
+        return path
+
+    monkeypatch.setattr(store, "backup", backup_then_try_another_writer)
+    result = import_transactions(store, io.StringIO(csv))
+    assert result.added == 1 and blocked == ["database is locked"]
+    assert [a.name for a in store.accounts()] == ["TFSA"]
+
+
+def test_import_rereads_a_default_account_archived_since_it_was_chosen(store):
+    acct = store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    stale = store.get_account(acct.saved_id)
+    acct.archived = True
+    store.update_account(acct)
+    csv = "date,type,symbol,quantity,price,currency\n2024-01-01,BUY,XEQT.TO,2,30,CAD\n"
+    result = import_transactions(store, io.StringIO(csv), default_account=stale)
+    assert result.added == 0 and result.skipped == [(2, "account 'TFSA' is archived")]
+
+
+def test_a_preview_from_another_day_must_be_redone(store, monkeypatch):
+    from datetime import date as real_date
+
+    acct = store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    csv = "date,type,amount\n2024-01-01,DEPOSIT,100\n"
+    preview = import_transactions(store, io.StringIO(csv), default_account=acct, dry_run=True)
+
+    class Tomorrow(real_date):
+        @classmethod
+        def today(cls):
+            return real_date.today().replace(year=real_date.today().year + 1)
+
+    monkeypatch.setattr("marketpulse.csvio.date", Tomorrow)
+    with pytest.raises(ValueError, match="changed since the preview"):
+        import_transactions(store, io.StringIO(csv), default_account=acct, expect_fingerprint=preview.fingerprint)
