@@ -171,11 +171,7 @@ def import_transactions(
         # One transaction from the check to the last write: no other process can change the
         # ledger in between, and a failure leaves no half-import (or new accounts) behind.
         with store.transaction():
-            if default_account is not None:
-                # It may have changed since the caller read it (e.g. been archived).
-                default_account = store.get_account(default_account.saved_id)
-                if default_account is None:
-                    raise ValueError("The selected account no longer exists.")
+            default_account = _reread(store, default_account)
             fingerprint = import_fingerprint(store, text, default_account, create_accounts)
             if expect_fingerprint is not None and expect_fingerprint != fingerprint:
                 raise ValueError("The ledger or the file changed since the preview. Preview the import again.")
@@ -189,7 +185,9 @@ def import_transactions(
     with TemporaryDirectory(prefix="marketpulse-preview-") as tmp:
         scratch = Store(store.backup(dest=Path(tmp) / "preview.db"))
         try:
-            # Fingerprint the exact copy the preview runs on, not the live ledger a moment later.
+            # Use the exact copy the preview runs on, not the live ledger (or the caller's
+            # account object) as it was a moment earlier.
+            default_account = _reread(scratch, default_account)
             fingerprint = import_fingerprint(scratch, text, default_account, create_accounts)
             result = _import(
                 scratch, text, default_account=default_account, create_accounts=create_accounts, backup=False
@@ -198,6 +196,16 @@ def import_transactions(
             scratch.close()
     result.fingerprint = fingerprint
     return result
+
+
+def _reread(store: Store, account: Account | None) -> Account | None:
+    """The default account as `store` has it now; it may have changed (e.g. been archived)."""
+    if account is None:
+        return None
+    current = store.get_account(account.saved_id)
+    if current is None:
+        raise ValueError("The selected account no longer exists.")
+    return current
 
 
 def import_fingerprint(store: Store, text: str, default_account: Account | None, create_accounts: bool) -> str:

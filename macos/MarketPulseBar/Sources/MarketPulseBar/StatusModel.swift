@@ -139,13 +139,17 @@ final class StatusModel: ObservableObject {
     await perform(args) { _ in success }
   }
 
-  /// Runs a write command, then reloads. `success` builds the confirmation from the command's output.
-  private func perform(_ args: [String], success: (Data) -> String) async -> Bool {
+  /// Runs a write command, then reloads. `afterWrite` runs as soon as the command succeeds,
+  /// before the reload; `success` builds the confirmation from the command's output.
+  private func perform(
+    _ args: [String], afterWrite: () -> Void = {}, success: (Data) -> String
+  ) async -> Bool {
     guard !demo && !saving else { return false }
     saving = true
     defer { saving = false }
     do {
       let output = try await CLI.run(args)
+      afterWrite()
       message = success(output)
       await reload()
       return true
@@ -167,16 +171,23 @@ final class StatusModel: ObservableObject {
     }
     let enable = !(status?.privacy ?? false)
     Task {
-      if await perform(["config", "set", "privacy", enable ? "true" : "false"], success: "Settings updated") {
-        // Applied locally too, so a failed refresh can't leave cached amounts on screen.
-        applyPrivacy(enable)
-      }
+      // Applied as soon as the setting is saved, not after the refresh (which may fail), so
+      // cached amounts never stay on screen.
+      await perform(
+        ["config", "set", "privacy", enable ? "true" : "false"], afterWrite: { self.applyPrivacy(enable) }
+      ) { _ in "Settings updated" }
     }
   }
 
   /// Every view reads privacy from `status` or `desktop.status`. Keeping both identical means
   /// the toolbar can never say "hidden" while a cached payload still shows amounts.
   private func applyPrivacy(_ enabled: Bool) {
+    // The menu bar title was formatted by the backend and may be an amount; hide it outright
+    // until the next refresh brings a correctly masked one.
+    if enabled, status?.privacy == false {
+      status?.title = Format.mask
+      desktop?.status.title = Format.mask
+    }
     status?.privacy = enabled
     desktop?.status.privacy = enabled
   }

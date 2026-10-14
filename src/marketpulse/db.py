@@ -186,6 +186,7 @@ class Store:
         existed = self.path.exists() and self.path.stat().st_size > 0
         self._lock = threading.RLock()
         self._in_transaction = False
+        self._changes_at_begin = 0
         self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=10)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
@@ -290,7 +291,10 @@ class Store:
                 if self._in_transaction:
                     # The backup API can't read through a connection with its own transaction
                     # open (it waits forever); a second connection reads the committed state
-                    # alongside it (WAL), which is the state before this transaction's writes.
+                    # alongside it (WAL). That's only the right state, and only safe from a
+                    # lock wait, before this transaction has written anything.
+                    if self._conn.total_changes != self._changes_at_begin:
+                        raise RuntimeError("Back up before writing inside a transaction.")
                     source = sqlite3.connect(self.path)
                     try:
                         source.backup(copy)
@@ -351,13 +355,16 @@ class Store:
                 raise RuntimeError("Transactions don't nest.")
             self._conn.execute("BEGIN IMMEDIATE")
             self._in_transaction = True
+            self._changes_at_begin = self._conn.total_changes
             try:
                 yield
-            except BaseException:
-                self._conn.rollback()
-                raise
-            else:
                 self._conn.commit()
+            except BaseException:
+                # Includes a failed commit, which would otherwise leave SQLite mid-transaction
+                # and let the next unrelated write commit these changes.
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
             finally:
                 self._in_transaction = False
 

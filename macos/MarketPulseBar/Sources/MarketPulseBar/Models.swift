@@ -5,7 +5,7 @@ import SwiftUI
 struct StatusPayload: Decodable {
     let version: Int
     let generatedAt: String
-    let title: String
+    var title: String  // masked locally by StatusModel.applyPrivacy until the next refresh
     let base: String
     var privacy: Bool  // kept in step with the desktop payload by StatusModel.applyPrivacy
     let stale: Bool

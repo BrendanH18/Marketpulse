@@ -265,7 +265,11 @@ def build_view(
             fx_rate=fx.rate(h.currency),
         )
         if hidden:
-            view.archived_value += position.value_base or 0.0
+            # Out of totals but in returns; a value we can't price must not count as zero there.
+            if position.value_base is None:
+                view.excluded.append(f"{h.symbol} in archived {acct.name}")
+            else:
+                view.archived_value += position.value_base
         else:
             view.positions.append(position)
 
@@ -301,6 +305,8 @@ def build_view(
         if account_id is None and cash_acct.archived:
             if round(amount, 2):
                 archived_with_value.add(cash_acct.name)
+                if amount_base is None:
+                    view.excluded.append(f"{cash_acct.name} cash ({ccy}, archived)")
             view.archived_value += amount_base or 0.0
             continue
         view.cash.append(CashView(cash_acct, ccy, amount, amount_base))

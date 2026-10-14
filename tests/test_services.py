@@ -398,3 +398,25 @@ def test_archiving_an_account_with_holdings_does_not_fake_a_loss(tracker, store)
     assert view.value_for_returns == pytest.approx(before_view.net_worth)  # ...but not from returns
     assert after.total_gain == pytest.approx(before.total_gain)
     assert after.xirr_pct == pytest.approx(before.xirr_pct)
+
+
+def test_an_unpriced_archived_holding_is_flagged_not_counted_as_zero(tracker, store):
+    main = store.add_account(Account(name="Main"))
+    old = store.add_account(Account(name="Old"))
+    _buy(store, main, "2024-01-02", 1, 100)
+    store.add_transaction(
+        Transaction(
+            account_id=old.id,
+            type=TxnType.BUY,
+            date="2024-01-02",
+            symbol="NOPRICE",
+            quantity=1,
+            price=100,
+            currency="USD",
+        )
+    )
+    old.archived = True
+    store.update_account(old)
+    view = tracker.valuation(record=False)
+    assert "NOPRICE in archived Old" in view.excluded
+    assert view.archived_value == 0 and view.archived_with_value == ["Old"]

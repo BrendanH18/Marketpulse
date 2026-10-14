@@ -315,3 +315,23 @@ def test_a_preview_from_another_day_must_be_redone(store, monkeypatch):
     monkeypatch.setattr("marketpulse.csvio.date", Tomorrow)
     with pytest.raises(ValueError, match="changed since the preview"):
         import_transactions(store, io.StringIO(csv), default_account=acct, expect_fingerprint=preview.fingerprint)
+
+
+def test_preview_uses_the_default_account_as_it_is_now(store):
+    from marketpulse.db import Store
+
+    acct = store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    stale = store.get_account(acct.saved_id)
+    other = Store(store.path)  # another process archives the account after the app read it
+    try:
+        changed = other.get_account(acct.saved_id)
+        changed.archived = True
+        other.update_account(changed)
+    finally:
+        other.close()
+    csv = "date,type,amount\n2024-01-01,DEPOSIT,100\n"
+    preview = import_transactions(store, io.StringIO(csv), default_account=stale, dry_run=True)
+    result = import_transactions(store, io.StringIO(csv), default_account=stale, expect_fingerprint=preview.fingerprint)
+    result.backup = None
+    assert preview == result  # the preview modelled the account as it is now
+    assert result.added == 0 and result.skipped == [(2, "account 'TFSA' is archived")]
