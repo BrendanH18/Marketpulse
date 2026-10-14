@@ -17,7 +17,8 @@ uv run --locked python scripts/qa_app.py --fresh      # desktop mode; add --menu
 
 `--fresh` resets the scratch ledger, settings, and the QA app's preferences, and the
 script quits any QA copy that's still running, so switching between desktop and menu
-bar mode always tests the new build. It builds a separate app (`dev.marketpulse.qa`) with its own data in
+bar mode always tests the new build. It refuses an `--out` folder that overlaps your real data or
+settings, or one it didn't create itself, so it can never touch a real portfolio. It builds a separate app (`dev.marketpulse.qa`) with its own data in
 `/tmp/marketpulse-qa`, so your installed app, its settings, and `~/.marketpulse`
 are untouched. Wait about 5 seconds for the first refresh (it fetches live quotes).
 

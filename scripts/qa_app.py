@@ -22,6 +22,7 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
+from marketpulse.config import config_path
 from marketpulse.db import Store
 from marketpulse.models import Account, AccountType, Alert, Transaction, TxnType
 
@@ -29,6 +30,21 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "macos" / "MarketPulseBar"
 BUNDLE_ID = "dev.marketpulse.qa"  # separate from the real app's defaults and login item
 APP_NAME = "MarketPulse QA"
+MARKER = ".marketpulse-qa"  # written into --out, so the script only ever reuses or resets its own folder
+
+
+def check_out(out: Path) -> None:
+    """Refuse any --out that could touch a real portfolio: it must not overlap the real data
+    folder or config file, and an existing folder must be one this script created."""
+    real = (
+        Path(os.environ.get("MARKETPULSE_DATA") or Path.home() / ".marketpulse").expanduser().resolve(),
+        config_path().expanduser().resolve(),
+    )
+    for path in real:
+        if out == path or out in path.parents or path in out.parents:
+            raise SystemExit(f"--out {out} overlaps your real MarketPulse data or settings ({path}).")
+    if out.is_dir() and any(out.iterdir()) and not (out / MARKER).exists():
+        raise SystemExit(f"{out} exists and wasn't created by this script. Choose a new or empty folder.")
 
 
 def seed(data: Path) -> None:
@@ -138,7 +154,10 @@ def main() -> None:
     parser.add_argument("--menubar", action="store_true", help="Menu bar mode (no Dock icon, no window at launch).")
     parser.add_argument("--fresh", action="store_true", help="Reset the scratch ledger, settings, and app defaults.")
     args = parser.parse_args()
-    out: Path = args.out.resolve()
+    out: Path = args.out.expanduser().resolve()
+    check_out(out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / MARKER).write_text("Created by scripts/qa_app.py (MarketPulse QA). Safe to delete.\n", encoding="utf-8")
     data = out / "data"
     # A QA copy that's still running keeps its old mode (desktop vs menu bar) and state,
     # and `open` would just reactivate it; quit it before rebuilding.
