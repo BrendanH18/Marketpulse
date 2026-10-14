@@ -33,7 +33,11 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     transactions.write_text(json.dumps(rows, allow_nan=False))
     # Exercise the actual receipt CLI on an isolated fictional ledger, with no quotes needed.
     request_id = str(uuid4())
-    env = {**os.environ, "MARKETPULSE_DATA": str(Path(tmp) / "data"), "MARKETPULSE_CONFIG": str(Path(tmp) / "config.toml")}
+    env = {
+        **os.environ,
+        "MARKETPULSE_DATA": str(Path(tmp) / "data"),
+        "MARKETPULSE_CONFIG": str(Path(tmp) / "config.toml"),
+    }
     cli = [sys.executable, "-c", "from marketpulse.cli import main; main()"]
     subprocess.run(
         cli + ["deposit", "--request-id", request_id, "--currency", "CAD", "--", "12.5"],
