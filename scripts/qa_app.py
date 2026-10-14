@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import os
 import plistlib
+import shlex
 import shutil
 import signal
 import subprocess
@@ -65,7 +66,8 @@ def sample_csv(path: Path) -> None:
         f"{today},Everyday TFSA,BUY,VFV.TO,2,140,CAD,\n"
         f"{today},Old RRSP,BUY,MSFT,1,400,USD,\n"  # skipped: archived account
         f"{today},New FHSA,DEPOSIT,,,,CAD,500\n"  # creates New FHSA
-        "2024-13-40,Everyday TFSA,BUY,VFV.TO,1,1,CAD,\n"  # skipped: invalid date
+        "2024-13-40,Everyday TFSA,BUY,VFV.TO,1,1,CAD,\n",  # skipped: invalid date
+        encoding="utf-8",
     )
 
 
@@ -79,7 +81,10 @@ def quit_running(app: Path) -> None:
         if command == exe or command.startswith(exe + " "):
             pids.append(int(pid))
     for pid in pids:
-        os.kill(pid, signal.SIGTERM)
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass  # exited since the listing
     deadline = time.monotonic() + 5
     while pids and time.monotonic() < deadline:
         time.sleep(0.1)
@@ -152,8 +157,9 @@ def main() -> None:
     launch = out / "launch.sh"
     launch.write_text(
         "#!/bin/sh\n# Opens the QA app on the scratch ledger; run it again to send a Dock-style reopen event.\n"
-        f"exec open --env MARKETPULSE_CLI='{cli}' --env MARKETPULSE_DATA='{data}' "
-        f"--env MARKETPULSE_CONFIG='{out / 'config.toml'}' '{app}'\n"
+        f"exec open --env MARKETPULSE_CLI={shlex.quote(str(cli))} --env MARKETPULSE_DATA={shlex.quote(str(data))} "
+        f"--env MARKETPULSE_CONFIG={shlex.quote(str(out / 'config.toml'))} {shlex.quote(str(app))}\n",
+        encoding="utf-8",
     )
     launch.chmod(0o755)
     print(f"QA app:        {app}")
