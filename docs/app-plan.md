@@ -48,8 +48,12 @@ Windows app (later)  ─┘   `marketpulse desktop` └─ SQLite in ~/.marketpu
 
 ## Distributing without code signing
 
-**macOS.** Apps must still be ad-hoc signed (`codesign --sign -`) to run on Apple
-Silicon; the build does this. Browsers quarantine downloads, and macOS blocks
+**macOS.** Apple Silicon Macs only run native code that carries a signature, and an
+ad-hoc one (`codesign --sign -`, no certificate) is enough
+([macOS 11 release notes](https://developer.apple.com/documentation/macos-release-notes/macos-big-sur-11_0_1-universal-apps-release-notes)).
+The linker signs the binary that way; the build re-signs the whole bundle ad-hoc so the
+signature also covers its Info.plist and icon. That satisfies the OS, not Gatekeeper:
+browsers quarantine downloads, and macOS blocks
 quarantined apps that Apple hasn't notarized. On macOS 15 and later, the
 Control-click → Open shortcut no longer bypasses this; users go to **System
 Settings › Privacy & Security › Open Anyway**. Files downloaded with `curl` aren't

@@ -12,7 +12,7 @@ uv sync                                        # install (includes dev group: py
 uv run marketpulse                             # TUI (no subcommand = TUI); `mp` is an alias
 uv run pytest                                  # full suite, offline (~2s)
 uv run pytest tests/test_ledger.py::test_split_keeps_cost_base   # single test
-uv run ruff check . && uv run ruff format .    # CI runs `ruff format --check`; line length 120
+uv run ruff check . && uv run ruff format --check .   # what CI runs; `ruff format .` applies fixes; line length 120
 swift build -c release --package-path macos/MarketPulseBar       # menu bar app
 ```
 
