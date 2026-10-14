@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   account lists and movers, including `status --json`), as the TUI's archive
   setting always described. Their history, income, realized gains, room, and tax
   reports are unchanged. If an archived account still holds something, you're
-  warned and daily snapshots pause until it's resolved.
+  warned, and daily snapshots and history rebuilds (`backfill`) wait until it's resolved.
 - CSV imports skip rows that name an archived account, with that reason.
 
 No database migration is required.

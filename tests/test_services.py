@@ -339,3 +339,35 @@ def test_emptied_archived_account_does_not_pause_snapshots(tracker, store):
     view = tracker.valuation()
     assert view.archived_with_value == []
     assert len(store.snapshots()) == 1
+
+
+def test_backfill_refuses_while_an_archived_account_holds_value(tracker, store, fake):
+    days = [(date.today() - timedelta(days=n)).isoformat() for n in (3, 2, 1, 0)]
+    fake.set_history("AAPL", dict.fromkeys(days, 100.0))
+    fake.set_history("USDCAD=X", dict.fromkeys(days, 1.0), currency="CAD")
+    main = store.add_account(Account(name="Main"))
+    old = store.add_account(Account(name="Old RRSP", type=AccountType.RRSP))
+    _buy(store, main, days[0], 1, 100)
+    _buy(store, old, days[0], 1, 100)
+    old.archived = True
+    store.update_account(old)
+    calls = len(fake.calls)
+    with pytest.raises(ValueError, match="Archived account Old RRSP still holds"):
+        tracker.backfill()
+    assert store.snapshots() == [] and len(fake.calls) == calls  # fails before any price request
+    # Once it's emptied, history rebuilds and counts it on the days it still held AAPL.
+    store.add_transaction(
+        Transaction(
+            account_id=old.saved_id,
+            type=TxnType.SELL,
+            date=days[2],
+            symbol="AAPL",
+            quantity=1,
+            price=100,
+            currency="USD",
+        )
+    )
+    assert tracker.backfill() == 4
+    by_day = {s.date: s.net_worth for s in store.snapshots()}
+    assert by_day[days[0]] == pytest.approx(200)  # both accounts held 1 AAPL @ 100 (FX 1.0)
+    assert by_day[days[3]] == pytest.approx(100)

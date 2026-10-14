@@ -52,7 +52,7 @@ Archived accounts never appear in the app: not in lists, pickers, holdings,
 activity, totals, or the menu bar. Their history stays in the ledger, and income,
 realized gains, contribution room, and tax reports still count it. If an archived
 account still holds investments or cash, MarketPulse leaves them out of net worth,
-warns you, and pauses daily snapshots so your history never records a false drop;
+warns you, and pauses daily snapshots and history rebuilds so your history never records a false drop;
 move or sell them, or unarchive the account. CSV rows that name an archived
 account are skipped with that reason, in both the preview and the import.
 

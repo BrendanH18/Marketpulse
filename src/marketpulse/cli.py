@@ -1356,8 +1356,11 @@ def tax(app: App, year: int | None) -> None:
 def backfill(app: App) -> None:
     """Rebuild daily net-worth history from your ledger and historical prices."""
     tr = app.tracker
-    with app.busy("Backfilling…") as spinner:
-        n = tr.backfill(progress=lambda msg: spinner.update(Text(f"Backfilling · {msg}", style="accent")))
+    try:
+        with app.busy("Backfilling…") as spinner:
+            n = tr.backfill(progress=lambda msg: spinner.update(Text(f"Backfilling · {msg}", style="accent")))
+    except ValueError as e:
+        fail(str(e))
     app.ok(f"Rebuilt {n:,} daily snapshots.")
 
 

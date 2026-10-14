@@ -235,6 +235,18 @@ class Tracker:
         assets = self.store.assets()
         base = self.base
         start = min(t.date for t in txns)
+        full = replay(txns, accounts)
+        # Past days include accounts archived since (they were part of net worth then), so an
+        # archived account that still holds something would make the rebuilt series disagree
+        # with today's totals, which leave it out. Same rule as live snapshots: pause until resolved.
+        archived = {i for i, a in accounts.items() if a.archived}
+        holding = {accounts[h.account_id].name for h in full.open_holdings() if h.account_id in archived}
+        holding |= {accounts[a].name for (a, _) in full.cash_balances() if a in archived and accounts[a].track_cash}
+        if holding:
+            raise ValueError(
+                f"Archived account {', '.join(sorted(holding))} still holds investments or cash. "
+                "Move or sell them, or unarchive the account, then rebuild history."
+            )
 
         market_syms = market_symbols((t.symbol for t in txns), assets)
         closes: dict[str, dict[str, float]] = {}
@@ -246,7 +258,6 @@ class Tracker:
             except MarketError:
                 closes[sym] = {}
 
-        full = replay(txns, accounts)
         ccys = {h.currency for h in full.holdings.values()} | set(listing_ccy.values())
         ccys |= {ccy for (_, ccy) in full.cash} | {c for _, _, c in external_flows(txns, accounts)}
         fx_hist: dict[str, dict[str, float]] = {}
