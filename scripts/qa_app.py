@@ -11,10 +11,13 @@ Then run the printed `launch.sh`, and follow docs/qa.md.
 from __future__ import annotations
 
 import argparse
+import os
 import plistlib
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -66,6 +69,31 @@ def sample_csv(path: Path) -> None:
     )
 
 
+def quit_running(app: Path) -> None:
+    """Quit processes running this exact QA executable, and nothing else."""
+    exe = str(app / "Contents" / "MacOS" / "MarketPulseBar")
+    listing = subprocess.run(["ps", "-Ao", "pid=,command="], capture_output=True, text=True, check=False).stdout
+    pids = []
+    for line in listing.splitlines():
+        pid, _, command = line.strip().partition(" ")
+        if command == exe or command.startswith(exe + " "):
+            pids.append(int(pid))
+    for pid in pids:
+        os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + 5
+    while pids and time.monotonic() < deadline:
+        time.sleep(0.1)
+        pids = [pid for pid in pids if _alive(pid)]
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
 def build_app(out: Path, menubar: bool) -> Path:
     subprocess.run(["swift", "build", "-c", "release", "--package-path", str(PACKAGE)], check=True)
     bin_dir = subprocess.run(
@@ -109,7 +137,7 @@ def main() -> None:
     data = out / "data"
     # A QA copy that's still running keeps its old mode (desktop vs menu bar) and state,
     # and `open` would just reactivate it; quit it before rebuilding.
-    subprocess.run(["pkill", "-f", str(out / f"{APP_NAME}.app" / "Contents" / "MacOS")], check=False)
+    quit_running(out / f"{APP_NAME}.app")
     if args.fresh:
         # A known starting point: ledger, settings (e.g. privacy left on), and the app's defaults.
         shutil.rmtree(data, ignore_errors=True)
