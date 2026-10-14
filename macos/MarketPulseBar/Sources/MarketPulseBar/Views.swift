@@ -208,11 +208,7 @@ struct Dashboard: View {
 extension StatusPayload {
     /// The desktop bridge sends every snapshot; the popover keeps its 30-day sparkline.
     var recentHistory: [HistoryPoint] {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "yyyy-MM-dd"
-        let since = formatter.string(from: Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .now)
+        let since = Format.isoDay(Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .now)
         return history.filter { $0.date >= since }
     }
 }

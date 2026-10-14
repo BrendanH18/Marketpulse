@@ -138,30 +138,94 @@ def test_preview_transfer_to_new_account_matches_import(store):
 
 
 @pytest.mark.parametrize(
-    "rows",
+    ("rows", "expected"),
     [
         # A type-named account resolves to the account created earlier in the same file.
-        "2024-01-01,New TFSA,BUY,XEQT.TO,2,30,CAD,\n2024-01-02,TFSA,BUY,XEQT.TO,1,30,CAD,\n",
-        # Case-insensitive account names, an in-file duplicate, and a bad row.
-        "2024-01-01,Cash,DEPOSIT,,,,CAD,\n2024-01-01,cash,BUY,VFV.TO,1,100,CAD,\n2024-01-01,cash,BUY,VFV.TO,1,100,CAD,\n"
-        "2024-13-01,Cash,BUY,VFV.TO,1,100,CAD,\n",
+        (
+            "2024-01-01,New TFSA,BUY,XEQT.TO,2,30,CAD,\n2024-01-02,TFSA,BUY,XEQT.TO,1,30,CAD,\n",
+            (2, 0, [], ["New TFSA"]),
+        ),
+        # Case-insensitive account names; a repeated row within the file is kept (only rows
+        # already in the ledger count as duplicates); a deposit with no amount and a bad date are skipped.
+        (
+            "2024-01-01,Cash,DEPOSIT,,,,CAD,\n2024-01-01,cash,BUY,VFV.TO,1,100,CAD,\n"
+            "2024-01-01,cash,BUY,VFV.TO,1,100,CAD,\n2024-13-01,Cash,BUY,VFV.TO,1,100,CAD,\n",
+            (
+                2,
+                0,
+                [(2, "DEPOSIT row has no amount"), (5, "Invalid date '2024-13-01' — use YYYY-MM-DD.")],
+                ["Cash"],
+            ),
+        ),
         # Transfers into accounts the file creates.
-        "2024-01-01,A,BUY,XEQT.TO,2,30,CAD,\n2024-01-02,A,TRANSFER,XEQT.TO,1,30,CAD,RRSP\n",
+        (
+            "2024-01-01,A,BUY,XEQT.TO,2,30,CAD,\n2024-01-02,A,TRANSFER,XEQT.TO,1,30,CAD,RRSP\n",
+            (2, 0, [], ["A", "RRSP"]),
+        ),
     ],
 )
-def test_preview_is_exactly_the_real_import(store, rows):
-    import io
-
-    from marketpulse.csvio import import_transactions
-
+def test_preview_is_exactly_the_real_import(store, rows, expected):
     csv = "date,account,type,symbol,quantity,price,currency,target_account\n" + rows
     store.add_account(Account(name="Existing"))
     before = (store.accounts(include_archived=True), store.transactions())
     preview = import_transactions(store, io.StringIO(csv), dry_run=True)
+    assert (preview.added, preview.duplicates, preview.skipped, preview.accounts_created) == expected
     assert (store.accounts(include_archived=True), store.transactions(), store.backups()) == (*before, [])
     result = import_transactions(store, io.StringIO(csv))
     result.backup = None
     assert preview == result
+    assert {a.name for a in store.accounts()} == {"Existing", *expected[3]}
+
+
+def test_skipped_rows_never_leave_new_accounts_behind(store):
+    store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    old = store.add_account(Account(name="Old", type=AccountType.RRSP))
+    old.archived = True
+    store.update_account(old)
+    csv = (
+        "date,account,type,symbol,quantity,price,currency,target_account\n"
+        # A BUY never creates its (meaningless) target account.
+        "2024-01-01,TFSA,BUY,XEQT.TO,2,30,CAD,Ghost One\n"
+        # An archived source is rejected before its missing target is looked up.
+        "2024-01-02,Old,TRANSFER,XEQT.TO,1,30,CAD,Ghost Two\n"
+        # A new account whose only row is invalid is removed again.
+        "2024-01-03,Brand New,BUY,XEQT.TO,0,30,CAD,\n"
+    )
+    preview = import_transactions(store, io.StringIO(csv), dry_run=True)
+    result = import_transactions(store, io.StringIO(csv))
+    result.backup = None
+    assert preview == result
+    assert result.added == 1 and result.accounts_created == []
+    assert [line for line, _ in result.skipped] == [3, 4]
+    assert result.skipped[0][1] == "account 'Old' is archived"
+    assert {a.name for a in store.accounts(include_archived=True)} == {"TFSA", "Old"}
+
+
+def test_commit_refuses_when_the_ledger_changed_since_the_preview(store):
+    acct = store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    csv = "date,type,symbol,quantity,price,currency\n2024-01-01,BUY,XEQT.TO,2,30,CAD\n"
+    preview = import_transactions(store, io.StringIO(csv), default_account=acct, dry_run=True)
+    assert preview.fingerprint
+    # The same row is entered elsewhere between preview and commit: the preview said "1 new".
+    store.add_transaction(
+        Transaction(
+            account_id=acct.saved_id, type=TxnType.BUY, date="2024-01-01", symbol="XEQT.TO", quantity=2, price=30
+        )
+    )
+    with pytest.raises(ValueError, match="changed since the preview"):
+        import_transactions(store, io.StringIO(csv), default_account=acct, expect_fingerprint=preview.fingerprint)
+    assert len(store.transactions()) == 1 and store.backups() == []  # nothing written, not even a backup
+    fresh = import_transactions(store, io.StringIO(csv), default_account=acct, dry_run=True)
+    result = import_transactions(store, io.StringIO(csv), default_account=acct, expect_fingerprint=fresh.fingerprint)
+    assert (result.added, result.duplicates) == (0, 1)
+    # A changed file is caught the same way.
+    with pytest.raises(ValueError, match="changed since the preview"):
+        import_transactions(
+            store,
+            io.StringIO(csv + "2024-01-02,BUY,XEQT.TO,1,30,CAD\n"),
+            default_account=acct,
+            expect_fingerprint=fresh.fingerprint,
+        )
 
 
 def test_rows_for_archived_accounts_are_skipped_in_preview_and_import(store):

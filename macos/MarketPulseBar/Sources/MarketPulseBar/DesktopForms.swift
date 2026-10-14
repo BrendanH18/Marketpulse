@@ -6,9 +6,9 @@ struct TransactionSheet: View {
   @Environment(\.dismiss) private var dismiss
   private var trade: Bool { draft.type == "BUY" || draft.type == "SELL" }
   private var needsSymbol: Bool { trade || draft.type == "DIVIDEND" }
-  private var currency: String { draft.currency.trimmingCharacters(in: .whitespaces).uppercased() }
+  private var currency: String { CurrencyInput.normalize(draft.currency) }
   private var valid: Bool {
-    !draft.account.isEmpty && (currency.isEmpty || currency.count == 3)
+    !draft.account.isEmpty && (currency.isEmpty || CurrencyInput.isValid(currency))
       && (!needsSymbol || !draft.symbol.trimmingCharacters(in: .whitespaces).isEmpty)
       && (trade
         ? positive(draft.quantity) && nonnegative(draft.price) && nonnegative(draft.fees)
@@ -106,7 +106,7 @@ struct AccountSheet: View {
         Button("Create account") {
           let args =
             [
-              "accounts", "add", "--type", draft.type, "--currency", draft.currency.uppercased(),
+              "accounts", "add", "--type", draft.type, "--currency", CurrencyInput.normalize(draft.currency),
               "--institution", draft.institution,
             ] + (draft.cash ? ["--track-cash"] : [])
             + ["--", draft.name.trimmingCharacters(in: .whitespaces)]
@@ -114,7 +114,7 @@ struct AccountSheet: View {
         }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
           .disabled(
             !model.canEdit || draft.name.trimmingCharacters(in: .whitespaces).isEmpty
-              || draft.currency.count != 3)
+              || !CurrencyInput.isValid(CurrencyInput.normalize(draft.currency)))
       }
     }
   }

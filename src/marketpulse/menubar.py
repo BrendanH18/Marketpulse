@@ -82,10 +82,15 @@ def build_and_install(log=print, *, desktop: bool = False) -> Path:
     subprocess.run(["defaults", "write", BUNDLE_ID, "cliPath", cli_path()], check=False)
     env_data = os.environ.get("MARKETPULSE_DATA")
     for key, value in (("dataDir", env_data), ("configPath", os.environ.get("MARKETPULSE_CONFIG"))):
-        if value:
-            subprocess.run(["defaults", "write", BUNDLE_ID, key, str(Path(value).expanduser().resolve())], check=False)
-        else:
-            subprocess.run(["defaults", "delete", BUNDLE_ID, key], check=False, capture_output=True)
+        command = (
+            ["defaults", "write", BUNDLE_ID, key, str(Path(value).expanduser().resolve())]
+            if value
+            else ["defaults", "delete", BUNDLE_ID, key]
+        )
+        try:
+            subprocess.run(command, check=False, capture_output=not value, timeout=30)
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"`defaults` timed out while updating {key}; run the install again.") from e
     log(f"Installed {app}")
     subprocess.run(["open", str(app)], check=False)
     return app

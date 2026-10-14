@@ -217,3 +217,13 @@ def test_alert_invalid_threshold_is_a_friendly_error(cli):
         assert result.exit_code == 1
         assert "finite and positive" in result.output
         assert "Traceback" not in result.output
+
+
+def test_desktop_import_commit_requires_an_unchanged_preview(cli, store, tmp_path):
+    path = tmp_path / "named.csv"
+    path.write_text("date,account,type,symbol,quantity,price\n2024-01-01,TFSA,BUY,XEQT.TO,2,30\n")
+    preview = json.loads(cli("desktop", "import", "--dry-run", "--", str(path)).output)
+    path.write_text("date,account,type,symbol,quantity,price\n2024-01-01,TFSA,BUY,XEQT.TO,20,30\n")
+    stale = cli("desktop", "import", "--expect-fingerprint", preview["fingerprint"], "--", str(path))
+    assert stale.exit_code == 1 and "changed since the preview" in stale.output
+    assert store.transactions() == [] and store.accounts() == []

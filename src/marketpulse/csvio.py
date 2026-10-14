@@ -8,10 +8,12 @@ Anything it can't interpret is skipped with a reason rather than guessed.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import json
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, TextIO
@@ -74,6 +76,7 @@ class ImportResult:
     skipped: list[tuple[int, str]] = field(default_factory=list)
     accounts_created: list[str] = field(default_factory=list)
     backup: Path | None = None  # pre-import snapshot of the database (None on a dry run)
+    fingerprint: str = ""  # the import's inputs; pass to `expect_fingerprint` to commit exactly a preview
 
 
 def _norm(header: str) -> str:
@@ -158,10 +161,18 @@ def import_transactions(
     default_account: Account | None = None,
     create_accounts: bool = True,
     dry_run: bool = False,
+    expect_fingerprint: str | None = None,
 ) -> ImportResult:
+    """Import (or preview) CSV rows. A commit given `expect_fingerprint` from its preview
+    refuses to write anything if the file or the ledger changed in between."""
     text = Path(source).read_text(encoding="utf-8-sig") if isinstance(source, Path | str) else source.read()
+    fingerprint = import_fingerprint(store, text, default_account, create_accounts)
     if not dry_run:
-        return _import(store, text, default_account=default_account, create_accounts=create_accounts, backup=True)
+        if expect_fingerprint is not None and expect_fingerprint != fingerprint:
+            raise ValueError("The ledger or the file changed since the preview. Preview the import again.")
+        result = _import(store, text, default_account=default_account, create_accounts=create_accounts, backup=True)
+        result.fingerprint = fingerprint
+        return result
     # A preview runs the real import against a throwaway copy of the ledger, so its
     # counts, new accounts and skipped lines are exactly what the import will produce.
     from .db import Store
@@ -169,11 +180,25 @@ def import_transactions(
     with TemporaryDirectory(prefix="marketpulse-preview-") as tmp:
         scratch = Store(store.backup(dest=Path(tmp) / "preview.db"))
         try:
-            return _import(
+            result = _import(
                 scratch, text, default_account=default_account, create_accounts=create_accounts, backup=False
             )
         finally:
             scratch.close()
+    result.fingerprint = fingerprint
+    return result
+
+
+def import_fingerprint(store: Store, text: str, default_account: Account | None, create_accounts: bool) -> str:
+    """Everything an import's outcome depends on: the file, the options, and the ledger."""
+    inputs = {
+        "csv": text,
+        "default_account": default_account.id if default_account else None,
+        "create_accounts": create_accounts,
+        "accounts": [asdict(a) for a in store.accounts(include_archived=True)],
+        "transactions": [asdict(t) for t in store.transactions()],
+    }
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def _import(
@@ -205,6 +230,7 @@ def _import(
     # executions on one day) are all kept.
     existing = Counter(key(t) for t in store.transactions())
     pending: list[Transaction] = []
+    created: list[Account] = []
 
     def get(row: dict, name: str) -> str:
         col = cols.get(name)
@@ -219,7 +245,7 @@ def _import(
             acct = store.add_account(
                 Account(name=name, type=guessed, currency=default_account.currency if default_account else "CAD")
             )
-            result.accounts_created.append(name)
+            created.append(acct)
         return acct
 
     for line_no, row in enumerate(reader, start=2):
@@ -238,6 +264,10 @@ def _import(
                 (line_no, f"unknown account '{get(row, 'account')}'" if get(row, "account") else "no account")
             )
             continue
+        # Archived accounts are closed to new entries; their rows would vanish from view.
+        if acct.archived:
+            result.skipped.append((line_no, f"account '{acct.name}' is archived"))
+            continue
         symbol = get(row, "symbol").upper()
         qty = abs(_number(get(row, "quantity")) or 0.0)
         price = abs(_number(get(row, "price")) or 0.0)
@@ -247,11 +277,11 @@ def _import(
             price = amount / qty
         if txn_type.uses_amount and not amount and qty and price:
             amount = qty * price
-        target_name = get(row, "target_account")
+        # Only transfers have a destination; other rows never create one.
+        target_name = get(row, "target_account") if txn_type is TxnType.TRANSFER else ""
         target = resolve_account(target_name) if target_name else None
-        # Archived accounts are closed to new entries; their rows would vanish from view.
-        if closed := next((a for a in (acct, target) if a is not None and a.archived), None):
-            result.skipped.append((line_no, f"account '{closed.name}' is archived"))
+        if target is not None and target.archived:
+            result.skipped.append((line_no, f"account '{target.name}' is archived"))
             continue
         txn = Transaction(
             account_id=acct.id,
@@ -282,6 +312,13 @@ def _import(
             continue
         pending.append(txn)
 
+    # An account created only for rows that were then skipped would be left empty.
+    used = {t.account_id for t in pending} | {t.target_account_id for t in pending}
+    for acct in created:
+        if acct.id in used:
+            result.accounts_created.append(acct.name)
+        else:
+            store.delete_account(acct.saved_id)
     if pending:
         store.add_transactions(pending)
     result.added = len(pending)

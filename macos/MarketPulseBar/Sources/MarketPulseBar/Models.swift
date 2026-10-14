@@ -131,6 +131,15 @@ extension Color {
 enum Format {
     static let mask = "••••"
 
+    /// A local calendar day as "YYYY-MM-DD", the format snapshot dates use.
+    static func isoDay(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
     static func money(_ value: Double?, _ currency: String, privacy: Bool, decimals: Int = 2, sign: Bool = false) -> String {
         guard let value else { return "—" }
         if privacy { return mask }

@@ -110,6 +110,8 @@ struct ImportPreview: Decodable, Equatable {
   let skipped: [ImportIssue]
   let accountsCreated: [String]
   let backup: String?
+  /// Identifies the preview's inputs; the commit sends it back so nothing changed is imported.
+  let fingerprint: String
 }
 
 struct ImportIssue: Decodable, Identifiable, Equatable {
@@ -120,6 +122,17 @@ struct ImportIssue: Decodable, Identifiable, Equatable {
     var values = try decoder.unkeyedContainer()
     line = try values.decode(Int.self)
     reason = try values.decode(String.self)
+  }
+}
+
+/// Currency codes typed into forms: trimmed and uppercased; valid codes are three ASCII letters.
+enum CurrencyInput {
+  static func normalize(_ raw: String) -> String {
+    raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+  }
+
+  static func isValid(_ code: String) -> Bool {
+    code.count == 3 && code.unicodeScalars.allSatisfy { ("A"..."Z").contains($0) }
   }
 }
 

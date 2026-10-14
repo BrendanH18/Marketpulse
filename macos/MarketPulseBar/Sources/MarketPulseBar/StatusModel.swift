@@ -216,19 +216,19 @@ final class StatusModel: ObservableObject {
 
   func commitImport() async {
     guard let url = importURL, let preview = importPreview, preview.added > 0 else { return }
-    let imported = await perform(["desktop", "import"] + importArguments + ["--", url.path]) { data in
+    // The backend writes nothing, and fails, if the ledger or the file changed since this preview.
+    let args =
+      ["desktop", "import", "--expect-fingerprint", preview.fingerprint] + importArguments + [
+        "--", url.path,
+      ]
+    let imported = await perform(args) { data in
       let decoder = JSONDecoder()
       decoder.keyDecodingStrategy = .convertFromSnakeCase
-      let result = try? decoder.decode(ImportPreview.self, from: data)
-      guard let result, result.added == preview.added, result.duplicates == preview.duplicates,
-        result.skipped == preview.skipped, result.accountsCreated == preview.accountsCreated
-      else {
-        // Only possible if the ledger changed between preview and import.
-        return "CSV imported, but the ledger changed after the preview: \(result?.added ?? 0) entries added. Review Activity."
-      }
-      return "Imported \(result.added) entries. A safety backup was created first."
+      let added = (try? decoder.decode(ImportPreview.self, from: data))?.added ?? preview.added
+      return "Imported \(added) entries. A safety backup was created first."
     }
-    if imported { closeImport() }
+    // On failure the error stays on screen, and the stale preview must be redone.
+    if imported { closeImport() } else { importPreview = nil }
   }
 
   func exportLedger() {

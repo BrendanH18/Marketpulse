@@ -1688,8 +1688,9 @@ def desktop_install(app: App) -> None:
 @click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("--account", type=str)
 @click.option("--dry-run", is_flag=True)
+@click.option("--expect-fingerprint", help="Commit only if nothing changed since the preview that returned this.")
 @click.pass_obj
-def desktop_import(app: App, path: Path, account: str | None, dry_run: bool) -> None:
+def desktop_import(app: App, path: Path, account: str | None, dry_run: bool, expect_fingerprint: str | None) -> None:
     """Preview or import CSV, returning a structured result for the app."""
     from dataclasses import asdict
 
@@ -1710,7 +1711,11 @@ def desktop_import(app: App, path: Path, account: str | None, dry_run: bool) -> 
             if len(accounts) != 1:
                 raise ValueError("Select an account for CSV files without an account column.")
             default = accounts[0]
-        result = asdict(import_transactions(app.store, path, default_account=default, dry_run=dry_run))
+        result = asdict(
+            import_transactions(
+                app.store, path, default_account=default, dry_run=dry_run, expect_fingerprint=expect_fingerprint
+            )
+        )
         if result["backup"] is not None:
             result["backup"] = str(result["backup"])
         click.echo(json.dumps(result, allow_nan=False))

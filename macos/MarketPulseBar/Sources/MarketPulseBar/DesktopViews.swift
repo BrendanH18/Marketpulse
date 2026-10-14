@@ -308,7 +308,8 @@ private struct OverviewWorkspace: View {
   private var points: [HistoryPoint] {
     if draft.period == 0 { return s.history }
     let since = Calendar.current.date(byAdding: .day, value: -draft.period, to: .now) ?? .now
-    let iso = ISO8601DateFormatter().string(from: since).prefix(10)
+    // Snapshot dates are local calendar days; compare in local time, not UTC.
+    let iso = Format.isoDay(since)
     return s.history.filter { $0.date >= iso }
   }
   var body: some View {

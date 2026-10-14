@@ -29,12 +29,14 @@ struct NativeBridgeCheck {
     precondition(payload.activity.contains { $0.type == "DIVIDEND" && $0.signedValue > 0 })
 
     let preview = Data(
-      #"{"added":2,"duplicates":1,"skipped":[[4,"Invalid date"]],"accounts_created":["TFSA"],"backup":null}"#
+      #"{"added":2,"duplicates":1,"skipped":[[4,"Invalid date"]],"accounts_created":["TFSA"],"backup":null,"fingerprint":"abc"}"#
         .utf8)
     let result = try decoder.decode(ImportPreview.self, from: preview)
     precondition(result.added == 2 && result.duplicates == 1)
     precondition(result.skipped.first?.line == 4 && result.skipped.first?.reason == "Invalid date")
-    precondition(result.accountsCreated == ["TFSA"] && result.backup == nil)
+    precondition(result.accountsCreated == ["TFSA"] && result.backup == nil && result.fingerprint == "abc")
+    precondition(CurrencyInput.normalize(" usd\n") == "USD" && CurrencyInput.isValid("USD"))
+    precondition(!CurrencyInput.isValid("12$") && !CurrencyInput.isValid("CA") && !CurrencyInput.isValid("ÉUR"))
     precondition(Format.money(12345, "CAD", privacy: true) == Format.mask)
     precondition(Format.money(nil, "CAD", privacy: true) == "—")
     precondition(Format.pct(-1.25) == "-1.25%")
