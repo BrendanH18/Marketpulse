@@ -43,8 +43,18 @@ def check_out(out: Path) -> None:
     for path in real:
         if out == path or out in path.parents or path in out.parents:
             raise SystemExit(f"--out {out} overlaps your real MarketPulse data or settings ({path}).")
-    if out.is_dir() and any(out.iterdir()) and not (out / MARKER).exists():
+    if not out.exists():
+        return
+    # Reusing a folder (the default is in the shared /tmp): it must be ours, made by this script,
+    # and free of symlinks, or a link inside it (say `data`) could point the QA app at real data.
+    if out.stat().st_uid != os.getuid():
+        raise SystemExit(f"{out} belongs to another user. Choose another folder.")
+    if any(out.iterdir()) and not (out / MARKER).is_file():
         raise SystemExit(f"{out} exists and wasn't created by this script. Choose a new or empty folder.")
+    for root, dirs, files in os.walk(out):
+        for name in dirs + files:
+            if (Path(root) / name).is_symlink():
+                raise SystemExit(f"{Path(root) / name} is a symbolic link. Delete {out} and run again.")
 
 
 def seed(data: Path) -> None:
