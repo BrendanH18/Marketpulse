@@ -103,12 +103,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=Path("/tmp/marketpulse-qa"))
     parser.add_argument("--menubar", action="store_true", help="Menu bar mode (no Dock icon, no window at launch).")
-    parser.add_argument("--fresh", action="store_true", help="Delete an existing scratch ledger first.")
+    parser.add_argument("--fresh", action="store_true", help="Reset the scratch ledger, settings, and app defaults.")
     args = parser.parse_args()
     out: Path = args.out.resolve()
     data = out / "data"
+    # A QA copy that's still running keeps its old mode (desktop vs menu bar) and state,
+    # and `open` would just reactivate it; quit it before rebuilding.
+    subprocess.run(["pkill", "-f", str(out / f"{APP_NAME}.app" / "Contents" / "MacOS")], check=False)
     if args.fresh:
+        # A known starting point: ledger, settings (e.g. privacy left on), and the app's defaults.
         shutil.rmtree(data, ignore_errors=True)
+        (out / "config.toml").unlink(missing_ok=True)
+        subprocess.run(["defaults", "delete", BUNDLE_ID], check=False, capture_output=True)
     if not (data / "marketpulse.db").exists():
         data.mkdir(parents=True, exist_ok=True)
         seed(data)
