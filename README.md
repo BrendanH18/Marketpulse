@@ -1,17 +1,17 @@
 # MarketPulse
 
-**Your portfolio, in the terminal.** A keyboard-first investment tracker with a
-local ledger, market data, Canadian account support, and a native macOS menu bar companion.
+**Your portfolio, in your workspace.** A local investment tracker with a native
+macOS app, a keyboard-first terminal interface, market data, and Canadian account support.
 
 [![CI](https://github.com/BrendanH18/Marketpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/BrendanH18/Marketpulse/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 [Get started](#get-started) · [User guide](docs/usage.md) ·
-[Configuration](docs/configuration.md) · [Roadmap](docs/roadmap.md) ·
+[Native app](docs/desktop.md) · [Configuration](docs/configuration.md) · [Roadmap](docs/roadmap.md) ·
 [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 
-![MarketPulse dashboard with a sample portfolio](docs/assets/dashboard.svg)
+![Native MarketPulse dashboard with a sample portfolio](docs/assets/desktop.png)
 
 *The dashboard above uses fictional accounts and market data.*
 
@@ -25,6 +25,10 @@ local ledger, market data, Canadian account support, and a native macOS menu bar
   contribution-room tracking and estimated capital gains using pooled ACB.
 - **A terminal workspace:** eight views, braille charts, a command palette,
   watchlists, price alerts, and bundled Omarchy themes.
+- **A native macOS app:** portfolio charts, searchable holdings and activity,
+  account and transaction forms, CSV previews, watchlists, and automation status.
+- **Routine maintenance:** automatic refresh, alert checks, daily snapshots,
+  and backups while the app runs, plus a scriptable automation worker.
 - **Scriptable commands:** CSV import and export, JSON status, backups, and
   integrations for Waybar, tmux, and macOS.
 - **Local storage:** one SQLite database, four direct runtime dependencies,
@@ -177,6 +181,18 @@ for arguments and options. The [user guide](docs/usage.md) covers cash tracking,
 manual assets, transfers, contribution room, alerts, and integrations.
 
 ## macOS and Omarchy
+
+For the full native portfolio app, use an editable source checkout and run:
+
+```bash
+uv tool install --python 3.11 --editable .
+marketpulse desktop install
+```
+
+The full window and menu bar share your existing ledger. See the
+[native app guide](docs/desktop.md) for installation, CSV preview/import,
+read-only demo, and background maintenance. A [project review](docs/project-review.md)
+records the implementation and recommended next steps.
 
 On macOS, install the native SwiftUI companion from an **editable source checkout**
 pinned to the same release tag as the CLI (the published wheel / non-editable

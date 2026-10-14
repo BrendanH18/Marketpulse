@@ -160,8 +160,9 @@ def performance(
         perf.since = min(d for d, _ in flows_base)
         perf.days = (today - date.fromisoformat(perf.since)).days
     perf.net_contributions = sum(a for _, a in flows_base)
-    perf.total_gain = view.net_worth - perf.net_contributions
-    investor = [(d, -a) for d, a in flows_base] + [(today.isoformat(), view.net_worth)]
+    # Flows include contributions to archived accounts, so value must include what they still hold.
+    perf.total_gain = view.value_for_returns - perf.net_contributions
+    investor = [(d, -a) for d, a in flows_base] + [(today.isoformat(), view.value_for_returns)]
     if perf.days >= 30:
         perf.xirr_pct = xirr(investor)
     idx = twr_index(snapshots)

@@ -152,3 +152,78 @@ def test_import_default_account(cli, store, tmp_path):
     assert "1 duplicate(s)" in cli("import", str(no_account), "-a", "A").output  # already in A from the first run
     assert "Imported 1" in cli("import", str(with_account)).output  # rows name their account
     assert {store.get_account(t.account_id).name for t in store.transactions()} == {"A", "B"}
+
+
+def test_desktop_snapshot_and_one_shot_automation(cli, store):
+    cli("buy", "AAPL", "1", "100")
+    payload = json.loads(cli("desktop", "snapshot").output)
+    assert payload["positions"][0]["symbol"] == "AAPL"
+    assert payload["automation"]["backup"] is not None
+    cycle = cli("automation", "run", "--once", "--json", "--quiet")
+    assert cycle.exit_code == 0
+    assert json.loads(cycle.output)["errors"] == []
+
+
+def test_desktop_import_preview_is_read_only_and_structured(cli, store, tmp_path):
+    path = tmp_path / "named.csv"
+    path.write_text("date,account,type,symbol,quantity,price\n2024-01-01,New TFSA,BUY,XEQT.TO,2,30\n")
+    result = cli("desktop", "import", str(path), "--dry-run")
+    payload = json.loads(result.output)
+    assert payload["added"] == 1 and payload["accounts_created"] == ["New TFSA"]
+    assert payload["backup"] is None
+    assert store.accounts() == []
+    assert store.transactions() == []
+    imported = json.loads(cli("desktop", "import", str(path)).output)
+    assert imported["added"] == 1 and imported["backup"]
+
+
+def test_desktop_preview_requires_default_account_without_creating_one(cli, store, tmp_path):
+    path = tmp_path / "unnamed.csv"
+    path.write_text("date,type,symbol,quantity,price\n2024-01-01,BUY,XEQT.TO,2,30\n")
+    result = cli("desktop", "import", str(path), "--dry-run")
+    assert result.exit_code == 1 and "Create an account first" in result.output
+    assert store.accounts() == []
+    cli("accounts", "add", "A")
+    cli("accounts", "add", "B")
+    result = cli("desktop", "import", str(path), "--dry-run")
+    assert result.exit_code == 1 and "Select an account" in result.output
+    assert len(store.accounts()) == 2
+
+
+def test_desktop_snapshot_reports_alerts_fired_by_its_cycle(cli, store, notifications):
+    cli("buy", "AAPL", "1", "100")
+    cli("alerts", "add", "AAPL", "above", "1")
+    payload = json.loads(cli("desktop", "snapshot").output)
+    assert payload["automation"]["fired"] == ["AAPL ≥ 1.00"]
+    assert payload["status"]["fired"] == payload["automation"]["fired"]
+    assert len(notifications) == 1
+
+
+def test_desktop_transaction_form_arguments_infer_listing_currency(cli, store):
+    # The native form omits --currency when blank; a USD listing in a CAD account stays USD.
+    cli("accounts", "add", "My TFSA", "-t", "TFSA", "-c", "CAD")
+    acct = store.get_account("My TFSA")
+    result = cli(
+        "buy", "AAPL", "2", "150", "--fees", "0", "--account", str(acct.id), "--date", "2024-01-02", "--note", ""
+    )
+    assert result.exit_code == 0, result.output
+    cli("deposit", "500", "--account", str(acct.id), "--date", "2024-01-02", "--note", "")
+    assert [(t.type.value, t.currency) for t in store.transactions()] == [("BUY", "USD"), ("DEPOSIT", "CAD")]
+
+
+def test_alert_invalid_threshold_is_a_friendly_error(cli):
+    for value in ("nan", "inf", "-1", "0"):
+        result = cli("alerts", "add", "--", "AAPL", "above", value)
+        assert result.exit_code == 1
+        assert "finite and positive" in result.output
+        assert "Traceback" not in result.output
+
+
+def test_desktop_import_commit_requires_an_unchanged_preview(cli, store, tmp_path):
+    path = tmp_path / "named.csv"
+    path.write_text("date,account,type,symbol,quantity,price\n2024-01-01,TFSA,BUY,XEQT.TO,2,30\n")
+    preview = json.loads(cli("desktop", "import", "--dry-run", "--", str(path)).output)
+    path.write_text("date,account,type,symbol,quantity,price\n2024-01-01,TFSA,BUY,XEQT.TO,20,30\n")
+    stale = cli("desktop", "import", "--expect-fingerprint", preview["fingerprint"], "--", str(path))
+    assert stale.exit_code == 1 and "changed since the preview" in stale.output
+    assert store.transactions() == [] and store.accounts() == []

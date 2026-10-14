@@ -126,7 +126,9 @@ class Tracker:
         fx, fx_errors = self.market.fx_rates(currencies, self.base)
         errors.update({f"FX {k}": v for k, v in fx_errors.items()})
         view = build_view(state, accounts, assets, quotes, fx, errors=errors, account_id=account_id)
-        if record and account_id is None and view.positions and not view.stale and not view.excluded:
+        # Leaving out an archived account's holdings would record a fake drop in value.
+        complete = not view.stale and not view.excluded and not view.archived_with_value
+        if record and account_id is None and view.positions and complete:
             self.record_snapshot(view, fx, flows)
         return view
 
@@ -233,6 +235,18 @@ class Tracker:
         assets = self.store.assets()
         base = self.base
         start = min(t.date for t in txns)
+        full = replay(txns, accounts)
+        # Past days include accounts archived since (they were part of net worth then), so an
+        # archived account that still holds something would make the rebuilt series disagree
+        # with today's totals, which leave it out. Same rule as live snapshots: pause until resolved.
+        archived = {i for i, a in accounts.items() if a.archived}
+        holding = {accounts[h.account_id].name for h in full.open_holdings() if h.account_id in archived}
+        holding |= {accounts[a].name for (a, _) in full.cash_balances() if a in archived and accounts[a].track_cash}
+        if holding:
+            raise ValueError(
+                f"Archived account {', '.join(sorted(holding))} still holds investments or cash. "
+                "Move or sell them, or unarchive the account, then rebuild history."
+            )
 
         market_syms = market_symbols((t.symbol for t in txns), assets)
         closes: dict[str, dict[str, float]] = {}
@@ -244,7 +258,6 @@ class Tracker:
             except MarketError:
                 closes[sym] = {}
 
-        full = replay(txns, accounts)
         ccys = {h.currency for h in full.holdings.values()} | set(listing_ccy.values())
         ccys |= {ccy for (_, ccy) in full.cash} | {c for _, _, c in external_flows(txns, accounts)}
         fx_hist: dict[str, dict[str, float]] = {}
@@ -387,12 +400,14 @@ class Tracker:
 
     # ── menu bar / scripting payload ──────────────────────────────────────────
 
-    def status_payload(self, view: PortfolioView | None = None, *, history_days: int = 30) -> dict:
+    def status_payload(
+        self, view: PortfolioView | None = None, *, history_days: int | None = 30, evaluate_alerts: bool = True
+    ) -> dict:
         view = view or self.valuation()
         privacy = self.config.privacy
         watch_syms, wq, _ = self.watchlist_quotes()
         active_alerts = self.store.alerts()
-        fired = self.check_alerts({**view.quotes, **wq}, notify=True)
+        fired = self.check_alerts({**view.quotes, **wq}, notify=True) if evaluate_alerts else []
         palette = resolve_palette(self.config.theme)
 
         display = self.config.menubar_display
@@ -413,7 +428,7 @@ class Tracker:
         else:
             title = f"{fmt.arrow(view.day_change)} {fmt.pct(view.day_change_pct)}"
 
-        since = (date.today() - timedelta(days=history_days)).isoformat()
+        since = (date.today() - timedelta(days=history_days)).isoformat() if history_days is not None else None
         history = [
             {"date": s.date, "value": round(s.net_worth, 2)}
             for s in self.store.snapshots(since)

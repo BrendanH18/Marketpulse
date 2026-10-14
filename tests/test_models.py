@@ -138,3 +138,18 @@ def test_saved_id_refuses_unsaved_objects():
         Account(name="A").saved_id  # noqa: B018 - the property access is the test
     with pytest.raises(ValueError, match="hasn't been saved"):
         Transaction(account_id=1, type=TxnType.DEPOSIT, amount=1).saved_id  # noqa: B018
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("field", ["quantity", "price", "amount", "fees", "ratio"])
+def test_transaction_rejects_nonfinite_numbers(field, value):
+    txn = Transaction(account_id=1, type=TxnType.BUY, symbol="AAPL", quantity=1, price=100)
+    setattr(txn, field, value)
+    with pytest.raises(ValueError, match="finite"):
+        txn.validate()
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1, 0])
+def test_alert_rejects_invalid_threshold(value):
+    with pytest.raises(ValueError, match="finite and positive"):
+        Alert("AAPL", "above", value)

@@ -8,6 +8,7 @@ so there is exactly one source of truth.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -256,6 +257,18 @@ class Account:
         return self.id
 
 
+_CASH_DIRECTION = {
+    TxnType.BUY: -1,
+    TxnType.SELL: 1,
+    TxnType.DIVIDEND: 1,
+    TxnType.INTEREST: 1,
+    TxnType.DEPOSIT: 1,
+    TxnType.WITHDRAWAL: -1,
+    TxnType.FEE: -1,
+    TxnType.ROC: 1,
+}
+
+
 @dataclass
 class Transaction:
     account_id: int
@@ -291,8 +304,16 @@ class Transaction:
             return self.quantity * self.price
         return self.amount
 
+    @property
+    def cash_direction(self) -> int:
+        """+1 when money comes into the account, -1 when it leaves, 0 for share-only entries
+        (DRIP, splits, transfers, valuations) that move no cash."""
+        return _CASH_DIRECTION.get(self.type, 0)
+
     def validate(self) -> None:
         t = self.type
+        if not all(math.isfinite(v) for v in (self.quantity, self.price, self.amount, self.fees, self.ratio)):
+            raise ValueError("Transaction numbers must be finite.")
         if t.needs_symbol and not self.symbol:
             raise ValueError(f"{t} needs a symbol.")
         if t.uses_quantity and self.quantity <= 0:
@@ -434,6 +455,18 @@ class Alert:
         self.symbol = self.symbol.upper()
         if self.condition not in ALERT_CONDITIONS:
             raise ValueError(f"Alert condition must be one of: {', '.join(ALERT_CONDITIONS)}")
+        # Stored alerts predate the stricter checks. Store.alerts keeps invalid
+        # legacy rows readable (and inactive); new alerts must still pass validation.
+        if self.id is None:
+            self.validate()
+
+    def validate(self) -> None:
+        if self.condition not in ALERT_CONDITIONS:
+            raise ValueError(f"Alert condition must be one of: {', '.join(ALERT_CONDITIONS)}")
+        if not self.symbol.strip():
+            raise ValueError("Alert needs a symbol.")
+        if not math.isfinite(self.threshold) or self.threshold <= 0:
+            raise ValueError("Alert threshold must be finite and positive.")
 
     @property
     def saved_id(self) -> int:

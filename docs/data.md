@@ -31,7 +31,7 @@ another MarketPulse process has the database open.
 
 | Reason | When | Retention |
 | --- | --- | --- |
-| `daily` | Startup when the most recent daily backup is over 24 hours old | Latest 14 daily backups |
+| `daily` | Startup or maintenance when the most recent backup of any kind is at least 24 hours old | Latest 14 daily backups |
 | `import` | Before a non-preview CSV import | Latest 14 import backups |
 | `pre-vN` | Before an existing database is upgraded to schema version N | Until removed manually |
 | `manual` | When requested | Until removed manually |

@@ -29,7 +29,7 @@ def cli_path() -> str:
     return str(Path(sys.executable).parent / "marketpulse")
 
 
-def build_and_install(log=print) -> Path:
+def build_and_install(log=print, *, desktop: bool = False) -> Path:
     if sys.platform != "darwin":
         raise RuntimeError("The menu bar companion is macOS-only. On Omarchy, use `marketpulse status --waybar`.")
     if not (PROJECT_DIR / "Package.swift").is_file():
@@ -55,6 +55,10 @@ def build_and_install(log=print) -> Path:
     macos.mkdir(parents=True)
     (app / "Contents" / "Resources").mkdir()
     shutil.copy2(binary, macos / "MarketPulseBar")
+    # Dock, Finder and Login Items icon (regenerate with scripts/make_app_icon.swift).
+    icon = PROJECT_DIR / "AppIcon.icns"
+    if icon.is_file():
+        shutil.copy2(icon, app / "Contents" / "Resources" / "AppIcon.icns")
     from . import __version__
 
     with open(app / "Contents" / "Info.plist", "wb") as f:
@@ -64,11 +68,12 @@ def build_and_install(log=print) -> Path:
                 "CFBundleDisplayName": APP_NAME,
                 "CFBundleIdentifier": BUNDLE_ID,
                 "CFBundleExecutable": "MarketPulseBar",
+                "CFBundleIconFile": "AppIcon",
                 "CFBundlePackageType": "APPL",
                 "CFBundleShortVersionString": __version__,
                 "CFBundleVersion": __version__,
                 "LSMinimumSystemVersion": "14.0",
-                "LSUIElement": True,  # menu bar only, no Dock icon
+                "LSUIElement": not desktop,
                 "NSHighResolutionCapable": True,
             },
             f,
@@ -76,8 +81,16 @@ def build_and_install(log=print) -> Path:
     subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=False, capture_output=True)
     subprocess.run(["defaults", "write", BUNDLE_ID, "cliPath", cli_path()], check=False)
     env_data = os.environ.get("MARKETPULSE_DATA")
-    if env_data:
-        subprocess.run(["defaults", "write", BUNDLE_ID, "dataDir", env_data], check=False)
+    for key, value in (("dataDir", env_data), ("configPath", os.environ.get("MARKETPULSE_CONFIG"))):
+        command = (
+            ["defaults", "write", BUNDLE_ID, key, str(Path(value).expanduser().resolve())]
+            if value
+            else ["defaults", "delete", BUNDLE_ID, key]
+        )
+        try:
+            subprocess.run(command, check=False, capture_output=not value, timeout=30)
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"`defaults` timed out while updating {key}; run the install again.") from e
     log(f"Installed {app}")
     subprocess.run(["open", str(app)], check=False)
     return app

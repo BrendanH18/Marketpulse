@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import Foundation
 import ServiceManagement
+import Darwin
 
 enum CLIError: LocalizedError {
     case failed(String)
@@ -19,7 +20,7 @@ enum CLIError: LocalizedError {
 /// installer stores the absolute CLI path in user defaults.
 enum CLI {
     static var path: String {
-        UserDefaults.standard.string(forKey: "cliPath") ?? "marketpulse"
+        ProcessInfo.processInfo.environment["MARKETPULSE_CLI"] ?? UserDefaults.standard.string(forKey: "cliPath") ?? "marketpulse"
     }
 
     static func run(_ args: [String]) async throws -> Data {
@@ -38,8 +39,11 @@ enum CLI {
                 let extra = ["/opt/homebrew/bin", "/usr/local/bin", NSHomeDirectory() + "/.local/bin"]
                 env["PATH"] = (extra + [env["PATH"] ?? "/usr/bin:/bin"]).joined(separator: ":")
                 env["NO_COLOR"] = "1"
-                if let dir = UserDefaults.standard.string(forKey: "dataDir") {
+                if env["MARKETPULSE_DATA"] == nil, let dir = UserDefaults.standard.string(forKey: "dataDir") {
                     env["MARKETPULSE_DATA"] = dir
+                }
+                if env["MARKETPULSE_CONFIG"] == nil, let config = UserDefaults.standard.string(forKey: "configPath") {
+                    env["MARKETPULSE_CONFIG"] = config
                 }
                 process.environment = env
                 let stdout = Pipe()
@@ -59,13 +63,26 @@ enum CLI {
                     continuation.resume(throwing: CLIError.launch(error.localizedDescription))
                     return
                 }
+                let watchdog = DispatchSource.makeTimerSource(queue: .global())
+                watchdog.schedule(deadline: .now() + 120)
+                watchdog.setEventHandler {
+                    if process.isRunning {
+                        process.terminate()
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                        }
+                    }
+                }
+                watchdog.resume()
+                defer { watchdog.cancel() }
                 let data = stdout.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
                 errGroup.wait()
                 if process.terminationStatus == 0 {
                     continuation.resume(returning: data)
                 } else {
-                    let message = String(data: errData, encoding: .utf8) ?? "exit \(process.terminationStatus)"
+                    let stderrText = String(data: errData, encoding: .utf8) ?? ""
+                    let message = stderrText.isEmpty ? "MarketPulse exited with status \(process.terminationStatus). If a refresh timed out, try again." : stderrText
                     continuation.resume(throwing: CLIError.failed(message))
                 }
             }

@@ -5,9 +5,9 @@ import SwiftUI
 struct StatusPayload: Decodable {
     let version: Int
     let generatedAt: String
-    let title: String
+    var title: String  // masked locally by StatusModel.applyPrivacy until the next refresh
     let base: String
-    let privacy: Bool
+    var privacy: Bool  // kept in step with the desktop payload by StatusModel.applyPrivacy
     let stale: Bool
     let marketState: String
     let netWorth: Double?
@@ -130,6 +130,15 @@ extension Color {
 
 enum Format {
     static let mask = "••••"
+
+    /// A local calendar day as "YYYY-MM-DD", the format snapshot dates use.
+    static func isoDay(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
 
     static func money(_ value: Double?, _ currency: String, privacy: Bool, decimals: Int = 2, sign: Bool = false) -> String {
         guard let value else { return "—" }

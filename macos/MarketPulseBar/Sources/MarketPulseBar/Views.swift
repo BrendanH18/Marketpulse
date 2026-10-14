@@ -3,18 +3,44 @@ import SwiftUI
 
 @main
 struct MarketPulseBarApp: App {
-    @StateObject private var model = StatusModel()
+    // The delegate owns the model so it can reopen the portfolio window from the Dock.
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
         MenuBarExtra {
-            PopoverView(model: model)
+            PopoverView(model: delegate.model)
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "waveform.path.ecg")
-                Text(model.menuTitle).monospacedDigit()
-            }
+            MenuBarLabel(model: delegate.model)
         }
         .menuBarExtraStyle(.window)
+        .commands {
+            CommandGroup(after: .newItem) {
+                LedgerFileCommands(model: delegate.model)
+            }
+        }
+    }
+}
+
+struct MenuBarLabel: View {
+    @ObservedObject var model: StatusModel
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "waveform.path.ecg")
+            Text(model.menuTitle).monospacedDigit()
+        }
+    }
+}
+
+/// Menu items that track whether editing is currently possible.
+struct LedgerFileCommands: View {
+    @ObservedObject var model: StatusModel
+
+    var body: some View {
+        Button("Open Portfolio") { model.showPortfolio() }.keyboardShortcut("0")
+        Divider()
+        Button("Import CSV…") { model.chooseImport() }.keyboardShortcut("i").disabled(!model.canEdit)
+        Button("Export ledger…") { model.exportLedger() }.keyboardShortcut("e").disabled(!model.canEdit)
     }
 }
 
@@ -110,8 +136,8 @@ struct Dashboard: View {
                 }
             }
 
-            if status.history.count > 1 {
-                HistoryChart(points: status.history, palette: palette)
+            if status.recentHistory.count > 1 {
+                HistoryChart(points: status.recentHistory, palette: palette)
             }
 
             HStack(spacing: 10) {
@@ -176,6 +202,14 @@ struct Dashboard: View {
                 Text("! \(error)").foregroundStyle(palette.muted).font(.system(size: 10, design: .monospaced)).lineLimit(2)
             }
         }
+    }
+}
+
+extension StatusPayload {
+    /// The desktop bridge sends every snapshot; the popover keeps its 30-day sparkline.
+    var recentHistory: [HistoryPoint] {
+        let since = Format.isoDay(Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .now)
+        return history.filter { $0.date >= since }
     }
 }
 
@@ -276,6 +310,7 @@ struct SettingsPanel: View {
             Text("Theme follows `marketpulse theme set …`").foregroundStyle(palette.muted).font(.system(size: 10, design: .monospaced))
         }
         .onAppear { model.loginEnabled = LoginItem.enabled }
+        .disabled(model.demo)
     }
 }
 
@@ -292,7 +327,10 @@ struct ActionBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            BarButton(symbol: "terminal", label: "Open", hint: "⌥⌘M", palette: palette) { model.openTUI() }
+            BarButton(symbol: "macwindow", label: "Portfolio", hint: nil, palette: palette) {
+                model.showPortfolio()
+            }
+            BarButton(symbol: "terminal", label: nil, hint: nil, palette: palette) { model.openTUI() }
             BarButton(symbol: "arrow.clockwise", label: nil, hint: nil, palette: palette) { model.refresh() }
             BarButton(symbol: (model.status?.privacy ?? false) ? "eye.slash" : "eye", label: nil, hint: nil, palette: palette) { model.togglePrivacy() }
             BarButton(symbol: model.showSettings ? "xmark" : "gearshape", label: nil, hint: nil, palette: palette) { model.showSettings.toggle() }

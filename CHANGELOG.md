@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A native macOS portfolio window with charts, holdings/activity search,
+  account/transaction/alert forms, CSV preview/import, export, income, and
+  automation status. Install from an editable checkout with `marketpulse desktop install`.
+- Versioned `desktop snapshot` JSON bridge and a fictional read-only `--demo`.
+- Shared maintenance cycle and `automation run` worker (continuous or `--once`)
+  for refresh, daily snapshots, alert checks, and daily safety backups.
+- Native checks that decode the real Python demo payload and CI coverage for them.
+- An app icon for the Dock, Finder, and Login Items.
+
+### Fixed
+
+- The native window reopens from the Dock and shows its toolbar on macOS 14.
+- Transaction validation rejects NaN/infinity; alerts require a finite positive threshold.
+- CSV previews (`--dry-run`) run the real import against a temporary copy of the
+  ledger, so they always match the import exactly. Imports are all-or-nothing, and
+  the app's import refuses to run if the file or ledger changed since its preview.
+- macOS installation preserves configuration overrides and clears obsolete paths.
+- Native CLI subprocesses time out instead of leaving refresh stuck indefinitely.
+
+### Changed
+
+- Archived accounts are now left out of every total (net worth, allocation,
+  account lists and movers, including `status --json`), as the TUI's archive
+  setting always described. Their history, income, realized gains, room, tax
+  reports, and returns (total gain, XIRR) still include them. If an archived account still holds something, you're
+  warned, and daily snapshots and history rebuilds (`backfill`) wait until it's resolved.
+- CSV imports skip rows that name an archived account, with that reason.
+
+No database migration is required.
+
 ## [2.1.0] - 2026-10-06
 
 First tagged release after MarketPulse 2.0. Minor bump (not a patch): this cut

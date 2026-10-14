@@ -99,3 +99,239 @@ def test_identical_partial_fills_are_kept(store):
     third = import_transactions(store, io.StringIO(header + row * 3), default_account=acct)
     assert (third.added, third.duplicates) == (1, 2)
     assert store.ledger().open_holdings()[0].quantity == 15
+
+
+def test_preview_new_accounts_matches_import_without_writing(store):
+    import io
+
+    from marketpulse.csvio import import_transactions
+
+    csv = "date,account,type,symbol,quantity,price,currency\n2024-01-01,New TFSA,BUY,XEQT.TO,2,30,CAD\n"
+    preview = import_transactions(store, io.StringIO(csv), dry_run=True)
+    assert preview.added == 1
+    assert preview.skipped == []
+    assert preview.accounts_created == ["New TFSA"]
+    assert store.accounts() == []
+    assert store.transactions() == []
+    assert store.backups() == []
+    result = import_transactions(store, io.StringIO(csv))
+    assert result.added == preview.added
+    assert result.skipped == preview.skipped
+    assert result.accounts_created == preview.accounts_created
+
+
+def test_preview_transfer_to_new_account_matches_import(store):
+    import io
+
+    from marketpulse.csvio import import_transactions
+
+    csv = (
+        "date,account,type,symbol,quantity,price,currency,target_account\n"
+        "2024-01-01,New TFSA,BUY,XEQT.TO,2,30,CAD,\n"
+        "2024-01-02,New TFSA,TRANSFER,XEQT.TO,1,30,CAD,New RRSP\n"
+    )
+    preview = import_transactions(store, io.StringIO(csv), dry_run=True)
+    result = import_transactions(store, io.StringIO(csv))
+    assert preview.added == result.added == 2
+    assert preview.accounts_created == result.accounts_created == ["New TFSA", "New RRSP"]
+    assert preview.skipped == result.skipped == []
+
+
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        # A type-named account resolves to the account created earlier in the same file.
+        (
+            "2024-01-01,New TFSA,BUY,XEQT.TO,2,30,CAD,\n2024-01-02,TFSA,BUY,XEQT.TO,1,30,CAD,\n",
+            (2, 0, [], ["New TFSA"]),
+        ),
+        # Case-insensitive account names; a repeated row within the file is kept (only rows
+        # already in the ledger count as duplicates); a deposit with no amount and a bad date are skipped.
+        (
+            "2024-01-01,Cash,DEPOSIT,,,,CAD,\n2024-01-01,cash,BUY,VFV.TO,1,100,CAD,\n"
+            "2024-01-01,cash,BUY,VFV.TO,1,100,CAD,\n2024-13-01,Cash,BUY,VFV.TO,1,100,CAD,\n",
+            (
+                2,
+                0,
+                [(2, "DEPOSIT row has no amount"), (5, "Invalid date '2024-13-01' — use YYYY-MM-DD.")],
+                ["Cash"],
+            ),
+        ),
+        # Transfers into accounts the file creates.
+        (
+            "2024-01-01,A,BUY,XEQT.TO,2,30,CAD,\n2024-01-02,A,TRANSFER,XEQT.TO,1,30,CAD,RRSP\n",
+            (2, 0, [], ["A", "RRSP"]),
+        ),
+    ],
+)
+def test_preview_is_exactly_the_real_import(store, rows, expected):
+    csv = "date,account,type,symbol,quantity,price,currency,target_account\n" + rows
+    store.add_account(Account(name="Existing"))
+    before = (store.accounts(include_archived=True), store.transactions())
+    preview = import_transactions(store, io.StringIO(csv), dry_run=True)
+    assert (preview.added, preview.duplicates, preview.skipped, preview.accounts_created) == expected
+    assert (store.accounts(include_archived=True), store.transactions(), store.backups()) == (*before, [])
+    result = import_transactions(store, io.StringIO(csv))
+    result.backup = None
+    assert preview == result
+    assert {a.name for a in store.accounts()} == {"Existing", *expected[3]}
+
+
+def test_skipped_rows_never_leave_new_accounts_behind(store):
+    store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    old = store.add_account(Account(name="Old", type=AccountType.RRSP))
+    old.archived = True
+    store.update_account(old)
+    csv = (
+        "date,account,type,symbol,quantity,price,currency,target_account\n"
+        # A BUY never creates its (meaningless) target account.
+        "2024-01-01,TFSA,BUY,XEQT.TO,2,30,CAD,Ghost One\n"
+        # An archived source is rejected before its missing target is looked up.
+        "2024-01-02,Old,TRANSFER,XEQT.TO,1,30,CAD,Ghost Two\n"
+        # A new account whose only row is invalid is removed again.
+        "2024-01-03,Brand New,BUY,XEQT.TO,0,30,CAD,\n"
+    )
+    preview = import_transactions(store, io.StringIO(csv), dry_run=True)
+    result = import_transactions(store, io.StringIO(csv))
+    result.backup = None
+    assert preview == result
+    assert result.added == 1 and result.accounts_created == []
+    assert [line for line, _ in result.skipped] == [3, 4]
+    assert result.skipped[0][1] == "account 'Old' is archived"
+    assert {a.name for a in store.accounts(include_archived=True)} == {"TFSA", "Old"}
+
+
+def test_commit_refuses_when_the_ledger_changed_since_the_preview(store):
+    acct = store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    csv = "date,type,symbol,quantity,price,currency\n2024-01-01,BUY,XEQT.TO,2,30,CAD\n"
+    preview = import_transactions(store, io.StringIO(csv), default_account=acct, dry_run=True)
+    assert preview.fingerprint
+    # The same row is entered elsewhere between preview and commit: the preview said "1 new".
+    store.add_transaction(
+        Transaction(
+            account_id=acct.saved_id, type=TxnType.BUY, date="2024-01-01", symbol="XEQT.TO", quantity=2, price=30
+        )
+    )
+    with pytest.raises(ValueError, match="changed since the preview"):
+        import_transactions(store, io.StringIO(csv), default_account=acct, expect_fingerprint=preview.fingerprint)
+    assert len(store.transactions()) == 1 and store.backups() == []  # nothing written, not even a backup
+    fresh = import_transactions(store, io.StringIO(csv), default_account=acct, dry_run=True)
+    result = import_transactions(store, io.StringIO(csv), default_account=acct, expect_fingerprint=fresh.fingerprint)
+    assert (result.added, result.duplicates) == (0, 1)
+    # A changed file is caught the same way.
+    with pytest.raises(ValueError, match="changed since the preview"):
+        import_transactions(
+            store,
+            io.StringIO(csv + "2024-01-02,BUY,XEQT.TO,1,30,CAD\n"),
+            default_account=acct,
+            expect_fingerprint=fresh.fingerprint,
+        )
+
+
+def test_rows_for_archived_accounts_are_skipped_in_preview_and_import(store):
+    old = store.add_account(Account(name="Old RRSP", type=AccountType.RRSP))
+    old.archived = True
+    store.update_account(old)
+    store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    csv = (
+        "date,account,type,symbol,quantity,price,currency,target_account\n"
+        "2024-01-01,Old RRSP,BUY,XEQT.TO,2,30,CAD,\n"
+        "2024-01-01,TFSA,BUY,XEQT.TO,2,30,CAD,\n"
+        "2024-01-02,TFSA,TRANSFER,XEQT.TO,1,30,CAD,old rrsp\n"
+    )
+    preview = import_transactions(store, io.StringIO(csv), dry_run=True)
+    result = import_transactions(store, io.StringIO(csv))
+    result.backup = None
+    assert preview == result
+    assert result.added == 1
+    assert result.skipped == [(2, "account 'Old RRSP' is archived"), (4, "account 'Old RRSP' is archived")]
+    assert {t.account_id for t in store.transactions()} == {store.get_account("TFSA").id}
+
+    # A default account that has since been archived is refused the same way.
+    rows = import_transactions(store, io.StringIO("date,type,amount\n2024-01-01,DEPOSIT,100\n"), default_account=old)
+    assert rows.added == 0 and rows.skipped == [(2, "account 'Old RRSP' is archived")]
+
+
+def test_a_failed_import_leaves_nothing_behind(store, monkeypatch):
+    csv = "date,account,type,symbol,quantity,price,currency\n2024-01-01,Brand New,BUY,XEQT.TO,2,30,CAD\n"
+
+    def crash(_pending):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(store, "add_transactions", crash)
+    with pytest.raises(OSError):
+        import_transactions(store, io.StringIO(csv))
+    assert store.accounts(include_archived=True) == [] and store.transactions() == []
+
+
+def test_other_writers_wait_while_an_import_runs(store, monkeypatch):
+    import sqlite3
+
+    csv = "date,account,type,symbol,quantity,price,currency\n2024-01-01,TFSA,BUY,XEQT.TO,2,30,CAD\n"
+    blocked = []
+    real_backup = store.backup
+
+    def backup_then_try_another_writer(*args, **kwargs):
+        path = real_backup(*args, **kwargs)
+        other = sqlite3.connect(store.path, timeout=0.05)
+        try:
+            other.execute(
+                "INSERT INTO accounts(name, type, currency, created_at) VALUES ('Sneaky', 'NONREG', 'CAD', '')"
+            )
+        except sqlite3.OperationalError as e:
+            blocked.append(str(e))
+        finally:
+            other.close()
+        return path
+
+    monkeypatch.setattr(store, "backup", backup_then_try_another_writer)
+    result = import_transactions(store, io.StringIO(csv))
+    assert result.added == 1 and blocked == ["database is locked"]
+    assert [a.name for a in store.accounts()] == ["TFSA"]
+
+
+def test_import_rereads_a_default_account_archived_since_it_was_chosen(store):
+    acct = store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    stale = store.get_account(acct.saved_id)
+    acct.archived = True
+    store.update_account(acct)
+    csv = "date,type,symbol,quantity,price,currency\n2024-01-01,BUY,XEQT.TO,2,30,CAD\n"
+    result = import_transactions(store, io.StringIO(csv), default_account=stale)
+    assert result.added == 0 and result.skipped == [(2, "account 'TFSA' is archived")]
+
+
+def test_a_preview_from_another_day_must_be_redone(store, monkeypatch):
+    from datetime import date as real_date
+
+    acct = store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    csv = "date,type,amount\n2024-01-01,DEPOSIT,100\n"
+    preview = import_transactions(store, io.StringIO(csv), default_account=acct, dry_run=True)
+
+    class Tomorrow(real_date):
+        @classmethod
+        def today(cls):
+            return real_date.today().replace(year=real_date.today().year + 1)
+
+    monkeypatch.setattr("marketpulse.csvio.date", Tomorrow)
+    with pytest.raises(ValueError, match="changed since the preview"):
+        import_transactions(store, io.StringIO(csv), default_account=acct, expect_fingerprint=preview.fingerprint)
+
+
+def test_preview_uses_the_default_account_as_it_is_now(store):
+    from marketpulse.db import Store
+
+    acct = store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    stale = store.get_account(acct.saved_id)
+    other = Store(store.path)  # another process archives the account after the app read it
+    try:
+        changed = other.get_account(acct.saved_id)
+        changed.archived = True
+        other.update_account(changed)
+    finally:
+        other.close()
+    csv = "date,type,amount\n2024-01-01,DEPOSIT,100\n"
+    preview = import_transactions(store, io.StringIO(csv), default_account=stale, dry_run=True)
+    result = import_transactions(store, io.StringIO(csv), default_account=stale, expect_fingerprint=preview.fingerprint)
+    result.backup = None
+    assert preview == result  # the preview modelled the account as it is now
+    assert result.added == 0 and result.skipped == [(2, "account 'TFSA' is archived")]
