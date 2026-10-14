@@ -111,8 +111,7 @@ The next agent starts from the latest handoff comment, not from scratch.
 
 ## Agent-specific notes
 
-- **Claude Code** reads `CLAUDE.md`, which this repo keeps out of Git (it's in `.gitignore`).
-  Add the line `@AGENTS.md` to your local `CLAUDE.md` so Claude Code loads this guide.
+- **Claude Code** reads `CLAUDE.md`, which imports this file and adds architecture notes.
 - **Codex** and **Cursor** read `AGENTS.md` directly.
 - Agents without GitHub access can't read issues: the maintainer should paste the
   issue and its latest handoff comment into the session.
