@@ -1,0 +1,133 @@
+"""Build a throwaway copy of the native app on a fictional scratch ledger, for manual or
+computer-use QA. Never touches your real ledger, settings, or installed app.
+
+    uv run --locked python scripts/qa_app.py              # desktop mode (Dock icon)
+    uv run --locked python scripts/qa_app.py --menubar    # menu bar mode
+    uv run --locked python scripts/qa_app.py --out /tmp/mp-qa --fresh
+
+Then run the printed `launch.sh`, and follow docs/qa.md.
+"""
+
+from __future__ import annotations
+
+import argparse
+import plistlib
+import shutil
+import subprocess
+import sys
+from datetime import date, timedelta
+from pathlib import Path
+
+from marketpulse.db import Store
+from marketpulse.models import Account, AccountType, Alert, Transaction, TxnType
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE = ROOT / "macos" / "MarketPulseBar"
+BUNDLE_ID = "dev.marketpulse.qa"  # separate from the real app's defaults and login item
+APP_NAME = "MarketPulse QA"
+
+
+def seed(data: Path) -> None:
+    """Fictional ledger covering the cases docs/qa.md checks."""
+    store = Store(data / "marketpulse.db")
+    try:
+        day = lambda n: (date.today() - timedelta(days=n)).isoformat()  # noqa: E731
+        tfsa = store.add_account(Account(name="Everyday TFSA", type=AccountType.TFSA, institution="Wealthsimple"))
+        cash = store.add_account(Account(name="Cash Account", currency="USD", track_cash=True))
+        old = store.add_account(Account(name="Old RRSP", type=AccountType.RRSP))
+        rows = [
+            (tfsa, TxnType.BUY, 60, {"symbol": "XEQT.TO", "quantity": 100, "price": 30, "currency": "CAD"}),
+            (tfsa, TxnType.DIVIDEND, 20, {"symbol": "XEQT.TO", "amount": 45.5, "currency": "CAD"}),
+            (cash, TxnType.DEPOSIT, 50, {"amount": 5000, "currency": "USD"}),
+            (cash, TxnType.BUY, 45, {"symbol": "AAPL", "quantity": 5, "price": 200, "currency": "USD"}),
+            (cash, TxnType.SELL, 10, {"symbol": "AAPL", "quantity": 1, "price": 230, "currency": "USD"}),
+            (cash, TxnType.FEE, 5, {"amount": 9.99, "currency": "USD"}),
+            (tfsa, TxnType.SPLIT, 3, {"symbol": "XEQT.TO", "ratio": 2}),
+            (old, TxnType.BUY, 90, {"symbol": "MSFT", "quantity": 3, "price": 380, "currency": "USD"}),
+        ]
+        for acct, kind, ago, fields in rows:
+            store.add_transaction(Transaction(account_id=acct.saved_id, type=kind, date=day(ago), **fields))
+        old.archived = True  # must be hidden everywhere, and left out of totals
+        store.update_account(old)
+        store.add_alert(Alert(symbol="AAPL", condition="above", threshold=1, note="always fires"))
+        store.add_watch(["NVDA", "VFV.TO"])
+    finally:
+        store.close()
+
+
+def sample_csv(path: Path) -> None:
+    today = date.today().isoformat()
+    path.write_text(
+        "date,account,type,symbol,quantity,price,currency,amount\n"
+        f"{today},Everyday TFSA,BUY,VFV.TO,2,140,CAD,\n"
+        f"{today},Old RRSP,BUY,MSFT,1,400,USD,\n"  # skipped: archived account
+        f"{today},New FHSA,DEPOSIT,,,,CAD,500\n"  # creates New FHSA
+        "2024-13-40,Everyday TFSA,BUY,VFV.TO,1,1,CAD,\n"  # skipped: invalid date
+    )
+
+
+def build_app(out: Path, menubar: bool) -> Path:
+    subprocess.run(["swift", "build", "-c", "release", "--package-path", str(PACKAGE)], check=True)
+    bin_dir = subprocess.run(
+        ["swift", "build", "-c", "release", "--package-path", str(PACKAGE), "--show-bin-path"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    app = out / f"{APP_NAME}.app"
+    shutil.rmtree(app, ignore_errors=True)
+    (app / "Contents" / "MacOS").mkdir(parents=True)
+    (app / "Contents" / "Resources").mkdir()
+    shutil.copy2(Path(bin_dir) / "MarketPulseBar", app / "Contents" / "MacOS" / "MarketPulseBar")
+    shutil.copy2(PACKAGE / "AppIcon.icns", app / "Contents" / "Resources" / "AppIcon.icns")
+    with open(app / "Contents" / "Info.plist", "wb") as f:
+        plistlib.dump(
+            {
+                "CFBundleName": APP_NAME,
+                "CFBundleIdentifier": BUNDLE_ID,
+                "CFBundleExecutable": "MarketPulseBar",
+                "CFBundleIconFile": "AppIcon",
+                "CFBundlePackageType": "APPL",
+                "LSMinimumSystemVersion": "14.0",
+                "LSUIElement": menubar,
+            },
+            f,
+        )
+    subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=False, capture_output=True)
+    return app
+
+
+def main() -> None:
+    if sys.platform != "darwin":
+        raise SystemExit("The QA app is macOS-only.")
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--out", type=Path, default=Path("/tmp/marketpulse-qa"))
+    parser.add_argument("--menubar", action="store_true", help="Menu bar mode (no Dock icon, no window at launch).")
+    parser.add_argument("--fresh", action="store_true", help="Delete an existing scratch ledger first.")
+    args = parser.parse_args()
+    out: Path = args.out.resolve()
+    data = out / "data"
+    if args.fresh:
+        shutil.rmtree(data, ignore_errors=True)
+    if not (data / "marketpulse.db").exists():
+        data.mkdir(parents=True, exist_ok=True)
+        seed(data)
+    sample_csv(out / "sample-import.csv")
+    app = build_app(out, args.menubar)
+    cli = Path(sys.executable).parent / "marketpulse"
+    launch = out / "launch.sh"
+    launch.write_text(
+        "#!/bin/sh\n# Opens the QA app on the scratch ledger; run it again to send a Dock-style reopen event.\n"
+        f"exec open --env MARKETPULSE_CLI='{cli}' --env MARKETPULSE_DATA='{data}' "
+        f"--env MARKETPULSE_CONFIG='{out / 'config.toml'}' '{app}'\n"
+    )
+    launch.chmod(0o755)
+    print(f"QA app:        {app}")
+    print(f"Scratch data:  {data}")
+    print(f"Sample CSV:    {out / 'sample-import.csv'}")
+    print(f"Launch:        {launch}")
+    print("Checklist:     docs/qa.md")
+
+
+if __name__ == "__main__":
+    main()
