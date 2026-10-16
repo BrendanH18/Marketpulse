@@ -69,7 +69,9 @@ so its preferences are separate from a checkout install's `MarketPulse Bar.app`.
    your shell's variables, so pass it explicitly:
    `open --env MARKETPULSE_CLI="$PWD/.venv/bin/marketpulse" dist/app/arm64/MarketPulse.app`.
 2. The bundled backend, in `MarketPulse.app`.
-3. The CLI path `marketpulse desktop install` records (`defaults read dev.marketpulse.bar cliPath`).
+3. The app's own `cliPath` setting. `marketpulse desktop install` records it for
+   `MarketPulse Bar.app` (`defaults read dev.marketpulse.bar cliPath`). `MarketPulse.app`
+   doesn't read that setting, so a checkout install never changes which engine it runs.
 4. `marketpulse` on `PATH`.
 
 **Automation › About MarketPulse** shows the app version, the backend's MarketPulse

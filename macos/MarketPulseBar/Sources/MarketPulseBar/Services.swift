@@ -18,7 +18,9 @@ enum CLIError: LocalizedError {
 
 /// Runs the MarketPulse CLI. Resolution order: `MARKETPULSE_CLI` (development), the backend
 /// bundled in release builds, the `cliPath` default `marketpulse desktop install` writes (GUI
-/// apps don't inherit the shell PATH), then `marketpulse` on PATH.
+/// apps don't inherit the shell PATH), then `marketpulse` on PATH. Defaults are this app's own:
+/// the standalone app (`dev.marketpulse.app`) deliberately ignores a checkout install's
+/// `dev.marketpulse.bar` settings, so they can't point it at another engine or data folder.
 enum CLI {
     enum Source: String {
         case override = "MARKETPULSE_CLI override"
