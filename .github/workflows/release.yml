@@ -1,0 +1,137 @@
+name: Release
+
+# Pushing a v* tag builds the unsigned macOS apps and opens a draft GitHub Release with them.
+# Running it by hand (Actions > Release > Run workflow) is a dry run: it builds and verifies the
+# same artifacts and uploads them to the run, but creates no release. See CONTRIBUTING.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: false # nothing a branch build cached can reach a release
+      - name: Check the tag matches the package version
+        if: github.ref_type == 'tag'
+        run: uv run --locked --no-dev python scripts/release.py check-tag "$GITHUB_REF_NAME"
+      - id: version
+        run: echo "version=$(uv run --locked --no-dev python -c 'import marketpulse; print(marketpulse.__version__)')" >> "$GITHUB_OUTPUT"
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ! uv run --locked --no-dev python scripts/release.py notes "$VERSION" > notes.md; then
+            if [ "$GITHUB_REF_TYPE" = tag ]; then exit 1; fi
+            echo "::warning::CHANGELOG.md has no section for $VERSION yet; a tag would fail here."
+            echo "Dry run of MarketPulse $VERSION." > notes.md
+          fi
+          cat notes.md
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: notes.md
+          if-no-files-found: error
+
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: false # nothing a branch build cached can reach a release
+      - name: Build the wheel and sdist
+        run: uv build --no-sources --out-dir dist/python
+      - name: Build MarketPulse.app for arm64 and x86_64 (signs, verifies, smoke-tests)
+        run: >-
+          uv run --locked python scripts/build_app.py --arch arm64 --arch x86_64
+          --wheel "dist/python/marketpulse-$VERSION-py3-none-any.whl" --out dist/app
+      - name: Package zips, DMGs, and SHA256SUMS
+        run: uv run --locked python scripts/release.py package --apps dist/app --python-dist dist/python --out dist/release
+      - name: Verify the packaged artifacts
+        run: uv run --locked python scripts/release.py verify dist/release --version "$VERSION" --require-smoke arm64
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: marketpulse-${{ env.VERSION }}
+          path: dist/release/
+          if-no-files-found: error
+
+  verify-intel:
+    # The arm64 runner has no Rosetta, so the Intel app first runs here.
+    needs: [prepare, build]
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: false # nothing a branch build cached can reach a release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: marketpulse-${{ env.VERSION }}
+          path: dist/release
+      - name: Verify the downloaded artifacts and run the Intel app
+        run: uv run --locked python scripts/release.py verify dist/release --version "$VERSION" --require-smoke x86_64
+
+  publish:
+    # A manual run is a dry run even when started on a tag.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [prepare, checks, build, verify-intel]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: marketpulse-${{ env.VERSION }}
+          path: dist/release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+      - name: Check the artifacts against SHA256SUMS
+        working-directory: dist/release
+        run: sha256sum --check --strict SHA256SUMS
+      - name: Create or update the draft release
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft > draft.txt 2>/dev/null; then
+            if [ "$(cat draft.txt)" != true ]; then
+              echo "::error::$GITHUB_REF_NAME is already published; not replacing its files."
+              exit 1
+            fi
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
+            gh release upload "$GITHUB_REF_NAME" dist/release/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "MarketPulse $VERSION" --notes-file notes.md dist/release/*
+          fi

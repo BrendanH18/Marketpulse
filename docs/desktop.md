@@ -58,6 +58,10 @@ tested only if Rosetta is installed; `--skip-smoke` skips the test.
 | arm64 | 77 MB | 32 MB |
 | x86_64 | 79 MB | 32 MB |
 
+Releases are built by the tag-triggered workflow, not on anyone's Mac: each version's
+GitHub Release has the arm64 and x86_64 apps as zips and DMGs, with `SHA256SUMS`
+(see the release checklist in [CONTRIBUTING.md](../CONTRIBUTING.md#maintainer-release-checklist)).
+
 The app uses the same data (`~/.marketpulse`) and settings
 (`~/.config/marketpulse/config.toml`) as the CLI and TUI, and honours
 `MARKETPULSE_DATA` and `MARKETPULSE_CONFIG`. Its bundle ID is `dev.marketpulse.app`,

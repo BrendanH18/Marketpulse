@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MarketPulse** shows the app and backend versions and which backend is running.
 - `python -m marketpulse` runs the CLI, and `desktop snapshot` reports a `backend`
   object (engine and Python versions).
+- Version tags build the release: a workflow checks that the tag matches the package
+  version, builds the wheel and `MarketPulse.app` for Apple silicon and Intel as zips and
+  DMGs with `SHA256SUMS`, verifies and runs every app, and opens a draft GitHub Release
+  with that version's changelog section. A manual run is a dry run with no release.
 
 ### Fixed
 
