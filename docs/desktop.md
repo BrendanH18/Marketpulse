@@ -1,8 +1,10 @@
 # Native macOS app
 
 MarketPulse now includes a full SwiftUI portfolio window alongside its menu bar.
-It uses your existing SQLite ledger through the Python CLI. Requires macOS 14+,
-the Xcode Command Line Tools, and an editable source checkout.
+It uses your existing SQLite ledger through the Python CLI. Requires macOS 14+.
+`MarketPulse.app` [built with its own backend](#build-the-standalone-app) needs
+nothing else; installing from a checkout needs the Xcode Command Line Tools and an
+editable source checkout.
 
 ## Install from this checkout
 
@@ -22,6 +24,59 @@ changing which portfolio/configuration the app should use. Installing with no
 overrides resets it to the default paths. Launch-at-login preferences remain
 under your control in Automation.
 
+## Build the standalone app
+
+`MarketPulse.app` carries its own Python, so it runs on a Mac with no Python, uv, or
+Xcode tools. Building it needs uv and the Swift toolchain:
+
+```bash
+uv sync --locked --dev
+uv run --locked python scripts/build_app.py                        # this Mac's architecture
+uv run --locked python scripts/build_app.py --arch arm64 --arch x86_64
+```
+
+Each build lands in `dist/app/<arch>/MarketPulse.app` (`--out` changes the folder).
+The script builds the wheel, copies a pinned, relocatable CPython
+([python-build-standalone](https://github.com/astral-sh/python-build-standalone),
+the builds uv installs) into `Contents/Resources/backend/python`, strips what the
+engine never uses (Tk, IDLE, the test suite, headers, pip), installs the wheel and
+the dependencies pinned in `uv.lock` (with hash checks), and precompiles bytecode.
+`Contents/Resources/backend/bin/marketpulse` is a small launcher that runs that
+Python in isolated mode, so `PYTHONPATH` or packages from your own Python setup
+never leak in. It works from any folder and through a symlink, so you can also
+link it onto your `PATH` and use the bundled CLI and TUI.
+
+The script ad-hoc signs every native library inside, then the app (no Developer ID:
+MarketPulse ships unsigned builds by decision, see the [App plan](app-plan.md)),
+checks `codesign --verify --deep --strict`, and smoke-tests the bundled CLI with an
+empty environment and a scratch ledger: version, demo payload, recording a deposit,
+and loading the native `curl_cffi` library. An Intel build on Apple Silicon is smoke
+tested only if Rosetta is installed; `--skip-smoke` skips the test.
+
+| Build (MarketPulse 2.1.0, Python 3.14.7) | App | Zipped (`ditto -c -k`) |
+| --- | --- | --- |
+| arm64 | 77 MB | 32 MB |
+| x86_64 | 79 MB | 32 MB |
+
+The app uses the same data (`~/.marketpulse`) and settings
+(`~/.config/marketpulse/config.toml`) as the CLI and TUI, and honours
+`MARKETPULSE_DATA` and `MARKETPULSE_CONFIG`. Its bundle ID is `dev.marketpulse.app`,
+so its preferences are separate from a checkout install's `MarketPulse Bar.app`.
+
+### Which backend the app runs
+
+1. `MARKETPULSE_CLI`, for development. Apps opened from Finder or `open` don't see
+   your shell's variables, so pass it explicitly:
+   `open --env MARKETPULSE_CLI="$PWD/.venv/bin/marketpulse" dist/app/arm64/MarketPulse.app`.
+2. The bundled backend, in `MarketPulse.app`.
+3. The app's own `cliPath` setting. `marketpulse desktop install` records it for
+   `MarketPulse Bar.app` (`defaults read dev.marketpulse.bar cliPath`). `MarketPulse.app`
+   doesn't read that setting, so a checkout install never changes which engine it runs.
+4. `marketpulse` on `PATH`.
+
+**Automation › About MarketPulse** shows the app version, the backend's MarketPulse
+and Python versions, and which of these the app is running.
+
 ## Workspaces
 
 - **Overview:** net worth, daily change, unrealized gain, snapshot history,
@@ -36,8 +91,8 @@ under your control in Automation.
   contribution-room summaries.
 - **Watchlist:** add/remove symbols and create/delete price or daily-change alerts.
 - **Income:** recorded monthly distributions and interest, converted at current FX.
-- **Automation:** refresh interval, login setting, backup action, errors, and
-  snapshot/backup status.
+- **Automation:** refresh interval, login setting, backup action, errors,
+  snapshot/backup status, and the app and backend versions.
 
 Use **⌘N** to record a transaction, **⌘R** to refresh, **⌘I** to import, and **⌘E**
 to export. Import first previews new entries, duplicates, skipped lines, and new

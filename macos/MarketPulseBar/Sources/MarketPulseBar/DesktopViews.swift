@@ -852,6 +852,16 @@ private struct AutomationWorkspace: View {
           ).font(.system(size: 11)).foregroundStyle(Studio.muted).fixedSize(
             horizontal: false, vertical: true)
         }
+        Surface("About MarketPulse") {
+          aboutRow("App", appVersion)
+          aboutRow(
+            "Backend",
+            model.desktop?.backend.map { "MarketPulse \($0.version) · Python \($0.python)" }
+              ?? "Version unavailable until the first refresh")
+          aboutRow("Runs", CLI.resolved.source.rawValue)
+          Text(CLI.path).font(.system(size: 11, design: .monospaced)).foregroundStyle(Studio.muted)
+            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }
         if let errors = model.desktop?.automation.errors, !errors.isEmpty {
           Surface("Needs attention") {
             ForEach(errors, id: \.self) {
@@ -874,6 +884,16 @@ private struct AutomationWorkspace: View {
           }
         }
       }.padding(.horizontal, 30).padding(.bottom, 24)
+    }
+  }
+  private var appVersion: String {
+    Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development build"
+  }
+  private func aboutRow(_ title: String, _ value: String) -> some View {
+    HStack {
+      Text(title).font(.system(size: 13, weight: .medium))
+      Spacer()
+      Text(value).font(.system(size: 12)).foregroundStyle(Studio.muted).textSelection(.enabled)
     }
   }
   private func automationRow(_ icon: String, _ title: String, _ detail: String) -> some View {

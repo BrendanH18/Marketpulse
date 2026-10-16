@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
+import platform
 from dataclasses import asdict
 from datetime import date, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from . import __version__
 from .analytics import income_by_month
 from .automation import run_cycle
 from .config import Config
@@ -62,6 +64,8 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         "room": [asdict(r) for r, _ in tracker.room()],
         "alerts": [{**asdict(a), "description": a.describe()} for a in tracker.store.alerts()],
         "automation": cycle.report,
+        # Which engine answered: the app shows it, and release builds check it matches the tag.
+        "backend": {"version": __version__, "python": platform.python_version()},
         "warnings": [
             *[f"{i.date}: {i.message}" for i in state.issues],
             *[f"Excluded from totals: {s}" for s in view.excluded],

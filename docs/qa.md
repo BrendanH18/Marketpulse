@@ -15,6 +15,11 @@ uv run --locked python scripts/qa_app.py --fresh      # desktop mode; add --menu
 "$TMPDIR/marketpulse-qa/launch.sh"                     # opens "MarketPulse QA"
 ```
 
+Add `--bundled` to build the QA app the way releases ship it, with its own Python
+backend ([build guide](desktop.md#build-the-standalone-app)) instead of this checkout's
+CLI. Use it for changes to the bundle or to how the app finds its backend, and when
+verifying a release.
+
 `--fresh` resets the scratch ledger, settings, and the QA app's preferences, and the
 script quits any QA copy that's still running, so switching between desktop and menu
 bar mode always tests the new build. It refuses an `--out` folder that overlaps your real data or
@@ -48,7 +53,9 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
    `12,5` shows "Enter a number, like 12.5." (on an English system) and disables
    Create; `1,000` shows "Reads as 1,000". Create an alert, then delete it.
 7. **Income.** Month labels read like "Nov 25".
-8. **Automation.** "Back up now" shows "Safety backup created".
+8. **Automation.** "Back up now" shows "Safety backup created". **About MarketPulse**
+   shows the app version, "MarketPulse <version> · Python <version>" for the backend,
+   and Runs: "Bundled with the app" with `--bundled`, otherwise "MARKETPULSE_CLI override".
 9. **Record a transaction (⌘N).** The account picker has no Old RRSP. Record a BUY
    of AAPL in Everyday TFSA with the currency left blank ("Automatic"); Activity
    shows it in US dollars, negative.

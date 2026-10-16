@@ -16,12 +16,35 @@ enum CLIError: LocalizedError {
     }
 }
 
-/// Runs the MarketPulse CLI. GUI apps don't inherit the shell PATH, so the
-/// installer stores the absolute CLI path in user defaults.
+/// Runs the MarketPulse CLI. Resolution order: `MARKETPULSE_CLI` (development), the backend
+/// bundled in release builds, the `cliPath` default `marketpulse desktop install` writes (GUI
+/// apps don't inherit the shell PATH), then `marketpulse` on PATH. Defaults are this app's own:
+/// the standalone app (`dev.marketpulse.app`) deliberately ignores a checkout install's
+/// `dev.marketpulse.bar` settings, so they can't point it at another engine or data folder.
 enum CLI {
-    static var path: String {
-        ProcessInfo.processInfo.environment["MARKETPULSE_CLI"] ?? UserDefaults.standard.string(forKey: "cliPath") ?? "marketpulse"
+    enum Source: String {
+        case override = "MARKETPULSE_CLI override"
+        case bundled = "Bundled with the app"
+        case installer = "Installed CLI"
+        case path = "marketpulse on PATH"
     }
+
+    static var resolved: (path: String, source: Source) {
+        if let override = ProcessInfo.processInfo.environment["MARKETPULSE_CLI"], !override.isEmpty {
+            return (override, .override)
+        }
+        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("backend/bin/marketpulse").path,
+            FileManager.default.isExecutableFile(atPath: bundled)
+        {
+            return (bundled, .bundled)
+        }
+        if let installed = UserDefaults.standard.string(forKey: "cliPath"), !installed.isEmpty {
+            return (installed, .installer)
+        }
+        return ("marketpulse", .path)
+    }
+
+    static var path: String { resolved.path }
 
     static func run(_ args: [String]) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
@@ -107,14 +130,14 @@ enum TerminalLauncher {
             appleScript("""
             tell application "iTerm"
                 activate
-                create window with default profile command "\(escape(command))"
+                create window with default profile command "\(escape(shellQuote(command)))"
             end tell
             """)
         default:
             appleScript("""
             tell application "Terminal"
                 activate
-                do script "\(escape(command))"
+                do script "\(escape(shellQuote(command)))"
             end tell
             """)
         }
@@ -131,6 +154,11 @@ enum TerminalLauncher {
             return name
         }
         return "terminal"
+    }
+
+    /// `command` is an executable path; shells would split it at spaces.
+    private static func shellQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     private static func escape(_ s: String) -> String {

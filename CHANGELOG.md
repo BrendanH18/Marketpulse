@@ -17,12 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for refresh, daily snapshots, alert checks, and daily safety backups.
 - Native checks that decode the real Python demo payload and CI coverage for them.
 - An app icon for the Dock, Finder, and Login Items.
+- `scripts/build_app.py` builds a standalone `MarketPulse.app` (arm64 and x86_64) that
+  carries its own pinned Python and locked dependencies, so it runs without Python, uv,
+  or Xcode tools. It is ad-hoc signed and smoke-tested in a clean environment.
+  `scripts/qa_app.py --bundled` builds the QA app the same way.
+- The app prefers its bundled backend after `MARKETPULSE_CLI`, and **Automation › About
+  MarketPulse** shows the app and backend versions and which backend is running.
+- `python -m marketpulse` runs the CLI, and `desktop snapshot` reports a `backend`
+  object (engine and Python versions).
 
 ### Fixed
 
 - Native transaction saves use durable request receipts: a confirmation failure or timeout
   can be recovered or retried without recording the transaction twice.
 - The native window reopens from the Dock and shows its toolbar on macOS 14.
+- Opening the TUI in Terminal or iTerm from the app works when the CLI's path contains spaces.
 - Transaction validation rejects NaN/infinity; alerts require a finite positive threshold.
 - CSV previews (`--dry-run`) run the real import against a temporary copy of the
   ledger, so they always match the import exactly. Imports are all-or-nothing, and
