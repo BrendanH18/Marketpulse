@@ -145,7 +145,8 @@ Ship version bumps and changelog updates through a pull request. Do not
 force-push `main`. Tag and publish the GitHub Release only after the release
 commit is on `main` and CI is green.
 
-1. Run the checks above and confirm CI passes on the release PR.
+1. Run the checks above and confirm CI passes on the release PR. Optionally
+   dry-run the release workflow on the release branch (see below).
 2. Update `__version__` in `src/marketpulse/__init__.py`; package metadata and
    the CLI use this single source. Refresh `uv.lock` if dependencies changed.
 3. Update [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog) with user-visible
@@ -171,19 +172,21 @@ commit is on `main` and CI is green.
    git push origin v2.1.0
    ```
 
-8. Publish a GitHub Release for that tag. Feed **only** the matching CHANGELOG
-   section (including upgrade / backup guidance) — do not pass the whole
-   `CHANGELOG.md` to `--notes-file`, or Unreleased / older sections will ship
-   as release notes:
+   Pushing the tag starts the **Release** workflow
+   ([`.github/workflows/release.yml`](.github/workflows/release.yml)). It fails
+   early if the tag isn't `v` plus `__version__` or `CHANGELOG.md` has no section
+   for the version. It then runs the CI checks, builds the wheel, sdist, and
+   `MarketPulse.app` for arm64 and x86_64 (`scripts/build_app.py`), packages each
+   app as a zip and a DMG, and writes `SHA256SUMS` (`scripts/release.py package`).
+   `scripts/release.py verify` opens every artifact, checks that the app and the
+   bundled backend both report the tag's version, the architecture, and the
+   signature, and runs each app: arm64 on `macos-15`, x86_64 on `macos-15-intel`.
+   Only then does it create a **draft** release whose notes are that version's
+   CHANGELOG section plus download and checksum instructions.
 
-   ```bash
-   VERSION=2.1.0
-   awk -v ver="$VERSION" '
-     $0 ~ "^## \\[" ver "\\]" {keep=1; print; next}
-     keep && /^## \[/ {exit}
-     keep {print}
-   ' CHANGELOG.md | gh release create "v$VERSION" --title "MarketPulse $VERSION" --notes-file -
-   ```
+8. Review the draft release on GitHub (assets, notes) and publish it. Re-running
+   the workflow for the same tag replaces the draft's files; it refuses once the
+   release is published.
 
 9. Verify a fresh install from the tag reports the expected version (prefer the
    non-editable git-tag path from the README; editable clone is fine for the
@@ -194,7 +197,24 @@ commit is on `main` and CI is green.
    marketpulse --version
    ```
 
-The repository does not automatically publish packages or create releases.
+   Download one of the release zips, check it against `SHA256SUMS`, and open the app.
+
+**Dry run.** Before tagging, run the workflow from **Actions › Release › Run
+workflow** on the release branch (or `gh workflow run release.yml --ref <branch>`).
+It builds and verifies the same artifacts and attaches them to the run as
+`marketpulse-<version>`, but creates no release; a missing CHANGELOG section is
+only a warning. Everything except the draft release can also be run locally:
+
+```bash
+uv build --no-sources --out-dir dist/python
+uv run --locked python scripts/build_app.py --arch arm64 --arch x86_64 \
+  --wheel dist/python/marketpulse-2.1.0-py3-none-any.whl
+uv run --locked python scripts/release.py package --python-dist dist/python   # dist/release
+uv run --locked python scripts/release.py verify dist/release
+uv run --locked python scripts/release.py notes       # this version's release notes
+```
+
+The workflow doesn't publish to PyPI.
 
 ### Publishing to PyPI (follow-up)
 
