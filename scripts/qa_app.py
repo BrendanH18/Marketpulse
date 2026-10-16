@@ -4,6 +4,7 @@ computer-use QA. Never touches your real ledger, settings, or installed app.
     uv run --locked python scripts/qa_app.py              # desktop mode (Dock icon)
     uv run --locked python scripts/qa_app.py --menubar    # menu bar mode
     uv run --locked python scripts/qa_app.py --out ~/mp-qa --fresh
+    uv run --locked python scripts/qa_app.py --bundled     # with its own Python, as releases ship
 
 The default folder is in your per-user temp directory ($TMPDIR on macOS), which other
 users can't write to. Then run the printed `launch.sh`, and follow docs/qa.md.
@@ -13,7 +14,7 @@ from __future__ import annotations
 
 import argparse
 import os
-import plistlib
+import platform
 import shlex
 import shutil
 import signal
@@ -24,12 +25,12 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
+from marketpulse import __version__
 from marketpulse.config import config_path
 from marketpulse.db import Store
+from marketpulse.menubar import assemble_app, info_plist, swift_build
 from marketpulse.models import Account, AccountType, Alert, Transaction, TxnType
 
-ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / "macos" / "MarketPulseBar"
 BUNDLE_ID = "dev.marketpulse.qa"  # separate from the real app's defaults and login item
 APP_NAME = "MarketPulse QA"
 MARKER = ".marketpulse-qa"  # written into --out, so the script only ever reuses or resets its own folder
@@ -57,6 +58,8 @@ def check_out(out: Path) -> None:
         for name in dirs + files:
             if (Path(root) / name).is_symlink():
                 raise SystemExit(f"{Path(root) / name} is a symbolic link. Delete {out} and run again.")
+        if Path(root) == out and f"{APP_NAME}.app" in dirs:
+            dirs.remove(f"{APP_NAME}.app")  # rebuilt each run; a bundled Python has its own links
 
 
 def seed(data: Path) -> None:
@@ -127,33 +130,17 @@ def _alive(pid: int) -> bool:
     return True
 
 
-def build_app(out: Path, menubar: bool) -> Path:
-    subprocess.run(["swift", "build", "-c", "release", "--package-path", str(PACKAGE)], check=True)
-    bin_dir = subprocess.run(
-        ["swift", "build", "-c", "release", "--package-path", str(PACKAGE), "--show-bin-path"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
+def build_app(out: Path, menubar: bool, bundled: bool) -> Path:
+    if bundled:  # the release layout, with its own Python backend (scripts/build_app.py)
+        from build_app import build, build_wheel  # scripts/ is on sys.path when this runs as a script
+
+        arch = "arm64" if platform.machine() == "arm64" else "x86_64"
+        with tempfile.TemporaryDirectory(prefix="marketpulse-qa-build-") as tmp:
+            wheel = build_wheel(Path(tmp) / "wheel")
+            return build(arch, out, wheel, Path(tmp), name=APP_NAME, bundle_id=BUNDLE_ID, menubar=menubar)
     app = out / f"{APP_NAME}.app"
     shutil.rmtree(app, ignore_errors=True)
-    (app / "Contents" / "MacOS").mkdir(parents=True)
-    (app / "Contents" / "Resources").mkdir()
-    shutil.copy2(Path(bin_dir) / "MarketPulseBar", app / "Contents" / "MacOS" / "MarketPulseBar")
-    shutil.copy2(PACKAGE / "AppIcon.icns", app / "Contents" / "Resources" / "AppIcon.icns")
-    with open(app / "Contents" / "Info.plist", "wb") as f:
-        plistlib.dump(
-            {
-                "CFBundleName": APP_NAME,
-                "CFBundleIdentifier": BUNDLE_ID,
-                "CFBundleExecutable": "MarketPulseBar",
-                "CFBundleIconFile": "AppIcon",
-                "CFBundlePackageType": "APPL",
-                "LSMinimumSystemVersion": "14.0",
-                "LSUIElement": menubar,
-            },
-            f,
-        )
+    assemble_app(app, swift_build(), info_plist(APP_NAME, BUNDLE_ID, __version__, menubar=menubar))
     subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=False, capture_output=True)
     return app
 
@@ -166,6 +153,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path(tempfile.gettempdir()) / "marketpulse-qa")
     parser.add_argument("--menubar", action="store_true", help="Menu bar mode (no Dock icon, no window at launch).")
     parser.add_argument("--fresh", action="store_true", help="Reset the scratch ledger, settings, and app defaults.")
+    parser.add_argument("--bundled", action="store_true", help="Bundle a Python backend, as releases do.")
     args = parser.parse_args()
     out: Path = args.out.expanduser().resolve()
     check_out(out)
@@ -191,12 +179,14 @@ def main() -> None:
         data.mkdir(parents=True, exist_ok=True)
         seed(data)
     sample_csv(out / "sample-import.csv")
-    app = build_app(out, args.menubar)
-    cli = Path(sys.executable).parent / "marketpulse"
+    app = build_app(out, args.menubar, args.bundled)
+    # The bundled app finds its own backend; otherwise point it at this checkout's CLI.
+    checkout_cli = shlex.quote(str(Path(sys.executable).parent / "marketpulse"))
+    cli = "" if args.bundled else f"--env MARKETPULSE_CLI={checkout_cli} "
     launch = out / "launch.sh"
     launch.write_text(
         "#!/bin/sh\n# Opens the QA app on the scratch ledger; run it again to send a Dock-style reopen event.\n"
-        f"exec open --env MARKETPULSE_CLI={shlex.quote(str(cli))} --env MARKETPULSE_DATA={shlex.quote(str(data))} "
+        f"exec open {cli}--env MARKETPULSE_DATA={shlex.quote(str(data))} "
         f"--env MARKETPULSE_CONFIG={shlex.quote(str(out / 'config.toml'))} {shlex.quote(str(app))}\n",
         encoding="utf-8",
     )

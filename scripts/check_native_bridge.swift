@@ -15,6 +15,7 @@ struct NativeBridgeCheck {
     precondition(payload.automation.errors.isEmpty && payload.automation.quoteErrors.isEmpty)
     precondition(payload.status.netWorth! > 0)
     precondition(payload.positions.allSatisfy { $0.value != nil })
+    precondition(payload.backend?.version.isEmpty == false && payload.backend?.python.isEmpty == false)
 
     let transactions = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     for row in try decoder.decode([ValuedTransaction].self, from: transactions) {

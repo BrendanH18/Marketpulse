@@ -71,9 +71,18 @@ swift build -c release --package-path macos/MarketPulseBar
 uv run --locked python scripts/check_native_bridge.py
 ```
 
+To build the standalone `MarketPulse.app`, with its own Python backend, as releases ship it
+(details in [docs/desktop.md](docs/desktop.md#build-the-standalone-app)):
+
+```bash
+uv run --locked python scripts/build_app.py                 # dist/app/<arch>/MarketPulse.app
+uv run --locked python scripts/build_app.py --arch arm64 --arch x86_64
+```
+
 For changes you can see in the app, also run the [QA checklist](docs/qa.md) against a
 throwaway copy of the app on a fictional ledger
-(`uv run --locked python scripts/qa_app.py --fresh`). AI agents should read
+(`uv run --locked python scripts/qa_app.py --fresh`; add `--bundled` for changes to
+the bundle or how the app finds its backend). AI agents should read
 [AGENTS.md](AGENTS.md); the app's direction is in the [App 1.0 plan](docs/app-plan.md).
 
 CI runs lint, formatting, type checks, Python tests on Linux and macOS, Python

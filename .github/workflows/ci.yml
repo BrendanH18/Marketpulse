@@ -82,3 +82,5 @@ jobs:
         run: swift build -c release --package-path macos/MarketPulseBar
       - name: Check native app bridge
         run: uv run --locked python scripts/check_native_bridge.py
+      - name: Build standalone app with bundled backend (signs, verifies, smoke-tests)
+        run: uv run --locked python scripts/build_app.py --out "$RUNNER_TEMP/app"

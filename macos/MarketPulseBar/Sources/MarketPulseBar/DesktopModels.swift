@@ -58,7 +58,15 @@ struct DesktopPayload: Decodable {
   let room: [ContributionRoom]
   let alerts: [DesktopAlert]
   let automation: AutomationReport
+  /// Absent from older engines (e.g. an old CLI behind MARKETPULSE_CLI).
+  let backend: BackendInfo?
   let warnings: [String]
+}
+
+/// The engine that produced the payload.
+struct BackendInfo: Decodable {
+  let version: String
+  let python: String
 }
 
 struct DesktopAccount: Decodable, Identifiable {
