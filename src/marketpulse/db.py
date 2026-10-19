@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from uuid import uuid4
 
 from .config import DEFAULT_WATCHLIST, data_dir
 from .ledger import LedgerState, replay
@@ -124,6 +126,18 @@ class SchemaError(RuntimeError):
     """The database can't be opened safely by this version of MarketPulse."""
 
 
+class RestoreError(RuntimeError):
+    """A backup can't be restored. The ledger is left exactly as it was."""
+
+
+# `meta` key that changes on every restore. Work that read the ledger before a restore must not
+# write what it derived from it into the restored one (see Store.restored_since).
+RESTORE_ID_KEY = "restore_id"
+
+# Tables every MarketPulse database has had since the baseline; a file without them isn't one.
+_CORE_TABLES = frozenset({"meta", "accounts", "transactions"})
+
+
 def latest_version(migrations: dict[int, Migration] | None = None) -> int:
     """The schema version this build of MarketPulse writes."""
     migrations = MIGRATIONS if migrations is None else migrations
@@ -154,6 +168,41 @@ def _apply_migration(conn: sqlite3.Connection, version: int, step: Migration) ->
         if conn.in_transaction:
             conn.rollback()
         raise
+
+
+def _stage_restore(source: Path, staged: Path) -> None:
+    """Check that `source` is a MarketPulse database this build can open, and copy it to `staged`.
+
+    The source is opened read-only, so checking a backup can't change it.
+    """
+    name = source.name
+    try:
+        conn = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
+    except sqlite3.Error as e:
+        raise RestoreError(f"{name} can't be opened: {e}") from e
+    try:
+        try:
+            problems = [row[0] for row in conn.execute("PRAGMA integrity_check")]
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        except sqlite3.DatabaseError as e:
+            raise RestoreError(f"{name} isn't a readable database: {e}") from e
+        if problems != ["ok"]:
+            raise RestoreError(f"{name} is damaged and can't be restored: {'; '.join(problems[:3])}")
+        if not _CORE_TABLES <= tables:
+            raise RestoreError(f"{name} isn't a MarketPulse database.")
+        if version > latest_version():
+            raise RestoreError(
+                f"{name} uses schema version {version}, but this MarketPulse only understands up to "
+                f"{latest_version()}. Upgrade MarketPulse to restore it."
+            )
+        copy = sqlite3.connect(staged)
+        try:
+            conn.backup(copy)
+        finally:
+            copy.close()
+    finally:
+        conn.close()
 
 
 _TXN_COLS = "account_id, date, type, symbol, quantity, price, amount, fees, currency, note, ratio, target_account_id"
@@ -258,6 +307,7 @@ class Store:
     #   pre-vN      taken before a schema upgrade — never deleted automatically
     #   daily       taken on startup when the newest backup is >24h old
     #   import      taken right before a CSV import writes to the ledger
+    #   pre-restore taken right before `restore` replaces the ledger — never deleted automatically
     # Automatic reasons (daily, import) are pruned to the newest
     # AUTO_BACKUP_KEEP each; the others are yours to manage.
 
@@ -341,6 +391,91 @@ class Store:
             if (datetime.now() - taken).total_seconds() < max_age_hours * 3600:
                 return None
         return self.backup(reason="daily")
+
+    @staticmethod
+    def backup_time(path: Path) -> datetime | None:
+        """When a backup in the backups directory was taken, from its name."""
+        try:
+            return datetime.strptime(path.name[12:27], "%Y%m%d-%H%M%S")
+        except ValueError:
+            return None
+
+    def restore(self, source: Path | str) -> Path:
+        """Replace the ledger with the database at `source`; returns the pre-restore backup.
+
+        The file must be an intact MarketPulse database this build can read: it passes
+        `PRAGMA integrity_check`, has the core tables, and its schema version is not newer
+        than `latest_version()`. It is copied to a scratch directory and upgraded there, so
+        the backup itself is never modified and a failed upgrade never reaches the ledger.
+
+        The swap is one write transaction on the ledger. It takes the write lock first, so
+        no other process (the TUI, the menu bar) can write between the `pre-restore` backup
+        and the swap, and readers see either the old ledger or the restored one. Each table
+        is emptied and refilled from the checked copy using this ledger's own columns, so a
+        copy missing a column, or breaking a constraint or foreign key, fails and rolls back.
+        Any failure raises RestoreError and leaves the ledger as it was.
+        """
+        source = Path(source).expanduser()
+        if not source.is_file():
+            raise RestoreError(f"{source} doesn't exist or isn't a file.")
+        if source.resolve() == self.path.resolve():
+            raise RestoreError(f"{source} is the ledger itself.")
+        with TemporaryDirectory(prefix="marketpulse-restore-") as scratch:
+            staged = Path(scratch) / "marketpulse.db"
+            _stage_restore(source, staged)
+            try:
+                Store(staged).close()  # brings the copy up to this build's schema
+            except (SchemaError, sqlite3.Error) as e:
+                raise RestoreError(f"{source.name} couldn't be upgraded for this version of MarketPulse: {e}") from e
+            with self._lock:
+                if self._in_transaction:
+                    raise RuntimeError("Restore can't run inside a transaction.")
+                # ATTACH isn't allowed inside a transaction, so it comes first.
+                self._conn.execute("ATTACH DATABASE ? AS restored", (str(staged),))
+                safety: Path | None = None
+                try:
+                    with self.transaction():
+                        safety = self.backup(reason="pre-restore")
+                        self._replace_from("restored")
+                        self.set_meta(RESTORE_ID_KEY, uuid4().hex)
+                except sqlite3.Error as e:
+                    # Rolled back: the safety copy is of a ledger that didn't change.
+                    if safety is not None:
+                        safety.unlink(missing_ok=True)
+                    raise RestoreError(f"{source.name} doesn't match this ledger's tables: {e}") from e
+                finally:
+                    self._conn.execute("DETACH DATABASE restored")
+        assert safety is not None
+        return safety
+
+    @property
+    def restore_id(self) -> str | None:
+        """Read before deriving something from the ledger; pass to `restored_since` before writing it."""
+        return self.get_meta(RESTORE_ID_KEY)
+
+    def restored_since(self, restore_id: str | None) -> bool:
+        """Whether a restore replaced the ledger after `restore_id` was read. Check it inside
+        `transaction()`, which keeps a restore from starting before the write commits."""
+        return self.restore_id != restore_id
+
+    def _replace_from(self, schema: str) -> None:
+        """Inside a transaction, replace every table's rows with those of the attached `schema`."""
+        tables = [
+            r[0]
+            for r in self._conn.execute("SELECT name FROM main.sqlite_master WHERE type = 'table'")
+            if not r[0].startswith("sqlite_")
+        ]
+        # Rows are deleted and reinserted in any order; references are checked at commit.
+        self._conn.execute("PRAGMA defer_foreign_keys = ON")
+        # Every table is emptied before any is refilled, so ON DELETE CASCADE can't remove restored rows.
+        for table in tables:
+            self._conn.execute(f'DELETE FROM main."{table}"')
+        for table in tables:
+            names = [r[1] for r in self._conn.execute(f'PRAGMA main.table_info("{table}")')]
+            # Qualified, because SQLite reads an unknown bare "name" as a string literal rather
+            # than failing: a copy missing a column would be filled with its name.
+            cols, picked = ", ".join(f'"{n}"' for n in names), ", ".join(f'src."{n}"' for n in names)
+            self._conn.execute(f'INSERT INTO main."{table}" ({cols}) SELECT {picked} FROM {schema}."{table}" AS src')
 
     def close(self) -> None:
         with self._lock:

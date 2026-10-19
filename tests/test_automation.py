@@ -78,9 +78,19 @@ def test_desktop_bridge_reports_missing_prices(tracker):
 
 def test_desktop_bridge_reports_where_data_lives_and_a_new_ledger(tracker, tmp_path):
     storage = snapshot(tracker)["storage"]
-    assert storage == {"data_dir": str(tmp_path), "empty": True}
+    backups = str(tmp_path / "backups")
+    assert storage == {"data_dir": str(tmp_path), "empty": True, "backup_dir": backups, "backups": []}
     account = tracker.store.add_account(Account(name="Old TFSA"))
     assert snapshot(tracker)["storage"]["empty"] is False
+    # The app lists backups to restore, newest first, as `backup list` does.
+    first = tracker.store.backup(dest=tracker.store.backup_dir / "marketpulse-20260101-090000-manual.db")
+    tracker.store.backup(dest=tracker.store.backup_dir / "marketpulse-20260102-090000-daily-2.db")
+    rows = snapshot(tracker)["storage"]["backups"]
+    assert [(r["name"], r["reason"], r["taken_at"]) for r in rows] == [
+        ("marketpulse-20260102-090000-daily-2.db", "daily", "2026-01-02T09:00:00"),
+        (first.name, "manual", "2026-01-01T09:00:00"),
+    ]
+    assert rows[1]["size"] == first.stat().st_size > 0
     # Archiving hides the account, but its owner isn't new: no welcome again.
     account.archived = True
     tracker.store.update_account(account)
@@ -99,7 +109,7 @@ def test_demo_never_opens_real_tracker(monkeypatch, tmp_path, notifications):
     assert payload["demo"] is True
     assert len(payload["positions"]) == 5
     assert len(payload["status"]["history"]) == 181
-    assert payload["storage"] == {"data_dir": None, "empty": False}
+    assert payload["storage"] == {"data_dir": None, "empty": False, "backup_dir": None, "backups": []}
     assert not (tmp_path / "data").exists()
     assert notifications == []
 

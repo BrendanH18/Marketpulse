@@ -21,6 +21,14 @@ struct NativeBridgeCheck {
     let storage = try decoder.decode(
       StorageInfo.self, from: Data(#"{"data_dir":"/tmp/marketpulse","empty":true}"#.utf8))
     precondition(storage.dataDir == "/tmp/marketpulse" && storage.empty)
+    precondition(storage.backupDir == nil && storage.backups == nil)  // an older engine
+    precondition(payload.storage?.backupDir == nil && payload.storage?.backups?.isEmpty == true)
+    let ledger = try decoder.decode(
+      StorageInfo.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[4])))
+    let backups = ledger.backups ?? []
+    precondition(ledger.backupDir?.hasSuffix("/backups") == true && backups.count >= 2)
+    precondition(Set(backups.map(\.reasonLabel)) == ["Daily backup", "Before a restore"])
+    precondition(backups.allSatisfy { $0.date != nil && $0.size > 0 && $0.when != $0.name })
 
     let transactions = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     for row in try decoder.decode([ValuedTransaction].self, from: transactions) {
@@ -95,7 +103,7 @@ struct NativeBridgeCheck {
     }
     precondition(retry == .recorded)
     print(
-      "Native bridge checks passed: real Python demo, storage, activity values, import result, privacy formatting, number entry, transaction save recovery"
+      "Native bridge checks passed: real Python demo, storage and backups, activity values, import result, privacy formatting, number entry, transaction save recovery"
     )
   }
 }

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, timedelta
 
 import pytest
@@ -420,3 +421,47 @@ def test_an_unpriced_archived_holding_is_flagged_not_counted_as_zero(tracker, st
     view = tracker.valuation(record=False)
     assert "NOPRICE in archived Old" in view.excluded
     assert view.archived_value == 0 and view.archived_with_value == ["Old"]
+
+
+def test_a_refresh_spanning_a_restore_records_nothing_from_the_replaced_ledger(tracker, store, monkeypatch):
+    acct = store.add_account(Account(name="Main"))
+    buy = Transaction(account_id=acct.id, type=TxnType.BUY, date="2024-01-02", symbol="AAPL", quantity=1, price=100)
+    store.add_transaction(buy)
+    taken = store.backup()
+    store.add_transaction(Transaction(account_id=acct.id, type=TxnType.DEPOSIT, date="2024-02-01", amount=5000))
+    store.add_transaction(replace(buy, id=None, quantity=9))
+    real_quotes = tracker.market.quotes
+
+    def restore_while_quotes_load(symbols, **kwargs):
+        store.restore(taken)  # e.g. `marketpulse backup restore` in a terminal, mid-refresh
+        return real_quotes(symbols, **kwargs)
+
+    monkeypatch.setattr(tracker.market, "quotes", restore_while_quotes_load)
+    tracker.valuation()
+    assert store.snapshots() == []  # that view valued ten shares the restored ledger doesn't have
+    monkeypatch.setattr(tracker.market, "quotes", real_quotes)
+    tracker.valuation()
+    (snap,) = store.snapshots()
+    assert snap.contributions == pytest.approx(100)  # only the restored ledger's one buy
+
+
+def test_backfill_spanning_a_restore_writes_nothing(tracker, store, fake, monkeypatch):
+    days = [(date.today() - timedelta(days=n)).isoformat() for n in (1, 0)]
+    acct = store.add_account(Account(name="Main"))
+    store.add_transaction(
+        Transaction(account_id=acct.id, type=TxnType.BUY, date=days[0], symbol="AAPL", quantity=1, price=100)
+    )
+    taken = store.backup()
+    fake.set_history("AAPL", dict(zip(days, [100, 110], strict=True)))
+    fake.set_history("USDCAD=X", dict.fromkeys(days, 1.3), currency="CAD")
+    real_closes = tracker.market.daily_closes
+    restored = []
+
+    def restore_while_closes_load(*args, **kwargs):
+        if not restored:
+            restored.append(store.restore(taken))
+        return real_closes(*args, **kwargs)
+
+    monkeypatch.setattr(tracker.market, "daily_closes", restore_while_closes_load)
+    assert tracker.backfill() == 0 and restored and store.snapshots() == []
+    assert tracker.backfill() == 2  # rebuilt from the restored ledger, once nothing replaced it midway

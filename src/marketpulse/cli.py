@@ -11,7 +11,7 @@ import shutil
 import sys
 import time
 from dataclasses import fields, replace
-from datetime import date
+from datetime import date, datetime
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
@@ -1461,8 +1461,7 @@ def backup(ctx: click.Context) -> None:
     \b
     Backups are consistent SQLite copies in ~/.marketpulse/backups/. One is
     also taken automatically each day, before every CSV import and before any
-    schema upgrade. To restore, quit MarketPulse and copy a backup over
-    ~/.marketpulse/marketpulse.db.
+    schema upgrade. `marketpulse backup restore` puts one back.
     """
     if ctx.invoked_subcommand is None:
         ctx.invoke(backup_now)
@@ -1490,6 +1489,59 @@ def backup_list(app: App) -> None:
         size = Text(f"{p.stat().st_size / 1024:,.0f} KB")
         t.add_row(Text(p.name), Text(app.store.backup_reason(p), style="muted"), size)
     app.console.print(t)
+
+
+@backup.command("restore")
+@click.argument("path", type=click.Path(dir_okay=False, path_type=Path), required=False)
+@click.option("--latest", is_flag=True, help="Restore the newest backup in the backups directory.")
+@click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation.")
+@pass_app
+def backup_restore(app: App, path: Path | None, latest: bool, yes: bool) -> None:
+    """Replace the ledger with a backup (a PATH, or a file name from `backup list`).
+
+    \b
+    The backup is checked first: it must be an intact MarketPulse database
+    that this version can read. Then the current ledger is saved as a
+    `pre-restore` backup, so a restore can itself be undone, and the backup
+    is copied in. Anything recorded after the backup was taken is replaced.
+    The configuration file is not part of a backup and stays as it is.
+    """
+    from .db import RestoreError
+
+    if latest == (path is not None):
+        fail("Give a backup to restore, or --latest.")
+    # Opening the ledger may take the daily backup, a copy of the ledger as it is now.
+    started = datetime.now().replace(microsecond=0)
+    store = app.store
+    if latest:
+        # Neither that daily backup nor a pre-restore one (the ledger a restore replaced) is what
+        # "go back to my latest backup" means.
+        def is_copy_of_current(p: Path) -> bool:
+            reason = store.backup_reason(p)
+            return reason == "pre-restore" or (reason == "daily" and (store.backup_time(p) or started) >= started)
+
+        candidates = [p for p in store.backups() if not is_copy_of_current(p)]
+        if not candidates:
+            fail(f"No backups to restore in {store.backup_dir}")
+        source = candidates[0]
+    else:
+        assert path is not None
+        source = path.expanduser()
+        if not source.exists() and source.name == str(path) and (store.backup_dir / source.name).exists():
+            source = store.backup_dir / source.name
+    taken = store.backup_time(source)
+    when = f" (taken {taken:%Y-%m-%d %H:%M})" if taken else ""
+    if not yes and not click.confirm(
+        f"Replace the ledger in {store.path.parent} with {source.name}{when}? The current ledger is backed up first."
+    ):
+        return
+    try:
+        safety = store.restore(source)
+    except RestoreError as e:
+        fail(f"{str(e).rstrip('.')}. Nothing was changed.")
+    accounts, txns = len(store.accounts(include_archived=True)), len(store.transactions())
+    app.ok(f"Restored {source.name}: {accounts} accounts, {txns} transactions.")
+    app.console.print(Text(f"  previous ledger saved as {safety}", style="muted"))
 
 
 # ── Appearance & config ───────────────────────────────────────────────────────

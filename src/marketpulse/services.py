@@ -113,6 +113,7 @@ class Tracker:
     # ── valuation ─────────────────────────────────────────────────────────────
 
     def valuation(self, *, use_cache: bool = True, record: bool = True, account_id: int | None = None) -> PortfolioView:
+        restore_id = self.store.restore_id
         state = self.store.ledger()
         accounts = self.store.account_map()
         assets = self.store.assets()
@@ -129,7 +130,11 @@ class Tracker:
         # Leaving out an archived account's holdings would record a fake drop in value.
         complete = not view.stale and not view.excluded and not view.archived_with_value
         if record and account_id is None and view.positions and complete:
-            self.record_snapshot(view, fx, flows)
+            with self.store.transaction():
+                # A restore while quotes loaded replaced the ledger this view describes; recording
+                # it would also carry its contributions into later snapshots.
+                if not self.store.restored_since(restore_id):
+                    self.record_snapshot(view, fx, flows)
         return view
 
     def flows_base(self, fx: FxRates) -> list[tuple[str, float]]:
@@ -227,6 +232,7 @@ class Tracker:
 
     def backfill(self, progress: Callable[[str], None] | None = None) -> int:
         """Rebuild daily net-worth snapshots from the ledger and historical closes."""
+        restore_id = self.store.restore_id
         txns = self.store.transactions()
         if not txns:
             return 0
@@ -326,7 +332,10 @@ class Tracker:
                     book += amount * rate
             if complete and (value > 0 or snaps):
                 snaps.append(Snapshot(iso, value, book, contributions, base, {"backfilled": True}))
-        self.store.upsert_snapshots(snaps)
+        with self.store.transaction():
+            if self.store.restored_since(restore_id):
+                return 0  # rebuilt from a ledger a restore has since replaced
+            self.store.upsert_snapshots(snaps)
         return len(snaps)
 
     # ── income, tax, room ─────────────────────────────────────────────────────

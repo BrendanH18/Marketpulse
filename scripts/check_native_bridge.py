@@ -8,7 +8,8 @@ import tempfile
 from pathlib import Path
 from uuid import uuid4
 
-from marketpulse.desktop import activity_row, demo_snapshot
+from marketpulse.db import Store
+from marketpulse.desktop import activity_row, demo_snapshot, storage_info
 from marketpulse.models import Account, Transaction, TxnType
 
 root = Path(__file__).resolve().parents[1]
@@ -51,6 +52,13 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
             cli + ["desktop", "transaction-status", request_id], env=env, capture_output=True, check=True
         ).stdout
     )
+    # The real ledger's storage object (the CLI runs above may already have taken a daily backup).
+    ledger = Store(Path(tmp) / "data" / "marketpulse.db")
+    for reason in ("daily", "pre-restore"):
+        ledger.backup(reason=reason)
+    storage = Path(tmp) / "storage.json"
+    storage.write_text(json.dumps(storage_info(ledger), allow_nan=False))
+    ledger.close()
     subprocess.run(
         [
             "swiftc",
@@ -62,4 +70,4 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
         ],
         check=True,
     )
-    subprocess.run([str(binary), str(fixture), str(transactions), str(receipt)], check=True)
+    subprocess.run([str(binary), str(fixture), str(transactions), str(receipt), str(storage)], check=True)

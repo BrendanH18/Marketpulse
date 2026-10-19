@@ -263,6 +263,27 @@ final class StatusModel: ObservableObject {
     }
   }
 
+  /// Replaces the ledger with a backup; the backend saves the current one as a pre-restore
+  /// backup first and refuses a damaged or newer file without changing anything.
+  func restoreBackup(_ backup: BackupInfo) async {
+    guard !demo && !saving, let folder = desktop?.storage?.backupDir else { return }
+    saving = true
+    defer { saving = false }
+    // A refresh still running could record today's snapshot, valued from the ledger being
+    // replaced, into the restored one. `saving` keeps new refreshes from starting meanwhile.
+    while realReloads > 0 { try? await Task.sleep(nanoseconds: 50_000_000) }
+    let path = URL(fileURLWithPath: folder).appendingPathComponent(backup.name).path
+    do {
+      _ = try await CLI.run(["backup", "restore", "--yes", "--", path])
+      errorMessage = nil
+      message =
+        "Restored the backup from \(backup.when). Your previous portfolio was saved as a backup first."
+      await reload()
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
   func setConfig(_ key: String, _ value: String) {
     Task { await perform(["config", "set", key, value], success: "Settings updated") }
   }

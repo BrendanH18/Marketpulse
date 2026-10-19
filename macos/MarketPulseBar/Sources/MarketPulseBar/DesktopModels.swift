@@ -80,6 +80,42 @@ struct StorageInfo: Decodable {
   let dataDir: String?
   /// No accounts at all, archived ones included.
   let empty: Bool
+  /// Where backups are kept. Absent from older engines; nil in the demo.
+  let backupDir: String?
+  /// Backups the app can restore, newest first. Absent from older engines; empty in the demo.
+  let backups: [BackupInfo]?
+}
+
+/// One file in the backups folder (`marketpulse backup list`).
+struct BackupInfo: Decodable, Identifiable, Equatable {
+  var id: String { name }
+  let name: String
+  /// daily, import, manual, pre-restore, or pre-vN (before a schema upgrade).
+  let reason: String
+  /// Local time from the file name, e.g. "2026-01-02T09:00:00".
+  let takenAt: String?
+  let size: Int
+
+  var date: Date? {
+    guard let takenAt else { return nil }
+    let parser = DateFormatter()
+    parser.locale = Locale(identifier: "en_US_POSIX")
+    parser.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+    return parser.date(from: takenAt)
+  }
+
+  var when: String { date?.formatted(date: .abbreviated, time: .shortened) ?? name }
+
+  var reasonLabel: String {
+    switch reason {
+    case "daily": return "Daily backup"
+    case "import": return "Before an import"
+    case "manual": return "Backed up by you"
+    case "pre-restore": return "Before a restore"
+    case let r where r.hasPrefix("pre-v"): return "Before an upgrade"
+    default: return reason
+    }
+  }
 }
 
 struct DesktopAccount: Decodable, Identifiable {

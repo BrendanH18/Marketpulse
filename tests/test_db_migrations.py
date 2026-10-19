@@ -189,3 +189,127 @@ def test_backup_names_sort_by_time_not_by_reason(store):
     # mtime plays no part in ordering (copies and restores reset it).
     os.utime(store.backups()[-1], (time.time() + 999, time.time() + 999))
     assert store.backups()[-1].name.startswith("marketpulse-2025")
+
+
+# ── restore ───────────────────────────────────────────────────────────────────
+
+
+def _names(store: Store) -> list[str]:
+    return sorted(a.name for a in store.accounts(include_archived=True))
+
+
+def test_restore_puts_a_backup_back_and_keeps_the_replaced_ledger(store):
+    _seed(store)
+    taken = store.backup()
+    store.add_account(Account(name="Later"))
+    # Another process (the TUI, the menu bar) with the ledger open sees the restore at once.
+    other = Store(store.path)
+    safety = store.restore(taken)
+    assert _names(store) == ["Main"] and [t.symbol for t in store.transactions()] == ["AAPL"]
+    assert _names(other) == ["Main"]
+    assert Store.backup_reason(safety) == "pre-restore" and safety.parent == store.backup_dir
+    assert _names(Store(safety)) == ["Later", "Main"]  # so the restore can itself be undone
+    assert store._query("PRAGMA journal_mode")[0][0] == "wal"
+    assert store.schema_version == BASELINE_VERSION
+    # Writes after a restore land in the restored ledger.
+    store.add_account(Account(name="After"))
+    assert _names(Store(store.path)) == ["After", "Main"]
+
+
+def test_restore_upgrades_an_older_backup_without_changing_it(tmp_path, monkeypatch):
+    old = tmp_path / "old.db"
+    _seed(Store(old))
+    original = old.read_bytes()
+    (tmp_path / "live").mkdir()
+    store = Store(tmp_path / "live" / "marketpulse.db")
+    monkeypatch.setattr(db, "MIGRATIONS", {2: "ALTER TABLE accounts ADD COLUMN colour TEXT"})
+    store._migrate(backup_first=False)
+    store.restore(old)
+    assert store.schema_version == 2 and _names(store) == ["Main"]
+    assert "colour" in {r["name"] for r in store._query("PRAGMA table_info(accounts)")}
+    assert old.read_bytes() == original
+    # The upgrade ran on a scratch copy: its pre-v2 backup didn't land among the user's.
+    assert [Store.backup_reason(p) for p in store.backups()] == ["pre-restore"]
+
+
+def _unchanged_after(store: Store, source, match: str) -> None:
+    """Restoring `source` fails with `match`, and neither the ledger nor the backups changed."""
+    before = (_names(store), len(store.transactions()), store.backups())
+    with pytest.raises(db.RestoreError, match=match):
+        store.restore(source)
+    assert (_names(store), len(store.transactions()), store.backups()) == before
+
+
+def test_restore_rejects_a_corrupt_or_foreign_file(store, tmp_path):
+    _seed(store)
+    garbage = tmp_path / "notes.db"
+    garbage.write_bytes(b"not a database at all" * 100)
+    _unchanged_after(store, garbage, "isn't a readable database")
+
+    damaged = store.backup(dest=tmp_path / "damaged.db")
+    data = bytearray(damaged.read_bytes())
+    page = 4096
+    data[page + 8 : 2 * page] = b"\xff" * (page - 8)  # wreck the second page, keep the header
+    damaged.write_bytes(bytes(data))
+    _unchanged_after(store, damaged, "damaged|isn't a readable database")
+
+    other = tmp_path / "other.db"
+    conn = sqlite3.connect(other)
+    conn.execute("CREATE TABLE notes (body TEXT)")
+    conn.commit()
+    conn.close()
+    _unchanged_after(store, other, "isn't a MarketPulse database")
+    _unchanged_after(store, tmp_path / "missing.db", "doesn't exist")
+    _unchanged_after(store, store.path, "the ledger itself")
+
+
+def test_restore_rejects_a_backup_from_a_newer_marketpulse(store, tmp_path):
+    _seed(store)
+    newer = store.backup(dest=tmp_path / "newer.db")
+    conn = sqlite3.connect(newer)
+    conn.execute("PRAGMA user_version = 99")
+    conn.commit()
+    conn.close()
+    _unchanged_after(store, newer, "schema version 99")
+
+
+def test_restore_rejects_a_backup_whose_tables_dont_match(store, tmp_path):
+    _seed(store)
+    missing = store.backup(dest=tmp_path / "missing-column.db")
+    conn = sqlite3.connect(missing)
+    conn.execute("ALTER TABLE accounts DROP COLUMN archived")
+    conn.commit()
+    conn.close()
+    _unchanged_after(store, missing, "doesn't match this ledger's tables: no such column")
+
+    # A transaction whose account is gone passes every check until the swap commits.
+    orphan = store.backup(dest=tmp_path / "orphan.db")
+    conn = sqlite3.connect(orphan)
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("DELETE FROM accounts")
+    conn.commit()
+    conn.close()
+    _unchanged_after(store, orphan, "FOREIGN KEY constraint failed")
+
+
+def test_no_other_process_can_write_between_the_safety_backup_and_the_swap(store, monkeypatch):
+    _seed(store)
+    taken = store.backup()
+    real_backup = Store.backup
+    blocked = []
+
+    def backup_then_try_to_write(self, reason="manual", dest=None):
+        path = real_backup(self, reason=reason, dest=dest)
+        if reason == "pre-restore":
+            other = sqlite3.connect(store.path, timeout=0)
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                other.execute(
+                    "INSERT INTO accounts(name, type, currency, created_at) VALUES ('Sneaky', 'TFSA', 'CAD', '')"
+                )
+            other.close()
+            blocked.append(True)
+        return path
+
+    monkeypatch.setattr(Store, "backup", backup_then_try_to_write)
+    store.restore(taken)
+    assert blocked == [True] and _names(store) == ["Main"]
