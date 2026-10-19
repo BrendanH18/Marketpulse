@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from uuid import uuid4
 
 import click
@@ -206,6 +207,45 @@ def test_backup_restore_command(cli, store, tmp_path):
     failed = cli("backup", "restore", "-y", str(bad))
     assert failed.exit_code == 1 and "database. Nothing was changed." in failed.output
     assert sorted(a.name for a in store.accounts()) == ["My TFSA", "Taxable"]
+
+
+def test_backup_restore_prefers_the_backups_folder_for_a_bare_name(cli, store, tmp_path, monkeypatch):
+    cli("accounts", "add", "My TFSA", "-t", "TFSA")
+    taken = store.backup(dest=store.backup_dir / "marketpulse-20260101-090000-manual.db")
+    cli("accounts", "add", "Taxable", "-t", "NONREG")
+    # The current folder has an unrelated file with the same name: it must not be restored instead.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    store.backup(dest=elsewhere / taken.name)
+    monkeypatch.chdir(elsewhere)
+    cli("backup", "restore", "-y", taken.name)
+    assert [a.name for a in store.accounts()] == ["My TFSA"]
+    # "./name" means the local file, even though `Path` would drop the "./".
+    cli("backup", "restore", "-y", f"./{taken.name}")
+    assert sorted(a.name for a in store.accounts()) == ["My TFSA", "Taxable"]
+    # A name the backups folder doesn't have is still found locally, and shown in full.
+    store.backup(dest=elsewhere / "local.db")
+    prompt = CliRunner().invoke(main, ["backup", "restore", "local.db"], input="n\n")
+    assert str((elsewhere / "local.db").resolve()) in prompt.output
+
+
+def test_a_trade_whose_quote_lookup_spans_a_restore_is_refused(cli, store, tracker, monkeypatch):
+    cli("accounts", "add", "Current TFSA", "-t", "TFSA")
+    other = store.backup(dest=store.backup_dir / "marketpulse-20260101-090000-manual.db")
+    conn = sqlite3.connect(other)
+    conn.execute("UPDATE accounts SET name = 'Other RRSP', type = 'RRSP'")  # same ID, another account
+    conn.commit()
+    conn.close()
+    real_quote = tracker.market.quote
+
+    def restore_mid_lookup(symbol):
+        store.restore(other)  # in another terminal, while this command waits for the quote
+        return real_quote(symbol)
+
+    monkeypatch.setattr(tracker.market, "quote", restore_mid_lookup)
+    out = cli("buy", "AAPL", "1", "100", "-a", "Current TFSA")
+    assert out.exit_code == 1 and "restored from a backup while this was being saved" in out.output
+    assert store.transactions() == [] and [a.name for a in store.accounts()] == ["Other RRSP"]
 
 
 def test_backup_restore_latest_ignores_the_backup_taken_on_startup(cli, store, tracker, monkeypatch):

@@ -465,3 +465,29 @@ def test_backfill_spanning_a_restore_writes_nothing(tracker, store, fake, monkey
     monkeypatch.setattr(tracker.market, "daily_closes", restore_while_closes_load)
     assert tracker.backfill() == 0 and restored and store.snapshots() == []
     assert tracker.backfill() == 2  # rebuilt from the restored ledger, once nothing replaced it midway
+
+
+def test_a_save_spanning_a_restore_is_refused(tracker, store, monkeypatch):
+    acct = store.add_account(Account(name="Main"))
+    store.add_transaction(
+        Transaction(account_id=acct.id, type=TxnType.BUY, date="2024-01-02", symbol="AAPL", quantity=10, price=100)
+    )
+    taken = store.backup()
+    store.add_transaction(
+        Transaction(account_id=acct.id, type=TxnType.BUY, date="2024-01-03", symbol="AAPL", quantity=20, price=100)
+    )
+    real_quote = tracker.market.quote
+
+    def restore_while_currency_resolves(symbol):
+        store.restore(taken)  # `marketpulse backup restore` in a terminal, mid-save
+        return real_quote(symbol)
+
+    monkeypatch.setattr(tracker.market, "quote", restore_while_currency_resolves)
+    # Checked against 30 shares before the restore; the restored ledger has 10.
+    sale = Transaction(account_id=acct.id, type=TxnType.SELL, date="2024-02-01", symbol="AAPL", quantity=25, price=1)
+    with pytest.raises(ValueError, match="restored from a backup while this was being saved"):
+        tracker.add_transaction(sale)
+    assert [t.quantity for t in store.transactions()] == [10]
+    monkeypatch.setattr(tracker.market, "quote", real_quote)
+    with pytest.raises(ValueError, match="only 10 held"):
+        tracker.add_transaction(replace(sale, currency=""))

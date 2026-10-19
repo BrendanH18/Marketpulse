@@ -335,25 +335,32 @@ class Store:
         else:
             target = Path(dest).expanduser()
         target.parent.mkdir(parents=True, exist_ok=True)
-        copy = sqlite3.connect(target)
+        existed = target.exists()
         try:
-            with self._lock:
-                if self._in_transaction:
-                    # The backup API can't read through a connection with its own transaction
-                    # open (it waits forever); a second connection reads the committed state
-                    # alongside it (WAL). That's only the right state, and only safe from a
-                    # lock wait, before this transaction has written anything.
-                    if self._conn.total_changes != self._changes_at_begin:
-                        raise RuntimeError("Back up before writing inside a transaction.")
-                    source = sqlite3.connect(self.path)
-                    try:
-                        source.backup(copy)
-                    finally:
-                        source.close()
-                else:
-                    self._conn.backup(copy)
-        finally:
-            copy.close()
+            copy = sqlite3.connect(target)
+            try:
+                with self._lock:
+                    if self._in_transaction:
+                        # The backup API can't read through a connection with its own transaction
+                        # open (it waits forever); a second connection reads the committed state
+                        # alongside it (WAL). That's only the right state, and only safe from a
+                        # lock wait, before this transaction has written anything.
+                        if self._conn.total_changes != self._changes_at_begin:
+                            raise RuntimeError("Back up before writing inside a transaction.")
+                        source = sqlite3.connect(self.path)
+                        try:
+                            source.backup(copy)
+                        finally:
+                            source.close()
+                    else:
+                        self._conn.backup(copy)
+            finally:
+                copy.close()
+        except BaseException:
+            # A partial copy (full disk, say) would be listed, and offered for restore, as a good backup.
+            if not existed:
+                target.unlink(missing_ok=True)
+            raise
         if dest is None and reason in self._AUTO_REASONS:
             self.prune_backups(reason)
         return target
@@ -433,27 +440,39 @@ class Store:
                 # ATTACH isn't allowed inside a transaction, so it comes first.
                 self._conn.execute("ATTACH DATABASE ? AS restored", (str(staged),))
                 safety: Path | None = None
+                step = "lock"
                 try:
                     with self.transaction():
+                        step = "safety"
                         safety = self.backup(reason="pre-restore")
+                        step = "swap"
                         self._replace_from("restored")
                         self.set_meta(RESTORE_ID_KEY, uuid4().hex)
-                except sqlite3.Error as e:
+                except (OSError, sqlite3.Error) as e:
                     # Rolled back: the safety copy is of a ledger that didn't change.
                     if safety is not None:
                         safety.unlink(missing_ok=True)
-                    raise RestoreError(f"{source.name} doesn't match this ledger's tables: {e}") from e
+                    raise RestoreError(
+                        {
+                            "lock": f"The ledger is busy in another MarketPulse window, so {source.name} "
+                            f"wasn't restored: {e}",
+                            "safety": f"Couldn't back up the current ledger first, so {source.name} "
+                            f"wasn't restored: {e}",
+                            "swap": f"{source.name} doesn't match this ledger's tables: {e}",
+                        }[step]
+                    ) from e
                 finally:
                     self._conn.execute("DETACH DATABASE restored")
         assert safety is not None
         return safety
 
     @property
-    def restore_id(self) -> str | None:
-        """Read before deriving something from the ledger; pass to `restored_since` before writing it."""
-        return self.get_meta(RESTORE_ID_KEY)
+    def restore_id(self) -> str:
+        """Read before deriving something from the ledger; pass to `restored_since` before writing it.
+        Empty for a ledger that has never been restored."""
+        return self.get_meta(RESTORE_ID_KEY) or ""
 
-    def restored_since(self, restore_id: str | None) -> bool:
+    def restored_since(self, restore_id: str) -> bool:
         """Whether a restore replaced the ledger after `restore_id` was read. Check it inside
         `transaction()`, which keeps a restore from starting before the write commits."""
         return self.restore_id != restore_id
@@ -502,6 +521,16 @@ class Store:
                 raise
             finally:
                 self._in_transaction = False
+
+    @contextmanager
+    def atomic(self) -> Iterator[None]:
+        """`transaction()`, or the one already open on this store (a caller's reads and writes join it)."""
+        with self._lock:
+            if self._in_transaction:
+                yield
+            else:
+                with self.transaction():
+                    yield
 
     @contextmanager
     def _write(self) -> Iterator[None]:

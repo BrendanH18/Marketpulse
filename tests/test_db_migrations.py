@@ -313,3 +313,26 @@ def test_no_other_process_can_write_between_the_safety_backup_and_the_swap(store
     monkeypatch.setattr(Store, "backup", backup_then_try_to_write)
     store.restore(taken)
     assert blocked == [True] and _names(store) == ["Main"]
+
+
+def test_restore_reports_a_failed_safety_backup_and_leaves_no_partial_file(store, monkeypatch):
+    _seed(store)
+    taken = store.backup()
+    real_backup = Store.backup
+
+    def disk_full_for_the_safety_copy(self, reason="manual", dest=None):
+        if reason == "pre-restore":
+            raise OSError(28, "No space left on device")
+        return real_backup(self, reason=reason, dest=dest)
+
+    monkeypatch.setattr(Store, "backup", disk_full_for_the_safety_copy)
+    _unchanged_after(store, taken, "Couldn't back up the current ledger first.*No space left")
+
+
+def test_a_failed_backup_leaves_no_partial_copy_behind(store):
+    _seed(store)
+    with pytest.raises(RuntimeError, match="Back up before writing"):
+        with store.transaction():
+            store.add_account(Account(name="Pending"))
+            store.backup(reason="manual")  # the copy file is opened before this is refused
+    assert store.backups() == []

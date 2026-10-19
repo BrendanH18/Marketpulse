@@ -93,22 +93,36 @@ class Tracker:
         except MarketError:
             return guess_currency(symbol, account.currency), None
 
-    def add_transaction(self, txn: Transaction) -> Transaction:
+    def add_transaction(self, txn: Transaction, *, restore_id: str | None = None) -> Transaction:
+        """Record `txn`. A caller that looked up its account or holdings first passes the
+        `store.restore_id` it read before doing so, so a restore since then refuses the save."""
+        if restore_id is None:
+            restore_id = self.store.restore_id
         if not txn.currency:
             acct = self.store.get_account(txn.account_id)
             if acct is None:
                 raise ValueError("Unknown account.")
+            # May fetch a quote, so it stays outside the write lock below.
             txn.currency, _ = self.resolve_currency(txn.symbol, acct)
         txn.validate()
-        if txn.type.value == "SELL":
-            state = self.store.ledger()
-            h = state.holdings.get((txn.account_id, txn.symbol))
-            held = h.quantity if h else 0.0
-            if txn.quantity > held + EPSILON:
+        # The checks and the write hold the write lock together: no restore (or sale in another
+        # window) can land between them.
+        with self.store.atomic():
+            if self.store.restored_since(restore_id):
+                # The account looked up above may now be a different one, or gone.
                 raise ValueError(
-                    f"Cannot sell {fmt.qty(txn.quantity)} {txn.symbol} — only {fmt.qty(held)} held in this account."
+                    "The portfolio was restored from a backup while this was being saved, so it wasn't "
+                    "saved. Check the portfolio and enter it again."
                 )
-        return self.store.add_transaction(txn)
+            if txn.type.value == "SELL":
+                state = self.store.ledger()
+                h = state.holdings.get((txn.account_id, txn.symbol))
+                held = h.quantity if h else 0.0
+                if txn.quantity > held + EPSILON:
+                    raise ValueError(
+                        f"Cannot sell {fmt.qty(txn.quantity)} {txn.symbol} — only {fmt.qty(held)} held in this account."
+                    )
+            return self.store.add_transaction(txn)
 
     # ── valuation ─────────────────────────────────────────────────────────────
 

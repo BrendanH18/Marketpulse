@@ -65,6 +65,7 @@ class App:
         self.palette = resolve_palette(self.config.theme)
         self.console = Console(theme=RichTheme(rich_styles(self.palette)), highlight=False)
         self._tracker: Tracker | None = None
+        self.restore_id = ""
         self.request_id: str | None = None
         self.request_fingerprint = ""
 
@@ -75,6 +76,8 @@ class App:
             from .services import Tracker
 
             self._tracker = Tracker.open(self.config)
+            # Before this command reads anything: a restore after this point replaces what it read.
+            self.restore_id = self._tracker.store.restore_id
         return self._tracker
 
     @property
@@ -527,9 +530,12 @@ def _record(app: App, txn: Transaction) -> Transaction:
     try:
         if app.request_id is not None:
             return record_once(
-                app.store, app.request_id, app.request_fingerprint, lambda: app.tracker.add_transaction(txn)
+                app.store,
+                app.request_id,
+                app.request_fingerprint,
+                lambda: app.tracker.add_transaction(txn, restore_id=app.restore_id),
             )
-        return app.tracker.add_transaction(txn)
+        return app.tracker.add_transaction(txn, restore_id=app.restore_id)
     except ValueError as e:
         fail(str(e))
 
@@ -1492,11 +1498,12 @@ def backup_list(app: App) -> None:
 
 
 @backup.command("restore")
-@click.argument("path", type=click.Path(dir_okay=False, path_type=Path), required=False)
+# A str, not a Path: Path("./name") drops the "./" that marks an explicit local file.
+@click.argument("path", type=click.Path(dir_okay=False), required=False)
 @click.option("--latest", is_flag=True, help="Restore the newest backup in the backups directory.")
 @click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation.")
 @pass_app
-def backup_restore(app: App, path: Path | None, latest: bool, yes: bool) -> None:
+def backup_restore(app: App, path: str | None, latest: bool, yes: bool) -> None:
     """Replace the ledger with a backup (a PATH, or a file name from `backup list`).
 
     \b
@@ -1526,13 +1533,16 @@ def backup_restore(app: App, path: Path | None, latest: bool, yes: bool) -> None
         source = candidates[0]
     else:
         assert path is not None
-        source = path.expanduser()
-        if not source.exists() and source.name == str(path) and (store.backup_dir / source.name).exists():
-            source = store.backup_dir / source.name
+        source = Path(path).expanduser()
+        # A bare name is one from `backup list`, even if the current folder has a file called that too.
+        if path == source.name and (store.backup_dir / path).exists():
+            source = store.backup_dir / path
     taken = store.backup_time(source)
     when = f" (taken {taken:%Y-%m-%d %H:%M})" if taken else ""
+    # A file outside the backups folder is shown in full, so it can't pass for one in it.
+    shown = source.name if source.parent == store.backup_dir else str(source.resolve())
     if not yes and not click.confirm(
-        f"Replace the ledger in {store.path.parent} with {source.name}{when}? The current ledger is backed up first."
+        f"Replace the ledger in {store.path.parent} with {shown}{when}? The current ledger is backed up first."
     ):
         return
     try:
