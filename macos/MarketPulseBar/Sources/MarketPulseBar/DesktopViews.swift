@@ -147,7 +147,7 @@ struct PortfolioWindow: View {
         .disabled(!model.canEdit).keyboardShortcut("n")
       }
     }
-    .sheet(item: $draft.sheet) { item in
+    .sheet(item: $draft.sheet, onDismiss: presentWelcome) { item in
       switch item {
       case .transaction: TransactionSheet(model: model)
       case .account: AccountSheet(model: model)
@@ -174,17 +174,30 @@ struct PortfolioWindow: View {
           })
       }
     }
-    .onChange(of: model.welcomeRequested, initial: true) { _, requested in
-      guard requested else { return }
-      model.welcomeRequested = false
-      // Never cover a form the user is filling in; a new ledger asks again on the next refresh.
-      guard draft.sheet == nil && !model.showImport else { return }
-      model.markWelcomeShown()
-      draft.sheet = .welcome
-    }
-    .sheet(isPresented: $model.showImport, onDismiss: { model.closeImport() }) {
+    .onChange(of: model.welcomeRequest, initial: true) { _, _ in presentWelcome() }
+    .sheet(
+      isPresented: $model.showImport,
+      onDismiss: {
+        model.closeImport()
+        presentWelcome()
+      }
+    ) {
       ImportSheet(model: model)
     }
+  }
+
+  /// Shows a requested welcome, or leaves the request pending until the open sheet closes:
+  /// never cover a form the user is filling in.
+  private func presentWelcome() {
+    guard model.welcomeRequest != nil else { return }
+    if draft.sheet == .welcome {
+      model.welcomeRequest = nil
+      return
+    }
+    guard draft.sheet == nil && !model.showImport else { return }
+    model.welcomeRequest = nil
+    model.markWelcomeShown()
+    draft.sheet = .welcome
   }
 
   private var sidebar: some View {

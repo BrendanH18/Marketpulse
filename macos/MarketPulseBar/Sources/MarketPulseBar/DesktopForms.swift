@@ -255,11 +255,13 @@ struct WelcomeSheet: View {
       VStack(spacing: 10) {
         choice(
           "Create your first account", icon: "building.columns",
-          detail: "Add an account, then record what you bought or deposited.", action: createAccount)
+          detail: "Add an account, then record what you bought or deposited.", action: createAccount
+        ).disabled(model.demoOnly)
         choice(
           "Import a CSV", icon: "square.and.arrow.down",
           detail: "Bring in transactions exported from your broker. You'll see a preview before anything is saved.",
-          action: importCSV)
+          action: importCSV
+        ).disabled(model.demoOnly)
         if model.demo {
           choice(
             "Leave the demo", icon: "arrow.uturn.backward",
@@ -269,7 +271,8 @@ struct WelcomeSheet: View {
           choice(
             "Explore a demo portfolio", icon: "sparkles",
             detail: "Look around with fictional investments. Nothing is saved, and you can leave the demo at any time.",
-            action: exploreDemo)
+            action: exploreDemo
+          ).disabled(!model.canEnterDemo)
         }
       }.disabled(model.saving)
       if !model.demo, let base = model.status?.base {

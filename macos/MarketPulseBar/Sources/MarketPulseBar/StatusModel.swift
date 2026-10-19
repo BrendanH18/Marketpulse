@@ -43,8 +43,10 @@ final class StatusModel: ObservableObject {
   let demoOnly = CommandLine.arguments.contains("--demo")
   /// The real ledger's folder, kept while the demo shows its temporary one.
   @Published private(set) var dataDir: String?
-  /// Asks the portfolio window to show the welcome sheet; the window clears it.
-  @Published var welcomeRequested = false
+  enum WelcomeRequest { case firstRun, help }
+  /// Asks the portfolio window to show the welcome sheet. It stays pending while another sheet
+  /// is open; the window clears it once the welcome is showing.
+  @Published var welcomeRequest: WelcomeRequest?
   private var portfolioController: PortfolioWindowController?
   var menuBarOnly: Bool { Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool ?? false }
 
@@ -57,6 +59,12 @@ final class StatusModel: ObservableObject {
 
   private var timer: Timer?
   private var reloadGeneration = 0
+  /// Real-ledger reloads still running, superseded ones included: dropping a result doesn't stop
+  /// the backend from finishing its refresh.
+  @Published private var realReloads = 0
+  /// Entering the demo waits for every real refresh, which may still record snapshots, take
+  /// backups or fire alerts after the window has switched.
+  var canEnterDemo: Bool { !demo && !saving && !loading && !showImport && realReloads == 0 }
   // A background refresh doesn't block edits: the edit's own reload supersedes it.
   var canEdit: Bool { !demo && !saving && desktop != nil }
 
@@ -106,7 +114,11 @@ final class StatusModel: ObservableObject {
     // Entering or leaving the demo mid-reload starts a newer reload; this one keeps its ledger.
     let demo = self.demo
     loading = true
-    defer { if generation == reloadGeneration { loading = false } }
+    if !demo { realReloads += 1 }
+    defer {
+      if !demo { realReloads -= 1 }
+      if generation == reloadGeneration { loading = false }
+    }
     let decoder = JSONDecoder()
     decoder.keyDecodingStrategy = .convertFromSnakeCase
     let desktopError: String
@@ -124,7 +136,10 @@ final class StatusModel: ObservableObject {
       lastUpdated = Date()
       if !demo, let folder = payload.storage?.dataDir { dataDir = folder }
       if !demo && payload.ledgerEmpty && !UserDefaults.standard.bool(forKey: Self.welcomeShownKey) {
-        welcomeRequested = true
+        welcomeRequest = welcomeRequest ?? .firstRun
+      } else if welcomeRequest == .firstRun {
+        // The ledger has something in it now, so a first-run offer still waiting is moot.
+        welcomeRequest = nil
       }
       return
     } catch let error as DecodingError {
@@ -162,7 +177,7 @@ final class StatusModel: ObservableObject {
   /// The Help menu's way back to the welcome, whatever the ledger holds.
   func showWelcome() {
     showPortfolio()
-    welcomeRequested = true
+    welcomeRequest = .help
   }
 
   /// Called when the window shows the welcome, so a new ledger offers it only once.
@@ -173,7 +188,7 @@ final class StatusModel: ObservableObject {
   /// Shows the fictional portfolio in place of the user's. The demo has its own temporary
   /// ledger in the backend: nothing is read from or written to the real one until `leaveDemo`.
   func enterDemo() {
-    guard !demo && !saving && !showImport else { return }
+    guard canEnterDemo else { return }
     demo = true
     switchLedger()
   }

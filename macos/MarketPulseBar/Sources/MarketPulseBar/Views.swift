@@ -59,7 +59,7 @@ struct HelpCommands: View {
             Button("Explore a Demo Portfolio") {
                 model.showPortfolio()
                 model.enterDemo()
-            }.disabled(model.saving || model.showImport)
+            }.disabled(!model.canEnterDemo)
         }
     }
 }

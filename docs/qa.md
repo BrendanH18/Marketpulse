@@ -118,7 +118,9 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     - Rebuild with `--empty`, then **Create your first account:** the account form opens,
       and the new account appears on Overview. Changing **Show totals in** to USD before
       that changes the footer to "USD".
-    With the seeded ledger (no `--empty`), the welcome never appears by itself.
+    With the seeded ledger (no `--empty`), the welcome never appears by itself. With the
+    **Record transaction** sheet open, **Help › Welcome to MarketPulse** shows the welcome
+    as soon as you cancel that sheet, not on top of it.
 
 Quit the QA app with ⌘Q when done.
 
