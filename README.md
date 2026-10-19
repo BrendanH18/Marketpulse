@@ -40,11 +40,35 @@ estimates; review them against your own records before relying on them.
 
 ## Get started
 
+### Download the Mac app
+
+`MarketPulse.app` runs on macOS 14 or later (Apple silicon or Intel) and needs nothing
+else installed. Paste this into Terminal ([read the script first](scripts/install.sh)):
+
+```bash
+curl -fsSL https://github.com/BrendanH18/Marketpulse/releases/latest/download/install.sh | bash
+```
+
+It downloads the latest release for your Mac, checks it against the release's published
+SHA-256 checksums, installs it to `~/Applications`, and opens it. Because it downloads with
+`curl`, macOS doesn't show a security prompt.
+
+Prefer to download it yourself? Get the DMG from the
+[latest release](https://github.com/BrendanH18/Marketpulse/releases/latest) and follow the
+[install guide](docs/install.md#install-from-the-dmg). The app is free and not notarized by
+Apple, so on macOS 15 and later you allow it once in **System Settings › Privacy & Security ›
+Open Anyway**. The guide also explains [why the app is unsigned](docs/install.md#why-the-app-is-unsigned),
+how to [verify a download](docs/install.md#verify-a-download), and how to
+[uninstall](docs/install.md#uninstall). The app ships with releases after 2.1.0; for 2.1.0,
+build it from a checkout ([macOS and Omarchy](#macos-and-omarchy)).
+
+### Command line and terminal interface
+
 You need **Python 3.11+**, [uv](https://docs.astral.sh/uv/getting-started/installation/),
 and a terminal with Unicode and color support. Linux and macOS are the primary
 platforms; the menu bar companion requires macOS 14+ and the Xcode Command Line Tools.
 
-### Install from a release tag
+#### Install from a release tag
 
 Install a pinned release so you are not tracking `main`. Prefer the tag shown on
 the [latest GitHub Release](https://github.com/BrendanH18/Marketpulse/releases)
@@ -74,7 +98,7 @@ Until then, the git-tag commands above are the supported versioned path.
 For contributors and for building the macOS menu bar companion, use an editable
 source checkout documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-### Development / unpinned (`main`)
+#### Development / unpinned (`main`)
 
 To follow current `main` instead of a release tag (unpinned; suitable for
 trying unreleased changes, not for a pinable upgrade):
@@ -123,7 +147,7 @@ MARKETPULSE_DATA="$PWD/.marketpulse/demo" marketpulse
 The demo uses your normal display configuration and fetches current market data.
 Its portfolio is separate from your default database.
 
-### Updating and uninstalling
+#### Updating and uninstalling
 
 Quit the TUI and menu bar companion, back up, then reinstall from the newer tag
 (replace the tag with the one you want):
@@ -143,6 +167,7 @@ uv tool uninstall marketpulse
 ```
 
 Re-run `marketpulse menubar install` after upgrading an editable companion checkout.
+To update or remove the downloaded Mac app, see the [install guide](docs/install.md#update).
 
 ## Find your way around
 
@@ -182,7 +207,8 @@ manual assets, transfers, contribution room, alerts, and integrations.
 
 ## macOS and Omarchy
 
-For the full native portfolio app, use an editable source checkout and run:
+The easiest way to get the native portfolio app is to [download it](#download-the-mac-app).
+To build it from an editable source checkout instead, run:
 
 ```bash
 uv tool install --python 3.11 --editable .

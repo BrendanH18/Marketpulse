@@ -49,6 +49,8 @@ def test_notes_are_only_that_versions_section(release):
     notes = release.release_notes(CHANGELOG, "1.2.0")
     assert notes.startswith("### Added\n\n- A feature.\n\n## Downloads")
     assert "MarketPulse-1.2.0-macos-arm64" in notes and "shasum -a 256 -c SHA256SUMS" in notes
+    assert "releases/download/v1.2.0/install.sh | bash -s -- --version v1.2.0" in notes
+    assert "blob/v1.2.0/scripts/install.sh" in notes and "blob/v1.2.0/docs/install.md" in notes
     assert "not shipped" not in notes and "older" not in notes
 
 

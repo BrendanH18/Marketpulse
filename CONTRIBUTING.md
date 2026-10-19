@@ -177,7 +177,8 @@ commit is on `main` and CI is green.
    early if the tag isn't `v` plus `__version__` or `CHANGELOG.md` has no section
    for the version. It then runs the CI checks, builds the wheel, sdist, and
    `MarketPulse.app` for arm64 and x86_64 (`scripts/build_app.py`), packages each
-   app as a zip and a DMG, and writes `SHA256SUMS` (`scripts/release.py package`).
+   app as a zip and a DMG, attaches `scripts/install.sh`, and writes `SHA256SUMS`
+   (`scripts/release.py package`).
    `scripts/release.py verify` opens every artifact, checks that the app and the
    bundled backend both report the tag's version, the architecture, and the
    signature, and runs each app: arm64 on `macos-15`, x86_64 on `macos-15-intel`.
@@ -198,6 +199,9 @@ commit is on `main` and CI is green.
    ```
 
    Download one of the release zips, check it against `SHA256SUMS`, and open the app.
+   Run the one-line install from the [install guide](docs/install.md) on a fresh macOS
+   user account ([QA item 16](docs/qa.md#checklist)); the `latest` URL only resolves
+   once the release is published.
 
 **Dry run.** Before tagging, run the workflow from **Actions › Release › Run
 workflow** on the release branch (or `gh workflow run release.yml --ref <branch>`).

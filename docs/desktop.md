@@ -59,8 +59,9 @@ tested only if Rosetta is installed; `--skip-smoke` skips the test.
 | x86_64 | 79 MB | 32 MB |
 
 Releases are built by the tag-triggered workflow, not on anyone's Mac: each version's
-GitHub Release has the arm64 and x86_64 apps as zips and DMGs, with `SHA256SUMS`
-(see the release checklist in [CONTRIBUTING.md](../CONTRIBUTING.md#maintainer-release-checklist)).
+GitHub Release has the arm64 and x86_64 apps as zips and DMGs, `SHA256SUMS`, and
+`install.sh` (see the release checklist in [CONTRIBUTING.md](../CONTRIBUTING.md#maintainer-release-checklist)).
+To install a release, see the [install guide](install.md).
 
 The app uses the same data (`~/.marketpulse`) and settings
 (`~/.config/marketpulse/config.toml`) as the CLI and TUI, and honours

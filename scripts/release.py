@@ -6,9 +6,10 @@
     uv run --locked python scripts/release.py verify dist/release --require-smoke arm64
 
 `package` turns each `<apps>/<arch>/MarketPulse.app` from scripts/build_app.py into a zip
-(`ditto -c -k --keepParent`, which keeps symlinks and signatures) and a DMG, copies the wheel and
-sdist, and writes SHA256SUMS. `verify` checks the checksums, then opens every zip and DMG and checks
-the versions, architectures, and signatures inside, and smoke-tests each app this Mac can run.
+(`ditto -c -k --keepParent`, which keeps symlinks and signatures) and a DMG, copies the wheel,
+sdist, and scripts/install.sh, and writes SHA256SUMS. `verify` checks the checksums, then opens every
+zip and DMG and checks the versions, architectures, and signatures inside, and smoke-tests each app this
+Mac can run.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from marketpulse import __version__
 ROOT = Path(__file__).resolve().parents[1]
 APP = "MarketPulse.app"
 SUMS = "SHA256SUMS"
+INSTALLER = "install.sh"
 
 
 def _build_app():
@@ -68,9 +70,15 @@ def changelog_section(changelog: str, version: str) -> str:
 
 
 def release_notes(changelog: str, version: str) -> str:
+    repo = "https://github.com/BrendanH18/Marketpulse"
     return (
         changelog_section(changelog, version)
         + "\n\n## Downloads\n\n"
+        + "Install the Mac app with one command, which checks the download against `SHA256SUMS` and avoids "
+        + f"macOS's security prompt ([read the script]({repo}/blob/v{version}/scripts/{INSTALLER}) first):\n\n"
+        + f"```bash\ncurl -fsSL {repo}/releases/download/v{version}/{INSTALLER}"
+        + f" | bash -s -- --version v{version}\n```\n\n"
+        + f"Or download it yourself and follow the [install guide]({repo}/blob/v{version}/docs/install.md). "
         + f"`MarketPulse-{version}-macos-arm64` is for Apple silicon Macs, `-x86_64` for Intel Macs; each "
         + "comes as a zip and a DMG. The apps are ad-hoc signed, not notarized by Apple. Check what you "
         + f"downloaded against `{SUMS}`:\n\n```bash\nshasum -a 256 -c {SUMS} --ignore-missing\n```\n"
@@ -143,6 +151,7 @@ def package(apps: Path, python_dist: Path, out: Path, version: str = __version__
                 f"Expected one {pattern} in {python_dist}, found {len(found)}; run `uv build --no-sources`."
             )
         shutil.copy2(found[0], out / found[0].name)
+    shutil.copy2(ROOT / "scripts" / INSTALLER, out / INSTALLER)
     write_sums(out)
     for path in sorted(out.iterdir()):
         print(f"{path.name}  ({path.stat().st_size / 1_000_000:.0f} MB)")
@@ -183,9 +192,11 @@ def verify(folder: Path, version: str = __version__, require_smoke: tuple[str, .
     pattern = re.compile(rf"MarketPulse-{re.escape(version)}-macos-(arm64|x86_64)\.(zip|dmg)")
     apps = [(p, m.group(1)) for p in files if (m := pattern.fullmatch(p.name))]
     expected = {f"MarketPulse-{version}-macos-{a}.{ext}" for a in ("arm64", "x86_64") for ext in ("zip", "dmg")}
-    expected |= {f"marketpulse-{version}-py3-none-any.whl", f"marketpulse-{version}.tar.gz"}
+    expected |= {f"marketpulse-{version}-py3-none-any.whl", f"marketpulse-{version}.tar.gz", INSTALLER}
     if {p.name for p in files} != expected:
         raise SystemExit(f"Expected exactly {sorted(expected)}, found {sorted(p.name for p in files)}.")
+    if (folder / INSTALLER).read_bytes() != (ROOT / "scripts" / INSTALLER).read_bytes():
+        raise SystemExit(f"{INSTALLER} isn't this checkout's scripts/{INSTALLER}.")
     ran = set()
     for path, arch in apps:
         smoke = build_app.can_run(arch)
