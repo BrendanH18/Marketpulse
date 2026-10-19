@@ -83,6 +83,18 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     for correction/cancellation and Activity has no new entry. Never change the
     real CLI or point the wrapper at a real ledger.
 
+16. **Fresh install** (release verification only). Use a new macOS user account
+    (System Settings › Users & Groups), so no real portfolio or earlier install is
+    involved; check macOS 14 and macOS 15 or later when you can. Run the one-line
+    install from the [install guide](install.md) for the release under test, with
+    `--version`: it prints "Checksum verified", installs to `~/Applications`, and the
+    app opens with **no security dialog**. **About MarketPulse** shows that version and
+    "Bundled with the app". Then delete the app, download the DMG in Safari, and follow
+    the guide's DMG steps: macOS blocks the first launch, **Open Anyway** (macOS 15+) or
+    Control-click › Open (macOS 14) opens it, and later launches don't ask. Finally,
+    follow the guide's Uninstall steps. (Tampered downloads are covered by
+    `tests/test_install_script.py`.)
+
 Quit the QA app with ⌘Q when done.
 
 ## Tool limits and workarounds
@@ -97,6 +109,6 @@ menu bar. Then:
 
 ## Reporting
 
-Post results on the PR (or the issue being verified) as a table of items 1–15 with
+Post results on the PR (or the issue being verified) as a table of items 1–16 with
 PASS / FAIL / UNVERIFIED and evidence, then any bugs with exact steps to reproduce.
 Clean up with `rm -rf "$TMPDIR/marketpulse-qa"`.

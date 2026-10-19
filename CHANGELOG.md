@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A one-line install for the Mac app: `scripts/install.sh`, attached to each release,
+  downloads the app with `curl`, checks it against `SHA256SUMS`, its bundle ID, version,
+  and signature, and installs it to `~/Applications` without a Gatekeeper prompt.
+  A new [install guide](docs/install.md) covers the DMG route with Open Anyway, verifying
+  downloads, why the app is unsigned, and uninstalling; `SECURITY.md` explains how
+  releases are produced and verified.
+
 - A native macOS portfolio window with charts, holdings/activity search,
   account/transaction/alert forms, CSV preview/import, export, income, and
   automation status. Install from an editable checkout with `marketpulse desktop install`.
