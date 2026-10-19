@@ -24,9 +24,13 @@ cleanup() { # keeps the exit status, which bash 3.2 would otherwise take from th
     local status=$?
     if [ -n "$TMP" ]; then rm -rf "$TMP"; fi
     if [ -n "$STAGE" ]; then
-        # Interrupted between moving the old app aside and the new one in: put the old one back.
-        if [ -d "$STAGE/previous.app" ] && [ ! -e "$STAGE/../$APP" ]; then
-            mv "$STAGE/previous.app" "$STAGE/../$APP" || true
+        # Interrupted between moving the old app aside and the new one in: put the old one back,
+        # and if that fails too, keep it where it is rather than delete it with the rest.
+        if [ -d "$STAGE/previous.app" ] && [ ! -e "$STAGE/../$APP" ] &&
+            ! mv "$STAGE/previous.app" "$STAGE/../$APP"; then
+            printf 'MarketPulse install: your previous app is in %s; move it back to %s.\n' \
+                "$STAGE/previous.app" "$(dirname "$STAGE")/$APP" >&2
+            exit 1
         fi
         rm -rf "$STAGE"
     fi
@@ -57,8 +61,12 @@ die() {
     exit 1
 }
 
+# Give up on a connection that takes 30 s, or a transfer that stays under 1 kB/s for a minute.
+CURL=(curl --fail --silent --show-error --location --retry 3 --proto-redir "=https"
+    --connect-timeout 30 --speed-limit 1024 --speed-time 60)
+
 fetch() { # fetch URL FILE
-    curl --fail --silent --show-error --location --retry 3 --proto-redir =https --output "$2" "$1"
+    "${CURL[@]}" --output "$2" "$1"
 }
 
 detect_arch() {
@@ -76,8 +84,7 @@ detect_arch() {
 
 latest_tag() { # latest_tag BASE_URL: follow the /latest redirect to .../tag/vX.Y.Z
     local url
-    url=$(curl --fail --silent --show-error --location --retry 3 --proto-redir =https \
-        --head --output /dev/null --write-out '%{url_effective}' "$1/latest") ||
+    url=$("${CURL[@]}" --head --output /dev/null --write-out '%{url_effective}' "$1/latest") ||
         die "couldn't look up the latest release at $1/latest."
     case "$url" in
         */tag/*) printf '%s' "${url##*/tag/}" ;;
@@ -118,6 +125,12 @@ main() {
             *) die "unknown option $1 (see --help)." ;;
         esac
     done
+
+    # Over plain HTTP, anyone in between could swap the zip and SHA256SUMS together.
+    case "$base_url" in
+        https://* | file://*) ;;
+        *) die "--base-url must start with https:// (or file:// for a local copy)." ;;
+    esac
 
     [ "$(uname -s)" = Darwin ] ||
         die "MarketPulse.app is for macOS. The CLI and TUI run anywhere: https://github.com/$REPO#get-started"

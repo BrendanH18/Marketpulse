@@ -41,8 +41,10 @@ options after `bash -s --`, as above; `bash -s -- --help` lists them all.
 
 Why doesn't macOS ask about this app? Browsers mark the files they download as
 "quarantined", and macOS checks quarantined apps with Apple. `curl` doesn't add that mark,
-so the checks the script runs take the place of that prompt. See
-[why the app is unsigned](#why-the-app-is-unsigned).
+so the command skips that prompt. The script's own checks are narrower than Apple's: they
+show the zip is the one this GitHub release published and the app hasn't changed since it
+was built, not who built it, and Apple hasn't scanned it. Using the command means trusting
+this project's GitHub releases. See [why the app is unsigned](#why-the-app-is-unsigned).
 
 ## Install from the DMG
 

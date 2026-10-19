@@ -5,6 +5,7 @@ zipped with `ditto` the way scripts/release.py packages the real one.
 """
 
 import importlib.util
+import os
 import platform
 import plistlib
 import shutil
@@ -18,7 +19,18 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install.sh"
 VERSION = "9.8.7"
-ARCH = platform.machine()
+
+
+# What install.sh picks: the native architecture, even from a Python running under Rosetta.
+def _native_arch() -> str:
+    if sys.platform == "darwin" and platform.machine() == "x86_64":
+        translated = subprocess.run(["sysctl", "-n", "sysctl.proc_translated"], capture_output=True, text=True)
+        if translated.stdout.strip() == "1":
+            return "arm64"
+    return platform.machine()
+
+
+ARCH = _native_arch()
 
 macos = pytest.mark.skipif(sys.platform != "darwin", reason="installs a macOS app")
 
@@ -63,9 +75,9 @@ def publish(root: Path, release_module, *, tamper_zip=False, tamper_app=False, a
     return root.as_uri()
 
 
-def install(base_url: str, dest: Path, *args: str) -> subprocess.CompletedProcess:
+def install(base_url: str, dest: Path, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     command = ["bash", str(SCRIPT), "--base-url", base_url, "--dir", str(dest), "--no-open", *args]
-    return subprocess.run(command, capture_output=True, text=True, timeout=120)
+    return subprocess.run(command, capture_output=True, text=True, timeout=120, env=env)
 
 
 def installed_version(dest: Path) -> str:
@@ -121,6 +133,30 @@ def test_waits_for_the_open_app_to_quit_before_replacing_it(tmp_path, release_mo
         assert installed_version(dest) == VERSION
     finally:
         app.kill()
+
+
+@macos
+def test_keeps_the_previous_app_if_it_cant_be_put_back(tmp_path, release_module):
+    url = publish(tmp_path / "releases", release_module)
+    dest = tmp_path.resolve() / "Applications"
+    dest.mkdir()
+    make_app(dest, version="1.0.0")
+    # An `mv` that fails to move the new app in, and then fails to put the old one back.
+    shim = tmp_path / "bin"
+    shim.mkdir()
+    (shim / "mv").write_text(
+        '#!/bin/bash\ncase "$1" in */.marketpulse-install.*/MarketPulse.app | */previous.app) exit 1 ;; esac\n'
+        'exec /bin/mv "$@"\n'
+    )
+    (shim / "mv").chmod(0o755)
+    env = {**os.environ, "PATH": f"{shim}:{os.environ['PATH']}"}
+    result = install(url, dest, "--version", VERSION, env=env)
+    assert result.returncode != 0
+    assert "your previous app is in" in result.stderr
+    kept = list(dest.glob(".marketpulse-install.*/previous.app"))
+    assert len(kept) == 1 and str(kept[0]) in result.stderr
+    with open(kept[0] / "Contents" / "Info.plist", "rb") as f:
+        assert plistlib.load(f)["CFBundleShortVersionString"] == "1.0.0"
 
 
 @macos
@@ -184,6 +220,14 @@ def test_rejects_versions_that_arent_plain(tmp_path, version):
     result = install((tmp_path / "missing").as_uri(), tmp_path / "Applications", "--version", version)
     assert result.returncode != 0
     assert "isn't a version like" in result.stderr
+    assert not (tmp_path / "Applications").exists()
+
+
+@pytest.mark.parametrize("url", ["http://example.com/releases", "ftp://example.com/releases", "releases"])
+def test_rejects_mirrors_that_arent_https(tmp_path, url):
+    result = install(url, tmp_path / "Applications", "--version", "v1.0.0")
+    assert result.returncode != 0
+    assert "--base-url must start with https://" in result.stderr
     assert not (tmp_path / "Applications").exists()
 
 
