@@ -60,13 +60,26 @@ struct DesktopPayload: Decodable {
   let automation: AutomationReport
   /// Absent from older engines (e.g. an old CLI behind MARKETPULSE_CLI).
   let backend: BackendInfo?
+  /// Absent from older engines.
+  let storage: StorageInfo?
   let warnings: [String]
+
+  /// Nobody has used this ledger yet, so the app offers its welcome. Older engines don't
+  /// report archived accounts, so fall back to what the window can see.
+  var ledgerEmpty: Bool { storage?.empty ?? (accounts.isEmpty && activity.isEmpty) }
 }
 
 /// The engine that produced the payload.
 struct BackendInfo: Decodable {
   let version: String
   let python: String
+}
+
+/// Where the engine keeps the ledger. `dataDir` is nil in the demo, whose folder is temporary.
+struct StorageInfo: Decodable {
+  let dataDir: String?
+  /// No accounts at all, archived ones included.
+  let empty: Bool
 }
 
 struct DesktopAccount: Decodable, Identifiable {

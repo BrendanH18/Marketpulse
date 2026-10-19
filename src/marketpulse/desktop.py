@@ -66,6 +66,12 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         "automation": cycle.report,
         # Which engine answered: the app shows it, and release builds check it matches the tag.
         "backend": {"version": __version__, "python": platform.python_version()},
+        "storage": {
+            "data_dir": str(tracker.store.path.parent),
+            # A brand-new ledger, so the app offers its welcome. Archived accounts count: their
+            # owner has used MarketPulse before. Every transaction belongs to an account.
+            "empty": not tracker.store.accounts(include_archived=True),
+        },
         "warnings": [
             *[f"{i.date}: {i.message}" for i in state.issues],
             *[f"Excluded from totals: {s}" for s in view.excluded],
@@ -182,6 +188,8 @@ def demo_snapshot() -> dict:
             payload = snapshot(tracker)
             payload["demo"] = True
             payload["automation"]["backup"] = None
+            # The demo's folder is temporary; the app must never show it as the user's.
+            payload["storage"] = {"data_dir": None, "empty": False}
             return payload
         finally:
             store.close()

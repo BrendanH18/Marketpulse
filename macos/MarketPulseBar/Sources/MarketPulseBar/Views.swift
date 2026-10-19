@@ -17,6 +17,9 @@ struct MarketPulseBarApp: App {
             CommandGroup(after: .newItem) {
                 LedgerFileCommands(model: delegate.model)
             }
+            CommandGroup(replacing: .help) {
+                HelpCommands(model: delegate.model)
+            }
         }
     }
 }
@@ -41,6 +44,23 @@ struct LedgerFileCommands: View {
         Divider()
         Button("Import CSV…") { model.chooseImport() }.keyboardShortcut("i").disabled(!model.canEdit)
         Button("Export ledger…") { model.exportLedger() }.keyboardShortcut("e").disabled(!model.canEdit)
+    }
+}
+
+/// The way back to the welcome and the demo after the first run.
+struct HelpCommands: View {
+    @ObservedObject var model: StatusModel
+
+    var body: some View {
+        Button("Welcome to MarketPulse") { model.showWelcome() }
+        if model.demo {
+            Button("Leave the Demo") { model.leaveDemo() }.disabled(model.demoOnly || model.saving)
+        } else {
+            Button("Explore a Demo Portfolio") {
+                model.showPortfolio()
+                model.enterDemo()
+            }.disabled(model.saving || model.showImport)
+        }
     }
 }
 
@@ -84,6 +104,9 @@ struct TopBar: View {
     var body: some View {
         HStack(spacing: 8) {
             Text("MARKETPULSE").font(.system(size: 10, weight: .bold, design: .monospaced)).tracking(2).foregroundStyle(palette.accent)
+            if model.demo {
+                Text("DEMO · FICTIONAL").font(.system(size: 10, design: .monospaced)).foregroundStyle(palette.muted)
+            }
             if let state = model.status?.marketState, !state.isEmpty {
                 MarketDot(state: state, palette: palette)
             }

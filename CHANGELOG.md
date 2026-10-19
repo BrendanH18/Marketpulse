@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- First-run onboarding in the Mac app: a new ledger opens with a welcome sheet that
+  offers to create an account, import a CSV, or explore the demo, sets the currency
+  for totals, and says where data is stored. **Help › Welcome to MarketPulse** brings
+  it back. The fictional demo can now be entered and left inside the app.
+  `desktop snapshot` gains a `storage` object (`data_dir`, `empty`), and
+  `scripts/qa_app.py --empty` builds the QA app on an empty ledger.
+
 - A one-line install for the Mac app: `scripts/install.sh`, attached to each release,
   downloads the app with `curl`, checks it against `SHA256SUMS`, its bundle ID, version,
   and signature, and installs it to `~/Applications` without a Gatekeeper prompt.

@@ -82,6 +82,16 @@ so its preferences are separate from a checkout install's `MarketPulse Bar.app`.
 **Automation › About MarketPulse** shows the app version, the backend's MarketPulse
 and Python versions, and which of these the app is running.
 
+## First run
+
+On a brand-new ledger (no accounts, including archived ones) the portfolio window
+opens with a welcome sheet, once. It offers to create the first account, import a
+CSV, or explore the demo portfolio, lets you pick the currency totals are shown in
+(`base_currency`), and says where the ledger is stored. **Help › Welcome to
+MarketPulse** brings it back at any time, and the empty Overview's **Other ways to
+start…** button opens it too. The app remembers that it showed the welcome in its
+own preferences (`welcomeShown`), not in your ledger.
+
 ## Workspaces
 
 - **Overview:** net worth, daily change, unrealized gain, snapshot history,
@@ -173,7 +183,14 @@ Backups are local; see [data and restoration](data.md) for retention and recover
 
 ## Read-only demo
 
-Build without installing, then launch with a fictional portfolio:
+In the app, choose **Help › Explore a Demo Portfolio** (or the option on the welcome
+sheet). The window and menu bar switch to a fictional portfolio with a "Demo" banner
+and a **Leave demo** button; writes, refreshes on a timer, and the terminal are off
+until you leave. The demo is built in a temporary folder by
+`marketpulse desktop snapshot --demo`, so your ledger isn't read or changed.
+
+For screenshots and QA, build without installing, then launch the app in the demo for
+the whole session (it has no way back to a real ledger):
 
 ```bash
 uv sync --locked --dev
