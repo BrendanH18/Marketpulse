@@ -76,6 +76,18 @@ def test_desktop_bridge_reports_missing_prices(tracker):
     json.dumps(payload, allow_nan=False)
 
 
+def test_desktop_bridge_reports_where_data_lives_and_a_new_ledger(tracker, tmp_path):
+    storage = snapshot(tracker)["storage"]
+    assert storage == {"data_dir": str(tmp_path), "empty": True}
+    account = tracker.store.add_account(Account(name="Old TFSA"))
+    assert snapshot(tracker)["storage"]["empty"] is False
+    # Archiving hides the account, but its owner isn't new: no welcome again.
+    account.archived = True
+    tracker.store.update_account(account)
+    payload = snapshot(tracker)
+    assert payload["accounts"] == [] and payload["storage"]["empty"] is False
+
+
 def test_demo_never_opens_real_tracker(monkeypatch, tmp_path, notifications):
     def fail_open(*args, **kwargs):
         raise AssertionError("Real portfolio must not be opened")
@@ -87,6 +99,7 @@ def test_demo_never_opens_real_tracker(monkeypatch, tmp_path, notifications):
     assert payload["demo"] is True
     assert len(payload["positions"]) == 5
     assert len(payload["status"]["history"]) == 181
+    assert payload["storage"] == {"data_dir": None, "empty": False}
     assert not (tmp_path / "data").exists()
     assert notifications == []
 

@@ -36,7 +36,17 @@ final class StatusModel: ObservableObject {
   @Published var terminal: String {
     didSet { if !demo { UserDefaults.standard.set(terminal, forKey: "terminal") } }
   }
-  let demo = CommandLine.arguments.contains("--demo")
+  /// The fictional read-only demo is showing instead of the user's ledger.
+  @Published private(set) var demo: Bool
+  /// Launched with `--demo` (screenshots, QA): the demo for the whole session, with no way out
+  /// to the real ledger.
+  let demoOnly = CommandLine.arguments.contains("--demo")
+  /// The real ledger's folder, kept while the demo shows its temporary one.
+  @Published private(set) var dataDir: String?
+  enum WelcomeRequest { case firstRun, help }
+  /// Asks the portfolio window to show the welcome sheet. It stays pending while another sheet
+  /// is open; the window clears it once the welcome is showing.
+  @Published var welcomeRequest: WelcomeRequest?
   private var portfolioController: PortfolioWindowController?
   var menuBarOnly: Bool { Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool ?? false }
 
@@ -49,10 +59,17 @@ final class StatusModel: ObservableObject {
 
   private var timer: Timer?
   private var reloadGeneration = 0
+  /// Real-ledger reloads still running, superseded ones included: dropping a result doesn't stop
+  /// the backend from finishing its refresh.
+  @Published private var realReloads = 0
+  /// Entering the demo waits for every real refresh, which may still record snapshots, take
+  /// backups or fire alerts after the window has switched.
+  var canEnterDemo: Bool { !demo && !saving && !loading && !showImport && realReloads == 0 }
   // A background refresh doesn't block edits: the edit's own reload supersedes it.
   var canEdit: Bool { !demo && !saving && desktop != nil }
 
   init() {
+    demo = demoOnly
     let defaults = UserDefaults.standard
     hotKeyEnabled = defaults.object(forKey: "hotKeyEnabled") as? Bool ?? true
     let seconds = defaults.integer(forKey: "refreshSeconds")
@@ -64,7 +81,11 @@ final class StatusModel: ObservableObject {
   }
 
   var palette: Palette { Palette(status?.theme) }
-  var menuTitle: String { status?.title ?? (errorMessage == nil ? "MarketPulse" : "MarketPulse ⚠︎") }
+  var menuTitle: String {
+    let title = status?.title ?? (errorMessage == nil ? "MarketPulse" : "MarketPulse ⚠︎")
+    // Fictional numbers in the menu bar must never pass for the user's own.
+    return demo ? "Demo \(title)" : title
+  }
 
   func schedule() {
     timer?.invalidate()
@@ -90,8 +111,14 @@ final class StatusModel: ObservableObject {
   private func reload() async {
     reloadGeneration += 1
     let generation = reloadGeneration
+    // Entering or leaving the demo mid-reload starts a newer reload; this one keeps its ledger.
+    let demo = self.demo
     loading = true
-    defer { if generation == reloadGeneration { loading = false } }
+    if !demo { realReloads += 1 }
+    defer {
+      if !demo { realReloads -= 1 }
+      if generation == reloadGeneration { loading = false }
+    }
     let decoder = JSONDecoder()
     decoder.keyDecodingStrategy = .convertFromSnakeCase
     let desktopError: String
@@ -107,6 +134,13 @@ final class StatusModel: ObservableObject {
       status = payload.status
       errorMessage = nil
       lastUpdated = Date()
+      if !demo, let folder = payload.storage?.dataDir { dataDir = folder }
+      if !demo && payload.ledgerEmpty && !UserDefaults.standard.bool(forKey: Self.welcomeShownKey) {
+        welcomeRequest = welcomeRequest ?? .firstRun
+      } else if welcomeRequest == .firstRun {
+        // The ledger has something in it now, so a first-run offer still waiting is moot.
+        welcomeRequest = nil
+      }
       return
     } catch let error as DecodingError {
       desktopError = "Unexpected portfolio data (\(error)). Update MarketPulse and reinstall the app."
@@ -115,8 +149,10 @@ final class StatusModel: ObservableObject {
     }
     // The menu bar must not depend on the desktop bridge: fall back to the stable
     // `status --json` API. Never in the demo, which must not touch the real ledger.
+    // A superseded reload stops here: after entering the demo, it must not query the real ledger.
+    guard generation == reloadGeneration else { return }
     guard !demo else {
-      if generation == reloadGeneration { errorMessage = desktopError }
+      errorMessage = desktopError
       return
     }
     do {
@@ -132,6 +168,57 @@ final class StatusModel: ObservableObject {
       guard generation == reloadGeneration else { return }
       errorMessage = desktopError
     }
+  }
+
+  // MARK: Welcome and demo
+
+  static let welcomeShownKey = "welcomeShown"
+
+  /// The Help menu's way back to the welcome, whatever the ledger holds.
+  func showWelcome() {
+    showPortfolio()
+    welcomeRequest = .help
+  }
+
+  /// Called when the window shows the welcome, so a new ledger offers it only once.
+  func markWelcomeShown() {
+    if !demo { UserDefaults.standard.set(true, forKey: Self.welcomeShownKey) }
+  }
+
+  /// Shows the fictional portfolio in place of the user's. The demo has its own temporary
+  /// ledger in the backend: nothing is read from or written to the real one until `leaveDemo`.
+  func enterDemo() {
+    guard canEnterDemo else { return }
+    demo = true
+    switchLedger()
+  }
+
+  func leaveDemo() {
+    Task { await leaveDemoAndReload() }
+  }
+
+  /// Returns once the real portfolio has reloaded, so a follow-up edit (say, an import) can run.
+  func leaveDemoAndReload() async {
+    guard demo && !demoOnly && !saving else { return }
+    demo = false
+    switchLedger()
+    // reload() clears `loading` when this generation finishes, whether it succeeded or failed.
+    while loading { try? await Task.sleep(nanoseconds: 50_000_000) }
+  }
+
+  private func switchLedger() {
+    // Clear first, so neither portfolio is ever shown under the other's label.
+    desktop = nil
+    status = nil
+    errorMessage = nil
+    message = nil
+    lastUpdated = nil
+    schedule()
+    // Invalidate in-flight reloads now, not when the queued one starts, so none of them can
+    // still act on the ledger being left.
+    reloadGeneration += 1
+    loading = true
+    Task { await reload() }
   }
 
   @discardableResult

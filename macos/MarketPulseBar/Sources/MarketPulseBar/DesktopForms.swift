@@ -236,6 +236,99 @@ struct ImportSheet: View {
   }
 }
 
+/// First-run choices for a new ledger; also reachable from Help.
+struct WelcomeSheet: View {
+  @ObservedObject var model: StatusModel
+  let createAccount: () -> Void
+  let importCSV: () -> Void
+  let exploreDemo: () -> Void
+  @Environment(\.dismiss) private var dismiss
+  private static let currencies = ["CAD", "USD", "EUR", "GBP"]
+
+  var body: some View {
+    SheetLayout(
+      title: "Welcome to MarketPulse",
+      subtitle:
+        "Track your TFSA, RRSP, FHSA, and non-registered accounts. MarketPulse works out your adjusted cost base as you go.",
+      model: model
+    ) {
+      VStack(spacing: 10) {
+        choice(
+          "Create your first account", icon: "building.columns",
+          detail: "Add an account, then record what you bought or deposited.", action: createAccount
+        ).disabled(model.demoOnly)
+        choice(
+          "Import a CSV", icon: "square.and.arrow.down",
+          detail: "Bring in transactions exported from your broker. You'll see a preview before anything is saved.",
+          action: importCSV
+        ).disabled(model.demoOnly)
+        if model.demo {
+          choice(
+            "Leave the demo", icon: "arrow.uturn.backward",
+            detail: "Go back to your own portfolio.", action: { model.leaveDemo(); dismiss() }
+          ).disabled(model.demoOnly)
+        } else {
+          choice(
+            "Explore a demo portfolio", icon: "sparkles",
+            detail: "Look around with fictional investments. Nothing is saved, and you can leave the demo at any time.",
+            action: exploreDemo
+          ).disabled(!model.canEnterDemo)
+        }
+      }.disabled(model.saving)
+      if !model.demo, let base = model.status?.base {
+        Picker("Show totals in", selection: baseCurrency(base)) {
+          ForEach(Self.currencies.contains(base) ? Self.currencies : [base] + Self.currencies, id: \.self) {
+            Text($0).tag($0)
+          }
+        }.disabled(!model.canEdit)
+        Text("Each account keeps its own currency. Totals are converted to this one.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      Label {
+        Text(
+          "Your portfolio stays on this Mac, in \(folder). It's never uploaded. MarketPulse goes online only to look up prices and exchange rates."
+        ).fixedSize(horizontal: false, vertical: true)
+      } icon: {
+        Image(systemName: "lock.shield")
+      }.font(.callout).foregroundStyle(.secondary)
+      HStack {
+        Spacer()
+        Button("Not now") { dismiss() }.keyboardShortcut(.cancelAction)
+      }
+    }
+  }
+
+  /// The ledger's folder, written the way Finder users think of it.
+  private var folder: String {
+    guard let path = model.dataDir else { return "a MarketPulse folder in your home folder" }
+    let home = NSHomeDirectory()
+    return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+  }
+
+  private func baseCurrency(_ current: String) -> Binding<String> {
+    Binding(get: { current }, set: { if $0 != current { model.setConfig("base_currency", $0) } })
+  }
+
+  private func choice(
+    _ title: String, icon: String, detail: String, action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      HStack(spacing: 14) {
+        Image(systemName: icon).font(.title2).frame(width: 30).foregroundStyle(.tint)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(title).font(.headline)
+          Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(
+            horizontal: false, vertical: true)
+        }
+        Spacer(minLength: 0)
+        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+      }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .contentShape(RoundedRectangle(cornerRadius: 10))
+    }.buttonStyle(.plain)
+  }
+}
+
 private struct SheetLayout<Content: View>: View {
   let title: String
   let subtitle: String

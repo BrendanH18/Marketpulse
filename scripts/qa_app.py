@@ -5,6 +5,7 @@ computer-use QA. Never touches your real ledger, settings, or installed app.
     uv run --locked python scripts/qa_app.py --menubar    # menu bar mode
     uv run --locked python scripts/qa_app.py --out ~/mp-qa --fresh
     uv run --locked python scripts/qa_app.py --bundled     # with its own Python, as releases ship
+    uv run --locked python scripts/qa_app.py --empty       # a brand-new ledger, for first-run onboarding
 
 The default folder is in your per-user temp directory ($TMPDIR on macOS), which other
 users can't write to. Then run the printed `launch.sh`, and follow docs/qa.md.
@@ -154,7 +155,11 @@ def main() -> None:
     parser.add_argument("--menubar", action="store_true", help="Menu bar mode (no Dock icon, no window at launch).")
     parser.add_argument("--fresh", action="store_true", help="Reset the scratch ledger, settings, and app defaults.")
     parser.add_argument("--bundled", action="store_true", help="Bundle a Python backend, as releases do.")
+    parser.add_argument(
+        "--empty", action="store_true", help="Start from an empty ledger, as a new user does. Implies --fresh."
+    )
     args = parser.parse_args()
+    args.fresh = args.fresh or args.empty
     out: Path = args.out.expanduser().resolve()
     check_out(out)
     if not out.exists():
@@ -177,7 +182,8 @@ def main() -> None:
         subprocess.run(["defaults", "delete", BUNDLE_ID], check=False, capture_output=True)
     if not (data / "marketpulse.db").exists():
         data.mkdir(parents=True, exist_ok=True)
-        seed(data)
+        if not args.empty:
+            seed(data)
     sample_csv(out / "sample-import.csv")
     app = build_app(out, args.menubar, args.bundled)
     # The bundled app finds its own backend; otherwise point it at this checkout's CLI.

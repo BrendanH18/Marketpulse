@@ -51,7 +51,7 @@ enum Workspace: String, CaseIterable, Identifiable {
 }
 
 enum DesktopSheet: String, Identifiable {
-  case transaction, account, alert
+  case transaction, account, alert, welcome
   var id: String { rawValue }
 }
 
@@ -83,7 +83,13 @@ struct PortfolioWindow: View {
         if let payload = model.desktop {
           if payload.demo {
             notice(
-              "Demo portfolio · Fictional data · Read-only", icon: "sparkles", color: Studio.mint)
+              "Demo portfolio · Fictional data · Read-only", icon: "sparkles", color: Studio.mint
+            ).overlay(alignment: .trailing) {
+              if !model.demoOnly {
+                Button("Leave demo") { model.leaveDemo() }.controlSize(.small).disabled(model.saving)
+                  .padding(.trailing, 30)
+              }
+            }
           }
           if payload.status.stale {
             notice(
@@ -141,16 +147,57 @@ struct PortfolioWindow: View {
         .disabled(!model.canEdit).keyboardShortcut("n")
       }
     }
-    .sheet(item: $draft.sheet) { item in
+    .sheet(item: $draft.sheet, onDismiss: presentWelcome) { item in
       switch item {
       case .transaction: TransactionSheet(model: model)
       case .account: AccountSheet(model: model)
       case .alert: AlertSheet(model: model)
+      case .welcome:
+        WelcomeSheet(
+          model: model,
+          createAccount: {
+            model.leaveDemo()
+            draft.sheet = .account
+          },
+          importCSV: {
+            draft.sheet = nil
+            // After the sheet closes (the file panel is modal, and the import sheet replaces this
+            // one) and, from the demo, once the real portfolio is back so editing is allowed.
+            Task {
+              await model.leaveDemoAndReload()
+              model.chooseImport()
+            }
+          },
+          exploreDemo: {
+            draft.sheet = nil
+            model.enterDemo()
+          })
       }
     }
-    .sheet(isPresented: $model.showImport, onDismiss: { model.closeImport() }) {
+    .onChange(of: model.welcomeRequest, initial: true) { _, _ in presentWelcome() }
+    .sheet(
+      isPresented: $model.showImport,
+      onDismiss: {
+        model.closeImport()
+        presentWelcome()
+      }
+    ) {
       ImportSheet(model: model)
     }
+  }
+
+  /// Shows a requested welcome, or leaves the request pending until the open sheet closes:
+  /// never cover a form the user is filling in.
+  private func presentWelcome() {
+    guard model.welcomeRequest != nil else { return }
+    if draft.sheet == .welcome {
+      model.welcomeRequest = nil
+      return
+    }
+    guard draft.sheet == nil && !model.showImport else { return }
+    model.welcomeRequest = nil
+    model.markWelcomeShown()
+    draft.sheet = .welcome
   }
 
   private var sidebar: some View {
@@ -223,7 +270,8 @@ struct PortfolioWindow: View {
     case .overview:
       OverviewWorkspace(
         payload: p, newAccount: { draft.sheet = .account },
-        newTransaction: { draft.sheet = .transaction }, canEdit: model.canEdit)
+        newTransaction: { draft.sheet = .transaction }, welcome: { draft.sheet = .welcome },
+        canEdit: model.canEdit)
     case .holdings:
       HoldingsWorkspace(payload: p, search: draft.search, accountFilter: $draft.accountFilter)
     case .activity:
@@ -239,7 +287,9 @@ struct PortfolioWindow: View {
   private var footer: some View {
     HStack(spacing: 8) {
       Circle().fill(model.errorMessage != nil ? Studio.red : Studio.mint).frame(width: 5, height: 5)
-      Text(model.loading ? "Refreshing portfolio…" : model.saving ? "Saving…" : "Local ledger")
+      Text(
+        model.loading
+          ? "Refreshing portfolio…" : model.saving ? "Saving…" : model.demo ? "Demo portfolio" : "Local ledger")
       if let date = model.lastUpdated {
         Text("· Updated \(date.formatted(date: .omitted, time: .shortened))")
       }
@@ -303,6 +353,7 @@ private struct OverviewWorkspace: View {
   let payload: DesktopPayload
   let newAccount: () -> Void
   let newTransaction: () -> Void
+  let welcome: () -> Void
   let canEdit: Bool
   private var s: StatusPayload { payload.status }
   private var points: [HistoryPoint] {
@@ -323,6 +374,7 @@ private struct OverviewWorkspace: View {
           } actions: {
             Button("Create an account", action: newAccount).buttonStyle(.borderedProminent)
               .disabled(!canEdit)
+            Button("Other ways to start…", action: welcome)
           }
         }
         HStack(spacing: 14) {

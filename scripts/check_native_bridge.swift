@@ -16,6 +16,11 @@ struct NativeBridgeCheck {
     precondition(payload.status.netWorth! > 0)
     precondition(payload.positions.allSatisfy { $0.value != nil })
     precondition(payload.backend?.version.isEmpty == false && payload.backend?.python.isEmpty == false)
+    // The demo's folder is temporary and never shown; a populated ledger never offers the welcome.
+    precondition(payload.storage?.dataDir == nil && payload.storage?.empty == false && !payload.ledgerEmpty)
+    let storage = try decoder.decode(
+      StorageInfo.self, from: Data(#"{"data_dir":"/tmp/marketpulse","empty":true}"#.utf8))
+    precondition(storage.dataDir == "/tmp/marketpulse" && storage.empty)
 
     let transactions = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     for row in try decoder.decode([ValuedTransaction].self, from: transactions) {
@@ -90,7 +95,7 @@ struct NativeBridgeCheck {
     }
     precondition(retry == .recorded)
     print(
-      "Native bridge checks passed: real Python demo, activity values, import result, privacy formatting, number entry, transaction save recovery"
+      "Native bridge checks passed: real Python demo, storage, activity values, import result, privacy formatting, number entry, transaction save recovery"
     )
   }
 }

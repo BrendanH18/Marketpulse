@@ -20,6 +20,9 @@ backend ([build guide](desktop.md#build-the-standalone-app)) instead of this che
 CLI. Use it for changes to the bundle or to how the app finds its backend, and when
 verifying a release.
 
+Add `--empty` to start from an empty ledger instead of the seeded one, as a new user
+does (it implies `--fresh`). Only item 17 uses it; rebuild without it for the rest.
+
 `--fresh` resets the scratch ledger, settings, and the QA app's preferences, and the
 script quits any QA copy that's still running, so switching between desktop and menu
 bar mode always tests the new build. It refuses an `--out` folder that overlaps your real data or
@@ -99,6 +102,26 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     follow the guide's Uninstall steps. (Tampered downloads are covered by
     `tests/test_install_script.py`.)
 
+17. **First-run onboarding.** Build with `--empty` and launch. The window opens with
+    a **Welcome to MarketPulse** sheet offering **Create your first account**, **Import
+    a CSV**, and **Explore a demo portfolio**, and saying the portfolio stays on this
+    Mac in the scratch `data` folder the script printed. The copy has no terminal
+    commands. **Not now** closes it, and relaunching (quit with ⌘Q first) doesn't show
+    it again; **Help › Welcome to MarketPulse** does. Then, from the welcome each time:
+    - **Explore a demo portfolio:** a "Demo portfolio · Fictional data · Read-only" banner
+      with **Leave demo**, three fictional accounts, ⌘N and the import and export buttons
+      disabled, and a menu bar title starting with "Demo". The scratch `data` folder is
+      unchanged afterwards (`ls -l` before and after). **Leave demo** returns to the
+      empty ledger.
+    - **Import a CSV:** a file panel opens; choose the sample CSV. The preview runs, and
+      importing adds the rows and creates their accounts.
+    - Rebuild with `--empty`, then **Create your first account:** the account form opens,
+      and the new account appears on Overview. Changing **Show totals in** to USD before
+      that changes the footer to "USD".
+    With the seeded ledger (no `--empty`), the welcome never appears by itself. With the
+    **Record transaction** sheet open, **Help › Welcome to MarketPulse** shows the welcome
+    as soon as you cancel that sheet, not on top of it.
+
 Quit the QA app with ⌘Q when done.
 
 ## Tool limits and workarounds
@@ -108,11 +131,14 @@ menu bar. Then:
 
 - **Reopen (13):** run `"$TMPDIR/marketpulse-qa/launch.sh"` again instead of clicking the
   Dock. Relaunching a running app sends the same reopen event as a Dock click.
+- **Help menu (17):** the Help menu lives in the system menu bar. Use the Overview's
+  empty-state **Other ways to start…** button, which opens the same welcome, and report
+  the Help menu itself as UNVERIFIED.
 - **Dock icon (1) and menu bar (12):** report them as UNVERIFIED and say why. A
   person should check them before a release.
 
 ## Reporting
 
-Post results on the PR (or the issue being verified) as a table of items 1–16 with
+Post results on the PR (or the issue being verified) as a table of items 1–17 with
 PASS / FAIL / UNVERIFIED and evidence, then any bugs with exact steps to reproduce.
 Clean up with `rm -rf "$TMPDIR/marketpulse-qa"`.
