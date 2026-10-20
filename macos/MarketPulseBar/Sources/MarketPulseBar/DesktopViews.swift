@@ -673,7 +673,7 @@ private struct ActivityWorkspace: View {
       }.padding(.horizontal, 30)
       Table(rows, selection: $draft.selection) {
         TableColumn("Date", value: \.date).width(100)
-        TableColumn("Type") { t in Text(t.type.capitalized).foregroundStyle(Studio.mint) }.width(90)
+        TableColumn("Type") { t in Text(t.type.capitalized).modifier(RowTint(Studio.mint)) }.width(90)
         TableColumn("Symbol", value: \.symbol).width(85)
         TableColumn("Account") { t in
           Text(
@@ -683,7 +683,7 @@ private struct ActivityWorkspace: View {
         }.width(min: 130, ideal: 160)
         TableColumn("Amount") { t in
           Text(activityAmount(t, privacy: payload.status.privacy)).monospacedDigit()
-            .foregroundStyle(activityColor(t))
+            .modifier(RowTint(activityColor(t)))
         }.width(120)
         TableColumn("Note", value: \.note)
       }.scrollContentBackground(.hidden).alternatingRowBackgrounds(.disabled)
@@ -736,6 +736,17 @@ private struct ActivityWorkspace: View {
       t.date, [t.type.capitalized, t.symbol].filter { !$0.isEmpty }.joined(separator: " "),
       activityAmount(t, privacy: payload.status.privacy), accountName(t.accountId, payload),
     ].joined(separator: " · ")
+  }
+}
+
+/// A table cell's colour, dropped while its row is selected so the text takes the selection's
+/// own (white on the accent colour) instead of green or red on blue.
+private struct RowTint: ViewModifier {
+  @Environment(\.backgroundProminence) private var prominence
+  let color: Color
+  init(_ color: Color) { self.color = color }
+  func body(content: Content) -> some View {
+    if prominence == .increased { content } else { content.foregroundStyle(color) }
   }
 }
 
