@@ -22,7 +22,7 @@ The installer records the absolute CLI path and any `MARKETPULSE_DATA` directory
 and `MARKETPULSE_CONFIG` file overrides. Reinstall after moving the checkout or
 changing which portfolio/configuration the app should use. Installing with no
 overrides resets it to the default paths. Launch-at-login preferences remain
-under your control in Automation.
+under your control in **Settings › General**.
 
 ## Build the standalone app
 

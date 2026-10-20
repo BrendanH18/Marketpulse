@@ -126,7 +126,7 @@ private struct GeneralSettings: View {
       Section("Menu bar") {
         Picker("Show", selection: model.configBinding("menubar_display", \.menubarDisplay)) {
           ForEach(Self.displays, id: \.0) { Text($0.1).tag($0.0) }
-        }.disabled(model.desktop?.settings == nil)
+        }
         if model.configValue("menubar_display", \.menubarDisplay) == "symbol" {
           LabeledContent("Symbol") {
             HStack {
@@ -137,6 +137,8 @@ private struct GeneralSettings: View {
           }
         }
       }
+      // A save reloads the portfolio, and setConfig ignores changes made until it finishes.
+      .disabled(model.desktop?.settings == nil || model.saving)
       Section("Terminal") {
         Picker("Open the terminal app in", selection: $model.terminal) {
           ForEach(TerminalLauncher.choices, id: \.self) { Text($0 == "iterm" ? "iTerm" : $0.capitalized).tag($0) }
