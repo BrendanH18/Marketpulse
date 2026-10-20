@@ -36,7 +36,7 @@ enum Workspace: String, CaseIterable, Identifiable {
 }
 
 enum DesktopSheet: String, Identifiable {
-  case transaction, account, alert, welcome
+  case transaction, editTransaction, account, alert, welcome
   var id: String { rawValue }
 }
 
@@ -149,6 +149,7 @@ struct PortfolioWindow: View {
     .sheet(item: $draft.sheet, onDismiss: presentWelcome) { item in
       switch item {
       case .transaction: TransactionSheet(model: model)
+      case .editTransaction: TransactionSheet(model: model, editing: draft.editing)
       case .account: AccountSheet(model: model)
       case .alert: AlertSheet(model: model)
       case .welcome:
@@ -279,7 +280,12 @@ struct PortfolioWindow: View {
     case .holdings:
       HoldingsWorkspace(payload: p, search: draft.search, accountFilter: $draft.accountFilter)
     case .activity:
-      ActivityWorkspace(payload: p, search: draft.search, accountFilter: $draft.accountFilter)
+      ActivityWorkspace(
+        payload: p, model: model, search: draft.search, accountFilter: $draft.accountFilter,
+        edit: { t in
+          draft.editing = t
+          draft.sheet = .editTransaction
+        })
     case .accounts:
       AccountsWorkspace(payload: p, canEdit: model.canEdit, add: { draft.sheet = .account })
     case .watchlist: WatchlistWorkspace(model: model, addAlert: { draft.sheet = .alert })
@@ -644,8 +650,11 @@ private struct HoldingsWorkspace: View {
 
 private struct ActivityWorkspace: View {
   let payload: DesktopPayload
+  @ObservedObject var model: StatusModel
   let search: String
   @Binding var accountFilter: Int
+  let edit: (DesktopTransaction) -> Void
+  @StateObject private var draft = ActivityWorkspaceDraft()
   private var rows: [DesktopTransaction] {
     payload.activity.filter {
       (accountFilter == 0 || $0.accountId == accountFilter)
@@ -662,7 +671,7 @@ private struct ActivityWorkspace: View {
           .system(size: 11))
           .foregroundStyle(Studio.muted)
       }.padding(.horizontal, 30)
-      Table(rows) {
+      Table(rows, selection: $draft.selection) {
         TableColumn("Date", value: \.date).width(100)
         TableColumn("Type") { t in Text(t.type.capitalized).foregroundStyle(Studio.mint) }.width(90)
         TableColumn("Symbol", value: \.symbol).width(85)
@@ -678,13 +687,61 @@ private struct ActivityWorkspace: View {
         }.width(120)
         TableColumn("Note", value: \.note)
       }.scrollContentBackground(.hidden).alternatingRowBackgrounds(.disabled)
+        .contextMenu(forSelectionType: DesktopTransaction.ID.self) { ids in
+          if let t = only(ids) {
+            Button("Edit…") { edit(t) }.disabled(!canEdit(t))
+            Button("Delete…", role: .destructive) { draft.deleting = t }.disabled(!model.canEdit)
+          }
+        } primaryAction: { ids in
+          if let t = only(ids), canEdit(t) { edit(t) }
+        }
+        .onDeleteCommand {
+          if model.canEdit, let id = draft.selection, let t = only([id]) { draft.deleting = t }
+        }
         .overlay {
           if rows.isEmpty {
             ContentUnavailableView("No matching activity", systemImage: "arrow.left.arrow.right")
           }
         }
     }
+    .confirmationDialog(
+      "Delete this transaction?",
+      isPresented: Binding(get: { draft.deleting != nil }, set: { if !$0 { draft.deleting = nil } }),
+      presenting: draft.deleting
+    ) { t in
+      Button("Delete", role: .destructive) {
+        Task {
+          await model.perform(
+            ["txn", "delete", "--yes"] + t.revisionArguments + ["--", String(t.id)],
+            success: "Transaction deleted")
+        }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: { t in
+      Text(
+        "\(describe(t)). Holdings, cost base, and gains are worked out again without it. This can't be undone."
+      )
+    }
   }
+
+  private func only(_ ids: Set<Int>) -> DesktopTransaction? {
+    ids.count == 1 ? rows.first { ids.contains($0.id) } : nil
+  }
+  /// The form edits the types it records; transfers, DRIPs, splits and the like aren't in it yet.
+  private func canEdit(_ t: DesktopTransaction) -> Bool {
+    model.canEdit && TransactionSheet.types.contains(t.type)
+  }
+  private func describe(_ t: DesktopTransaction) -> String {
+    [
+      t.date, [t.type.capitalized, t.symbol].filter { !$0.isEmpty }.joined(separator: " "),
+      activityAmount(t, privacy: payload.status.privacy), accountName(t.accountId, payload),
+    ].joined(separator: " · ")
+  }
+}
+
+private final class ActivityWorkspaceDraft: ObservableObject {
+  @Published var selection: Int?
+  @Published var deleting: DesktopTransaction?
 }
 
 private struct AccountsWorkspace: View {
@@ -1034,6 +1091,8 @@ private final class BackupsPanelDraft: ObservableObject {
 
 private final class PortfolioWindowDraft: ObservableObject {
   @Published var sheet: DesktopSheet?
+  /// The entry the `.editTransaction` sheet changes.
+  @Published var editing: DesktopTransaction?
   @Published var section: Workspace? = .overview
   @Published var search = ""
   @Published var accountFilter = 0

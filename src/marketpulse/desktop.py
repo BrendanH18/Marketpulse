@@ -138,6 +138,8 @@ def activity_row(t: Transaction, accounts: dict[int, Account]) -> dict:
         "value": t.gross_value,
         "direction": t.cash_direction,
         "target_account": target.name if target else "",
+        # Sent back with an edit or delete (`txn edit --revision`), which is refused if the entry changed.
+        "revision": t.revision,
     }
 
 

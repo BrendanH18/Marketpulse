@@ -43,6 +43,9 @@ struct NativeBridgeCheck {
     let transactions = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     for row in try decoder.decode([ValuedTransaction].self, from: transactions) {
       precondition(
+        row.transaction.revisionArguments.count == 2 && row.transaction.revision?.count == 16,
+        "Missing revision for \(row.transaction.type)")
+      precondition(
         row.transaction.signedValue == row.expectedSignedValue,
         "Activity value differs for \(row.transaction.type)")
       precondition(
@@ -77,6 +80,18 @@ struct NativeBridgeCheck {
     precondition(NumberInput.hint("12.50", locale: english) == nil)
     precondition(NumberInput.hint("1.000", locale: german)?.hasPrefix("Reads as") == true)
     precondition(NumberInput.hint("12,5", locale: english)?.hasPrefix("Enter a number") == true)
+    // The edit form prefills stored numbers; they must read back unchanged, with no hint.
+    for locale in [french, german, english] {
+      for value in [0, 1234.5, 0.000125, 10, 33.333333, 0.123456789012, 1.0 / 3, 0.1 + 0.2, 1e-12, 0.000012345678901234568, 1e-21, 123456789.123456789] {
+        let text = NumberInput.editable(value, locale: locale)
+        precondition(NumberInput.parse(text, locale: locale) == value, "\(text) in \(locale.identifier)")
+      }
+    }
+    precondition(NumberInput.editable(1234.5, locale: french) == "1234,5")
+    precondition(NumberInput.editable(10, locale: english) == "10")
+    for day in ["2024-01-02", "2024-03-10", "2024-11-03", "2025-12-31"] {
+      precondition(LedgerDate.date(day).map(LedgerDate.string) == day, day)
+    }
     let receipt = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[3]))
     let request = TransactionSaveRequest(
       arguments: ["deposit", "--note", "--a literal note", "--", "12.5"],
@@ -113,7 +128,7 @@ struct NativeBridgeCheck {
     }
     precondition(retry == .recorded)
     print(
-      "Native bridge checks passed: real Python demo, storage and backups, settings, activity values, import result, privacy formatting, number entry, transaction save recovery"
+      "Native bridge checks passed: real Python demo, storage and backups, settings, activity values, import result, privacy formatting, number entry, editable numbers and dates, transaction save recovery"
     )
   }
 }

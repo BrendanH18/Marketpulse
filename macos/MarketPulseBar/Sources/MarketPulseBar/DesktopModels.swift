@@ -180,7 +180,12 @@ struct DesktopTransaction: Decodable, Identifiable {
   /// +1 money into the account, -1 money out, 0 for share-only entries (DRIP, split, transfer).
   let direction: Int
   let targetAccount: String
+  /// Sent back with an edit or delete, which the engine refuses if the entry changed since.
+  /// Absent from older engines.
+  let revision: String?
   var signedValue: Double { direction < 0 ? -value : value }
+  /// `txn edit` / `txn delete` options that make the change apply only to the entry as shown.
+  var revisionArguments: [String] { revision.map { ["--revision", $0] } ?? [] }
 }
 
 struct AllocationBucket: Decodable, Identifiable {
@@ -284,4 +289,29 @@ enum NumberInput {
   static func cli(_ raw: String, locale: Locale = .current) -> String {
     parse(raw, locale: locale).map { String($0) } ?? raw
   }
+
+  /// A stored number as the user would type it, with the fewest decimals that read back as
+  /// exactly the same value, so saving an edit never rounds a field the user didn't touch.
+  static func editable(_ value: Double, locale: Locale = .current) -> String {
+    func text(_ digits: Int) -> String {
+      value.formatted(.number.locale(locale).grouping(.never).precision(.fractionLength(0...digits)))
+    }
+    // Then Swift's shortest exact form ("1e-21"), for values no plain decimal reaches.
+    let candidates = (0...20).lazy.map(text) + [String(value)]
+    return candidates.first { parse($0, locale: locale) == value } ?? String(value)
+  }
+}
+
+/// Ledger dates are plain `yyyy-MM-dd` days, read and written in the user's own time zone.
+enum LedgerDate {
+  private static func formatter(_ format: String) -> DateFormatter {
+    let f = DateFormatter()
+    f.dateFormat = format
+    f.locale = Locale(identifier: "en_US_POSIX")
+    return f
+  }
+
+  static func string(_ date: Date) -> String { formatter("yyyy-MM-dd").string(from: date) }
+  /// Noon on that day: midnight doesn't exist on some daylight-saving days.
+  static func date(_ string: String) -> Date? { formatter("yyyy-MM-dd HH:mm").date(from: string + " 12:00") }
 }

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Edit and delete transactions in the Mac app: in **Activity**, right-click an entry for
+  **Edit…** (or double-click it) and **Delete…** (or press Delete). Edit opens the
+  transaction form filled in, with the type fixed; delete asks first and names the entry.
+  Buys, sells, deposits, withdrawals, dividends, interest, and fees can be edited;
+  every type can be deleted. Errors show in the form or the window.
+
 - A Settings window in the Mac app (**MarketPulse › Settings…**, ⌘,), with General
   (refresh interval, launch at login, menu bar display, terminal), Appearance (System,
   Light, or Dark), Portfolio (currency for totals, default account, privacy), and Data
@@ -81,6 +87,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native CLI subprocesses time out instead of leaving refresh stuck indefinitely.
 
 ### Changed
+
+- `marketpulse txn edit`, `txn delete`, and `undo` (and edits and deletes in the TUI)
+  now check the ledger the way it's replayed, each entry at its own date, and refuse a
+  change that leaves a sale of more than was held then: for example, an edit that
+  oversells, a purchase moved after the sale that needs it, or deleting that purchase.
+  Change or delete the sale first. Problems already in the ledger don't block other
+  changes. Edits are also validated like new entries (positive quantities, no future
+  dates), and an edit or delete that a backup restore overtook is refused.
+- `txn edit --symbol` without `--currency` works the currency out again for the new
+  symbol, and `--currency ""` uses the listing currency.
+- `txn edit` and `txn delete` accept `--revision`, and each `desktop snapshot` activity
+  row gains a `revision`: the app sends it back, so an entry changed or replaced since the
+  window loaded it (in another window, by a restore, or a reused id) is refused, not overwritten.
 
 - Archived accounts are now left out of every total (net worth, allocation,
   account lists and movers, including `status --json`), as the TUI's archive

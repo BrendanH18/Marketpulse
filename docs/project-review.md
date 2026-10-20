@@ -58,13 +58,19 @@ not a substitute for atomic writes.
 
 ### 2. Strengthen chronological entry validation
 
-`Tracker.add_transaction` checks a sale against current holdings. A backdated
-sale can therefore be accepted using shares acquired later, or refused because
-shares were sold after the date being entered. Imported entries and direct
-updates also bypass this service guard. Replay records issues, and the native
-app now displays them, but a shared chronological validation path for add/edit/
-import would be a stronger contract. Cover backdated sales, same-day ordering,
-transfers, splits, and edits before changing this behavior.
+Edits and deletes now have that path: `Tracker.update_transaction` and
+`Tracker.delete_transaction` replay the ledger with the change applied and refuse
+it if an entry that applied before no longer does (a sale of more than was held
+at its date), so a backdated change that breaks a later sale is caught. Problems
+already in the ledger don't block unrelated changes. The CLI (`txn edit`,
+`txn delete`, `undo`), the TUI, and the native app all go through them.
+
+New entries still use the narrower check: `Tracker.add_transaction` compares a
+sale with current holdings. A backdated sale can therefore be accepted using
+shares acquired later, or refused because shares were sold after the date being
+entered. Imported entries bypass the guard entirely. Moving adds and imports to
+the same replay check is the remaining step; cover backdated sales, same-day
+ordering, transfers, and splits when doing it.
 
 ### 3. Measure coverage where mistakes are expensive
 
@@ -107,8 +113,8 @@ workspaces, and forms rather than expanding the popover file.
 
 ### 7. Complete app workflow parity
 
-The native app covers the common creation and inspection workflows. Transaction
-editing/deletion, manual/fixed-income asset forms, target-allocation editing,
+The native app covers the common creation and inspection workflows, and editing
+and deleting transactions. Manual/fixed-income asset forms, target-allocation editing,
 full tax reporting, and historical backfill controls are follow-ups. These remain
 available in the CLI/TUI. Account archiving and contribution-room editing deserve
 native forms with clear consequences. Add keyboard and VoiceOver checks, chart

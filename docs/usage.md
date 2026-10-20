@@ -25,6 +25,13 @@ sell price to use the current quote; for historical records, provide the actual
 execution price and date. `--fees` records commissions. `marketpulse undo`
 deletes the latest transaction after confirmation.
 
+To fix a mistake, find the entry's id with `marketpulse activity`, then change it with
+`marketpulse txn edit ID` (`--date`, `--account`, `--symbol`, `--quantity`, `--price`,
+`--amount`, `--fees`, `--currency`, `--note`) or remove it with `marketpulse txn delete ID`.
+The type can't be changed; delete the entry and record a new one. A change that leaves a
+sale of more shares than were held at the time is refused, such as deleting the purchase
+a later sale relies on: change or delete the sale first.
+
 With cash tracking, purchases debit cash and sales, deposits, and income credit
 it. Without cash tracking, valuation includes holdings without a cash balance.
 Cash tracking can be changed with `accounts edit --track-cash`.

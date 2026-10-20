@@ -31,6 +31,7 @@ from .models import (
     Quote,
     Transaction,
     guess_currency,
+    parse_date,
 )
 from .tax import TaxReport
 from .themes import resolve_palette
@@ -108,12 +109,7 @@ class Tracker:
         # The checks and the write hold the write lock together: no restore (or sale in another
         # window) can land between them.
         with self.store.atomic():
-            if self.store.restored_since(restore_id):
-                # The account looked up above may now be a different one, or gone.
-                raise ValueError(
-                    "The portfolio was restored from a backup while this was being saved, so it wasn't "
-                    "saved. Check the portfolio and enter it again."
-                )
+            self._refuse_if_restored(restore_id)
             if txn.type.value == "SELL":
                 state = self.store.ledger()
                 h = state.holdings.get((txn.account_id, txn.symbol))
@@ -123,6 +119,86 @@ class Tracker:
                         f"Cannot sell {fmt.qty(txn.quantity)} {txn.symbol} — only {fmt.qty(held)} held in this account."
                     )
             return self.store.add_transaction(txn)
+
+    def update_transaction(
+        self, txn: Transaction, *, restore_id: str | None = None, revision: str | None = None
+    ) -> Transaction:
+        """Replace the stored transaction `txn.id` with `txn`. A blank currency is resolved as for
+        a new entry. Refused if the ledger would then have an entry it can't apply (a sale of more
+        than was held at the time) that it could apply before; problems already there don't block it.
+        `restore_id` works as for `add_transaction`: read it before looking the transaction up.
+        `revision`, the stored entry's `Transaction.revision` as the caller saw it, refuses the
+        change if the entry has changed since."""
+        if restore_id is None:
+            restore_id = self.store.restore_id
+        txn_id = txn.saved_id
+        # Replay sorts by the date text, so it must already be in the stored ISO form.
+        txn.date = parse_date(txn.date)
+        if not txn.currency:
+            acct = self.store.get_account(txn.account_id)
+            if acct is None:
+                raise ValueError("Unknown account.")
+            txn.currency, _ = self.resolve_currency(txn.symbol, acct)
+        txn.validate()
+        with self.store.atomic():
+            self._refuse_if_restored(restore_id, retry="try again")
+            if self.store.get_account(txn.account_id) is None:
+                raise ValueError("Unknown account.")
+            before = self._stored(txn_id, revision)
+            self._refuse_new_issues(before, [txn if t.id == txn_id else t for t in before], txn_id, "saved")
+            self.store.update_transaction(txn)
+        return txn
+
+    def delete_transaction(self, txn_id: int, *, restore_id: str | None = None, revision: str | None = None) -> None:
+        """Delete a transaction, unless that leaves a later entry the ledger can't apply (a sale of
+        shares the deleted purchase provided). `restore_id` and `revision` work as for
+        `update_transaction`."""
+        if restore_id is None:
+            restore_id = self.store.restore_id
+        with self.store.atomic():
+            self._refuse_if_restored(restore_id, "deleted", "try again")
+            before = self._stored(txn_id, revision)
+            self._refuse_new_issues(before, [t for t in before if t.id != txn_id], txn_id, "deleted")
+            self.store.delete_transaction(txn_id)
+
+    def _refuse_if_restored(self, restore_id: str, done: str = "saved", retry: str = "enter it again") -> None:
+        if self.store.restored_since(restore_id):
+            # Anything looked up before the restore may now be a different row, or gone.
+            raise ValueError(
+                f"The portfolio was restored from a backup while this was being {done}, so it wasn't "
+                f"{done}. Check the portfolio and {retry}."
+            )
+
+    def _stored(self, txn_id: int, revision: str | None) -> list[Transaction]:
+        """Every transaction, after checking `txn_id` is one of them and still at `revision`."""
+        txns = self.store.transactions()
+        stored = next((t for t in txns if t.id == txn_id), None)
+        if stored is None:
+            raise ValueError(f"No transaction #{txn_id}. It may have been deleted in another window.")
+        if revision is not None and stored.revision != revision:
+            raise ValueError(
+                f"Transaction #{txn_id} has changed since it was loaded, perhaps in another window. "
+                "Nothing was changed. Check it and try again."
+            )
+        return txns
+
+    def _refuse_new_issues(
+        self, before: list[Transaction], after: list[Transaction], changed_id: int, verb: str
+    ) -> None:
+        # Replay judges every entry at its own date, so this also catches a backdated change that
+        # breaks a later sale, which a check against today's holdings would miss.
+        accounts = self.store.account_map()
+        known = {i.txn_id for i in replay(before, accounts).issues}
+        new = [i for i in replay(after, accounts).issues if i.txn_id not in known]
+        if not new:
+            return
+        issue = new[0]
+        if issue.txn_id == changed_id:
+            raise ValueError(f"Not {verb}: on {issue.date}, {issue.message[0].lower()}{issue.message[1:]}.")
+        raise ValueError(
+            f"Not {verb}: transaction #{issue.txn_id} on {issue.date} would no longer add up "
+            f"({issue.message}). Change or delete that one first."
+        )
 
     # ── valuation ─────────────────────────────────────────────────────────────
 

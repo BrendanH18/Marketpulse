@@ -146,7 +146,13 @@ v99.0.0.
 - **Activity:** searchable ledger entries and amounts in the original currency,
   signed from the account's point of view: **+** money in (sells, deposits,
   income), **−** money out (buys, withdrawals, fees). DRIPs and transfers move
-  shares rather than cash and carry no sign; splits show their ratio.
+  shares rather than cash and carry no sign; splits show their ratio. Right-click an
+  entry to **Edit…** (or double-click it) or **Delete…** (or select it and press Delete).
+  Edit opens the transaction form filled in; the type is fixed, so delete the entry and
+  record a new one to change it. Buys, sells, deposits, withdrawals, dividends,
+  interest, and fees can be edited; any entry can be deleted, after a confirmation. A
+  change that would leave a sale of more than was held at the time is refused, with the
+  reason, and nothing is changed.
 - **Accounts:** account creation, holdings/cash tracking details, and entered
   contribution-room summaries.
 - **Watchlist:** add/remove symbols and create/delete price or daily-change alerts.
@@ -185,6 +191,10 @@ If it cannot check the outcome, the form keeps the original entry locked and off
 **Retry save**, which reuses the same request and cannot add a duplicate. When a receipt
 check confirms nothing was saved, you can correct or cancel the entry normally. If you
 force-quit during an uncertain save, check Activity before entering it in a new form.
+
+Edits and deletes send the activity row's `revision` (`txn edit --revision`, `txn delete
+--revision`), so an entry that changed since the window loaded it is refused with "has
+changed since it was loaded" instead of being overwritten; refresh and try again.
 
 For clients using the CLI, transaction commands accept `--request-id <uuid>`;
 `marketpulse desktop transaction-status <uuid>` returns `recorded` and `transaction_id`

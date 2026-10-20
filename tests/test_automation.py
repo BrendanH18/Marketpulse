@@ -73,6 +73,7 @@ def test_desktop_bridge_reports_missing_prices(tracker):
     assert "Excluded from totals: UNKNOWN" in payload["warnings"]
     assert next(p for p in payload["positions"] if p["symbol"] == "UNKNOWN")["value"] is None
     assert payload["activity"][0]["type"] == "BUY"
+    assert payload["activity"][0]["revision"] == tracker.store.transactions()[-1].revision
     json.dumps(payload, allow_nan=False)
 
 

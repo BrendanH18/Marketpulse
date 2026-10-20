@@ -1262,16 +1262,16 @@ class MarketPulseApp(App):
         )
         self.push_screen(form, self._txn_done)
 
-    def _txn_done(self, txn: Transaction | None) -> None:
+    def _txn_done(self, txn: Transaction | None, restore_id: str | None = None) -> None:
         if txn is not None:
-            self.save_txn(txn)
+            self.save_txn(txn, restore_id)
 
     @work(thread=True, group="write")
-    def save_txn(self, txn: Transaction) -> None:
+    def save_txn(self, txn: Transaction, restore_id: str | None = None) -> None:
         tr = self.tracker
         try:
             if txn.id is not None:
-                tr.store.update_transaction(txn)
+                tr.update_transaction(txn, restore_id=restore_id)
                 message = f"Updated transaction #{txn.id}"
             else:
                 saved = tr.add_transaction(txn)
@@ -1290,10 +1290,14 @@ class MarketPulseApp(App):
     def action_edit(self) -> None:
         ws = self.workspace
         if ws == "activity":
+            restore_id = self.tracker.store.restore_id
             key = self._selected_key(self.query_one("#activity-table", DataTable))
             txn = next((t for t in self.tracker.store.transactions() if str(t.id) == key), None)
             if txn:
-                self.push_screen(TransactionForm(self.tracker, txn=txn, symbols=self.known_symbols()), self._txn_done)
+                self.push_screen(
+                    TransactionForm(self.tracker, txn=txn, symbols=self.known_symbols()),
+                    lambda edited: self._txn_done(edited, restore_id),
+                )
         elif ws == "tax":
             key = self._selected_key(self.query_one("#accounts-table", DataTable))
             acct = self.tracker.store.get_account(int(key)) if key else None
@@ -1303,6 +1307,7 @@ class MarketPulseApp(App):
     def action_delete(self) -> None:
         ws, store = self.workspace, self.tracker.store
         if ws == "activity":
+            restore_id = store.restore_id
             key = self._selected_key(self.query_one("#activity-table", DataTable))
             txn = next((t for t in store.transactions() if str(t.id) == key), None)
             if txn is None:
@@ -1310,8 +1315,7 @@ class MarketPulseApp(App):
             detail = " ".join(c.plain for c in render.activity_cells(txn, store.account_map())[1:8] if c.plain != "—")
 
             def done(yes: bool | None) -> None:
-                if yes:
-                    store.delete_transaction(txn.saved_id)
+                if yes and self._delete_txn(txn.saved_id, restore_id):
                     self.after_change(f"Deleted transaction #{txn.id}")
 
             self.push_screen(ConfirmScreen(f"Delete transaction #{txn.id}?", detail), done)
@@ -1363,6 +1367,7 @@ class MarketPulseApp(App):
 
     def action_undo(self) -> None:
         store = self.tracker.store
+        restore_id = store.restore_id
         txns = store.transactions()
         if not txns:
             self.notify("Nothing to undo.")
@@ -1371,11 +1376,18 @@ class MarketPulseApp(App):
         detail = " ".join(c.plain for c in render.activity_cells(last, store.account_map())[1:8] if c.plain != "—")
 
         def done(yes: bool | None) -> None:
-            if yes:
-                store.delete_transaction(last.saved_id)
+            if yes and self._delete_txn(last.saved_id, restore_id):
                 self.after_change(f"Undid transaction #{last.id}")
 
         self.push_screen(ConfirmScreen("Undo the last transaction?", detail), done)
+
+    def _delete_txn(self, txn_id: int, restore_id: str) -> bool:
+        try:
+            self.tracker.delete_transaction(txn_id, restore_id=restore_id)
+        except ValueError as e:
+            self.notify(str(e), title="Not deleted", severity="error")
+            return False
+        return True
 
     def action_new_account(self) -> None:
         self.push_screen(AccountForm(None, self.tracker.base), self._account_done)

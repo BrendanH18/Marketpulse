@@ -818,13 +818,17 @@ def activity(app: App, account, symbol, limit, show_all) -> None:
 @pass_app
 def undo(app: App, yes: bool) -> None:
     """Delete the most recently recorded transaction."""
+    restore_id = app.store.restore_id
     txns = app.store.transactions()
     if not txns:
         fail("Nothing to undo.")
     last = max(txns, key=lambda t: t.id or 0)
     app.console.print(render.activity_table([last], app.store.account_map()))
     if yes or click.confirm("Delete this transaction?"):
-        app.store.delete_transaction(last.saved_id)
+        try:
+            app.tracker.delete_transaction(last.saved_id, restore_id=restore_id)
+        except ValueError as e:
+            fail(str(e))
         app.ok(f"Deleted transaction #{last.id}.")
 
 
@@ -833,17 +837,26 @@ def txn() -> None:
     """Edit or delete individual transactions (ids from `activity`)."""
 
 
+REVISION_HELP = "Refuse unless the entry is unchanged since it had this revision (from `desktop snapshot`)."
+
+
 @txn.command("delete")
 @click.argument("txn_id", type=int)
 @click.option("-y", "--yes", is_flag=True)
+@click.option("--revision", help=REVISION_HELP)
 @pass_app
-def txn_delete(app: App, txn_id: int, yes: bool) -> None:
+def txn_delete(app: App, txn_id: int, yes: bool, revision: str | None) -> None:
+    """Delete a transaction. Refused if a later entry depends on it (a sale of the shares it bought)."""
+    restore_id = app.store.restore_id
     match = [t for t in app.store.transactions() if t.id == txn_id]
     if not match:
         fail(f"No transaction #{txn_id}.")
     app.console.print(render.activity_table(match, app.store.account_map()))
     if yes or click.confirm("Delete?"):
-        app.store.delete_transaction(txn_id)
+        try:
+            app.tracker.delete_transaction(txn_id, restore_id=restore_id, revision=revision)
+        except ValueError as e:
+            fail(str(e))
         app.ok(f"Deleted #{txn_id}.")
 
 
@@ -856,14 +869,25 @@ def txn_delete(app: App, txn_id: int, yes: bool) -> None:
 @click.option("--price", type=float)
 @click.option("--amount", type=float)
 @click.option("--fees", type=float)
-@click.option("--currency")
+@click.option("--currency", help="Blank to use the symbol's listing currency (or the account's for cash).")
 @click.option("--note")
+@click.option("--revision", help=REVISION_HELP)
 @pass_app
-def txn_edit(app: App, txn_id: int, when, account, symbol, quantity, price, amount, fees, currency, note) -> None:
+def txn_edit(
+    app: App, txn_id: int, when, account, symbol, quantity, price, amount, fees, currency, note, revision
+) -> None:
+    """Change a transaction's fields; its type stays the same.
+
+    Changing the symbol without --currency works the currency out again. Refused if the
+    result doesn't add up, e.g. a sale of more than was held then, or a later sale that
+    would lose the shares it needs."""
+    restore_id = app.store.restore_id
     match = [t for t in app.store.transactions() if t.id == txn_id]
     if not match:
         fail(f"No transaction #{txn_id}.")
     t = match[0]
+    if symbol is not None and currency is None and symbol.upper() != t.symbol:
+        currency = ""  # the old symbol's currency may not be the new one's
     if when is not None:
         t.date = when
     if account is not None:
@@ -878,9 +902,9 @@ def txn_edit(app: App, txn_id: int, when, account, symbol, quantity, price, amou
         ("note", note),
     ):
         if value is not None:
-            setattr(t, name, value.upper() if name in ("symbol", "currency") else value)
+            setattr(t, name, value.strip().upper() if name in ("symbol", "currency") else value)
     try:
-        app.store.update_transaction(t)
+        app.tracker.update_transaction(t, restore_id=restore_id, revision=revision)
     except ValueError as e:
         fail(str(e))
     app.console.print(render.activity_table([t], app.store.account_map()))
