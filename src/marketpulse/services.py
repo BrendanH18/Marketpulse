@@ -93,26 +93,41 @@ class Tracker:
         except MarketError:
             return guess_currency(symbol, account.currency), None
 
-    def add_transaction(self, txn: Transaction) -> Transaction:
+    def add_transaction(self, txn: Transaction, *, restore_id: str | None = None) -> Transaction:
+        """Record `txn`. A caller that looked up its account or holdings first passes the
+        `store.restore_id` it read before doing so, so a restore since then refuses the save."""
+        if restore_id is None:
+            restore_id = self.store.restore_id
         if not txn.currency:
             acct = self.store.get_account(txn.account_id)
             if acct is None:
                 raise ValueError("Unknown account.")
+            # May fetch a quote, so it stays outside the write lock below.
             txn.currency, _ = self.resolve_currency(txn.symbol, acct)
         txn.validate()
-        if txn.type.value == "SELL":
-            state = self.store.ledger()
-            h = state.holdings.get((txn.account_id, txn.symbol))
-            held = h.quantity if h else 0.0
-            if txn.quantity > held + EPSILON:
+        # The checks and the write hold the write lock together: no restore (or sale in another
+        # window) can land between them.
+        with self.store.atomic():
+            if self.store.restored_since(restore_id):
+                # The account looked up above may now be a different one, or gone.
                 raise ValueError(
-                    f"Cannot sell {fmt.qty(txn.quantity)} {txn.symbol} — only {fmt.qty(held)} held in this account."
+                    "The portfolio was restored from a backup while this was being saved, so it wasn't "
+                    "saved. Check the portfolio and enter it again."
                 )
-        return self.store.add_transaction(txn)
+            if txn.type.value == "SELL":
+                state = self.store.ledger()
+                h = state.holdings.get((txn.account_id, txn.symbol))
+                held = h.quantity if h else 0.0
+                if txn.quantity > held + EPSILON:
+                    raise ValueError(
+                        f"Cannot sell {fmt.qty(txn.quantity)} {txn.symbol} — only {fmt.qty(held)} held in this account."
+                    )
+            return self.store.add_transaction(txn)
 
     # ── valuation ─────────────────────────────────────────────────────────────
 
     def valuation(self, *, use_cache: bool = True, record: bool = True, account_id: int | None = None) -> PortfolioView:
+        restore_id = self.store.restore_id
         state = self.store.ledger()
         accounts = self.store.account_map()
         assets = self.store.assets()
@@ -129,7 +144,11 @@ class Tracker:
         # Leaving out an archived account's holdings would record a fake drop in value.
         complete = not view.stale and not view.excluded and not view.archived_with_value
         if record and account_id is None and view.positions and complete:
-            self.record_snapshot(view, fx, flows)
+            with self.store.transaction():
+                # A restore while quotes loaded replaced the ledger this view describes; recording
+                # it would also carry its contributions into later snapshots.
+                if not self.store.restored_since(restore_id):
+                    self.record_snapshot(view, fx, flows)
         return view
 
     def flows_base(self, fx: FxRates) -> list[tuple[str, float]]:
@@ -227,6 +246,7 @@ class Tracker:
 
     def backfill(self, progress: Callable[[str], None] | None = None) -> int:
         """Rebuild daily net-worth snapshots from the ledger and historical closes."""
+        restore_id = self.store.restore_id
         txns = self.store.transactions()
         if not txns:
             return 0
@@ -326,7 +346,10 @@ class Tracker:
                     book += amount * rate
             if complete and (value > 0 or snaps):
                 snaps.append(Snapshot(iso, value, book, contributions, base, {"backfilled": True}))
-        self.store.upsert_snapshots(snaps)
+        with self.store.transaction():
+            if self.store.restored_since(restore_id):
+                return 0  # rebuilt from a ledger a restore has since replaced
+            self.store.upsert_snapshots(snaps)
         return len(snaps)
 
     # ── income, tax, room ─────────────────────────────────────────────────────

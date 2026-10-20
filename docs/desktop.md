@@ -107,7 +107,11 @@ own preferences (`welcomeShown`), not in your ledger.
 - **Watchlist:** add/remove symbols and create/delete price or daily-change alerts.
 - **Income:** recorded monthly distributions and interest, converted at current FX.
 - **Automation:** refresh interval, login setting, backup action, errors,
-  snapshot/backup status, and the app and backend versions.
+  snapshot/backup status, and the app and backend versions. **Backups** lists the
+  backups on this Mac with **Restore…** and **Show in Finder**. A restore asks for
+  confirmation, saves your current portfolio as a backup first, refuses a damaged
+  file or one from a newer version without changing anything, and reloads the window
+  ([details](data.md#restore-a-database)).
 
 Use **⌘N** to record a transaction, **⌘R** to refresh, **⌘I** to import, and **⌘E**
 to export. Import first previews new entries, duplicates, skipped lines, and new

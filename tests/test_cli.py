@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from uuid import uuid4
 
 import click
@@ -7,6 +8,7 @@ from click.testing import CliRunner
 
 from marketpulse.cli import App, main
 from marketpulse.config import Config, config_path
+from marketpulse.models import Account
 
 
 @pytest.fixture
@@ -178,6 +180,99 @@ def test_backup_commands(cli, store, tmp_path):
     assert (tmp_path / "copy.db").exists()
     listing = cli("backup", "list").output
     assert "manual" in listing and "copy.db" not in listing  # explicit paths live outside the backups dir
+
+
+def test_backup_restore_command(cli, store, tmp_path):
+    cli("accounts", "add", "My TFSA", "-t", "TFSA")
+    taken = store.backup(dest=store.backup_dir / "marketpulse-20260101-090000-manual.db")
+    cli("accounts", "add", "Taxable", "-t", "NONREG")
+    assert cli("backup", "restore").exit_code != 0  # a backup or --latest is required
+    # Declining the confirmation changes nothing.
+    declined = CliRunner().invoke(main, ["backup", "restore", "--latest"], input="n\n")
+    assert "taken 2026-01-01 09:00" in declined.output and len(store.accounts()) == 2
+    # A file name from `backup list` is found in the backups directory.
+    out = cli("backup", "restore", "-y", taken.name).output
+    assert "Restored marketpulse-20260101-090000-manual.db: 1 accounts, 0 transactions" in out
+    assert [a.name for a in store.accounts()] == ["My TFSA"]
+    (safety,) = [p for p in store.backups() if store.backup_reason(p) == "pre-restore"]
+    assert safety.name in out.replace("\n", "")
+    # --latest skips the pre-restore copy the restore just made.
+    cli("backup", "restore", "--latest", "-y")
+    assert [a.name for a in store.accounts()] == ["My TFSA"]
+    # Undo the restore by restoring its pre-restore backup.
+    cli("backup", "restore", "-y", str(safety))
+    assert sorted(a.name for a in store.accounts()) == ["My TFSA", "Taxable"]
+    bad = tmp_path / "bad.db"
+    bad.write_text("not a ledger")
+    failed = cli("backup", "restore", "-y", str(bad))
+    assert failed.exit_code == 1 and "database. Nothing was changed." in failed.output
+    assert sorted(a.name for a in store.accounts()) == ["My TFSA", "Taxable"]
+
+
+def test_backup_restore_prefers_the_backups_folder_for_a_bare_name(cli, store, tmp_path, monkeypatch):
+    cli("accounts", "add", "My TFSA", "-t", "TFSA")
+    taken = store.backup(dest=store.backup_dir / "marketpulse-20260101-090000-manual.db")
+    cli("accounts", "add", "Taxable", "-t", "NONREG")
+    # The current folder has an unrelated file with the same name: it must not be restored instead.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    store.backup(dest=elsewhere / taken.name)
+    monkeypatch.chdir(elsewhere)
+    cli("backup", "restore", "-y", taken.name)
+    assert [a.name for a in store.accounts()] == ["My TFSA"]
+    # "./name" means the local file, even though `Path` would drop the "./".
+    cli("backup", "restore", "-y", f"./{taken.name}")
+    assert sorted(a.name for a in store.accounts()) == ["My TFSA", "Taxable"]
+    # A name the backups folder doesn't have is still found locally, and shown in full.
+    store.backup(dest=elsewhere / "local.db")
+    prompt = CliRunner().invoke(main, ["backup", "restore", "local.db"], input="n\n")
+    assert str((elsewhere / "local.db").resolve()) in prompt.output
+
+
+def test_a_trade_whose_quote_lookup_spans_a_restore_is_refused(cli, store, tracker, monkeypatch):
+    cli("accounts", "add", "Current TFSA", "-t", "TFSA")
+    other = store.backup(dest=store.backup_dir / "marketpulse-20260101-090000-manual.db")
+    conn = sqlite3.connect(other)
+    conn.execute("UPDATE accounts SET name = 'Other RRSP', type = 'RRSP'")  # same ID, another account
+    conn.commit()
+    conn.close()
+    real_quote = tracker.market.quote
+
+    def restore_mid_lookup(symbol):
+        store.restore(other)  # in another terminal, while this command waits for the quote
+        return real_quote(symbol)
+
+    monkeypatch.setattr(tracker.market, "quote", restore_mid_lookup)
+    out = cli("buy", "AAPL", "1", "100", "-a", "Current TFSA")
+    assert out.exit_code == 1 and "restored from a backup while this was being saved" in out.output
+    assert store.transactions() == [] and [a.name for a in store.accounts()] == ["Other RRSP"]
+
+
+def test_backup_restore_latest_ignores_the_backup_taken_on_startup(cli, store, tracker, monkeypatch):
+    cli("accounts", "add", "My TFSA", "-t", "TFSA")
+    store.backup(dest=store.backup_dir / "marketpulse-20260101-090000-manual.db")
+    cli("accounts", "add", "Taxable", "-t", "NONREG")
+
+    def open_with_daily_backup(cls, config=None):
+        store.backup(reason="daily")  # what opening the ledger does when the newest backup is a day old
+        return tracker
+
+    monkeypatch.setattr("marketpulse.services.Tracker.open", classmethod(open_with_daily_backup))
+    cli("backup", "restore", "--latest", "-y")
+    assert [a.name for a in store.accounts()] == ["My TFSA"]
+
+
+def test_backup_restore_latest_keeps_a_manual_backup_from_the_same_second(cli, store, tracker, monkeypatch):
+    cli("accounts", "add", "My TFSA", "-t", "TFSA")
+
+    def open_right_after_a_manual_backup(cls, config=None):
+        store.backup(reason="manual")  # taken by the user a moment before
+        store.add_account(Account(name="Later"))
+        return tracker
+
+    monkeypatch.setattr("marketpulse.services.Tracker.open", classmethod(open_right_after_a_manual_backup))
+    cli("backup", "restore", "--latest", "-y")
+    assert [a.name for a in store.accounts()] == ["My TFSA"]
 
 
 def test_tax_report_explains_superficial_losses_and_transfer_issues(cli, store):

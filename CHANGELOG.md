@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Restore from a backup: `marketpulse backup restore PATH` (or a name from `backup list`,
+  or `--latest`), and **Automation › Backups** in the Mac app with Restore and Show in
+  Finder. The backup is checked first (integrity, a MarketPulse database, a schema this
+  version reads), the current ledger is saved as a `pre-restore` backup, and the swap
+  happens in one step without quitting other MarketPulse windows. `desktop snapshot`'s
+  `storage` object gains `backup_dir` and `backups`.
+
 - First-run onboarding in the Mac app: a new ledger opens with a welcome sheet that
   offers to create an account, import a CSV, or explore the demo, sets the currency
   for totals, and says where data is stored. **Help › Welcome to MarketPulse** brings

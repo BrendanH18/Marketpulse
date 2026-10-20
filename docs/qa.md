@@ -122,6 +122,15 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     **Record transaction** sheet open, **Help › Welcome to MarketPulse** shows the welcome
     as soon as you cancel that sheet, not on top of it.
 
+18. **Restore a backup.** In **Automation**, **Back up now**, then record a deposit
+    (⌘N). **Backups** lists the new backup first ("Backed up by you"), with its date,
+    time, and size; the magnifying glass shows it selected in Finder. **Restore…** on
+    it asks "Restore the backup from <date>?" and says your current portfolio is saved
+    first; **Cancel** changes nothing. Confirm: the window reloads, says "Restored the
+    backup from <date>…", the deposit is gone from Activity, and a "Before a restore"
+    backup is now first in the list. Restore that one: the deposit is back. In the
+    demo, **Backups** says the demo has none.
+
 Quit the QA app with ⌘Q when done.
 
 ## Tool limits and workarounds
@@ -139,6 +148,6 @@ menu bar. Then:
 
 ## Reporting
 
-Post results on the PR (or the issue being verified) as a table of items 1–17 with
+Post results on the PR (or the issue being verified) as a table of items 1–18 with
 PASS / FAIL / UNVERIFIED and evidence, then any bugs with exact steps to reproduce.
 Clean up with `rm -rf "$TMPDIR/marketpulse-qa"`.

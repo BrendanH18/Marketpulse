@@ -882,6 +882,7 @@ private struct AutomationWorkspace: View {
             }.disabled(!model.canEdit)
           }
         }
+        BackupsPanel(model: model)
         Surface("Preferences") {
           Picker("Refresh interval", selection: $model.refreshSeconds) {
             ForEach([30, 60, 120, 300], id: \.self) { Text("\($0) seconds").tag($0) }
@@ -959,6 +960,83 @@ private struct AutomationWorkspace: View {
       Spacer()
     }
   }
+}
+
+/// The backups folder, with a confirmed Restore for each backup.
+private struct BackupsPanel: View {
+  @ObservedObject var model: StatusModel
+  @StateObject private var draft = BackupsPanelDraft()
+  private static let collapsedCount = 6
+
+  var body: some View {
+    let backups = model.desktop?.storage?.backups ?? []
+    let folder = model.desktop?.storage?.backupDir
+    Surface("Backups", trailing: "KEPT ON THIS MAC") {
+      if model.demo {
+        Text("The demo has no backups. Your own portfolio's backups appear here.")
+          .foregroundStyle(Studio.muted)
+      } else if backups.isEmpty {
+        Text(
+          folder == nil
+            ? "Backups appear here after the next refresh."
+            : "No backups yet. One is made each day once your portfolio has transactions, and before every import."
+        ).foregroundStyle(Studio.muted)
+      }
+      ForEach(draft.showAll ? backups : Array(backups.prefix(Self.collapsedCount))) { backup in
+        HStack(spacing: 14) {
+          Image(systemName: "externaldrive").foregroundStyle(Studio.mint).frame(width: 24)
+          VStack(alignment: .leading, spacing: 4) {
+            Text(backup.when).font(.system(size: 13, weight: .medium))
+            Text(
+              "\(backup.reasonLabel) · \(ByteCountFormatter.string(fromByteCount: Int64(backup.size), countStyle: .file))"
+            ).font(.system(size: 11)).foregroundStyle(Studio.muted)
+          }
+          Spacer()
+          Button {
+            if let folder { reveal(URL(fileURLWithPath: folder).appendingPathComponent(backup.name)) }
+          } label: {
+            Image(systemName: "magnifyingglass")
+          }.buttonStyle(.plain).help("Show \(backup.name) in Finder")
+          Button("Restore…") { draft.pending = backup }.disabled(!model.canEdit)
+        }
+      }
+      HStack {
+        if backups.count > Self.collapsedCount {
+          Button(draft.showAll ? "Show fewer" : "Show all \(backups.count)") { draft.showAll.toggle() }
+        }
+        Button("Show in Finder") {
+          if let folder { NSWorkspace.shared.open(URL(fileURLWithPath: folder)) }
+        }.disabled(folder.map { !FileManager.default.fileExists(atPath: $0) } ?? true)
+      }
+      Text(
+        "Restoring replaces your portfolio with the backup. Your current portfolio is backed up first, so a restore can be undone by restoring that backup. Settings aren't part of a backup and don't change."
+      ).font(.system(size: 11)).foregroundStyle(Studio.muted).fixedSize(
+        horizontal: false, vertical: true)
+    }
+    .confirmationDialog(
+      draft.pending.map { "Restore the backup from \($0.when)?" } ?? "Restore this backup?",
+      isPresented: Binding(get: { draft.pending != nil }, set: { if !$0 { draft.pending = nil } }),
+      presenting: draft.pending
+    ) { backup in
+      Button("Restore", role: .destructive) {
+        Task { await model.restoreBackup(backup) }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: { backup in
+      Text(
+        "Your portfolio will be replaced with this backup (\(backup.reasonLabel.lowercased())). Anything recorded after \(backup.when) will no longer appear. Your current portfolio is saved as a new backup first, so you can undo this."
+      )
+    }
+  }
+
+  private func reveal(_ url: URL) {
+    NSWorkspace.shared.activateFileViewerSelecting([url])
+  }
+}
+
+private final class BackupsPanelDraft: ObservableObject {
+  @Published var pending: BackupInfo?
+  @Published var showAll = false
 }
 
 private final class PortfolioWindowDraft: ObservableObject {

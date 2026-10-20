@@ -66,17 +66,40 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         "automation": cycle.report,
         # Which engine answered: the app shows it, and release builds check it matches the tag.
         "backend": {"version": __version__, "python": platform.python_version()},
-        "storage": {
-            "data_dir": str(tracker.store.path.parent),
-            # A brand-new ledger, so the app offers its welcome. Archived accounts count: their
-            # owner has used MarketPulse before. Every transaction belongs to an account.
-            "empty": not tracker.store.accounts(include_archived=True),
-        },
+        "storage": storage_info(tracker.store),
         "warnings": [
             *[f"{i.date}: {i.message}" for i in state.issues],
             *[f"Excluded from totals: {s}" for s in view.excluded],
             *[archived_warning(name) for name in view.archived_with_value],
         ],
+    }
+
+
+def storage_info(store: Store) -> dict:
+    """Where the ledger lives, whether it's brand new, and the backups the app can restore."""
+    return {
+        "data_dir": str(store.path.parent),
+        # A brand-new ledger, so the app offers its welcome. Archived accounts count: their
+        # owner has used MarketPulse before. Every transaction belongs to an account.
+        "empty": not store.accounts(include_archived=True),
+        "backup_dir": str(store.backup_dir),
+        "backups": [row for p in store.backups() if (row := backup_row(store, p)) is not None],
+    }
+
+
+def backup_row(store: Store, path: Path) -> dict | None:
+    """A backup the app can offer to restore, newest first like `backup list`. None if it's
+    gone since the folder was listed (another process may prune automatic backups)."""
+    try:
+        size = path.stat().st_size
+    except FileNotFoundError:
+        return None
+    taken = store.backup_time(path)
+    return {
+        "name": path.name,
+        "reason": store.backup_reason(path),
+        "taken_at": taken.isoformat() if taken else None,
+        "size": size,
     }
 
 
@@ -189,7 +212,7 @@ def demo_snapshot() -> dict:
             payload["demo"] = True
             payload["automation"]["backup"] = None
             # The demo's folder is temporary; the app must never show it as the user's.
-            payload["storage"] = {"data_dir": None, "empty": False}
+            payload["storage"] = {"data_dir": None, "empty": False, "backup_dir": None, "backups": []}
             return payload
         finally:
             store.close()
