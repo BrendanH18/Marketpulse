@@ -8,9 +8,11 @@ so there is exactly one source of truth.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta, timezone
 from enum import StrEnum
 
@@ -296,6 +298,14 @@ class Transaction:
         if self.id is None:
             raise ValueError("Transaction hasn't been saved yet.")
         return self.id
+
+    def revision(self, generation: str) -> str:
+        """Changes whenever any stored field does, or the ledger is restored (`generation` is
+        `Store.restore_id`). A client that loaded the entry sends it back with an edit or delete,
+        so a row changed or replaced since (another window, a restore, or a reused id) is
+        refused instead of overwritten, even when a restore brought back identical fields."""
+        fields = json.dumps({**asdict(self), "generation": generation}, sort_keys=True, default=str)
+        return hashlib.sha256(fields.encode()).hexdigest()[:16]
 
     @property
     def gross_value(self) -> float:

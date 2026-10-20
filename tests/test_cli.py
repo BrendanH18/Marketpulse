@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from dataclasses import replace
 from uuid import uuid4
 
 import click
@@ -401,3 +402,97 @@ def test_desktop_import_commit_requires_an_unchanged_preview(cli, store, tmp_pat
     stale = cli("desktop", "import", "--expect-fingerprint", preview["fingerprint"], "--", str(path))
     assert stale.exit_code == 1 and "changed since the preview" in stale.output
     assert store.transactions() == [] and store.accounts() == []
+
+
+def test_txn_edit_and_delete_refuse_entries_that_no_longer_add_up(cli, store):
+    cli("accounts", "add", "Fictional TFSA", "--type", "TFSA")
+    cli("buy", "AAPL", "10", "100", "--date", "2024-01-02")
+    cli("sell", "AAPL", "4", "110", "--date", "2024-02-01")
+    buy, sale = store.transactions()
+
+    oversell = cli("txn", "edit", "--quantity", "20", "--", str(sale.id))
+    assert oversell.exit_code == 1 and "sell of 20.0000 AAPL exceeds 10.0000 held" in oversell.output
+    backdated = cli("txn", "edit", "--date", "2024-03-01", "--", str(buy.id))
+    assert backdated.exit_code == 1 and f"transaction #{sale.id} on 2024-02-01" in backdated.output
+    refused = cli("txn", "delete", "--yes", "--", str(buy.id))
+    assert refused.exit_code == 1 and "Not deleted" in refused.output
+    assert store.transactions() == [buy, sale]
+
+    # Option values are taken verbatim, even ones that look like options.
+    assert cli("txn", "edit", "--quantity", "6", "--note", "--typo", "--", str(sale.id)).exit_code == 0
+    assert [(t.quantity, t.note) for t in store.transactions()] == [(10, ""), (6, "--typo")]
+    assert cli("undo", "-y").exit_code == 0  # the sale, the latest recorded
+    assert "Deleted #" in cli("txn", "delete", "--yes", "--", str(buy.id)).output
+    assert cli("txn", "delete", "--yes", "--", str(buy.id)).exit_code == 1
+
+
+def test_txn_edit_works_out_the_currency_again_for_a_new_symbol(cli, store):
+    cli("buy", "AAPL", "1", "100", "--date", "2024-01-02")
+    (buy,) = store.transactions()
+    assert buy.currency == "USD"
+    assert cli("txn", "edit", "--symbol", " xeqt.to", "--", str(buy.id)).exit_code == 0
+    assert (store.transactions()[0].symbol, store.transactions()[0].currency) == ("XEQT.TO", "CAD")
+    assert cli("txn", "edit", "--symbol", "AAPL", "--currency", "cad", "--", str(buy.id)).exit_code == 0
+    assert store.transactions()[0].currency == "CAD"  # an explicit currency wins
+    assert cli("txn", "edit", "--symbol", " aapl ", "--", str(buy.id)).exit_code == 0
+    assert store.transactions()[0].currency == "CAD"  # the same symbol: the currency stays
+    assert cli("txn", "edit", "--currency", "", "--", str(buy.id)).exit_code == 0
+    assert store.transactions()[0].currency == "USD"  # blank: the listing currency
+
+
+def test_txn_edit_accepts_what_the_app_edit_form_sends(cli, store):
+    # `TransactionSheet.editArguments`: every field the form shows, a possibly blank currency,
+    # the row's revision, then `--` id.
+    cli("accounts", "add", "Fictional TFSA", "--type", "TFSA")
+    cli("buy", "AAPL", "10", "100", "--date", "2024-01-02")
+    cli("dividend", "AAPL", "5", "--date", "2024-02-01")
+    cli("deposit", "500", "--date", "2024-01-01")
+    buy, deposit, dividend = sorted(store.transactions(), key=lambda t: t.type.value)
+
+    def edit(t, *fields):
+        common = ("--account", str(t.account_id), "--date", "2024-01-03", "--currency", "", "--note", "- edited")
+        return cli("txn", "edit", *common, *fields, "--revision", t.revision(store.restore_id), "--", str(t.id))
+
+    stale = ("--revision", "0" * 16)
+    assert "has changed since it was loaded" in cli("txn", "edit", "--note", "x", *stale, "--", str(buy.id)).output
+    assert "has changed since it was loaded" in cli("txn", "delete", "--yes", *stale, "--", str(buy.id)).output
+    trade = ("--symbol", "AAPL", "--quantity", "12.0", "--price", "99.5", "--fees", "1.0")
+    assert edit(buy, *trade).exit_code == 0
+    assert edit(dividend, "--symbol", "AAPL", "--amount", "6.25").exit_code == 0
+    assert edit(deposit, "--amount", "750.0").exit_code == 0
+    edited = {t.id: t for t in store.transactions()}
+    b, d, c = edited[buy.id], edited[dividend.id], edited[deposit.id]
+    assert (b.date, b.quantity, b.price, b.fees, b.currency, b.note) == ("2024-01-03", 12, 99.5, 1, "USD", "- edited")
+    assert (d.amount, d.currency, d.type) == (6.25, "USD", dividend.type)
+    assert (c.amount, c.currency, c.symbol) == (750, "CAD", "")
+    assert edit(buy, *trade).exit_code == 1  # the revision it was loaded at is gone
+
+
+def test_txn_edit_and_delete_refuse_an_entry_changed_meanwhile(cli, store, tracker, monkeypatch):
+    # Without --revision, the CLI checks against the entry as it read it, so a change made in
+    # another window meanwhile is refused rather than overwritten or deleted unseen.
+    cli("buy", "AAPL", "10", "100", "--date", "2024-01-02")
+    (buy,) = store.transactions()
+    real = tracker.resolve_currency
+
+    def edited_elsewhere_while_quoting(symbol, account):
+        store.update_transaction(replace(store.transactions()[0], note="edited in another window"))
+        return real(symbol, account)
+
+    monkeypatch.setattr(tracker, "resolve_currency", edited_elsewhere_while_quoting)
+    result = cli("txn", "edit", "--symbol", "XEQT.TO", "--", str(buy.id))  # looks the currency up again
+    assert result.exit_code == 1 and "has changed since it was loaded" in result.output
+    assert (store.transactions()[0].symbol, store.transactions()[0].note) == ("AAPL", "edited in another window")
+
+    def edited_elsewhere_while_confirming(*args, **kwargs):
+        current = store.transactions()[0]
+        store.update_transaction(replace(current, quantity=current.quantity - 1))
+        return True
+
+    monkeypatch.setattr("click.confirm", edited_elsewhere_while_confirming)
+    result = cli("txn", "delete", "--", str(buy.id))
+    assert result.exit_code == 1 and "has changed since it was loaded" in result.output
+    assert [t.quantity for t in store.transactions()] == [9]
+    result = cli("undo")  # the same for undo's confirmation
+    assert result.exit_code == 1 and "has changed since it was loaded" in result.output
+    assert [t.quantity for t in store.transactions()] == [8]

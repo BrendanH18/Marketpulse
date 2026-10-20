@@ -20,6 +20,9 @@ from .services import Tracker
 
 
 def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
+    # Read before anything the app shows: a restore during the snapshot then makes its activity
+    # revisions stale, so nothing shown from the replaced ledger can be edited or deleted.
+    generation = tracker.store.restore_id
     cycle = run_cycle(tracker, fresh=fresh)
     view = cycle.view
     state = tracker.store.ledger()
@@ -57,7 +60,9 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
             for p in view.positions
         ],
         "activity": [
-            activity_row(t, amap) for t in reversed(tracker.store.transactions()) if t.account_id not in archived
+            activity_row(t, amap, generation)
+            for t in reversed(tracker.store.transactions())
+            if t.account_id not in archived
         ],
         "allocation": [asdict(b) for b in view.by_class],
         "income_months": [{"date": d, "value": v} for d, v in income_by_month(state, view.fx.convert)],
@@ -130,7 +135,7 @@ def archived_warning(name: str) -> str:
     )
 
 
-def activity_row(t: Transaction, accounts: dict[int, Account]) -> dict:
+def activity_row(t: Transaction, accounts: dict[int, Account], generation: str = "") -> dict:
     """A ledger entry for the app; `value` is unsigned and `direction` gives its sign."""
     target = accounts.get(t.target_account_id) if t.target_account_id is not None else None
     return {
@@ -138,6 +143,8 @@ def activity_row(t: Transaction, accounts: dict[int, Account]) -> dict:
         "value": t.gross_value,
         "direction": t.cash_direction,
         "target_account": target.name if target else "",
+        # Sent back with an edit or delete (`txn edit --revision`), which is refused if the entry changed.
+        "revision": t.revision(generation),
     }
 
 

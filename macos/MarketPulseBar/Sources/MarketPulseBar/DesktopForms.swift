@@ -1,30 +1,37 @@
 import SwiftUI
 
 struct TransactionSheet: View {
+  /// The types this form records, and so the ones it can edit.
+  static let types = ["BUY", "SELL", "DEPOSIT", "WITHDRAWAL", "DIVIDEND", "INTEREST", "FEE"]
   @StateObject private var draft = TransactionSheetDraft()
   @ObservedObject var model: StatusModel
+  /// An existing entry to change with `marketpulse txn edit`, instead of recording a new one.
+  var editing: DesktopTransaction? = nil
   @Environment(\.dismiss) private var dismiss
   private var trade: Bool { draft.type == "BUY" || draft.type == "SELL" }
   private var needsSymbol: Bool { trade || draft.type == "DIVIDEND" }
   private var currency: String { CurrencyInput.normalize(draft.currency) }
+  private var symbol: String { draft.symbol.trimmingCharacters(in: .whitespaces).uppercased() }
   private var valid: Bool {
     !draft.account.isEmpty && (currency.isEmpty || CurrencyInput.isValid(currency))
-      && (!needsSymbol || !draft.symbol.trimmingCharacters(in: .whitespaces).isEmpty)
+      && (!needsSymbol || !symbol.isEmpty)
       && (trade
         ? positive(draft.quantity) && nonnegative(draft.price) && nonnegative(draft.fees)
         : positive(draft.amount))
   }
   var body: some View {
     SheetLayout(
-      title: "Record a transaction",
-      subtitle: "Add an entry to your local ledger. This doesn't place a trade.", model: model
+      title: editing == nil ? "Record a transaction" : "Edit transaction",
+      subtitle: editing == nil
+        ? "Add an entry to your local ledger. This doesn't place a trade."
+        : "Change this entry in your local ledger. Cost base and gains are worked out again.",
+      model: model
     ) {
       Form {
         Picker("Type", selection: $draft.type) {
-          ForEach(
-            ["BUY", "SELL", "DEPOSIT", "WITHDRAWAL", "DIVIDEND", "INTEREST", "FEE"], id: \.self
-          ) { Text($0.capitalized).tag($0) }
-        }
+          ForEach(Self.types, id: \.self) { Text($0.capitalized).tag($0) }
+        }.disabled(editing != nil)
+          .help(editing == nil ? "" : "To change the type, delete this entry and record a new one.")
         Picker("Account", selection: $draft.account) {
           Text("Choose account").tag("")
           ForEach(model.desktop?.accounts ?? []) { Text($0.name).tag(String($0.id)) }
@@ -45,12 +52,19 @@ struct TransactionSheet: View {
         TextField("Note (optional)", text: $draft.note)
       }.formStyle(.grouped).disabled(model.saving || draft.request != nil)
       .onAppear {
-        // Settings › Portfolio › Default account, when it's one of the accounts listed.
-        if draft.account.isEmpty, let id = model.desktop?.settings?.defaultAccountId,
+        if let editing, !draft.loaded {
+          draft.load(editing)
+        } else if draft.account.isEmpty, let id = model.desktop?.settings?.defaultAccountId,
           model.desktop?.accounts.contains(where: { $0.id == id }) == true
         {
+          // Settings › Portfolio › Default account, when it's one of the accounts listed.
           draft.account = String(id)
         }
+      }
+      .onChange(of: draft.symbol) { _, _ in
+        // The original currency belongs to the original symbol: work it out again for a new
+        // one, unless the user typed a currency themselves.
+        if let editing, symbol != editing.symbol, currency == editing.currency { draft.currency = "" }
       }
       if draft.request != nil && !model.saving {
         Text("The save outcome is unknown. Retry the same entry before changing or closing it.")
@@ -60,7 +74,14 @@ struct TransactionSheet: View {
         Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving || draft.request != nil)
         Spacer()
         if model.saving { ProgressView().controlSize(.small) }
-        Button(draft.request == nil ? "Save transaction" : "Retry save") {
+        Button(editing != nil ? "Save changes" : draft.request == nil ? "Save transaction" : "Retry save") {
+          if let editing {
+            // An edit sets the same values again when repeated, so it needs no save receipt.
+            Task {
+              if await model.perform(editArguments(editing.id), success: "Transaction updated") { dismiss() }
+            }
+            return
+          }
           let attempt = draft.request ?? TransactionSaveRequest(arguments: arguments)
           draft.request = attempt
           Task {
@@ -81,16 +102,31 @@ struct TransactionSheet: View {
       "BUY": "buy", "SELL": "sell", "DEPOSIT": "deposit", "WITHDRAWAL": "withdraw",
       "DIVIDEND": "dividend", "INTEREST": "interest", "FEE": "fee",
     ][draft.type]!
-    let f = DateFormatter()
-    f.dateFormat = "yyyy-MM-dd"
-    f.locale = Locale(identifier: "en_US_POSIX")
-    var options = ["--account", draft.account, "--date", f.string(from: draft.date), "--note", draft.note]
+    var options = ["--account", draft.account, "--date", LedgerDate.string(draft.date), "--note", draft.note]
     if trade { options += ["--fees", NumberInput.cli(draft.fees)] }
     // Blank lets the CLI infer the listing currency, so a USD stock in a CAD account stays USD.
     if !currency.isEmpty { options += ["--currency", currency] }
-    var values = needsSymbol ? [draft.symbol.trimmingCharacters(in: .whitespaces).uppercased()] : []
+    var values = needsSymbol ? [symbol] : []
     values += (trade ? [draft.quantity, draft.price] : [draft.amount]).map { NumberInput.cli($0) }
     return [command] + options + ["--"] + values
+  }
+  /// Every field the form shows, so the stored entry ends up exactly as the form reads.
+  /// A blank currency is sent too: the CLI then works it out as for a new entry.
+  private func editArguments(_ id: Int) -> [String] {
+    var options = [
+      "txn", "edit", "--account", draft.account, "--date", LedgerDate.string(draft.date),
+      "--currency", currency, "--note", draft.note,
+    ]
+    if needsSymbol { options += ["--symbol", symbol] }
+    if trade {
+      options += [
+        "--quantity", NumberInput.cli(draft.quantity), "--price", NumberInput.cli(draft.price),
+        "--fees", NumberInput.cli(draft.fees),
+      ]
+    } else {
+      options += ["--amount", NumberInput.cli(draft.amount)]
+    }
+    return options + (editing?.revisionArguments ?? []) + ["--", String(id)]
   }
 }
 
@@ -375,6 +411,8 @@ private struct NumberField: View {
 
 private final class TransactionSheetDraft: ObservableObject {
   @Published var request: TransactionSaveRequest?
+  /// Whether `load` has filled in the entry being edited (only once, so edits aren't reset).
+  var loaded = false
   @Published var type = "BUY"
   @Published var account = ""
   @Published var symbol = ""
@@ -385,6 +423,20 @@ private final class TransactionSheetDraft: ObservableObject {
   @Published var currency = ""
   @Published var note = ""
   @Published var date = Date.now
+
+  func load(_ t: DesktopTransaction) {
+    loaded = true
+    type = t.type
+    account = String(t.accountId)
+    symbol = t.symbol
+    quantity = NumberInput.editable(t.quantity)
+    price = NumberInput.editable(t.price)
+    amount = NumberInput.editable(t.amount)
+    fees = NumberInput.editable(t.fees)
+    currency = t.currency
+    note = t.note
+    date = LedgerDate.date(t.date) ?? date
+  }
 }
 
 private final class AccountSheetDraft: ObservableObject {

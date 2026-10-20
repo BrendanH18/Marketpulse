@@ -491,3 +491,180 @@ def test_a_save_spanning_a_restore_is_refused(tracker, store, monkeypatch):
     monkeypatch.setattr(tracker.market, "quote", real_quote)
     with pytest.raises(ValueError, match="only 10 held"):
         tracker.add_transaction(replace(sale, currency=""))
+
+
+# ── editing and deleting transactions ─────────────────────────────────────────
+
+
+def _trade(acct, kind, day, qty, price, symbol="AAPL"):
+    return Transaction(
+        account_id=acct.id, type=kind, date=day, symbol=symbol, quantity=qty, price=price, currency="USD"
+    )
+
+
+def test_an_edit_recomputes_acb_and_realized_gain(tracker, store):
+    acct = store.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA))
+    store.add_transaction(_trade(acct, TxnType.BUY, "2024-01-02", 10, 100))
+    second = store.add_transaction(_trade(acct, TxnType.BUY, "2024-01-03", 10, 120))
+    store.add_transaction(_trade(acct, TxnType.SELL, "2024-02-01", 5, 130))
+    before = store.ledger()
+    assert before.holdings[(acct.id, "AAPL")].avg_cost == pytest.approx(110)
+    assert before.realized[0].gain == pytest.approx(100)  # 5 × (130 − 110)
+
+    tracker.update_transaction(replace(second, price=140))
+    after = store.ledger()
+    assert after.holdings[(acct.id, "AAPL")].avg_cost == pytest.approx(120)
+    assert after.realized[0].gain == pytest.approx(50)  # 5 × (130 − 120)
+
+
+def test_an_edit_that_oversells_is_refused_and_changes_nothing(tracker, store):
+    acct = store.add_account(Account(name="Main"))
+    store.add_transaction(_trade(acct, TxnType.BUY, "2024-01-02", 10, 100))
+    sale = store.add_transaction(_trade(acct, TxnType.SELL, "2024-02-01", 4, 110))
+    with pytest.raises(ValueError, match=r"Not saved: on 2024-02-01, sell of 20\.0000 AAPL exceeds 10\.0000 held"):
+        tracker.update_transaction(replace(sale, quantity=20))
+    assert [t.quantity for t in store.transactions()] == [10, 4]
+
+
+def test_a_backdated_edit_that_breaks_a_later_sale_is_refused(tracker, store):
+    # Today's holdings are the same either way (bought 10, sold 10), so only a replay at each
+    # entry's own date shows that the sale would come before the shares it sells.
+    acct = store.add_account(Account(name="Main"))
+    buy = store.add_transaction(_trade(acct, TxnType.BUY, "2024-01-02", 10, 100))
+    sale = store.add_transaction(_trade(acct, TxnType.SELL, "2024-02-01", 10, 110))
+    with pytest.raises(ValueError, match=rf"transaction #{sale.id} on 2024-02-01 would no longer add up"):
+        tracker.update_transaction(replace(buy, date="2024-03-01"))
+    assert store.transactions()[0].date == "2024-01-02"
+    tracker.update_transaction(replace(buy, date="2024-01-15"))  # still before the sale
+    assert store.transactions()[0].date == "2024-01-15"
+
+
+def test_moving_a_purchase_to_another_account_is_refused_when_a_sale_needs_it(tracker, store):
+    main = store.add_account(Account(name="Main"))
+    other = store.add_account(Account(name="Other"))
+    buy = store.add_transaction(_trade(main, TxnType.BUY, "2024-01-02", 10, 100))
+    store.add_transaction(_trade(main, TxnType.SELL, "2024-02-01", 5, 110))
+    with pytest.raises(ValueError, match="would no longer add up"):
+        tracker.update_transaction(replace(buy, account_id=other.id))
+    with pytest.raises(ValueError, match="Unknown account"):
+        tracker.update_transaction(replace(buy, account_id=999))
+    assert store.transactions()[0].account_id == main.id
+
+
+def test_deleting_a_purchase_a_sale_needs_is_refused(tracker, store):
+    acct = store.add_account(Account(name="Main"))
+    buy = store.add_transaction(_trade(acct, TxnType.BUY, "2024-01-02", 10, 100))
+    sale = store.add_transaction(_trade(acct, TxnType.SELL, "2024-02-01", 5, 110))
+    with pytest.raises(ValueError, match=rf"Not deleted: transaction #{sale.id} on 2024-02-01"):
+        tracker.delete_transaction(buy.saved_id)
+    assert len(store.transactions()) == 2
+    tracker.delete_transaction(sale.saved_id)
+    tracker.delete_transaction(buy.saved_id)
+    assert store.transactions() == []
+    with pytest.raises(ValueError, match="No transaction #"):
+        tracker.delete_transaction(buy.saved_id)
+
+
+def test_problems_already_in_the_ledger_do_not_block_other_changes(tracker, store):
+    acct = store.add_account(Account(name="Main"))
+    # An oversell the add guard can't see: backdated before the purchase it relies on.
+    buy = store.add_transaction(_trade(acct, TxnType.BUY, "2024-03-01", 10, 100))
+    broken = store.add_transaction(_trade(acct, TxnType.SELL, "2024-02-01", 5, 110))
+    other = store.add_transaction(_trade(acct, TxnType.BUY, "2024-01-02", 1, 50, symbol="MSFT"))
+    assert [i.txn_id for i in store.ledger().issues] == [broken.id]
+    tracker.update_transaction(replace(other, note="fixed a typo"))
+    tracker.update_transaction(replace(broken, note="still to sort out"))
+    tracker.update_transaction(replace(buy, price=101))
+    assert [t.note for t in store.transactions() if t.id == broken.id] == ["still to sort out"]
+    tracker.update_transaction(replace(broken, date="2024-03-02"))  # the fix
+    assert store.ledger().issues == []
+
+
+def test_an_edit_is_validated_like_a_new_entry(tracker, store):
+    acct = store.add_account(Account(name="Main"))
+    buy = store.add_transaction(_trade(acct, TxnType.BUY, "2024-01-02", 10, 100))
+    with pytest.raises(ValueError, match="Quantity must be positive"):
+        tracker.update_transaction(replace(buy, quantity=0))
+    with pytest.raises(ValueError, match="future"):
+        tracker.update_transaction(replace(buy, date=(date.today() + timedelta(days=2)).isoformat()))
+    with pytest.raises(ValueError, match="hasn't been saved"):
+        tracker.update_transaction(replace(buy, id=None))
+    with pytest.raises(ValueError, match="No transaction #999"):
+        tracker.update_transaction(replace(buy, id=999))
+    tracker.update_transaction(replace(buy, symbol="XEQT.TO", currency=""))  # blank: resolved again
+    assert store.transactions()[0].currency == "CAD"
+
+
+def test_an_edit_or_delete_spanning_a_restore_is_refused(tracker, store):
+    acct = store.add_account(Account(name="Main"))
+    buy = store.add_transaction(_trade(acct, TxnType.BUY, "2024-01-02", 10, 100))
+    taken = store.backup()
+    store.add_transaction(_trade(acct, TxnType.BUY, "2024-01-03", 20, 100))
+    restore_id = store.restore_id  # read before looking the entry up, as the CLI does
+    store.restore(taken)  # `marketpulse backup restore` in another window, meanwhile
+    with pytest.raises(ValueError, match="restored from a backup while this was being saved"):
+        tracker.update_transaction(replace(buy, price=1), restore_id=restore_id)
+    with pytest.raises(ValueError, match="restored from a backup while this was being deleted"):
+        tracker.delete_transaction(buy.saved_id, restore_id=restore_id)
+    assert [(t.quantity, t.price) for t in store.transactions()] == [(10, 100)]
+
+
+def test_an_edit_with_a_non_iso_date_is_checked_at_the_date_it_is_stored_as(tracker, store):
+    acct = store.add_account(Account(name="Main"))
+    buy = store.add_transaction(_trade(acct, TxnType.BUY, "2024-01-02", 10, 100))
+    store.add_transaction(_trade(acct, TxnType.SELL, "2024-02-01", 10, 110))
+    # "01/31/2025" sorts before "2024-02-01" as text, but is stored as 2025-01-31: after the sale.
+    with pytest.raises(ValueError, match="would no longer add up"):
+        tracker.update_transaction(replace(buy, date="01/31/2025"))
+    assert store.transactions()[0].date == "2024-01-02"
+
+
+def test_an_entry_changed_or_replaced_since_it_was_loaded_is_refused(tracker, store):
+    acct = store.add_account(Account(name="Main"))
+    fee = store.add_transaction(Transaction(account_id=acct.id, type=TxnType.FEE, date="2024-01-02", amount=5))
+    seen = store.transactions()[0].revision(store.restore_id)  # what the app's Activity row carries
+    # Another window undoes the fee and records a deposit, which SQLite gives the same id.
+    tracker.delete_transaction(fee.saved_id)
+    deposit = store.add_transaction(
+        Transaction(account_id=acct.id, type=TxnType.DEPOSIT, date="2024-01-03", amount=500)
+    )
+    assert deposit.id == fee.id
+    with pytest.raises(ValueError, match=rf"#{fee.id} has changed since it was loaded"):
+        tracker.delete_transaction(fee.saved_id, revision=seen)
+    with pytest.raises(ValueError, match="has changed since it was loaded"):
+        tracker.update_transaction(replace(store.transactions()[0], amount=1), revision=seen)
+    assert [(t.type, t.amount) for t in store.transactions()] == [(TxnType.DEPOSIT, 500)]
+    current = store.transactions()[0].revision(store.restore_id)
+    tracker.update_transaction(replace(store.transactions()[0], note="checked"), revision=current)
+    assert store.transactions()[0].revision(store.restore_id) != current  # any stored change moves it on
+
+
+def test_a_restore_makes_revisions_stale_even_for_identical_entries(tracker, store):
+    acct = store.add_account(Account(name="Main"))
+    fee = store.add_transaction(Transaction(account_id=acct.id, type=TxnType.FEE, date="2024-01-02", amount=5))
+    taken = store.backup()
+    seen = store.transactions()[0].revision(store.restore_id)
+    # The restored ledger has the same row under the same id, but its accounts and other
+    # entries may not be what the window showed.
+    store.restore(taken)
+    assert store.transactions()[0] == fee
+    with pytest.raises(ValueError, match="has changed since it was loaded"):
+        tracker.delete_transaction(fee.saved_id, revision=seen)
+    tracker.delete_transaction(fee.saved_id, revision=store.transactions()[0].revision(store.restore_id))
+    assert store.transactions() == []
+
+
+def test_an_edit_that_leaves_a_transfer_short_is_refused(tracker, store):
+    taxable = store.add_account(Account(name="Taxable"))
+    tfsa = store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    buy = store.add_transaction(_trade(taxable, TxnType.BUY, "2024-01-02", 10, 100))
+    move = store.add_transaction(
+        Transaction(
+            account_id=taxable.id, type=TxnType.TRANSFER, date="2024-02-01", symbol="AAPL", quantity=10,
+            price=110, currency="USD", target_account_id=tfsa.id,
+        )
+    )  # fmt: skip
+    # 5 would still be held, so the transfer applies, but moves only half of what it records.
+    with pytest.raises(ValueError, match=rf"transaction #{move.id} on 2024-02-01 would no longer add up"):
+        tracker.update_transaction(replace(buy, quantity=5))
+    assert store.ledger().holdings[(tfsa.id, "AAPL")].quantity == 10

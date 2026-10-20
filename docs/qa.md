@@ -163,6 +163,19 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     is available." Turn off **Check for updates automatically**: the banner and menu item
     disappear and **Check Now** is disabled. In the demo, no banner appears.
 
+21. **Edit and delete transactions.** In **Activity**, right-click the AAPL sell (Cash
+    Account) and choose **Edit…**. The sheet reads "Edit transaction" with Type "Sell"
+    (disabled), Quantity 1, Price 230, currency USD, and the sale's date. Set Quantity to 10
+    and **Save changes**: the sheet says "Not saved: on <date>, sell of 10.0000 AAPL exceeds
+    5.0000 held." and Activity is unchanged. Set it to 2 and save: the window says
+    "Transaction updated" and the sale shows +460.00 USD. Double-click the dividend: the
+    same sheet opens with its amount (45.5, or 45,5 in French); **Cancel**. Right-click the
+    AAPL buy, **Delete…**, **Delete**: the window says "Not deleted: transaction #… would
+    no longer add up…" and the buy is still listed. Select the fee and press Delete: the
+    confirmation names it (its date, "Fee", the amount, "Cash Account"); **Cancel** changes nothing,
+    **Delete** removes it and the totals refresh. On the split, **Edit…** is disabled and
+    **Delete…** isn't (don't delete it). In the demo, both are disabled.
+
 Quit the QA app with ⌘Q when done.
 
 ## Tool limits and workarounds
@@ -180,6 +193,6 @@ menu bar. Then:
 
 ## Reporting
 
-Post results on the PR (or the issue being verified) as a table of items 1–20 with
+Post results on the PR (or the issue being verified) as a table of items 1–21 with
 PASS / FAIL / UNVERIFIED and evidence, then any bugs with exact steps to reproduce.
 Clean up with `rm -rf "$TMPDIR/marketpulse-qa"`.
