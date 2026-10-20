@@ -823,10 +823,11 @@ def undo(app: App, yes: bool) -> None:
     if not txns:
         fail("Nothing to undo.")
     last = max(txns, key=lambda t: t.id or 0)
+    seen = last.revision(restore_id)  # the entry as shown; refused if it changes before the delete
     app.console.print(render.activity_table([last], app.store.account_map()))
     if yes or click.confirm("Delete this transaction?"):
         try:
-            app.tracker.delete_transaction(last.saved_id, restore_id=restore_id)
+            app.tracker.delete_transaction(last.saved_id, restore_id=restore_id, revision=seen)
         except ValueError as e:
             fail(str(e))
         app.ok(f"Deleted transaction #{last.id}.")
@@ -851,6 +852,8 @@ def txn_delete(app: App, txn_id: int, yes: bool, revision: str | None) -> None:
     match = [t for t in app.store.transactions() if t.id == txn_id]
     if not match:
         fail(f"No transaction #{txn_id}.")
+    if revision is None:
+        revision = match[0].revision(restore_id)  # the entry as shown; refused if it changes meanwhile
     app.console.print(render.activity_table(match, app.store.account_map()))
     if yes or click.confirm("Delete?"):
         try:
@@ -886,6 +889,10 @@ def txn_edit(
     if not match:
         fail(f"No transaction #{txn_id}.")
     t = match[0]
+    if revision is None:
+        # Every field of `t` is written back, so an edit made elsewhere since it was read (while a
+        # quote is looked up, say) is refused rather than overwritten.
+        revision = t.revision(restore_id)
     if symbol is not None and currency is None and symbol.strip().upper() != t.symbol:
         currency = ""  # the old symbol's currency may not be the new one's
     if when is not None:

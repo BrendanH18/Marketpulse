@@ -1262,16 +1262,16 @@ class MarketPulseApp(App):
         )
         self.push_screen(form, self._txn_done)
 
-    def _txn_done(self, txn: Transaction | None, restore_id: str | None = None) -> None:
+    def _txn_done(self, txn: Transaction | None, restore_id: str | None = None, revision: str | None = None) -> None:
         if txn is not None:
-            self.save_txn(txn, restore_id)
+            self.save_txn(txn, restore_id, revision)
 
     @work(thread=True, group="write")
-    def save_txn(self, txn: Transaction, restore_id: str | None = None) -> None:
+    def save_txn(self, txn: Transaction, restore_id: str | None = None, revision: str | None = None) -> None:
         tr = self.tracker
         try:
             if txn.id is not None:
-                tr.update_transaction(txn, restore_id=restore_id)
+                tr.update_transaction(txn, restore_id=restore_id, revision=revision)
                 message = f"Updated transaction #{txn.id}"
             else:
                 saved = tr.add_transaction(txn)
@@ -1294,9 +1294,11 @@ class MarketPulseApp(App):
             key = self._selected_key(self.query_one("#activity-table", DataTable))
             txn = next((t for t in self.tracker.store.transactions() if str(t.id) == key), None)
             if txn:
+                # Taken before the form opens: a change made elsewhere meanwhile refuses the save.
+                seen = txn.revision(restore_id)
                 self.push_screen(
                     TransactionForm(self.tracker, txn=txn, symbols=self.known_symbols()),
-                    lambda edited: self._txn_done(edited, restore_id),
+                    lambda edited: self._txn_done(edited, restore_id, seen),
                 )
         elif ws == "tax":
             key = self._selected_key(self.query_one("#accounts-table", DataTable))
@@ -1313,9 +1315,10 @@ class MarketPulseApp(App):
             if txn is None:
                 return
             detail = " ".join(c.plain for c in render.activity_cells(txn, store.account_map())[1:8] if c.plain != "—")
+            seen = txn.revision(restore_id)
 
             def done(yes: bool | None) -> None:
-                if yes and self._delete_txn(txn.saved_id, restore_id):
+                if yes and self._delete_txn(txn.saved_id, restore_id, seen):
                     self.after_change(f"Deleted transaction #{txn.id}")
 
             self.push_screen(ConfirmScreen(f"Delete transaction #{txn.id}?", detail), done)
@@ -1376,14 +1379,14 @@ class MarketPulseApp(App):
         detail = " ".join(c.plain for c in render.activity_cells(last, store.account_map())[1:8] if c.plain != "—")
 
         def done(yes: bool | None) -> None:
-            if yes and self._delete_txn(last.saved_id, restore_id):
+            if yes and self._delete_txn(last.saved_id, restore_id, last.revision(restore_id)):
                 self.after_change(f"Undid transaction #{last.id}")
 
         self.push_screen(ConfirmScreen("Undo the last transaction?", detail), done)
 
-    def _delete_txn(self, txn_id: int, restore_id: str) -> bool:
+    def _delete_txn(self, txn_id: int, restore_id: str, revision: str) -> bool:
         try:
-            self.tracker.delete_transaction(txn_id, restore_id=restore_id)
+            self.tracker.delete_transaction(txn_id, restore_id=restore_id, revision=revision)
         except ValueError as e:
             self.notify(str(e), title="Not deleted", severity="error")
             return False

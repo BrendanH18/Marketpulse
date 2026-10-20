@@ -103,6 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `txn edit` and `txn delete` accept `--revision`, and each `desktop snapshot` activity
   row gains a `revision`: the app sends it back, so an entry changed or replaced since the
   window loaded it (in another window, by a restore, or a reused id) is refused, not overwritten.
+  Without `--revision`, `txn edit`, `txn delete`, and `undo` (and the TUI) check against the
+  entry as they read it, so a change made elsewhere before they write is refused too.
 
 - Archived accounts are now left out of every total (net worth, allocation,
   account lists and movers, including `status --json`), as the TUI's archive

@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from dataclasses import replace
 from uuid import uuid4
 
 import click
@@ -465,3 +466,33 @@ def test_txn_edit_accepts_what_the_app_edit_form_sends(cli, store):
     assert (d.amount, d.currency, d.type) == (6.25, "USD", dividend.type)
     assert (c.amount, c.currency, c.symbol) == (750, "CAD", "")
     assert edit(buy, *trade).exit_code == 1  # the revision it was loaded at is gone
+
+
+def test_txn_edit_and_delete_refuse_an_entry_changed_meanwhile(cli, store, tracker, monkeypatch):
+    # Without --revision, the CLI checks against the entry as it read it, so a change made in
+    # another window meanwhile is refused rather than overwritten or deleted unseen.
+    cli("buy", "AAPL", "10", "100", "--date", "2024-01-02")
+    (buy,) = store.transactions()
+    real = tracker.resolve_currency
+
+    def edited_elsewhere_while_quoting(symbol, account):
+        store.update_transaction(replace(store.transactions()[0], note="edited in another window"))
+        return real(symbol, account)
+
+    monkeypatch.setattr(tracker, "resolve_currency", edited_elsewhere_while_quoting)
+    result = cli("txn", "edit", "--symbol", "XEQT.TO", "--", str(buy.id))  # looks the currency up again
+    assert result.exit_code == 1 and "has changed since it was loaded" in result.output
+    assert (store.transactions()[0].symbol, store.transactions()[0].note) == ("AAPL", "edited in another window")
+
+    def edited_elsewhere_while_confirming(*args, **kwargs):
+        current = store.transactions()[0]
+        store.update_transaction(replace(current, quantity=current.quantity - 1))
+        return True
+
+    monkeypatch.setattr("click.confirm", edited_elsewhere_while_confirming)
+    result = cli("txn", "delete", "--", str(buy.id))
+    assert result.exit_code == 1 and "has changed since it was loaded" in result.output
+    assert [t.quantity for t in store.transactions()] == [9]
+    result = cli("undo")  # the same for undo's confirmation
+    assert result.exit_code == 1 and "has changed since it was loaded" in result.output
+    assert [t.quantity for t in store.transactions()] == [8]
