@@ -119,6 +119,16 @@ def test_transfer_moves_cost_base_between_accounts():
     assert (s.holdings[(1, "A")].quantity, s.holdings[(1, "A")].book) == (6, pytest.approx(60))
     assert (s.holdings[(2, "A")].quantity, s.holdings[(2, "A")].book) == (4, pytest.approx(40))
     assert not s.realized
+    assert not s.issues
+
+
+def test_a_transfer_of_more_than_is_held_moves_what_is_held_and_is_flagged():
+    s = replay(
+        [txn(TxnType.BUY, "2024-01-01", "A", 5, 10), txn(TxnType.TRANSFER, "2024-02-01", "A", 8, target_account_id=2)],
+        ACCOUNTS,
+    )
+    assert (s.holdings[(1, "A")].quantity, s.holdings[(2, "A")].quantity) == (0, 5)  # unchanged: the held 5 move
+    assert [i.message for i in s.issues] == ["Transfer of 8.0000 A exceeds 5.0000 held"]
 
 
 def test_drip_adds_shares_and_income():

@@ -128,7 +128,7 @@ class Tracker:
         than was held at the time) that it could apply before; problems already there don't block it.
         `restore_id` works as for `add_transaction`: read it before looking the transaction up.
         `revision`, the stored entry's `Transaction.revision` as the caller saw it, refuses the
-        change if the entry has changed since."""
+        change if the entry has changed, or the ledger was restored, since."""
         if restore_id is None:
             restore_id = self.store.restore_id
         txn_id = txn.saved_id
@@ -175,7 +175,7 @@ class Tracker:
         stored = next((t for t in txns if t.id == txn_id), None)
         if stored is None:
             raise ValueError(f"No transaction #{txn_id}. It may have been deleted in another window.")
-        if revision is not None and stored.revision != revision:
+        if revision is not None and stored.revision(self.store.restore_id) != revision:
             raise ValueError(
                 f"Transaction #{txn_id} has changed since it was loaded, perhaps in another window. "
                 "Nothing was changed. Check it and try again."

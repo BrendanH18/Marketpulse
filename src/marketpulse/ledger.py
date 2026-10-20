@@ -218,6 +218,13 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
         if h is None or h.quantity <= EPSILON or txn.target_account_id is None:
             state.issues.append(LedgerIssue(txn.id, txn.date, f"Transfer of {txn.symbol} with nothing held"))
             return
+        if txn.quantity > h.quantity + EPSILON:
+            # Like a sale, only what's held moves; flag it so the shortfall isn't silent.
+            state.issues.append(
+                LedgerIssue(
+                    txn.id, txn.date, f"Transfer of {txn.quantity:,.4f} {txn.symbol} exceeds {h.quantity:,.4f} held"
+                )
+            )
         qty = min(txn.quantity, h.quantity)
         moved_book = h.avg_cost * qty
         h.quantity -= qty

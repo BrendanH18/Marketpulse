@@ -433,6 +433,8 @@ def test_txn_edit_works_out_the_currency_again_for_a_new_symbol(cli, store):
     assert (store.transactions()[0].symbol, store.transactions()[0].currency) == ("XEQT.TO", "CAD")
     assert cli("txn", "edit", "--symbol", "AAPL", "--currency", "cad", "--", str(buy.id)).exit_code == 0
     assert store.transactions()[0].currency == "CAD"  # an explicit currency wins
+    assert cli("txn", "edit", "--symbol", " aapl ", "--", str(buy.id)).exit_code == 0
+    assert store.transactions()[0].currency == "CAD"  # the same symbol: the currency stays
     assert cli("txn", "edit", "--currency", "", "--", str(buy.id)).exit_code == 0
     assert store.transactions()[0].currency == "USD"  # blank: the listing currency
 
@@ -448,7 +450,7 @@ def test_txn_edit_accepts_what_the_app_edit_form_sends(cli, store):
 
     def edit(t, *fields):
         common = ("--account", str(t.account_id), "--date", "2024-01-03", "--currency", "", "--note", "- edited")
-        return cli("txn", "edit", *common, *fields, "--revision", t.revision, "--", str(t.id))
+        return cli("txn", "edit", *common, *fields, "--revision", t.revision(store.restore_id), "--", str(t.id))
 
     stale = ("--revision", "0" * 16)
     assert "has changed since it was loaded" in cli("txn", "edit", "--note", "x", *stale, "--", str(buy.id)).output

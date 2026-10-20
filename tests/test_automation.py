@@ -73,7 +73,7 @@ def test_desktop_bridge_reports_missing_prices(tracker):
     assert "Excluded from totals: UNKNOWN" in payload["warnings"]
     assert next(p for p in payload["positions"] if p["symbol"] == "UNKNOWN")["value"] is None
     assert payload["activity"][0]["type"] == "BUY"
-    assert payload["activity"][0]["revision"] == tracker.store.transactions()[-1].revision
+    assert payload["activity"][0]["revision"] == tracker.store.transactions()[-1].revision(tracker.store.restore_id)
     json.dumps(payload, allow_nan=False)
 
 
@@ -293,3 +293,21 @@ def test_desktop_activity_amounts_are_signed_by_cash_direction(tracker):
         "SPLIT": (0, 0),
     }
     assert rows["SPLIT"]["ratio"] == 2
+
+
+def test_a_restore_during_a_snapshot_makes_its_activity_stale(tracker, monkeypatch):
+    store = tracker.store
+    acct = store.add_account(Account(name="Fictional RRSP", type=AccountType.RRSP))
+    fee = store.add_transaction(Transaction(account_id=acct.saved_id, type=TxnType.FEE, date="2024-01-02", amount=5))
+    taken = store.backup()
+
+    def cycle_then_restore(tracker, **kwargs):
+        report = run_cycle(tracker, **kwargs)
+        store.restore(taken)  # `backup restore` in another window, while accounts are being read
+        return report
+
+    monkeypatch.setattr("marketpulse.desktop.run_cycle", cycle_then_restore)
+    row = snapshot(tracker)["activity"][0]
+    assert row["id"] == fee.id  # the same entry, but shown alongside the replaced ledger
+    with pytest.raises(ValueError, match="has changed since it was loaded"):
+        tracker.delete_transaction(fee.saved_id, revision=row["revision"])

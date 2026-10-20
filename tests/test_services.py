@@ -622,7 +622,7 @@ def test_an_edit_with_a_non_iso_date_is_checked_at_the_date_it_is_stored_as(trac
 def test_an_entry_changed_or_replaced_since_it_was_loaded_is_refused(tracker, store):
     acct = store.add_account(Account(name="Main"))
     fee = store.add_transaction(Transaction(account_id=acct.id, type=TxnType.FEE, date="2024-01-02", amount=5))
-    seen = store.transactions()[0].revision  # what the app's Activity row carries
+    seen = store.transactions()[0].revision(store.restore_id)  # what the app's Activity row carries
     # Another window undoes the fee and records a deposit, which SQLite gives the same id.
     tracker.delete_transaction(fee.saved_id)
     deposit = store.add_transaction(
@@ -634,6 +634,37 @@ def test_an_entry_changed_or_replaced_since_it_was_loaded_is_refused(tracker, st
     with pytest.raises(ValueError, match="has changed since it was loaded"):
         tracker.update_transaction(replace(store.transactions()[0], amount=1), revision=seen)
     assert [(t.type, t.amount) for t in store.transactions()] == [(TxnType.DEPOSIT, 500)]
-    current = store.transactions()[0].revision
+    current = store.transactions()[0].revision(store.restore_id)
     tracker.update_transaction(replace(store.transactions()[0], note="checked"), revision=current)
-    assert store.transactions()[0].revision != current  # any stored change moves it on
+    assert store.transactions()[0].revision(store.restore_id) != current  # any stored change moves it on
+
+
+def test_a_restore_makes_revisions_stale_even_for_identical_entries(tracker, store):
+    acct = store.add_account(Account(name="Main"))
+    fee = store.add_transaction(Transaction(account_id=acct.id, type=TxnType.FEE, date="2024-01-02", amount=5))
+    taken = store.backup()
+    seen = store.transactions()[0].revision(store.restore_id)
+    # The restored ledger has the same row under the same id, but its accounts and other
+    # entries may not be what the window showed.
+    store.restore(taken)
+    assert store.transactions()[0] == fee
+    with pytest.raises(ValueError, match="has changed since it was loaded"):
+        tracker.delete_transaction(fee.saved_id, revision=seen)
+    tracker.delete_transaction(fee.saved_id, revision=store.transactions()[0].revision(store.restore_id))
+    assert store.transactions() == []
+
+
+def test_an_edit_that_leaves_a_transfer_short_is_refused(tracker, store):
+    taxable = store.add_account(Account(name="Taxable"))
+    tfsa = store.add_account(Account(name="TFSA", type=AccountType.TFSA))
+    buy = store.add_transaction(_trade(taxable, TxnType.BUY, "2024-01-02", 10, 100))
+    move = store.add_transaction(
+        Transaction(
+            account_id=taxable.id, type=TxnType.TRANSFER, date="2024-02-01", symbol="AAPL", quantity=10,
+            price=110, currency="USD", target_account_id=tfsa.id,
+        )
+    )  # fmt: skip
+    # 5 would still be held, so the transfer applies, but moves only half of what it records.
+    with pytest.raises(ValueError, match=rf"transaction #{move.id} on 2024-02-01 would no longer add up"):
+        tracker.update_transaction(replace(buy, quantity=5))
+    assert store.ledger().holdings[(tfsa.id, "AAPL")].quantity == 10

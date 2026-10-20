@@ -886,7 +886,7 @@ def txn_edit(
     if not match:
         fail(f"No transaction #{txn_id}.")
     t = match[0]
-    if symbol is not None and currency is None and symbol.upper() != t.symbol:
+    if symbol is not None and currency is None and symbol.strip().upper() != t.symbol:
         currency = ""  # the old symbol's currency may not be the new one's
     if when is not None:
         t.date = when

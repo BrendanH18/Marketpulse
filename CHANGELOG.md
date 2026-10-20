@@ -92,10 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now check the ledger the way it's replayed, each entry at its own date, and refuse a
   change that leaves a sale of more than was held then: for example, an edit that
   oversells, a purchase moved after the sale that needs it, or deleting that purchase.
+  A transfer that would move more shares than were held counts too.
   Change or delete the sale first. Problems already in the ledger don't block other
   changes. Edits are also validated like new entries (positive quantities, no future
   dates), and an edit or delete that a backup restore overtook is refused.
-- `txn edit --symbol` without `--currency` works the currency out again for the new
+- A transfer of more shares than were held moves what was held, as before, and is now
+  listed with the ledger's other warnings instead of passing silently.
+- `txn edit --symbol` without `--currency` works the currency out again for a different
   symbol, and `--currency ""` uses the listing currency.
 - `txn edit` and `txn delete` accept `--revision`, and each `desktop snapshot` activity
   row gains a `revision`: the app sends it back, so an entry changed or replaced since the
