@@ -131,6 +131,38 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     backup is now first in the list. Restore that one: the deposit is back. In the
     demo, **Backups** says the demo has none.
 
+19. **Settings and appearance.** **MarketPulse › Settings…** (⌘,) opens a window with
+    General, Appearance, Portfolio, and Data tabs; the popover's gear and **Automation ›
+    Open Settings…** bring back the same window. Each of the following applies without
+    a restart:
+    - **General:** set **Refresh quotes every** to 2 minutes; **Automation** now says
+      "Every 120 seconds". Set the menu bar to **A symbol's price**, enter `xeqt.to`, and
+      **Set**: the menu bar shows XEQT.TO's price. Leave **Launch at login** off.
+    - **Appearance:** **Light** turns the portfolio window, Settings, and the ⌘N sheet
+      light; **Dark** turns them dark; **System** follows System Settings › Appearance.
+      In Light, visit every workspace and open each sheet (⌘N, New account, Create alert,
+      Import, Welcome): all text, chart colours, warnings ("Archived account Old RRSP…")
+      and errors are readable. The menu bar popover keeps its terminal theme.
+    - **Portfolio:** **Show totals in** USD changes the footer to "USD". **Default
+      account** Cash Account preselects it in ⌘N. **Hide amounts** masks amounts as
+      "••••", the same as the eye button. `marketpulse config` (with the QA app's
+      `MARKETPULSE_CONFIG`) shows the new values.
+    - **Data:** the portfolio path is the scratch `data` folder; **Reveal in Finder**
+      selects it. **Show Backups…** opens **Automation**.
+    Quit and relaunch: every setting is kept. In the demo, General, Appearance, and Portfolio say
+    "Settings are read-only" and their controls are disabled.
+
+20. **Update check.** The QA app reads the fictional release in the scratch folder's
+    `update-feed.json` (v99.0.0) instead of GitHub. After launch, the window shows
+    "MarketPulse 99.0.0 is available." with **Release Notes** and **Copy Install Command**;
+    the app menu has **Update Available: MarketPulse 99.0.0…** and the popover has a
+    "↓ MarketPulse 99.0.0 is available" line. **Copy Install Command** says it was copied,
+    and the clipboard holds `curl -fsSL https://github.com/BrendanH18/Marketpulse/releases/download/v99.0.0/install.sh | bash -s -- --version v99.0.0`
+    (don't run it). Closing the banner (×) hides it in all three places, also after a
+    relaunch; **Check for Updates…** brings it back and Settings says "MarketPulse 99.0.0
+    is available." Turn off **Check for updates automatically**: the banner and menu item
+    disappear and **Check Now** is disabled. In the demo, no banner appears.
+
 Quit the QA app with ⌘Q when done.
 
 ## Tool limits and workarounds

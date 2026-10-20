@@ -62,6 +62,8 @@ struct DesktopPayload: Decodable {
   let backend: BackendInfo?
   /// Absent from older engines.
   let storage: StorageInfo?
+  /// Absent from older engines; the Settings window then edits only the app's own preferences.
+  let settings: SettingsInfo?
   let warnings: [String]
 
   /// Nobody has used this ledger yet, so the app offers its welcome. Older engines don't
@@ -84,6 +86,20 @@ struct StorageInfo: Decodable {
   let backupDir: String?
   /// Backups the app can restore, newest first. Absent from older engines; empty in the demo.
   let backups: [BackupInfo]?
+}
+
+/// The engine configuration the Settings window edits with `marketpulse config set`.
+struct SettingsInfo: Decodable {
+  let baseCurrency: String
+  let privacy: Bool
+  /// As written in the config: a name, id or account type. Empty for none.
+  let defaultAccount: String
+  /// The active account `defaultAccount` picks, if any.
+  let defaultAccountId: Int?
+  let menubarDisplay: String
+  let menubarSymbol: String
+  /// nil in the demo, whose settings are its own.
+  let configPath: String?
 }
 
 /// One file in the backups folder (`marketpulse backup list`).

@@ -237,8 +237,9 @@ To build the companion against current `main` instead, clone without
 so Python and Swift still come from the same commit.
 
 The companion shows portfolio status in the menu bar and a popover with accounts,
-movers, charts, and alerts. Press `⌥⌘M` to open the TUI. Settings include display
-mode, refresh interval, terminal selection, and launch at login.
+movers, charts, and alerts. Press `⌥⌘M` to open the TUI. Its gear opens **Settings**
+(⌘,): what the menu bar shows, refresh interval, terminal selection, launch at login,
+light or dark appearance, and portfolio defaults.
 
 On Omarchy, `theme = "auto"` follows your active theme. Elsewhere, it defaults
 to Tokyo Night. Select a bundled palette with `marketpulse theme set kanagawa`.

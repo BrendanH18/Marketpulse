@@ -92,6 +92,51 @@ MarketPulse** brings it back at any time, and the empty Overview's **Other ways 
 start…** button opens it too. The app remembers that it showed the welcome in its
 own preferences (`welcomeShown`), not in your ledger.
 
+## Settings
+
+**MarketPulse › Settings…** (⌘,), the popover's gear, or **Automation › Open Settings…**
+opens the Settings window. Every change applies straight away, without a restart.
+
+| Tab | Settings | Stored in |
+| --- | --- | --- |
+| General | Refresh interval, launch at login, [update checks](#update-checks), what the menu bar shows (day change, net worth, or a symbol's price), the terminal app, and the ⌥⌘M shortcut | App preferences; the menu bar display is `menubar_display` / `menubar_symbol` in the config file |
+| Appearance | System, Light, or Dark for the portfolio and Settings windows and their sheets | App preferences (`appearance`) |
+| Portfolio | The currency totals are shown in, the default account, and privacy mode | Config file: `base_currency`, `default_account`, `privacy` |
+| Data | Where the portfolio and the settings file are, with **Reveal in Finder**, and the backups kept | — |
+
+Config-file settings are saved with `marketpulse config set`, so the CLI and TUI see
+the same values. The default account is preselected when you record a transaction
+and saved by name (by id for a name made only of digits, which the CLI reads as an id);
+an id or account type written by the CLI works too. In the demo, Settings is read-only. The menu bar's popover keeps the
+colours of your MarketPulse terminal theme (`marketpulse theme set`).
+
+## Update checks
+
+The app downloaded from GitHub Releases checks for a newer version at most once a day,
+while it runs. When there is one, the portfolio window shows a banner, the app menu
+gains **Update Available**, and the menu bar popover gets a line. Each offers the release
+notes and **Copy Install Command**: the [one-line install](install.md#update) for that
+version (with `--dir /Applications` if the app runs from there), to paste into Terminal.
+Nothing is downloaded or installed for you, and your portfolio isn't touched. Closing the
+banner hides it until the next version. **MarketPulse › Check for Updates…** or
+**Settings › General › Check Now** checks straight away.
+
+**What's sent:** one HTTPS `GET` to
+`https://api.github.com/repos/BrendanH18/Marketpulse/releases/latest`, with the headers
+`Accept: application/vnd.github+json` and `User-Agent: MarketPulse/<app version>`, plus
+the standard `Accept-Encoding` and `Accept-Language` headers macOS adds. No cookies,
+identifiers, portfolio data, or settings. GitHub sees your IP address, as with any
+request. The answer is only compared with the app's version.
+
+**Turning it off:** **Settings › General › Check for updates automatically**. Off means no
+request at all, including **Check Now**. The demo never checks. Copies built from a checkout
+(`marketpulse desktop install`) never check: update the checkout and run the install again.
+Failures (offline, GitHub rate limits) are silent, and the next check is a day later.
+
+For QA, `MARKETPULSE_UPDATE_FEED=<file>` makes the app read a GitHub-style release JSON
+from that file instead of contacting GitHub; `scripts/qa_app.py` sets it to a fictional
+v99.0.0.
+
 ## Workspaces
 
 - **Overview:** net worth, daily change, unrealized gain, snapshot history,
@@ -106,7 +151,7 @@ own preferences (`welcomeShown`), not in your ledger.
   contribution-room summaries.
 - **Watchlist:** add/remove symbols and create/delete price or daily-change alerts.
 - **Income:** recorded monthly distributions and interest, converted at current FX.
-- **Automation:** refresh interval, login setting, backup action, errors,
+- **Automation:** what runs while the app is open, a link to Settings, backup action, errors,
   snapshot/backup status, and the app and backend versions. **Backups** lists the
   backups on this Mac with **Restore…** and **Show in Finder**. A restore asks for
   confirmation, saves your current portfolio as a backup first, refuses a damaged
@@ -150,8 +195,8 @@ required. Commands without a request ID keep their existing output and exit beha
 
 Privacy mode masks portfolio amounts and quantities, and hides amount-bearing
 charts. Quotes and percentage changes remain visible. CSV and JSON exports
-contain the original data. The desktop app currently uses a dedicated dark
-palette; the menu bar continues to follow configured Omarchy themes.
+contain the original data. The portfolio window has light and dark palettes
+(**Settings › Appearance**); the menu bar continues to follow configured Omarchy themes.
 
 Advanced asset definitions, transfers, transaction edits/deletions, tax reports,
 and historical backfills remain in the CLI/TUI. Portfolio charts show net worth,
@@ -169,7 +214,7 @@ If the portfolio window's data can't be refreshed, the menu bar falls back to
 
 Closing the window leaves the menu bar running. Click the Dock icon, choose
 **Open Portfolio** (⌘0), or use the menu bar's **Portfolio** button to bring it back. Quitting the app stops its
-maintenance timer. Only enable launch at login if you want that behavior.
+maintenance timer. Only enable **Settings › General › Launch at login** if you want that behavior.
 For a terminal worker or an external scheduler:
 
 ```bash

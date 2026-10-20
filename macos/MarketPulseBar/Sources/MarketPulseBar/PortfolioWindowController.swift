@@ -13,7 +13,6 @@ final class PortfolioWindowController: NSWindowController {
     let window = NSWindow(contentViewController: host)
     window.title = "MarketPulse"
     window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
-    window.appearance = NSAppearance(named: .darkAqua)
     window.isReleasedWhenClosed = false
     window.tabbingMode = .disallowed
     window.setContentSize(NSSize(width: 1200, height: 850))
@@ -37,6 +36,10 @@ final class PortfolioWindowController: NSWindowController {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
   let model = StatusModel()
+
+  func applicationWillFinishLaunching(_ notification: Notification) {
+    model.appearance.apply()
+  }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     // Desktop installs open the portfolio at launch; menu bar installs wait to be asked.

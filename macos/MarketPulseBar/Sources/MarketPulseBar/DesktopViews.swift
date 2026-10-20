@@ -2,21 +2,6 @@ import AppKit
 import Charts
 import SwiftUI
 
-private enum Studio {
-  static let background = Color(hex: "#101619")
-  static let panel = Color(hex: "#171f23")
-  static let line = Color.white.opacity(0.08)
-  static let text = Color(hex: "#edf2f2")
-  static let muted = Color(hex: "#8d9ba3")
-  static let mint = Color(hex: "#9cdbc5")
-  static let red = Color(hex: "#f09696")
-  static let colors = [
-    mint, Color(hex: "#89afd3"), Color(hex: "#c7bae9"), Color(hex: "#dec795"),
-    Color(hex: "#83969d"),
-  ]
-  static func trend(_ value: Double?) -> Color { (value ?? 0) < 0 ? red : mint }
-}
-
 enum Workspace: String, CaseIterable, Identifiable {
   case overview = "Overview"
   case holdings = "Holdings"
@@ -80,6 +65,21 @@ struct PortfolioWindow: View {
             }.buttonStyle(.plain)
           }.padding(12).background(Studio.mint.opacity(0.1))
         }
+        if model.showUpdateBanner, let update = model.availableUpdate {
+          HStack(spacing: 10) {
+            Label("MarketPulse \(update.version) is available.", systemImage: "arrow.down.circle")
+              .font(.system(size: 11)).foregroundStyle(Studio.mint)
+            Spacer()
+            Button("Release Notes") { model.openReleaseNotes() }.controlSize(.small)
+            Button("Copy Install Command") { model.copyInstallCommand() }.controlSize(.small)
+              .help("Paste it into Terminal to install the update. Your portfolio isn't changed.")
+            Button {
+              model.dismissUpdate()
+            } label: {
+              Image(systemName: "xmark")
+            }.buttonStyle(.plain).help("Hide until the next version")
+          }.padding(.horizontal, 30).padding(.vertical, 8).background(Studio.mint.opacity(0.08))
+        }
         if let payload = model.desktop {
           if payload.demo {
             notice(
@@ -94,12 +94,12 @@ struct PortfolioWindow: View {
           if payload.status.stale {
             notice(
               "Cached quotes are in use. Values may be out of date.", icon: "wifi.exclamationmark",
-              color: .orange)
+              color: Studio.warn)
           }
           if !payload.warnings.isEmpty {
             notice(
               payload.warnings.joined(separator: " · "), icon: "exclamationmark.circle",
-              color: .orange)
+              color: Studio.warn)
           }
           workspace(payload)
         } else if model.loading {
@@ -121,7 +121,6 @@ struct PortfolioWindow: View {
     }
     .tint(Studio.mint)
     .foregroundStyle(Studio.text)
-    .preferredColorScheme(.dark)
     .frame(minWidth: 980, minHeight: 680)
     .toolbar {
       ToolbarItemGroup {
@@ -175,6 +174,11 @@ struct PortfolioWindow: View {
       }
     }
     .onChange(of: model.welcomeRequest, initial: true) { _, _ in presentWelcome() }
+    .onChange(of: model.workspaceRequest, initial: true) { _, request in
+      guard let request else { return }
+      draft.section = request
+      model.workspaceRequest = nil
+    }
     .sheet(
       isPresented: $model.showImport,
       onDismiss: {
@@ -884,22 +888,11 @@ private struct AutomationWorkspace: View {
         }
         BackupsPanel(model: model)
         Surface("Preferences") {
-          Picker("Refresh interval", selection: $model.refreshSeconds) {
-            ForEach([30, 60, 120, 300], id: \.self) { Text("\($0) seconds").tag($0) }
-          }.frame(maxWidth: 400)
-          Toggle(
-            "Launch at login",
-            isOn: Binding(
-              get: { model.loginEnabled },
-              set: { value in
-                do {
-                  try LoginItem.set(value)
-                  model.loginError = nil
-                } catch { model.loginError = error.localizedDescription }
-                model.loginEnabled = LoginItem.enabled
-              })
-          ).disabled(model.demo)
-          if let error = model.loginError { Text(error).foregroundStyle(Studio.red) }
+          automationRow(
+            "gearshape", "Refresh interval, launch at login, and more",
+            "Change how often quotes refresh, whether MarketPulse opens when you log in, its appearance, and your portfolio's defaults in Settings."
+          )
+          Button("Open Settings…") { model.showSettingsWindow() }
           Text(
             "Closing the portfolio window keeps the menu bar and automation running. Quitting the app stops them. For unattended runs, use marketpulse automation run --once with launchd or cron."
           ).font(.system(size: 11)).foregroundStyle(Studio.muted).fixedSize(
@@ -925,14 +918,14 @@ private struct AutomationWorkspace: View {
         if let errors = model.desktop?.automation.quoteErrors, !errors.isEmpty {
           Surface("Quotes unavailable") {
             ForEach(errors, id: \.self) {
-              Text($0).foregroundStyle(.orange).textSelection(.enabled)
+              Text($0).foregroundStyle(Studio.warn).textSelection(.enabled)
             }
           }
         }
         if let warnings = model.desktop?.warnings, !warnings.isEmpty {
           Surface("Ledger checks") {
             ForEach(warnings, id: \.self) {
-              Text($0).foregroundStyle(.orange).textSelection(.enabled)
+              Text($0).foregroundStyle(Studio.warn).textSelection(.enabled)
             }
           }
         }

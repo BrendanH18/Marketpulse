@@ -122,6 +122,15 @@ def test_config_roundtrip_ignores_bad_values(tmp_path, capsys):
     assert err.count("using default settings") == 1 and str(path) in err
 
 
+def test_config_saves_any_text_as_valid_toml(tmp_path):
+    # Text from the app (an account name, a symbol) may hold quotes, backslashes or control characters.
+    path = tmp_path / "c.toml"
+    text = 'Fictional\nMargin \t"quoted" C:\\path \x00\x1f\x7f é'
+    Config(default_account=text, menubar_symbol="XEQT.TO").save(path)
+    loaded = Config.load(path)
+    assert (loaded.default_account, loaded.menubar_symbol) == (text, "XEQT.TO")
+
+
 @pytest.mark.parametrize("value", [0.0, 0.5, 1.0])
 def test_hbar_bounds(value):
     assert len(charts.hbar(value, 7, "x").plain) == 7
