@@ -218,7 +218,11 @@ def test_restore_puts_a_backup_back_and_keeps_the_replaced_ledger(store):
 
 def test_restore_upgrades_an_older_backup_without_changing_it(tmp_path, monkeypatch):
     old = tmp_path / "old.db"
-    _seed(Store(old))
+    seeded = Store(old)
+    _seed(seeded)
+    # Closed first: an open store keeps the seed in its WAL file, and checkpoints it into
+    # old.db whenever it's garbage-collected, which would change the bytes compared below.
+    seeded.close()
     original = old.read_bytes()
     (tmp_path / "live").mkdir()
     store = Store(tmp_path / "live" / "marketpulse.db")
