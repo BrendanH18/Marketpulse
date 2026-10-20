@@ -14,6 +14,7 @@ users can't write to. Then run the printed `launch.sh`, and follow docs/qa.md.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import shlex
@@ -146,6 +147,17 @@ def build_app(out: Path, menubar: bool, bundled: bool) -> Path:
     return app
 
 
+def update_feed(path: Path) -> None:
+    """A fictional newer release for the update check, which reads this instead of GitHub."""
+    release = {
+        "tag_name": "v99.0.0",
+        "html_url": "https://github.com/BrendanH18/Marketpulse/releases/latest",
+        "prerelease": False,
+        "draft": False,
+    }
+    path.write_text(json.dumps(release, indent=2) + "\n", encoding="utf-8")
+
+
 def main() -> None:
     if sys.platform != "darwin":
         raise SystemExit("The QA app is macOS-only.")
@@ -185,6 +197,7 @@ def main() -> None:
         if not args.empty:
             seed(data)
     sample_csv(out / "sample-import.csv")
+    update_feed(out / "update-feed.json")
     app = build_app(out, args.menubar, args.bundled)
     # The bundled app finds its own backend; otherwise point it at this checkout's CLI.
     checkout_cli = shlex.quote(str(Path(sys.executable).parent / "marketpulse"))
@@ -193,7 +206,8 @@ def main() -> None:
     launch.write_text(
         "#!/bin/sh\n# Opens the QA app on the scratch ledger; run it again to send a Dock-style reopen event.\n"
         f"exec open {cli}--env MARKETPULSE_DATA={shlex.quote(str(data))} "
-        f"--env MARKETPULSE_CONFIG={shlex.quote(str(out / 'config.toml'))} {shlex.quote(str(app))}\n",
+        f"--env MARKETPULSE_CONFIG={shlex.quote(str(out / 'config.toml'))} "
+        f"--env MARKETPULSE_UPDATE_FEED={shlex.quote(str(out / 'update-feed.json'))} {shlex.quote(str(app))}\n",
         encoding="utf-8",
     )
     launch.chmod(0o755)

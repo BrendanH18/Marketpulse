@@ -44,6 +44,14 @@ struct TransactionSheet: View {
         ).font(.caption).foregroundStyle(.secondary)
         TextField("Note (optional)", text: $draft.note)
       }.formStyle(.grouped).disabled(model.saving || draft.request != nil)
+      .onAppear {
+        // Settings › Portfolio › Default account, when it's one of the accounts listed.
+        if draft.account.isEmpty, let id = model.desktop?.settings?.defaultAccountId,
+          model.desktop?.accounts.contains(where: { $0.id == id }) == true
+        {
+          draft.account = String(id)
+        }
+      }
       if draft.request != nil && !model.saving {
         Text("The save outcome is unknown. Retry the same entry before changing or closing it.")
           .font(.caption).foregroundStyle(.secondary)
@@ -203,7 +211,7 @@ struct ImportSheet: View {
           ScrollView {
             VStack(alignment: .leading, spacing: 8) {
               ForEach(preview.skipped) { issue in
-                Text("Line \(issue.line): \(issue.reason)").font(.caption).foregroundStyle(.orange)
+                Text("Line \(issue.line): \(issue.reason)").font(.caption).foregroundStyle(Studio.warn)
               }
             }
           }.frame(maxHeight: 160)
@@ -339,7 +347,7 @@ private struct SheetLayout<Content: View>: View {
       Text(title).font(.title2.weight(.semibold))
       Text(subtitle).font(.callout).foregroundStyle(.secondary)
       if let error = model.errorMessage {
-        Text(error).font(.callout).foregroundStyle(.red).fixedSize(
+        Text(error).font(.callout).foregroundStyle(Studio.red).fixedSize(
           horizontal: false, vertical: true
         ).textSelection(.enabled)
       }
@@ -360,7 +368,7 @@ private struct NumberField: View {
     TextField(title, text: $text)
     if let hint = NumberInput.hint(text) {
       Text(hint).font(.caption).foregroundStyle(
-        NumberInput.parse(text) == nil ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+        NumberInput.parse(text) == nil ? AnyShapeStyle(Studio.warn) : AnyShapeStyle(.secondary))
     }
   }
 }

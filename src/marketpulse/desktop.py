@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 from . import __version__
 from .analytics import income_by_month
 from .automation import run_cycle
-from .config import Config
+from .config import Config, config_path
 from .db import Snapshot, Store
 from .market import MarketData
 from .models import Account, AccountType, Quote, Transaction, TxnType
@@ -67,6 +67,7 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         # Which engine answered: the app shows it, and release builds check it matches the tag.
         "backend": {"version": __version__, "python": platform.python_version()},
         "storage": storage_info(tracker.store),
+        "settings": settings_info(tracker),
         "warnings": [
             *[f"{i.date}: {i.message}" for i in state.issues],
             *[f"Excluded from totals: {s}" for s in view.excluded],
@@ -84,6 +85,25 @@ def storage_info(store: Store) -> dict:
         "empty": not store.accounts(include_archived=True),
         "backup_dir": str(store.backup_dir),
         "backups": [row for p in store.backups() if (row := backup_row(store, p)) is not None],
+    }
+
+
+def settings_info(tracker: Tracker) -> dict:
+    """The configuration the app's Settings window edits with `config set`."""
+    config = tracker.config
+    try:
+        account = tracker.store.get_account(config.default_account) if config.default_account else None
+    except (OverflowError, ValueError):  # an id too large for SQLite, or digits like "²" int() rejects
+        account = None
+    return {
+        "base_currency": tracker.base,
+        "privacy": config.privacy,
+        # As written in the config (a name, id or account type), and the active account it picks.
+        "default_account": config.default_account,
+        "default_account_id": account.saved_id if account and not account.archived else None,
+        "menubar_display": config.menubar_display,
+        "menubar_symbol": config.menubar_symbol,
+        "config_path": str(config_path()),
     }
 
 
@@ -213,6 +233,7 @@ def demo_snapshot() -> dict:
             payload["automation"]["backup"] = None
             # The demo's folder is temporary; the app must never show it as the user's.
             payload["storage"] = {"data_dir": None, "empty": False, "backup_dir": None, "backups": []}
+            payload["settings"]["config_path"] = None
             return payload
         finally:
             store.close()

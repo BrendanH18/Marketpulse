@@ -122,7 +122,8 @@ What you can rely on instead:
 
 ## Update
 
-Run the [install command](#install-with-one-command-recommended) again; it installs the
+The app tells you when a new version is out ([update checks](desktop.md#update-checks)) and
+can copy the install command for it. Or run the [install command](#install-with-one-command-recommended) again; it installs the
 latest release over the old app. If you installed from the DMG, your copy is in
 `/Applications`: add `-s -- --dir /Applications` after `bash`, or delete that copy so you
 don't keep two. MarketPulse makes a daily safety backup while it runs;
@@ -130,7 +131,7 @@ to take one first, use **Automation › Back up now** in the app.
 
 ## Uninstall
 
-1. If you turned on **Launch at login**, turn it off in the app's **Automation** view
+1. If you turned on **Launch at login**, turn it off in the app's **Settings › General**
    first. (Already deleted the app? Remove MarketPulse in System Settings › General ›
    **Login Items** — **Login Items & Extensions** on macOS 15 and later.)
 2. Quit MarketPulse (⌘Q) and delete the app:

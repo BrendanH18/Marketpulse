@@ -12,8 +12,17 @@ final class StatusModel: ObservableObject {
   @Published var loading = false
   @Published var saving = false
   @Published var lastUpdated: Date?
-  @Published var showSettings = false
   @Published var symbolDraft = ""
+  /// Why the last change in the Settings window wasn't saved.
+  @Published var settingsError: String?
+  /// Config values being saved, shown until the reload brings the saved ones.
+  @Published private var pendingConfig: [String: String] = [:]
+  @Published var appearance: AppAppearance {
+    didSet {
+      if !demo { UserDefaults.standard.set(appearance.rawValue, forKey: AppAppearance.key) }
+      appearance.apply()
+    }
+  }
   @Published var loginEnabled = LoginItem.enabled
   @Published var loginError: String?
   @Published var importURL: URL?
@@ -36,6 +45,23 @@ final class StatusModel: ObservableObject {
   @Published var terminal: String {
     didSet { if !demo { UserDefaults.standard.set(terminal, forKey: "terminal") } }
   }
+  /// Settings › General › Check for updates automatically. Off means no request at all.
+  @Published var checkForUpdates: Bool {
+    didSet {
+      guard checkForUpdates != oldValue else { return }
+      if !demo { UserDefaults.standard.set(checkForUpdates, forKey: Self.checkForUpdatesKey) }
+      updateCheckResult = nil
+      if checkForUpdates { checkForUpdatesIfDue() }
+    }
+  }
+  /// A newer release, from the last check. Kept between launches, so a check a day is enough.
+  @Published private(set) var availableUpdate: UpdateAvailable?
+  /// The version whose banner the user closed; a newer one shows again.
+  @Published private var dismissedUpdate: String?
+  @Published private(set) var checkingForUpdates = false
+  @Published private(set) var lastUpdateCheck: Date?
+  /// The outcome of Check Now, shown in Settings. Automatic checks fail silently.
+  @Published private(set) var updateCheckResult: String?
   /// The fictional read-only demo is showing instead of the user's ledger.
   @Published private(set) var demo: Bool
   /// Launched with `--demo` (screenshots, QA): the demo for the whole session, with no way out
@@ -47,7 +73,10 @@ final class StatusModel: ObservableObject {
   /// Asks the portfolio window to show the welcome sheet. It stays pending while another sheet
   /// is open; the window clears it once the welcome is showing.
   @Published var welcomeRequest: WelcomeRequest?
+  /// Asks the portfolio window to switch workspace (Settings › Data › Show Backups).
+  @Published var workspaceRequest: Workspace?
   private var portfolioController: PortfolioWindowController?
+  private var settingsController: SettingsWindowController?
   var menuBarOnly: Bool { Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool ?? false }
 
   /// Shows the portfolio window, creating it on first use.
@@ -55,6 +84,18 @@ final class StatusModel: ObservableObject {
     let controller = portfolioController ?? PortfolioWindowController(model: self)
     portfolioController = controller
     controller.present()
+  }
+
+  /// `tab` picks a tab (0 is General); nil keeps the last one shown.
+  func showSettingsWindow(tab: Int? = nil) {
+    let controller = settingsController ?? SettingsWindowController(model: self)
+    settingsController = controller
+    controller.present(tab: tab)
+  }
+
+  func showWorkspace(_ workspace: Workspace) {
+    showPortfolio()
+    workspaceRequest = workspace
   }
 
   private var timer: Timer?
@@ -75,9 +116,22 @@ final class StatusModel: ObservableObject {
     let seconds = defaults.integer(forKey: "refreshSeconds")
     refreshSeconds = seconds > 0 ? seconds : 60
     terminal = defaults.string(forKey: "terminal") ?? "auto"
+    appearance = AppAppearance.saved
+    checkForUpdates = defaults.object(forKey: Self.checkForUpdatesKey) as? Bool ?? true
+    lastUpdateCheck = defaults.object(forKey: Self.lastUpdateCheckKey) as? Date
+    dismissedUpdate = defaults.string(forKey: Self.dismissedUpdateKey)
+    if Self.updatesSupported, let saved = defaults.data(forKey: Self.availableUpdateKey),
+      let update = try? JSONDecoder().decode(UpdateAvailable.self, from: saved)
+    {
+      // Dropped once this app is that version or newer.
+      availableUpdate = UpdateCheck.decide(
+        current: UpdateCheck.currentVersion, latestTag: update.tag, notesURL: update.notesURL,
+        prerelease: false, draft: false)
+    }
     configureHotKey()
     schedule()
     refresh()
+    checkForUpdatesIfDue()
   }
 
   var palette: Palette { Palette(status?.theme) }
@@ -93,7 +147,10 @@ final class StatusModel: ObservableObject {
     timer = Timer.scheduledTimer(
       withTimeInterval: TimeInterval(max(refreshSeconds, 15)), repeats: true
     ) { [weak self] _ in
-      Task { @MainActor in self?.refresh() }
+      Task { @MainActor in
+        self?.refresh()
+        self?.checkForUpdatesIfDue()
+      }
     }
   }
 
@@ -168,6 +225,103 @@ final class StatusModel: ObservableObject {
       guard generation == reloadGeneration else { return }
       errorMessage = desktopError
     }
+  }
+
+  // MARK: Updates
+
+  static let checkForUpdatesKey = "checkForUpdates"
+  static let lastUpdateCheckKey = "lastUpdateCheck"
+  static let availableUpdateKey = "availableUpdate"
+  static let dismissedUpdateKey = "dismissedUpdate"
+  /// QA only: a file with a fictional GitHub release, read instead of the network.
+  static let updateFeed = ProcessInfo.processInfo.environment["MARKETPULSE_UPDATE_FEED"].flatMap {
+    $0.isEmpty ? nil : $0
+  }
+  /// Release builds check GitHub. A checkout install (`MarketPulse Bar.app`) updates from its
+  /// checkout instead, and the release's install command would install a second app.
+  static var updatesSupported: Bool {
+    Bundle.main.bundleIdentifier == "dev.marketpulse.app" || updateFeed != nil
+  }
+
+  var showUpdateBanner: Bool {
+    guard let availableUpdate, checkForUpdates && !demo else { return false }
+    return availableUpdate.tag != dismissedUpdate
+  }
+
+  /// At most once a day; never when turned off, in the demo, or in a checkout install.
+  func checkForUpdatesIfDue() {
+    guard UpdateCheck.isDue(lastCheck: lastUpdateCheck) else { return }
+    runUpdateCheck(manual: false)
+  }
+
+  /// Settings › Check Now and the app menu's Check for Updates.
+  func checkForUpdatesNow() {
+    runUpdateCheck(manual: true)
+  }
+
+  private func runUpdateCheck(manual: Bool) {
+    guard Self.updatesSupported && checkForUpdates && !demo && !checkingForUpdates else { return }
+    checkingForUpdates = true
+    updateCheckResult = nil
+    Task {
+      let latest = await Self.latestRelease()
+      checkingForUpdates = false
+      // Turned off, or the demo entered, while the request ran.
+      guard checkForUpdates && !demo else { return }
+      // A failed check (offline, rate limited) counts too: it tries again tomorrow.
+      let now = Date()
+      lastUpdateCheck = now
+      UserDefaults.standard.set(now, forKey: Self.lastUpdateCheckKey)
+      guard let latest else {
+        if manual { updateCheckResult = "Couldn't reach GitHub. Check your connection and try again later." }
+        return
+      }
+      let update = UpdateCheck.decide(current: UpdateCheck.currentVersion, latest: latest)
+      availableUpdate = update
+      if let update, let data = try? JSONEncoder().encode(update) {
+        UserDefaults.standard.set(data, forKey: Self.availableUpdateKey)
+      } else {
+        UserDefaults.standard.removeObject(forKey: Self.availableUpdateKey)
+      }
+      if manual {
+        // Asked for, so show it again even if its banner was closed.
+        if update != nil { setDismissedUpdate(nil) }
+        updateCheckResult = update.map { "MarketPulse \($0.version) is available." } ?? "MarketPulse is up to date."
+      }
+    }
+  }
+
+  private static func latestRelease() async -> LatestRelease? {
+    guard let updateFeed else { return await UpdateCheck.fetchLatest() }
+    return (try? Data(contentsOf: URL(fileURLWithPath: updateFeed))).flatMap {
+      try? JSONDecoder().decode(LatestRelease.self, from: $0)
+    }
+  }
+
+  func openReleaseNotes() {
+    if let update = availableUpdate, let url = URL(string: update.notesURL) { NSWorkspace.shared.open(url) }
+  }
+
+  /// The release's one-line install command, to paste into Terminal. Never run for the user.
+  func copyInstallCommand() {
+    guard let update = availableUpdate else { return }
+    var command = update.installCommand
+    // The script installs to ~/Applications; a DMG copy lives in /Applications. Replace that one
+    // rather than leaving two.
+    if Bundle.main.bundleURL.deletingLastPathComponent().path == "/Applications" {
+      command += command.contains(" -s -- ") ? " --dir /Applications" : " -s -- --dir /Applications"
+    }
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(command, forType: .string)
+    message =
+      "Install command for MarketPulse \(update.version) copied. Paste it into Terminal and press Return. Your portfolio isn't changed."
+  }
+
+  func dismissUpdate() { setDismissedUpdate(availableUpdate?.tag) }
+
+  private func setDismissedUpdate(_ tag: String?) {
+    dismissedUpdate = tag
+    UserDefaults.standard.set(tag, forKey: Self.dismissedUpdateKey)
   }
 
   // MARK: Welcome and demo
@@ -284,8 +438,38 @@ final class StatusModel: ObservableObject {
     }
   }
 
+  /// Saves an engine setting with `marketpulse config set`, then reloads so it takes effect.
+  /// The value goes after `--`: it may be text the user typed.
   func setConfig(_ key: String, _ value: String) {
-    Task { await perform(["config", "set", key, value], success: "Settings updated") }
+    guard !demo && !saving else { return }
+    pendingConfig[key] = value
+    Task {
+      let saved = await perform(["config", "set", key, "--", value], success: "Settings updated")
+      settingsError = saved ? nil : errorMessage
+      pendingConfig[key] = nil
+    }
+  }
+
+  /// A setting as the Settings window shows it: the value being saved, else the engine's.
+  func configValue(_ key: String, _ path: KeyPath<SettingsInfo, String>) -> String {
+    pendingConfig[key] ?? desktop?.settings?[keyPath: path] ?? ""
+  }
+
+  func configBinding(_ key: String, _ path: KeyPath<SettingsInfo, String>) -> Binding<String> {
+    Binding(
+      get: { self.configValue(key, path) },
+      set: { if $0 != self.configValue(key, path) { self.setConfig(key, $0) } })
+  }
+
+  func setLoginItem(_ on: Bool) {
+    guard !demo else { return }
+    do {
+      try LoginItem.set(on)
+      loginError = nil
+    } catch {
+      loginError = error.localizedDescription
+    }
+    loginEnabled = LoginItem.enabled
   }
 
   func togglePrivacy() {

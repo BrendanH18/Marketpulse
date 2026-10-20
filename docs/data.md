@@ -15,6 +15,8 @@ payload. Protect these files as you would other financial records.
 
 There is no application telemetry or brokerage authentication. Yahoo Finance
 receives symbol and market-data requests, including normal request metadata.
+The Mac app also checks GitHub for a newer release at most once a day; see
+[update checks](desktop.md#update-checks) for exactly what it sends and how to turn it off.
 Missing network data may fall back to cached prices marked as stale; this is
 not a guarantee that every feature works offline.
 

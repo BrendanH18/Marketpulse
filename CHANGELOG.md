@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A Settings window in the Mac app (**MarketPulse › Settings…**, ⌘,), with General
+  (refresh interval, launch at login, menu bar display, terminal), Appearance (System,
+  Light, or Dark), Portfolio (currency for totals, default account, privacy), and Data
+  (where the portfolio and settings live, backups) tabs. The portfolio window now has a
+  light palette and follows the system appearance instead of always being dark. The
+  default account is preselected when recording a transaction. The popover's settings
+  panel and the Automation workspace's preferences moved into the window.
+  `desktop snapshot` gains a `settings` object.
+
+- Update checks in the Mac app: at most once a day, the release app asks GitHub for its
+  latest release. A newer version shows a banner, an **Update Available** menu item and a
+  popover line, each offering the release notes and the one-line install command to
+  paste into Terminal. Nothing is installed automatically. Turn it off in **Settings ›
+  General**; the demo and checkout builds never check. The request and what it sends are
+  documented in `docs/desktop.md`.
+
 - Restore from a backup: `marketpulse backup restore PATH` (or a name from `backup list`,
   or `--latest`), and **Automation › Backups** in the Mac app with Restore and Show in
   Finder. The backup is checked first (integrity, a MarketPulse database, a schema this

@@ -23,6 +23,16 @@ struct NativeBridgeCheck {
     precondition(storage.dataDir == "/tmp/marketpulse" && storage.empty)
     precondition(storage.backupDir == nil && storage.backups == nil)  // an older engine
     precondition(payload.storage?.backupDir == nil && payload.storage?.backups?.isEmpty == true)
+    // The demo's settings are its own: no config file to reveal.
+    precondition(payload.settings?.baseCurrency == "CAD" && payload.settings?.configPath == nil)
+    precondition(payload.settings?.defaultAccountId == nil && payload.settings?.menubarDisplay == "day_pct")
+    let settings = try decoder.decode(
+      SettingsInfo.self,
+      from: Data(
+        #"{"base_currency":"USD","privacy":true,"default_account":"tfsa","default_account_id":3,"menubar_display":"symbol","menubar_symbol":"XEQT.TO","config_path":"/tmp/config.toml"}"#
+          .utf8))
+    precondition(settings.defaultAccount == "tfsa" && settings.defaultAccountId == 3 && settings.privacy)
+    precondition(settings.menubarSymbol == "XEQT.TO" && settings.configPath == "/tmp/config.toml")
     let ledger = try decoder.decode(
       StorageInfo.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[4])))
     let backups = ledger.backups ?? []
@@ -103,7 +113,7 @@ struct NativeBridgeCheck {
     }
     precondition(retry == .recorded)
     print(
-      "Native bridge checks passed: real Python demo, storage and backups, activity values, import result, privacy formatting, number entry, transaction save recovery"
+      "Native bridge checks passed: real Python demo, storage and backups, settings, activity values, import result, privacy formatting, number entry, transaction save recovery"
     )
   }
 }

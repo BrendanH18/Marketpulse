@@ -14,6 +14,12 @@ struct MarketPulseBarApp: App {
         }
         .menuBarExtraStyle(.window)
         .commands {
+            CommandGroup(after: .appInfo) {
+                UpdateCommands(model: delegate.model)
+            }
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { delegate.model.showSettingsWindow() }.keyboardShortcut(",")
+            }
             CommandGroup(after: .newItem) {
                 LedgerFileCommands(model: delegate.model)
             }
@@ -47,6 +53,24 @@ struct LedgerFileCommands: View {
     }
 }
 
+/// "Update Available" when the last check found a newer release, and a way to check now.
+struct UpdateCommands: View {
+    @ObservedObject var model: StatusModel
+
+    var body: some View {
+        if StatusModel.updatesSupported {
+            if model.showUpdateBanner, let update = model.availableUpdate {
+                Button("Update Available: MarketPulse \(update.version)…") { model.openReleaseNotes() }
+                Button("Copy Install Command") { model.copyInstallCommand() }
+            }
+            Button("Check for Updates…") {
+                model.showSettingsWindow(tab: 0)
+                model.checkForUpdatesNow()
+            }.disabled(!model.checkForUpdates || model.demo)
+        }
+    }
+}
+
 /// The way back to the welcome and the demo after the first run.
 struct HelpCommands: View {
     @ObservedObject var model: StatusModel
@@ -73,9 +97,7 @@ struct PopoverView: View {
         let p = model.palette
         VStack(alignment: .leading, spacing: 12) {
             TopBar(model: model, palette: p)
-            if model.showSettings {
-                SettingsPanel(model: model, palette: p)
-            } else if let status = model.status {
+            if let status = model.status {
                 Dashboard(status: status, palette: p)
             } else if let error = model.errorMessage {
                 Card(title: "can't reach marketpulse", palette: p) {
@@ -84,6 +106,16 @@ struct PopoverView: View {
                 }
             } else {
                 HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }.padding(24)
+            }
+            if model.showUpdateBanner, let update = model.availableUpdate {
+                // Menu bar builds have no app menu, so the popover is where they hear of updates.
+                HStack(spacing: 8) {
+                    Button("↓ MarketPulse \(update.version) is available") { model.openReleaseNotes() }
+                        .buttonStyle(.plain).foregroundStyle(p.accent)
+                    Spacer()
+                    Button("copy install command") { model.copyInstallCommand() }
+                        .buttonStyle(.plain).foregroundStyle(p.muted)
+                }.font(.system(size: 10, design: .monospaced))
             }
             ActionBar(model: model, palette: p)
         }
@@ -282,61 +314,6 @@ struct Sparkline: View {
     }
 }
 
-// MARK: - Settings
-
-struct SettingsPanel: View {
-    @ObservedObject var model: StatusModel
-    let palette: Palette
-
-    private let displays = [("day_pct", "Day change %"), ("day_change", "Day change $"), ("net_worth", "Net worth"), ("symbol", "A symbol")]
-    private let intervals = [30, 60, 120, 300]
-
-    var body: some View {
-        Card(title: "settings", palette: palette) {
-            Picker("Menu bar shows", selection: Binding(
-                get: { UserDefaults.standard.string(forKey: "menubarDisplay") ?? "day_pct" },
-                set: { value in
-                    UserDefaults.standard.set(value, forKey: "menubarDisplay")
-                    model.setConfig("menubar_display", value)
-                }
-            )) {
-                ForEach(displays, id: \.0) { Text($0.1).tag($0.0) }
-            }
-            HStack {
-                TextField("Symbol for menu bar (e.g. XEQT.TO)", text: $model.symbolDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { model.setConfig("menubar_symbol", model.symbolDraft.uppercased()) }
-                Button("Set") { model.setConfig("menubar_symbol", model.symbolDraft.uppercased()) }
-            }
-            Picker("Refresh every", selection: $model.refreshSeconds) {
-                ForEach(intervals, id: \.self) { Text($0 < 60 ? "\($0)s" : "\($0 / 60)m").tag($0) }
-            }
-            Picker("Open TUI in", selection: $model.terminal) {
-                ForEach(TerminalLauncher.choices, id: \.self) { Text($0.capitalized).tag($0) }
-            }
-            Toggle("⌥⌘M opens MarketPulse", isOn: $model.hotKeyEnabled)
-            Toggle("Launch at login", isOn: Binding(
-                get: { model.loginEnabled },
-                set: { on in
-                    do {
-                        try LoginItem.set(on)
-                        model.loginError = nil
-                    } catch {
-                        model.loginError = error.localizedDescription
-                    }
-                    model.loginEnabled = LoginItem.enabled
-                }
-            ))
-            if let loginError = model.loginError {
-                Text(loginError).foregroundStyle(palette.down).font(.system(size: 10, design: .monospaced))
-            }
-            Text("Theme follows `marketpulse theme set …`").foregroundStyle(palette.muted).font(.system(size: 10, design: .monospaced))
-        }
-        .onAppear { model.loginEnabled = LoginItem.enabled }
-        .disabled(model.demo)
-    }
-}
-
 /// Hover tracking without @State (the command-line toolchain lacks SwiftUI's macro plugins).
 final class HoverState: ObservableObject {
     @Published var on = false
@@ -356,7 +333,7 @@ struct ActionBar: View {
             BarButton(symbol: "terminal", label: nil, hint: nil, palette: palette) { model.openTUI() }
             BarButton(symbol: "arrow.clockwise", label: nil, hint: nil, palette: palette) { model.refresh() }
             BarButton(symbol: (model.status?.privacy ?? false) ? "eye.slash" : "eye", label: nil, hint: nil, palette: palette) { model.togglePrivacy() }
-            BarButton(symbol: model.showSettings ? "xmark" : "gearshape", label: nil, hint: nil, palette: palette) { model.showSettings.toggle() }
+            BarButton(symbol: "gearshape", label: nil, hint: nil, palette: palette) { model.showSettingsWindow() }
             Spacer()
             BarButton(symbol: "power", label: nil, hint: nil, palette: palette) { NSApplication.shared.terminate(nil) }
         }

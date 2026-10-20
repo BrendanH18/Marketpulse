@@ -97,5 +97,17 @@ def _toml_value(value) -> str:
         return repr(value)
     if isinstance(value, list):
         return "[" + ", ".join(_toml_value(v) for v in value) + "]"
-    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
+    return '"' + "".join(_toml_char(c) for c in str(value)) + '"'
+
+
+_TOML_ESCAPES = {'"': '\\"', "\\": "\\\\", "\b": "\\b", "\t": "\\t", "\n": "\\n", "\f": "\\f", "\r": "\\r"}
+
+
+def _toml_char(c: str) -> str:
+    """One character of a TOML basic string. Control characters must be escaped, or a value
+    typed in the app (an account name with a newline) would make the whole file unreadable."""
+    if c in _TOML_ESCAPES:
+        return _TOML_ESCAPES[c]
+    if ord(c) < 0x20 or ord(c) == 0x7F:
+        return f"\\u{ord(c):04X}"
+    return c

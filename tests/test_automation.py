@@ -8,7 +8,7 @@ from click.testing import CliRunner
 from marketpulse.automation import run_cycle
 from marketpulse.cli import main
 from marketpulse.desktop import snapshot
-from marketpulse.models import Account, Alert, Transaction, TxnType
+from marketpulse.models import Account, AccountType, Alert, Transaction, TxnType
 
 
 def holding(store):
@@ -98,6 +98,51 @@ def test_desktop_bridge_reports_where_data_lives_and_a_new_ledger(tracker, tmp_p
     assert payload["accounts"] == [] and payload["storage"]["empty"] is False
 
 
+def test_desktop_bridge_reports_settings_the_app_edits(tracker, monkeypatch, tmp_path):
+    config = tmp_path / "config.toml"
+    monkeypatch.setenv("MARKETPULSE_CONFIG", str(config))
+    settings = snapshot(tracker)["settings"]
+    assert settings == {
+        "base_currency": "CAD",
+        "privacy": False,
+        "default_account": "",
+        "default_account_id": None,
+        "menubar_display": "day_pct",
+        "menubar_symbol": "",
+        "config_path": str(config),
+    }
+    tfsa = tracker.store.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA))
+    tracker.config.base_currency = "usd"
+    tracker.config.privacy = True
+    # A default written as an account type (as the CLI accepts) still resolves for the app.
+    tracker.config.default_account = "tfsa"
+    settings = snapshot(tracker)["settings"]
+    assert settings["base_currency"] == "USD" and settings["privacy"] is True
+    assert (settings["default_account"], settings["default_account_id"]) == ("tfsa", tfsa.saved_id)
+    # An archived default picks nothing in the app: archived accounts are hidden everywhere.
+    tracker.config.default_account = "Fictional TFSA"
+    tfsa.archived = True
+    tracker.store.update_account(tfsa)
+    assert snapshot(tracker)["settings"]["default_account_id"] is None
+    tracker.config.default_account = "No such account"
+    assert snapshot(tracker)["settings"]["default_account_id"] is None
+    # The app saves names: a deleted default's id may be reused by a new, unrelated account.
+    old = tracker.store.add_account(Account(name="Fictional Margin"))
+    tracker.config.default_account = old.name
+    assert snapshot(tracker)["settings"]["default_account_id"] == old.saved_id
+    tracker.store.delete_account(old.saved_id)
+    reused = tracker.store.add_account(Account(name="Fictional FHSA", type=AccountType.FHSA))
+    assert reused.saved_id == old.saved_id
+    assert snapshot(tracker)["settings"]["default_account_id"] is None
+    # A digit-only name is an id to the CLI, so the app saves that account's id instead.
+    numeric = tracker.store.add_account(Account(name="1"))
+    tracker.config.default_account = str(numeric.saved_id)
+    assert snapshot(tracker)["settings"]["default_account_id"] == numeric.saved_id
+    for unusable in ("999999999999999999999", "²"):
+        tracker.config.default_account = unusable
+        assert snapshot(tracker)["settings"]["default_account_id"] is None
+
+
 def test_demo_never_opens_real_tracker(monkeypatch, tmp_path, notifications):
     def fail_open(*args, **kwargs):
         raise AssertionError("Real portfolio must not be opened")
@@ -110,6 +155,8 @@ def test_demo_never_opens_real_tracker(monkeypatch, tmp_path, notifications):
     assert len(payload["positions"]) == 5
     assert len(payload["status"]["history"]) == 181
     assert payload["storage"] == {"data_dir": None, "empty": False, "backup_dir": None, "backups": []}
+    # The demo's settings are its own and never point at the user's config file.
+    assert payload["settings"]["config_path"] is None and payload["settings"]["base_currency"] == "CAD"
     assert not (tmp_path / "data").exists()
     assert notifications == []
 
