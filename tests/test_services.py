@@ -668,3 +668,22 @@ def test_an_edit_that_leaves_a_transfer_short_is_refused(tracker, store):
     with pytest.raises(ValueError, match=rf"transaction #{move.id} on 2024-02-01 would no longer add up"):
         tracker.update_transaction(replace(buy, quantity=5))
     assert store.ledger().holdings[(tfsa.id, "AAPL")].quantity == 10
+
+
+def test_archived_accounts_still_use_contribution_room(tracker, store):
+    year = date.today().year  # no new annual limit or withdrawals to add back
+    tfsa = store.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA))
+    old = store.add_account(Account(name="Old TFSA", type=AccountType.TFSA))
+    for acct, amount in [(tfsa, 1000), (old, 5000)]:
+        store.add_transaction(
+            Transaction(account_id=acct.saved_id, type=TxnType.DEPOSIT, date=f"{year}-01-01", amount=amount)
+        )
+    store.set_room("TFSA", year, 7000)
+    [(before, members)] = tracker.room()
+    assert before.remaining == pytest.approx(1000) and [a.name for a in members] == ["Fictional TFSA", "Old TFSA"]
+    old.archived = True
+    store.update_account(old)
+    # Archiving used to drop Old TFSA's $5,000 deposit, overstating the room left at $6,000.
+    [(after, members)] = tracker.room()
+    assert after.contributions == pytest.approx(6000) and after.remaining == pytest.approx(1000)
+    assert [a.name for a in members] == ["Fictional TFSA"]  # archived accounts stay hidden

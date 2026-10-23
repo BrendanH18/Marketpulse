@@ -82,6 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Contribution room still counts deposits to archived accounts. Archiving a TFSA, RRSP
+  or FHSA used to drop its contributions, overstating the room left. Archived accounts
+  stay out of the room table's account list.
 - `accounts edit` reports a clear error instead of a traceback when the new name is
   taken, and refuses a blank name (the TUI's account form too).
 - Native transaction saves use durable request receipts: a confirmation failure or timeout

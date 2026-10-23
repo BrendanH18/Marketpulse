@@ -488,13 +488,15 @@ class Tracker:
         return capital_gains(report, inclusion_rate=self.config.capital_gains_inclusion), report
 
     def room(self) -> list[tuple[RoomStatus, list[Account]]]:
-        accounts = self.store.accounts()
+        # CRA counts every contribution, so an archived account's deposits still use up room;
+        # only active accounts are listed with it, since archived ones are hidden everywhere.
+        accounts = self.store.accounts(include_archived=True)
         flows = self.store.ledger().flows
         out = []
         for acct_type, (year, amount) in sorted(self.store.rooms().items()):
             members = [a for a in accounts if a.type.value == acct_type]
             status = contribution_room(acct_type, year, amount, flows, {a.saved_id for a in members})
-            out.append((status, members))
+            out.append((status, [a for a in members if not a.archived]))
         return out
 
     # ── menu bar / scripting payload ──────────────────────────────────────────
