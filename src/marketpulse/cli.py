@@ -1406,10 +1406,36 @@ def income(app: App, no_forecast: bool) -> None:
 
 @main.command()
 @click.option("-y", "--year", type=int, default=None)
+@click.option(
+    "--csv",
+    "csv_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Write the dispositions (the --year's, or every year's) to this CSV file instead of showing the report.",
+)
 @pass_app
-def tax(app: App, year: int | None) -> None:
+def tax(app: App, year: int | None, csv_path: Path | None) -> None:
     """Capital gains (pooled ACB, trade-date FX), superficial losses and contribution room."""
     tr = app.tracker
+    if csv_path is not None:
+        from .csvio import export_capital_gains
+
+        with app.busy("Building tax report…"):
+            years, report = tr.tax_years()
+        if year is not None and not any(y.year == year for y in years):
+            fail(f"No capital gains or losses in {year}.")
+        try:
+            with csv_path.open("w", newline="", encoding="utf-8") as f:
+                n = export_capital_gains(years, tr.store.account_map(), tr.base, f, year=year)
+        except OSError as e:
+            fail(f"Couldn't write {csv_path}: {e.strerror or e}")
+        app.ok(f"Exported {n} disposition(s) to {csv_path}")
+        if report.issues:
+            # E.g. a transfer into a TFSA with no price: its deemed sale can't be in the file.
+            app.warn(f"{len(report.issues)} issue(s) may leave sales out of this file:")
+            for issue in report.issues:
+                app.warn(f"  {issue.date} {issue.message}")
+        return
     with app.busy("Building tax report…"):
         years, report = tr.tax_years()
         rooms = tr.room()
@@ -1814,6 +1840,20 @@ def desktop_snapshot(app: App, fresh: bool, demo: bool) -> None:
 
     try:
         payload = demo_snapshot() if demo else snapshot(app.tracker, fresh=fresh)
+        click.echo(json.dumps(payload, allow_nan=False))
+    except (ValueError, OSError) as e:
+        fail(str(e))
+
+
+@desktop.command("tax")
+@click.option("--demo", is_flag=True, help="The fictional demo portfolio's report; no real ledger or network access.")
+@click.pass_obj
+def desktop_tax(app: App, demo: bool) -> None:
+    """JSON capital gains for every year, superficial losses, and contribution room."""
+    from .desktop import demo_tax, tax_report
+
+    try:
+        payload = demo_tax() if demo else tax_report(app.tracker)
         click.echo(json.dumps(payload, allow_nan=False))
     except (ValueError, OSError) as e:
         fail(str(e))

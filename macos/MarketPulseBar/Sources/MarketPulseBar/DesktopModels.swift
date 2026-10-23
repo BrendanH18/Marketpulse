@@ -66,6 +66,9 @@ struct DesktopPayload: Decodable {
   let storage: StorageInfo?
   /// Absent from older engines; the Settings window then edits only the app's own preferences.
   let settings: SettingsInfo?
+  /// Changes whenever anything a tax report reads does, archived accounts' entries included.
+  /// Absent from older engines.
+  let ledgerRevision: String?
   let warnings: [String]
 
   /// Nobody has used this ledger yet, so the app offers its welcome. Older engines don't
@@ -230,6 +233,112 @@ struct ContributionRoom: Decodable, Identifiable {
   let asOfYear: Int
   let startingRoom: Double
   let remaining: Double
+  /// How `remaining` was worked out: starting room + new limits + withdrawals added back
+  /// − contributions − forfeited. Absent from older engines.
+  let contributions: Double?
+  let newLimits: Double?
+  let withdrawalsAddedBack: Double?
+  /// FHSA room above the carry-forward or lifetime limits, which can't be used.
+  let forfeited: Double?
+}
+
+/// Version 1 of `marketpulse desktop tax`: capital gains for every year, as `marketpulse tax`
+/// reports them. Loaded only when the Tax workspace opens, because it needs historical FX rates.
+struct TaxPayload: Decodable {
+  let version: Int
+  let demo: Bool
+  let baseCurrency: String
+  let inclusionRate: Double
+  /// Newest year first; only years with a disposition.
+  let years: [TaxYearReport]
+  let issues: [TaxIssue]
+  let room: [ContributionRoom]
+  /// The "not tax advice" notes the workspace must show.
+  let notes: [String]
+}
+
+/// One calendar year. Totals leave out rows missing an FX rate (`missingFx` counts them).
+struct TaxYearReport: Decodable, Identifiable {
+  var id: Int { year }
+  let year: Int
+  let proceeds: Double
+  let acb: Double
+  /// Losses that don't count this year: superficial, or moved into a registered account.
+  let denied: Double
+  /// Gains minus allowed losses.
+  let netGain: Double
+  /// `netGain` times the inclusion rate; 0 for a net loss.
+  let taxable: Double
+  let inclusionRate: Double
+  let dispositions: Int
+  let missingFx: Int
+  let superficial: Int
+  let securities: [TaxSecurity]
+  let rows: [TaxDisposition]
+}
+
+struct TaxSecurity: Decodable, Identifiable {
+  var id: String { symbol }
+  let symbol: String
+  let dispositions: Int
+  let quantity: Double
+  let proceeds: Double
+  let acb: Double
+  let denied: Double
+  let netGain: Double
+  let missingFx: Int
+}
+
+/// One taxable event, every amount in the base currency. Amounts are nil when an FX rate they
+/// depend on is missing: unknown, never zero.
+struct TaxDisposition: Decodable, Identifiable {
+  let id: String
+  let date: String
+  let accountId: Int
+  /// nil for an archived account, which the app never names.
+  let account: String?
+  let accountType: String?
+  let archived: Bool
+  let symbol: String
+  let quantity: Double
+  /// The security's trading currency, and its rate to the base currency on the day.
+  let currency: String
+  let fx: Double?
+  /// sale, roc (return of capital beyond ACB), or deemed (moved in kind into a registered account).
+  let kind: String
+  let complete: Bool
+  let proceeds: Double?
+  let acb: Double?
+  let gain: Double?
+  let denied: Double?
+  /// The gain as reported: a denied loss is added back.
+  let allowedGain: Double?
+  /// superficial, registered, or empty.
+  let deniedReason: String
+  let superficial: Bool
+  /// Superficial-loss working: units bought 30 days either side, and held at the end of day +30.
+  let acquiredInWindow: Double
+  let heldAfterWindow: Double
+  /// Day +30 hasn't come yet, so the denial can still change.
+  let windowOpen: Bool
+  /// Short tag, as in `marketpulse tax` ("superficial", "FX missing"…); empty for an ordinary sale.
+  let note: String
+  let transactionId: Int?
+
+  var accountLabel: String { account ?? "Archived account" }
+  var kindLabel: String {
+    switch kind {
+    case "roc": return "Return of capital above ACB"
+    case "deemed": return "Moved to a registered account"
+    default: return "Sale"
+    }
+  }
+}
+
+struct TaxIssue: Decodable, Identifiable {
+  var id: String { date + message }
+  let date: String
+  let message: String
 }
 
 struct DesktopAlert: Decodable, Identifiable {

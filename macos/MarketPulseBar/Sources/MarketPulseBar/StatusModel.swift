@@ -75,6 +75,16 @@ final class StatusModel: ObservableObject {
   @Published var welcomeRequest: WelcomeRequest?
   /// Asks the portfolio window to switch workspace (Settings › Data › Show Backups).
   @Published var workspaceRequest: Workspace?
+  /// The Tax workspace's report. Loaded when the workspace opens, not on every refresh: it
+  /// needs historical FX rates.
+  @Published private(set) var tax: TaxPayload?
+  @Published private(set) var taxLoading = false
+  @Published private(set) var taxError: String?
+  /// Identifies everything the tax report depends on in the last payload; see `ledgerKey`.
+  @Published private(set) var taxKey: Int?
+  /// The `taxKey` the shown (or loading) report was built from.
+  private var taxLoadedKey: Int?
+  private var taxGeneration = 0
   private var portfolioController: PortfolioWindowController?
   private var settingsController: SettingsWindowController?
   var menuBarOnly: Bool { Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool ?? false }
@@ -189,6 +199,7 @@ final class StatusModel: ObservableObject {
       guard generation == reloadGeneration else { return }
       desktop = payload
       status = payload.status
+      taxKey = Self.ledgerKey(payload)
       errorMessage = nil
       lastUpdated = Date()
       if !demo, let folder = payload.storage?.dataDir { dataDir = folder }
@@ -367,6 +378,7 @@ final class StatusModel: ObservableObject {
     errorMessage = nil
     message = nil
     lastUpdated = nil
+    clearTax()
     schedule()
     // Invalidate in-flight reloads now, not when the queued one starts, so none of them can
     // still act on the ledger being left.
@@ -575,6 +587,106 @@ final class StatusModel: ObservableObject {
     }
     // On failure the error stays on screen, and the stale preview must be redone.
     if imported { closeImport() } else { importPreview = nil }
+  }
+
+  // MARK: Tax
+
+  /// Changes when anything the tax report reads changes: an entry, an account (archiving
+  /// included), contribution room, the base currency, or a restore (which changes every
+  /// revision). A timer refresh that changes none of them keeps the loaded report.
+  /// `ledgerRevision` also covers archived accounts' entries and the inclusion rate, which
+  /// the rest of the payload doesn't show.
+  private static func ledgerKey(_ payload: DesktopPayload) -> Int {
+    var hasher = Hasher()
+    hasher.combine(payload.demo)
+    hasher.combine(payload.ledgerRevision)
+    hasher.combine(payload.status.base)
+    for t in payload.activity {
+      hasher.combine(t.id)
+      hasher.combine(t.revision)
+    }
+    for a in payload.accounts {
+      hasher.combine(a.id)
+      hasher.combine(a.revision)
+    }
+    for a in payload.archivedAccounts ?? [] {
+      hasher.combine(a.id)
+      hasher.combine(a.revision)
+    }
+    for r in payload.room {
+      hasher.combine(r.accountType)
+      hasher.combine(r.asOfYear)
+      hasher.combine(r.startingRoom)
+    }
+    return hasher.finalize()
+  }
+
+  /// Loads the tax report unless the one shown already matches the portfolio. `force`
+  /// recalculates anyway (say, after FX rates were unavailable).
+  func loadTax(force: Bool = false) {
+    guard let key = taxKey, force || key != taxLoadedKey else { return }
+    taxLoadedKey = key
+    taxGeneration += 1
+    let generation = taxGeneration
+    let demo = self.demo
+    taxLoading = true
+    taxError = nil
+    Task {
+      do {
+        let data = try await CLI.run(["desktop", "tax"] + (demo ? ["--demo"] : []))
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let payload = try decoder.decode(TaxPayload.self, from: data)
+        guard payload.version == 1 else {
+          throw CLIError.failed("Unsupported tax report version. Reinstall the app.")
+        }
+        guard generation == taxGeneration else { return }
+        tax = payload
+      } catch {
+        // Entered or left the demo, or a newer load started: this result is for another ledger.
+        guard generation == taxGeneration else { return }
+        taxError =
+          error is DecodingError
+          ? "Unexpected tax report (\(error)). Update MarketPulse and reinstall the app."
+          : error.localizedDescription
+        // So the next change, or Try Again, loads it again.
+        taxLoadedKey = nil
+      }
+      if generation == taxGeneration { taxLoading = false }
+    }
+  }
+
+  private func clearTax() {
+    taxGeneration += 1
+    tax = nil
+    taxKey = nil
+    taxLoadedKey = nil
+    taxError = nil
+    taxLoading = false
+  }
+
+  /// One year's dispositions as CSV for an accountant (`marketpulse tax --csv`). Reads the
+  /// ledger only. Not in the demo, whose ledger the CLI can't reach.
+  func exportTax(year: Int) {
+    guard !demo && desktop != nil else { return }
+    let panel = NSSavePanel()
+    panel.nameFieldStringValue = "marketpulse-capital-gains-\(year).csv"
+    panel.allowedContentTypes = [.commaSeparatedText]
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    let issues = tax?.issues.count ?? 0
+    Task {
+      do {
+        _ = try await CLI.run(["tax", "--year", String(year), "--csv", url.path])
+        errorMessage = nil
+        message =
+          "Saved \(year) capital gains to \(url.lastPathComponent)"
+          + (issues == 0
+            ? ""
+            : ". \(issues == 1 ? "1 issue" : "\(issues) issues") under Needs attention may leave sales out of it.")
+      } catch {
+        errorMessage = error.localizedDescription
+      }
+    }
   }
 
   func exportLedger() {

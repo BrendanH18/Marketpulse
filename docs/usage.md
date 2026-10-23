@@ -58,6 +58,15 @@ The tax report implements:
 - Deemed dispositions for supported in-kind transfers across taxable and
   registered accounts. Registered replacement purchases can permanently deny a loss.
 
+To give a year's sales to an accountant, save them as CSV. Each row has the date,
+account, units, trading currency and FX rate, proceeds, ACB, the gain or loss, any
+denied loss, and the gain or loss as reported, in your base currency. Without
+`--year`, every year is written:
+
+```bash
+marketpulse tax --year 2025 --csv capital-gains-2025.csv
+```
+
 Account holdings still show their own cost basis, which can differ from the
 pooled basis used by the tax report. Rows missing historical FX or required
 transfer prices are flagged and excluded from report totals.

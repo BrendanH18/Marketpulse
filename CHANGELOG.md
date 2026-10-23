@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A **Tax** workspace in the Mac app: capital gains for each year with a sale in a
+  taxable account, with the same figures as `marketpulse tax` (pooled cost base,
+  trade-date exchange rates). It shows net and taxable capital gain, denied losses with
+  the reason (superficial losses show what was bought back and held), gains by security
+  with each sale, sales missing an exchange rate, contribution room with its working,
+  and a "not tax advice" note. Amounts follow privacy mode. **Export CSV…** saves a
+  year's sales for an accountant. New `marketpulse desktop tax` (versioned JSON, with
+  `--demo`) feeds it, and `marketpulse tax --csv FILE` writes the CSV (and warns about
+  ledger issues that may leave sales out). `desktop snapshot` gains `ledger_revision`, so
+  the app recalculates only when something the report reads has changed. The demo
+  portfolio gains three NVDA trades in its taxable account (a superficial loss, then a
+  gain), so the demo's Tax workspace has something to show.
+
 - Manage accounts in the Mac app: in **Accounts**, **Edit account…** renames an account or
   changes its type, currency, institution, or cash tracking, and **Archive…** hides it
   after a confirmation that explains the consequences. **Settings › Data** lists archived

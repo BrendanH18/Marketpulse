@@ -8,9 +8,19 @@ import tempfile
 from pathlib import Path
 from uuid import uuid4
 
+from marketpulse.config import Config
 from marketpulse.db import Store
-from marketpulse.desktop import activity_row, archived_accounts, demo_snapshot, storage_info
+from marketpulse.desktop import (
+    DemoMarket,
+    activity_row,
+    archived_accounts,
+    demo_snapshot,
+    demo_tax,
+    storage_info,
+    tax_report,
+)
 from marketpulse.models import Account, AccountType, Transaction, TxnType
+from marketpulse.services import Tracker
 
 root = Path(__file__).resolve().parents[1]
 sources = root / "macos/MarketPulseBar/Sources/MarketPulseBar"
@@ -20,6 +30,8 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     binary = Path(tmp) / "bridge-check"
     fixture = Path(tmp) / "demo.json"
     fixture.write_text(json.dumps(demo_snapshot(), allow_nan=False))
+    demo_tax_report = Path(tmp) / "demo-tax.json"
+    demo_tax_report.write_text(json.dumps(demo_tax(), allow_nan=False))
     transactions = Path(tmp) / "transactions.json"
     rows = []
     target = {2: Account(name="RRSP", id=2)}
@@ -64,6 +76,38 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     ledger.update_account(old)
     archived = Path(tmp) / "archived.json"
     archived.write_text(json.dumps(archived_accounts(ledger.account_map()), allow_nan=False))
+    # The Tax workspace: a sale with no FX rate (no amounts), and one in an archived account (never named).
+    taxable = ledger.add_account(Account(name="Fictional Taxable"))
+    for kind, day, price in [(TxnType.BUY, "2025-01-10", 100), (TxnType.SELL, "2025-04-01", 120)]:
+        ledger.add_transaction(
+            Transaction(
+                account_id=taxable.saved_id,
+                type=kind,
+                date=day,
+                symbol="SAP.DE",
+                quantity=2,
+                price=price,
+                currency="EUR",
+            )
+        )
+    margin = ledger.add_account(Account(name="Old Margin", type=AccountType.MARGIN))
+    for kind, day, price in [(TxnType.BUY, "2025-01-06", 15), (TxnType.SELL, "2025-05-01", 16)]:
+        ledger.add_transaction(
+            Transaction(
+                account_id=margin.saved_id,
+                type=kind,
+                date=day,
+                symbol="ZAG.TO",
+                quantity=100,
+                price=price,
+                currency="CAD",
+            )
+        )
+    margin.archived = True
+    ledger.update_account(margin)
+    offline = Tracker(ledger, DemoMarket(store=ledger), Config())  # no network: EUR has no rate
+    ledger_tax = Path(tmp) / "tax.json"
+    ledger_tax.write_text(json.dumps(tax_report(offline), allow_nan=False))
     ledger.close()
     subprocess.run(
         [
@@ -77,5 +121,15 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
         check=True,
     )
     subprocess.run(
-        [str(binary), str(fixture), str(transactions), str(receipt), str(storage), str(archived)], check=True
+        [
+            str(binary),
+            str(fixture),
+            str(transactions),
+            str(receipt),
+            str(storage),
+            str(archived),
+            str(demo_tax_report),
+            str(ledger_tax),
+        ],
+        check=True,
     )

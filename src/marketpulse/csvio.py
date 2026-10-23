@@ -13,15 +13,19 @@ import io
 import json
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, TextIO
 
+from .analytics import disposition_note
 from .models import Account, AccountType, Transaction, TxnType, guess_currency, parse_date
 
 if TYPE_CHECKING:
+    from .analytics import TaxYear
     from .db import Store
 
 EXPORT_COLUMNS = [
@@ -152,6 +156,73 @@ def export_transactions(store: Store, out: TextIO) -> int:
             ]
         )
         n += 1
+    return n
+
+
+DISPOSITION_KINDS = {
+    "sale": "Sale",
+    "roc": "Return of capital above ACB",
+    "deemed": "Transfer in kind to a registered account",
+}
+
+
+def _plain(value: float) -> str:
+    """A number as written, never in exponent form a spreadsheet would misread: 1234567, 0.00000000125."""
+    text = format(Decimal(str(value)), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def export_capital_gains(
+    years: Sequence[TaxYear], accounts: dict[int, Account], base: str, out: TextIO, *, year: int | None = None
+) -> int:
+    """Write every disposition (one year's, or all) as CSV for an accountant. Amounts are in
+    `base`, as `marketpulse tax` reports them. A row missing an FX rate keeps its date, units
+    and note but no amounts, because they aren't known."""
+    writer = csv.writer(out)
+    writer.writerow(
+        [
+            "Tax year",
+            "Date",
+            "Account",
+            "Account type",
+            "Symbol",
+            "Quantity",
+            "Trading currency",
+            f"FX rate to {base}",
+            f"Proceeds ({base})",
+            f"ACB ({base})",
+            f"Gain or loss ({base})",
+            f"Denied loss ({base})",
+            f"Reported gain or loss ({base})",
+            "Type",
+            "Note",
+        ]
+    )
+    n = 0
+    for y in sorted(years, key=lambda y: y.year):
+        if year is not None and y.year != year:
+            continue
+        for r in y.rows:
+            acct = accounts.get(r.account_id)
+            amounts = (
+                [f"{v:.2f}" for v in (r.proceeds, r.acb, r.gain, r.denied, r.allowed_gain)] if r.complete else [""] * 5
+            )
+            writer.writerow(
+                [
+                    y.year,
+                    r.date,
+                    acct.name if acct else r.account_id,
+                    acct.type.value if acct else "",
+                    r.symbol,
+                    _plain(r.quantity) if r.quantity else "",
+                    r.currency,
+                    f"{r.fx:.6f}" if r.fx is not None else "",
+                    *amounts,
+                    DISPOSITION_KINDS.get(r.kind, r.kind),
+                    disposition_note(r),
+                ]
+            )
+            n += 1
     return n
 
 

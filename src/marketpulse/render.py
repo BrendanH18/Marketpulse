@@ -15,7 +15,15 @@ from rich.table import Table
 from rich.text import Text
 
 from . import charts, fmt
-from .analytics import IncomeForecast, Performance, RebalanceRow, TaxYear, max_drawdown, period_return
+from .analytics import (
+    IncomeForecast,
+    Performance,
+    RebalanceRow,
+    TaxYear,
+    disposition_note,
+    max_drawdown,
+    period_return,
+)
 from .ledger import RoomStatus
 from .market import SearchResult
 from .models import Account, Bar, Quote, Transaction, TxnType
@@ -616,16 +624,12 @@ def income_group(
 def _disposition_note(r: Disposition) -> Text:
     """Short tag explaining anything unusual about a disposition row."""
     if not r.complete:
-        return Text("FX missing", style="down")
-    if r.denied_reason == DENIED_REGISTERED:
-        return Text("→ registered, loss denied", style="warn")
-    if r.superficial:
-        return Text("superficial" + (" (window open)" if r.window_open else ""), style="warn")
-    if r.kind == "roc":
-        return Text("ROC > ACB", style="muted")
-    if r.kind == "deemed":
-        return Text("→ registered", style="muted")
-    return Text("")
+        style = "down"
+    elif r.denied_reason == DENIED_REGISTERED or r.superficial:
+        style = "warn"
+    else:
+        style = "muted"
+    return Text(disposition_note(r), style=style)
 
 
 def tax_group(

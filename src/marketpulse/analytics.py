@@ -11,7 +11,7 @@ from itertools import pairwise
 
 from .ledger import LedgerState
 from .models import EPSILON, Account, Transaction, TxnType, guess_currency
-from .tax import Disposition, TaxReport
+from .tax import DENIED_REGISTERED, Disposition, TaxReport
 from .valuation import Breakdown, PortfolioView
 
 # ── Money in / money out ──────────────────────────────────────────────────────
@@ -333,6 +333,66 @@ class TaxYear:
     @property
     def missing_fx(self) -> list[Disposition]:
         return [r for r in self.rows if not r.complete]
+
+    def by_symbol(self) -> list[SecurityGains]:
+        """This year's totals per security, alphabetically. Like the year's own totals, only
+        complete rows are summed; `missing_fx` counts the ones left out."""
+        out: dict[str, SecurityGains] = {}
+        for r in self.rows:
+            s = out.setdefault(r.symbol, SecurityGains(r.symbol))
+            s.rows.append(r)
+        return [out[k] for k in sorted(out)]
+
+
+@dataclass
+class SecurityGains:
+    """One security's dispositions in one tax year."""
+
+    symbol: str
+    rows: list[Disposition] = field(default_factory=list)
+
+    @property
+    def counted(self) -> list[Disposition]:
+        return [r for r in self.rows if r.complete]
+
+    @property
+    def quantity(self) -> float:
+        return sum(r.quantity for r in self.counted)
+
+    @property
+    def proceeds(self) -> float:
+        return sum(r.proceeds for r in self.counted)
+
+    @property
+    def cost(self) -> float:
+        return sum(r.acb for r in self.counted)
+
+    @property
+    def denied(self) -> float:
+        return sum(r.denied for r in self.counted)
+
+    @property
+    def net_gain(self) -> float:
+        return sum(r.allowed_gain for r in self.counted)
+
+    @property
+    def missing_fx(self) -> int:
+        return len(self.rows) - len(self.counted)
+
+
+def disposition_note(r: Disposition) -> str:
+    """Short tag explaining anything unusual about a disposition row ("" for an ordinary sale)."""
+    if not r.complete:
+        return "FX missing"
+    if r.denied_reason == DENIED_REGISTERED:
+        return "→ registered, loss denied"
+    if r.superficial:
+        return "superficial" + (" (window open)" if r.window_open else "")
+    if r.kind == "roc":
+        return "ROC > ACB"
+    if r.kind == "deemed":
+        return "→ registered"
+    return ""
 
 
 def capital_gains(report: TaxReport, *, inclusion_rate: float = 0.5) -> list[TaxYear]:
