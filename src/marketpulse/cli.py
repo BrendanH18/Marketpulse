@@ -1010,7 +1010,7 @@ def accounts_add(app: App, name, acct_type, currency, institution, track_cash) -
 @pass_app
 def accounts_edit(app: App, ref, name, acct_type, currency, institution, track_cash, archive) -> None:
     acct = app.account(ref)
-    if name:
+    if name is not None:
         acct.name = name
     if acct_type:
         acct.type = AccountType(acct_type.upper())
@@ -1022,7 +1022,10 @@ def accounts_edit(app: App, ref, name, acct_type, currency, institution, track_c
         acct.track_cash = track_cash
     if archive is not None:
         acct.archived = archive
-    app.store.update_account(acct)
+    try:
+        app.store.update_account(acct)
+    except ValueError as e:
+        fail(str(e))
     app.ok(f"Updated {acct.name}.")
 
 

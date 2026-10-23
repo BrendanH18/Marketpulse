@@ -9,8 +9,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from marketpulse.db import Store
-from marketpulse.desktop import activity_row, demo_snapshot, storage_info
-from marketpulse.models import Account, Transaction, TxnType
+from marketpulse.desktop import activity_row, archived_accounts, demo_snapshot, storage_info
+from marketpulse.models import Account, AccountType, Transaction, TxnType
 
 root = Path(__file__).resolve().parents[1]
 sources = root / "macos/MarketPulseBar/Sources/MarketPulseBar"
@@ -58,6 +58,12 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
         ledger.backup(reason=reason)
     storage = Path(tmp) / "storage.json"
     storage.write_text(json.dumps(storage_info(ledger), allow_nan=False))
+    # Settings › Data lists archived accounts so they can be unarchived.
+    old = ledger.add_account(Account(name="Old RRSP", type=AccountType.RRSP))
+    old.archived = True
+    ledger.update_account(old)
+    archived = Path(tmp) / "archived.json"
+    archived.write_text(json.dumps(archived_accounts(ledger.account_map()), allow_nan=False))
     ledger.close()
     subprocess.run(
         [
@@ -70,4 +76,6 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
         ],
         check=True,
     )
-    subprocess.run([str(binary), str(fixture), str(transactions), str(receipt), str(storage)], check=True)
+    subprocess.run(
+        [str(binary), str(fixture), str(transactions), str(receipt), str(storage), str(archived)], check=True
+    )

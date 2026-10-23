@@ -291,6 +291,42 @@ def test_tax_report_explains_superficial_losses_and_transfer_issues(cli, store):
     assert "spouse or a corporation" in out
 
 
+def test_accounts_edit_as_the_app_sends_it(cli, store):
+    cli("accounts", "add", "Fictional TFSA", "-t", "TFSA", "-i", "Bank")
+    cli("accounts", "add", "Fictional Cash", "-t", "CASH")
+    acct = store.get_account("Fictional TFSA")
+    ref = str(acct.saved_id)
+    # Every field, user text in option values, the account id after `--`.
+    out = cli(
+        "accounts", "edit", "--name", "  -Renamed FHSA ", "--type", "FHSA", "--currency", "usd",
+        "--institution", "", "--track-cash", "--", ref,
+    )  # fmt: skip
+    assert out.exit_code == 0 and "Updated -Renamed FHSA." in out.output
+    edited = store.get_account(ref)
+    assert (edited.name, edited.type.value, edited.currency, edited.institution, edited.track_cash) == (
+        "-Renamed FHSA",
+        "FHSA",
+        "USD",
+        "",
+        True,
+    )
+    for name, error in [("fictional cash", "already exists"), ("   ", "name is required")]:
+        result = cli("accounts", "edit", "--name", name, "--", ref)
+        assert result.exit_code == 1 and error in result.output and "Traceback" not in result.output
+    assert store.get_account(ref).name == "-Renamed FHSA"  # unchanged by the failed edits
+    assert cli("accounts", "edit", "--archive", "--", ref).exit_code == 0
+    assert store.get_account(ref).archived and [a.name for a in store.accounts()] == ["Fictional Cash"]
+    assert cli("accounts", "edit", "--unarchive", "--", ref).exit_code == 0
+    assert not store.get_account(ref).archived
+
+
+def test_accounts_room_as_the_app_sends_it(cli, store):
+    assert cli("accounts", "room", "--", "TFSA", "2026", "-250.5").exit_code == 0  # over-contributed
+    assert store.rooms() == {"TFSA": (2026, -250.5)}
+    assert cli("accounts", "room", "--", "TFSA", "2025", "7000").exit_code == 0  # replaces, never adds
+    assert store.rooms() == {"TFSA": (2025, 7000.0)}
+
+
 def test_fhsa_room_shows_capped_carry_forward(cli, store):
     cli("accounts", "add", "My FHSA", "-t", "FHSA")
     cli("accounts", "room", "FHSA", "2023", "8000")

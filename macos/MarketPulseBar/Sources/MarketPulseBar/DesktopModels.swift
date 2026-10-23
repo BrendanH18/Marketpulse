@@ -51,6 +51,8 @@ struct DesktopPayload: Decodable {
   let demo: Bool
   var status: StatusPayload
   let accounts: [DesktopAccount]
+  /// Only Settings › Data lists these, to unarchive them. Absent from older engines.
+  let archivedAccounts: [ArchivedAccount]?
   let positions: [DesktopPosition]
   let activity: [DesktopTransaction]
   let allocation: [AllocationBucket]
@@ -135,12 +137,23 @@ struct BackupInfo: Decodable, Identifiable, Equatable {
 }
 
 struct DesktopAccount: Decodable, Identifiable {
+  /// Every type `marketpulse accounts add --type` accepts.
+  static let types = [
+    "TFSA", "RRSP", "FHSA", "RESP", "LIRA", "RRIF", "NONREG", "MARGIN", "CRYPTO", "CASH", "OTHER",
+  ]
   let id: Int
   let name: String
   let type: String
   let currency: String
   let institution: String
   let trackCash: Bool
+}
+
+/// An archived account: hidden everywhere, left out of totals, history kept.
+struct ArchivedAccount: Decodable, Identifiable {
+  let id: Int
+  let name: String
+  let type: String
 }
 
 struct DesktopPosition: Decodable, Identifiable {
@@ -196,10 +209,18 @@ struct AllocationBucket: Decodable, Identifiable {
   let weight: Double
 }
 
+/// Room CRA works out in Canadian dollars, whatever currency totals are shown in.
 struct ContributionRoom: Decodable, Identifiable {
+  /// The types the app sets room for (`marketpulse accounts room`).
+  static let types = ["TFSA", "RRSP", "FHSA"]
+  /// The earliest year the form offers: FHSAs began in 2023 and TFSAs in 2009. RRSP room is
+  /// entered from a recent notice of assessment, so the TFSA range is plenty.
+  static func firstYear(_ type: String) -> Int { type == "FHSA" ? 2023 : 2009 }
   var id: String { accountType }
   let accountType: String
+  /// The user entered `startingRoom` as CRA's figure on January 1 of this year.
   let asOfYear: Int
+  let startingRoom: Double
   let remaining: Double
 }
 

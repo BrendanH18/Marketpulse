@@ -102,7 +102,7 @@ opens the Settings window. Every change applies straight away, without a restart
 | General | Refresh interval, launch at login, [update checks](#update-checks), what the menu bar shows (day change, net worth, or a symbol's price), the terminal app, and the ⌥⌘M shortcut | App preferences; the menu bar display is `menubar_display` / `menubar_symbol` in the config file |
 | Appearance | System, Light, or Dark for the portfolio and Settings windows and their sheets | App preferences (`appearance`) |
 | Portfolio | The currency totals are shown in, the default account, and privacy mode | Config file: `base_currency`, `default_account`, `privacy` |
-| Data | Where the portfolio and the settings file are, with **Reveal in Finder**, and the backups kept | — |
+| Data | Where the portfolio and the settings file are, with **Reveal in Finder**, the backups kept, and archived accounts to unarchive | — |
 
 Config-file settings are saved with `marketpulse config set`, so the CLI and TUI see
 the same values. The default account is preselected when you record a transaction
@@ -153,8 +153,12 @@ v99.0.0.
   interest, and fees can be edited; any entry can be deleted, after a confirmation. A
   change that would leave a sale of more than was held at the time is refused, with the
   reason, and nothing is changed.
-- **Accounts:** account creation, holdings/cash tracking details, and entered
-  contribution-room summaries.
+- **Accounts:** create accounts, and **Edit account…** (or right-click) to rename one or
+  change its type, currency, institution, or cash tracking. **Archive…** in the same
+  sheet hides an account after a confirmation that says what will happen. Contribution
+  room for TFSA, RRSP, and FHSA shows what's left; **Set…** or **Update…** enters the
+  room CRA reported for January 1 of a year (`marketpulse accounts room`), in Canadian
+  dollars.
 - **Watchlist:** add/remove symbols and create/delete price or daily-change alerts.
 - **Income:** recorded monthly distributions and interest, converted at current FX.
 - **Automation:** what runs while the app is open, a link to Settings, backup action, errors,
@@ -180,6 +184,8 @@ account still holds investments or cash, MarketPulse leaves them out of net wort
 warns you, and pauses daily snapshots and history rebuilds so your history never records a false drop;
 move or sell them, or unarchive the account. CSV rows that name an archived
 account are skipped with that reason, in both the preview and the import.
+The one exception is **Settings › Data › Archived accounts**, which lists them only so
+you can **Unarchive** one; the Accounts workspace links to it with a count.
 
 Number fields accept your system's format (`12,5` in French or German, as well as
 `12.5`). When an entry could be read more than one way, such as `1.000`, the form

@@ -36,7 +36,7 @@ enum Workspace: String, CaseIterable, Identifiable {
 }
 
 enum DesktopSheet: String, Identifiable {
-  case transaction, editTransaction, account, alert, welcome
+  case transaction, editTransaction, account, editAccount, room, alert, welcome
   var id: String { rawValue }
 }
 
@@ -151,6 +151,8 @@ struct PortfolioWindow: View {
       case .transaction: TransactionSheet(model: model)
       case .editTransaction: TransactionSheet(model: model, editing: draft.editing)
       case .account: AccountSheet(model: model)
+      case .editAccount: AccountSheet(model: model, editing: draft.editingAccount)
+      case .room: RoomSheet(model: model, type: draft.roomType)
       case .alert: AlertSheet(model: model)
       case .welcome:
         WelcomeSheet(
@@ -175,6 +177,10 @@ struct PortfolioWindow: View {
       }
     }
     .onChange(of: model.welcomeRequest, initial: true) { _, _ in presentWelcome() }
+    .onChange(of: model.desktop?.accounts.map(\.id)) { _, ids in
+      // An archived account no longer filters Holdings and Activity.
+      if draft.accountFilter != 0 && ids?.contains(draft.accountFilter) != true { draft.accountFilter = 0 }
+    }
     .onChange(of: model.workspaceRequest, initial: true) { _, request in
       guard let request else { return }
       draft.section = request
@@ -287,7 +293,17 @@ struct PortfolioWindow: View {
           draft.sheet = .editTransaction
         })
     case .accounts:
-      AccountsWorkspace(payload: p, canEdit: model.canEdit, add: { draft.sheet = .account })
+      AccountsWorkspace(
+        payload: p, canEdit: model.canEdit, add: { draft.sheet = .account },
+        edit: { account in
+          draft.editingAccount = account
+          draft.sheet = .editAccount
+        },
+        setRoom: { type in
+          draft.roomType = type
+          draft.sheet = .room
+        },
+        showArchived: { model.showSettingsWindow(tab: SettingsWindowController.dataTab) })
     case .watchlist: WatchlistWorkspace(model: model, addAlert: { draft.sheet = .alert })
     case .income: IncomeWorkspace(payload: p)
     case .automation: AutomationWorkspace(model: model)
@@ -759,11 +775,25 @@ private struct AccountsWorkspace: View {
   let payload: DesktopPayload
   let canEdit: Bool
   let add: () -> Void
+  let edit: (DesktopAccount) -> Void
+  let setRoom: (String) -> Void
+  let showArchived: () -> Void
+  /// Room types worth showing: ones with room entered, or an account that uses them.
+  private var roomTypes: [String] {
+    ContributionRoom.types.filter { type in
+      payload.room.contains { $0.accountType == type } || payload.accounts.contains { $0.type == type }
+    }
+  }
   var body: some View {
+    let privacy = payload.status.privacy
     ScrollView {
       VStack(spacing: 18) {
         HStack {
           Text("\(payload.accounts.count) active accounts").foregroundStyle(Studio.muted)
+          if let archived = payload.archivedAccounts?.count, archived > 0 {
+            Button(archived == 1 ? "1 archived" : "\(archived) archived", action: showArchived)
+              .buttonStyle(.link).help("Archived accounts are listed in Settings › Data, to unarchive them")
+          }
           Spacer()
           Button("Add account", systemImage: "plus", action: add).disabled(!canEdit)
         }
@@ -774,33 +804,57 @@ private struct AccountsWorkspace: View {
                 Text(a.institution.isEmpty ? "Personal account" : a.institution).foregroundStyle(
                   Studio.muted)
                 Text(
-                  a.trackCash
-                    ? "Holdings and cash are tracked" : "Holdings are tracked; cash is excluded"
+                  (a.trackCash ? "Holdings and cash are tracked" : "Holdings are tracked; cash is excluded")
+                    + " · \(a.currency)"
                 ).font(.system(size: 11)).foregroundStyle(Studio.muted)
+                Button("Edit account…") { edit(a) }.disabled(!canEdit).controlSize(.small)
               }
               Spacer()
               Text(
                 Format.money(
                   payload.status.accounts.first { $0.name == a.name }?.value ?? 0,
-                  payload.status.base, privacy: payload.status.privacy)
+                  payload.status.base, privacy: privacy)
               )
               .font(.system(size: 24, weight: .medium)).monospacedDigit()
             }
+          }.contextMenu {
+            Button("Edit Account…") { edit(a) }.disabled(!canEdit)
           }
         }
-        if !payload.room.isEmpty {
-          Surface("Contribution room", trailing: "BASED ON YOUR ENTERED LIMITS") {
-            ForEach(payload.room) { r in
+        if !roomTypes.isEmpty || !payload.room.isEmpty {
+          Surface("Contribution room", trailing: "IN CAD · FROM THE ROOM YOU ENTERED") {
+            ForEach(roomTypes, id: \.self) { type in
+              let room = payload.room.first { $0.accountType == type }
+              HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                  Text(type)
+                  Text(
+                    room.map {
+                      "From \(Format.money($0.startingRoom, "CAD", privacy: privacy)) on January 1, \(String($0.asOfYear))"
+                    } ?? "Not set yet"
+                  ).font(.system(size: 11)).foregroundStyle(Studio.muted)
+                }
+                Spacer()
+                if let room {
+                  Text(Format.money(room.remaining, "CAD", privacy: privacy)).foregroundStyle(
+                    Studio.trend(room.remaining)
+                  ).monospacedDigit()
+                }
+                Button(room == nil ? "Set…" : "Update…") { setRoom(type) }.disabled(!canEdit)
+                  .controlSize(.small)
+              }
+            }
+            // Room entered in the terminal for other types (e.g. RESP) is shown, not edited here.
+            ForEach(payload.room.filter { !ContributionRoom.types.contains($0.accountType) }) { r in
               HStack {
                 Text(r.accountType)
                 Spacer()
-                Text(
-                  Format.money(r.remaining, payload.status.base, privacy: payload.status.privacy)
-                ).foregroundStyle(Studio.trend(r.remaining))
+                Text(Format.money(r.remaining, "CAD", privacy: privacy)).foregroundStyle(Studio.trend(r.remaining))
+                  .monospacedDigit()
               }
             }
             Text(
-              "Set starting room with marketpulse accounts room. Confirm limits against your own records."
+              "Deposits to your accounts of each type are subtracted. Confirm the figures against CRA My Account before contributing."
             ).font(.system(size: 11)).foregroundStyle(Studio.muted)
           }
         }
@@ -1104,6 +1158,10 @@ private final class PortfolioWindowDraft: ObservableObject {
   @Published var sheet: DesktopSheet?
   /// The entry the `.editTransaction` sheet changes.
   @Published var editing: DesktopTransaction?
+  /// The account the `.editAccount` sheet changes.
+  @Published var editingAccount: DesktopAccount?
+  /// The type the `.room` sheet opens on.
+  @Published var roomType = "TFSA"
   @Published var section: Workspace? = .overview
   @Published var search = ""
   @Published var accountFilter = 0

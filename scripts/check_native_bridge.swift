@@ -39,6 +39,17 @@ struct NativeBridgeCheck {
     precondition(ledger.backupDir?.hasSuffix("/backups") == true && backups.count >= 2)
     precondition(Set(backups.map(\.reasonLabel)) == ["Daily backup", "Before a restore"])
     precondition(backups.allSatisfy { $0.date != nil && $0.size > 0 && $0.when != $0.name })
+    // Archived accounts: none in the demo; listed with just enough to unarchive them.
+    precondition(payload.archivedAccounts?.isEmpty == true)
+    let archived = try decoder.decode(
+      [ArchivedAccount].self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[5])))
+    precondition(archived.count == 1 && archived[0].name == "Old RRSP" && archived[0].type == "RRSP")
+    precondition(payload.accounts.allSatisfy { DesktopAccount.types.contains($0.type) })
+    // The demo's TFSA room, as entered: the room sheet edits it from these fields.
+    let year = Calendar.current.component(.year, from: .now)
+    precondition(payload.room.count == 1 && payload.room[0].accountType == "TFSA")
+    precondition(payload.room[0].asOfYear == year && payload.room[0].startingRoom == 18000)
+    precondition(ContributionRoom.firstYear("FHSA") == 2023 && ContributionRoom.firstYear("TFSA") == 2009)
 
     let transactions = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     for row in try decoder.decode([ValuedTransaction].self, from: transactions) {
@@ -128,7 +139,7 @@ struct NativeBridgeCheck {
     }
     precondition(retry == .recorded)
     print(
-      "Native bridge checks passed: real Python demo, storage and backups, settings, activity values, import result, privacy formatting, number entry, editable numbers and dates, transaction save recovery"
+      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, settings, activity values, import result, privacy formatting, number entry, editable numbers and dates, transaction save recovery"
     )
   }
 }
