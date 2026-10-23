@@ -83,6 +83,7 @@ UI item as passing that you didn't see.
   never fire alerts or record snapshots.
 - No new network calls, telemetry, or accounts beyond what an issue specifies. No secrets in the repo.
 - Keep PRs focused. Refactors stay behavior-preserving.
+- When you add generated, vendored or build-output paths, add matching patterns to `.macroscope/ignore.md` (see https://docs.macroscope.com/code-review/ignore-files) and run `python3 ~/.agents/skills/macroscope-ignore/scripts/macroscope_ignore.py validate`.
 
 ## Handoff protocol
 
