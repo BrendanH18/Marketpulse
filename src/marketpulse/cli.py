@@ -1007,10 +1007,17 @@ def accounts_add(app: App, name, acct_type, currency, institution, track_cash) -
 @click.option("-i", "--institution")
 @click.option("--track-cash/--no-track-cash", default=None)
 @click.option("--archive/--unarchive", default=None)
+@click.option(
+    "--revision", help="Refuse unless the account is unchanged since it had this revision (from `desktop snapshot`)."
+)
 @pass_app
-def accounts_edit(app: App, ref, name, acct_type, currency, institution, track_cash, archive) -> None:
+def accounts_edit(app: App, ref, name, acct_type, currency, institution, track_cash, archive, revision) -> None:
+    restore_id = app.store.restore_id
     acct = app.account(ref)
-    if name:
+    if revision is None:
+        # Every field is written back, so a change made elsewhere since it was read is refused.
+        revision = acct.revision(restore_id)
+    if name is not None:
         acct.name = name
     if acct_type:
         acct.type = AccountType(acct_type.upper())
@@ -1022,7 +1029,10 @@ def accounts_edit(app: App, ref, name, acct_type, currency, institution, track_c
         acct.track_cash = track_cash
     if archive is not None:
         acct.archived = archive
-    app.store.update_account(acct)
+    try:
+        app.tracker.update_account(acct, restore_id=restore_id, revision=revision)
+    except ValueError as e:
+        fail(str(e))
     app.ok(f"Updated {acct.name}.")
 
 

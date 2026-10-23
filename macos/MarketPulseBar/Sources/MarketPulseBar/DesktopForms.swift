@@ -133,45 +133,177 @@ struct TransactionSheet: View {
 struct AccountSheet: View {
   @StateObject private var draft = AccountSheetDraft()
   @ObservedObject var model: StatusModel
+  /// An existing account to change with `marketpulse accounts edit`, instead of creating one.
+  var editing: DesktopAccount? = nil
   @Environment(\.dismiss) private var dismiss
+  private var name: String { draft.name.trimmingCharacters(in: .whitespaces) }
+  private var currency: String { CurrencyInput.normalize(draft.currency) }
   var body: some View {
     SheetLayout(
-      title: "A home for your investments",
-      subtitle: "Create an account in your existing portfolio.", model: model
+      title: editing == nil ? "A home for your investments" : "Edit account",
+      subtitle: editing == nil
+        ? "Create an account in your existing portfolio."
+        : "Change how this account is named and tracked. Its transactions stay as they are.",
+      model: model
     ) {
       Form {
         TextField("Account name", text: $draft.name, prompt: Text("My TFSA"))
         Picker("Type", selection: $draft.type) {
-          ForEach(
-            [
-              "TFSA", "RRSP", "FHSA", "RESP", "LIRA", "RRIF", "NONREG", "MARGIN", "CRYPTO", "CASH",
-              "OTHER",
-            ], id: \.self
-          ) { Text($0).tag($0) }
+          ForEach(DesktopAccount.types, id: \.self) { Text($0).tag($0) }
+        }
+        if let editing, draft.type != editing.type {
+          caution(
+            "The type decides whether gains in this account are taxable and which contribution room it counts against. Both are worked out again."
+          )
         }
         TextField("Currency", text: $draft.currency)
+        if let editing, currency != editing.currency, hasActivity(editing) {
+          caution(
+            "Entries saved without a currency of their own are read in the account's currency, so changing it can change what they're worth."
+          )
+        }
         TextField("Institution (optional)", text: $draft.institution)
         Toggle("Track cash balance", isOn: $draft.cash)
         Text(
           "When enabled, record deposits and withdrawals so purchases and sales are reflected in cash. Otherwise, only holdings are included."
         ).font(.caption).foregroundStyle(.secondary)
-      }.formStyle(.grouped)
+      }.formStyle(.grouped).disabled(model.saving)
+        .onAppear { if let editing, !draft.loaded { draft.load(editing) } }
+      HStack {
+        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving)
+        if editing != nil {
+          Button("Archive…") { draft.confirmArchive = true }.disabled(!model.canEdit)
+            .help("Hide this account everywhere and leave it out of your totals")
+        }
+        Spacer()
+        if model.saving { ProgressView().controlSize(.small) }
+        Button(editing == nil ? "Create account" : "Save changes") {
+          Task { if await model.perform(arguments, success: editing == nil ? "Account created" : "Account updated") { dismiss() } }
+        }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+          .disabled(!model.canEdit || name.isEmpty || !CurrencyInput.isValid(currency))
+      }
+    }
+    .confirmationDialog(
+      "Archive \(editing?.name ?? "this account")?", isPresented: $draft.confirmArchive, presenting: editing
+    ) { account in
+      Button("Archive") {
+        Task {
+          if await model.perform(
+            ["accounts", "edit", "--archive"] + account.revisionArguments + ["--", String(account.id)],
+            success: "Archived \(account.name). You can unarchive it in Settings › Data.")
+          {
+            dismiss()
+          }
+        }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: { _ in
+      // Stated whenever it might apply: the engine pauses on any non-zero cash balance in any
+      // currency, which the account's net value can't show (balances can offset, or lack a rate).
+      Text(
+        "It will be hidden everywhere in MarketPulse and left out of your totals. Its transactions are kept, and you can unarchive it in Settings › Data. While it still holds investments or cash, daily net-worth snapshots pause until you move or sell them, or unarchive it."
+      )
+    }
+  }
+
+  private var arguments: [String] {
+    guard let editing else {
+      return [
+        "accounts", "add", "--type", draft.type, "--currency", currency, "--institution", draft.institution,
+      ] + (draft.cash ? ["--track-cash"] : []) + ["--", name]
+    }
+    // Every field the form shows, so the account ends up exactly as the form reads.
+    return [
+      "accounts", "edit", "--name", name, "--type", draft.type, "--currency", currency,
+      "--institution", draft.institution, draft.cash ? "--track-cash" : "--no-track-cash",
+    ] + editing.revisionArguments + ["--", String(editing.id)]
+  }
+
+  private func hasActivity(_ account: DesktopAccount) -> Bool {
+    model.desktop?.activity.contains { $0.accountId == account.id } ?? false
+  }
+
+  private func caution(_ text: String) -> some View {
+    Text(text).font(.caption).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
+  }
+}
+
+/// Contribution room as CRA reported it on January 1 of a year (`marketpulse accounts room`).
+struct RoomSheet: View {
+  @StateObject private var draft = RoomSheetDraft()
+  @ObservedObject var model: StatusModel
+  let type: String
+  @Environment(\.dismiss) private var dismiss
+  private static let currentYear = Calendar.current.component(.year, from: .now)
+  private var saved: ContributionRoom? { model.desktop?.room.first { $0.accountType == draft.type } }
+  private var years: [Int] {
+    Array(stride(from: Self.currentYear, through: min(ContributionRoom.firstYear(draft.type), draft.year), by: -1))
+  }
+  var body: some View {
+    SheetLayout(
+      title: "Contribution room",
+      subtitle:
+        "Enter the room CRA reported for January 1 of a year. You'll find it in CRA My Account or on your notice of assessment.",
+      model: model
+    ) {
+      Form {
+        Picker("Account type", selection: $draft.type) {
+          ForEach(ContributionRoom.types, id: \.self) { Text($0).tag($0) }
+        }
+        Picker("Room on January 1 of", selection: $draft.year) {
+          ForEach(years, id: \.self) { Text(String($0)).tag($0) }
+        }
+        NumberField(title: "Room in CAD", text: $draft.amount)
+        Text(explanation).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        if let saved {
+          Text(
+            "Replaces the room you entered before: \(Format.money(saved.startingRoom, "CAD", privacy: model.status?.privacy ?? false)) on January 1, \(String(saved.asOfYear))."
+          ).font(.caption).foregroundStyle(.secondary)
+        }
+      }.formStyle(.grouped).disabled(model.saving)
+        .onAppear {
+          guard !draft.loaded else { return }
+          draft.loaded = true
+          draft.type = type
+          load()
+        }
+        .onChange(of: draft.type) { _, _ in load() }
       HStack {
         Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving)
         Spacer()
-        Button("Create account") {
-          let args =
-            [
-              "accounts", "add", "--type", draft.type, "--currency", CurrencyInput.normalize(draft.currency),
-              "--institution", draft.institution,
-            ] + (draft.cash ? ["--track-cash"] : [])
-            + ["--", draft.name.trimmingCharacters(in: .whitespaces)]
-          Task { if await model.perform(args, success: "Account created") { dismiss() } }
+        if model.saving { ProgressView().controlSize(.small) }
+        Button("Save room") {
+          let args = ["accounts", "room", "--", draft.type, String(draft.year), NumberInput.cli(draft.amount)]
+          Task { if await model.perform(args, success: "\(draft.type) contribution room saved") { dismiss() } }
         }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-          .disabled(
-            !model.canEdit || draft.name.trimmingCharacters(in: .whitespaces).isEmpty
-              || !CurrencyInput.isValid(CurrencyInput.normalize(draft.currency)))
+          .disabled(!model.canEdit || NumberInput.parse(draft.amount) == nil)
       }
+    }
+  }
+
+  /// What MarketPulse does with the figure, which differs by account type.
+  private var explanation: String {
+    switch draft.type {
+    case "TFSA":
+      return
+        "Each new year's limit is added for you, and withdrawals are added back the following January. Deposits to your TFSA accounts are subtracted. Enter a negative amount if you've over-contributed."
+    case "FHSA":
+      return
+        "Each year's $8,000 is added for you, with up to $8,000 of unused room carried forward and the $40,000 lifetime limit applied. Deposits to your FHSA accounts are subtracted."
+    default:
+      return
+        "RRSP room doesn't grow on its own here: enter the new figure from each year's notice of assessment. Deposits to your RRSP accounts are subtracted."
+    }
+  }
+
+  /// The room saved for the chosen type, so it can be corrected; otherwise this year, blank.
+  private func load() {
+    if let saved {
+      draft.year = saved.asOfYear
+      draft.amount = NumberInput.editable(saved.startingRoom)
+    } else {
+      draft.year = Self.currentYear
+      draft.amount = ""
     }
   }
 }
@@ -440,11 +572,30 @@ private final class TransactionSheetDraft: ObservableObject {
 }
 
 private final class AccountSheetDraft: ObservableObject {
+  /// Whether `load` has filled in the account being edited (only once, so edits aren't reset).
+  var loaded = false
   @Published var name = ""
   @Published var type = "TFSA"
   @Published var currency = "CAD"
   @Published var institution = ""
   @Published var cash = false
+  @Published var confirmArchive = false
+
+  func load(_ account: DesktopAccount) {
+    loaded = true
+    name = account.name
+    type = account.type
+    currency = account.currency
+    institution = account.institution
+    cash = account.trackCash
+  }
+}
+
+private final class RoomSheetDraft: ObservableObject {
+  var loaded = false
+  @Published var type = "TFSA"
+  @Published var year = Calendar.current.component(.year, from: .now)
+  @Published var amount = ""
 }
 
 private final class AlertSheetDraft: ObservableObject {

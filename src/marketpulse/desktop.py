@@ -37,7 +37,9 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         "version": 1,
         "demo": False,
         "status": status,
-        "accounts": [asdict(a) for a in tracker.store.accounts()],
+        # Each with the revision an edit, archive or unarchive sends back (`accounts edit --revision`).
+        "accounts": [{**asdict(a), "revision": a.revision(generation)} for a in tracker.store.accounts()],
+        "archived_accounts": archived_accounts(amap, generation),
         "positions": [
             {
                 "id": f"{p.account.saved_id}:{p.symbol}",
@@ -79,6 +81,15 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
             *[archived_warning(name) for name in view.archived_with_value],
         ],
     }
+
+
+def archived_accounts(accounts: dict[int, Account], generation: str = "") -> list[dict]:
+    """Only so Settings can offer to unarchive them; nothing else in the app shows these."""
+    return [
+        {"id": a.saved_id, "name": a.name, "type": a.type.value, "revision": a.revision(generation)}
+        for a in accounts.values()
+        if a.archived
+    ]
 
 
 def storage_info(store: Store) -> dict:

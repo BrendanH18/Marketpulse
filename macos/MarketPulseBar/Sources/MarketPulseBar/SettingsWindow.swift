@@ -6,6 +6,9 @@ import SwiftUI
 /// workspace all bring back the same window.
 @MainActor
 final class SettingsWindowController: NSWindowController {
+  /// The Data tab's index, for links that open it (e.g. to archived accounts).
+  static let dataTab = 3
+
   init(model: StatusModel) {
     let tabs = NSTabViewController()
     tabs.tabStyle = .toolbar
@@ -257,6 +260,25 @@ private struct DataSettings: View {
           LabeledContent("Latest", value: "\(latest.when) · \(latest.reasonLabel)")
         }
         Button("Show Backups…") { model.showWorkspace(.automation) }.disabled(model.demo)
+      }
+      // The only place archived accounts appear, solely so they can be brought back.
+      if let archived = model.desktop?.archivedAccounts, !archived.isEmpty {
+        Section {
+          DisclosureGroup("Archived accounts (\(archived.count))") {
+            ForEach(archived) { account in
+              LabeledContent {
+                Button("Unarchive") { model.unarchiveAccount(account) }.disabled(!model.canEdit)
+              } label: {
+                Text(account.name)
+                Text(account.type)
+              }
+            }
+          }
+        } footer: {
+          Text(
+            "Archived accounts are hidden everywhere else and left out of your totals. Their transactions are kept. Unarchive one to bring it back."
+          )
+        }
       }
     }
   }

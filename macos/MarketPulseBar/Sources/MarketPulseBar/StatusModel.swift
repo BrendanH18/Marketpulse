@@ -450,6 +450,17 @@ final class StatusModel: ObservableObject {
     }
   }
 
+  /// Brings an archived account back (Settings › Data, the only place archived accounts are listed).
+  func unarchiveAccount(_ account: ArchivedAccount) {
+    guard !demo && !saving else { return }
+    Task {
+      let saved = await perform(
+        ["accounts", "edit", "--unarchive"] + account.revisionArguments + ["--", String(account.id)],
+        success: "\(account.name) is back in your portfolio")
+      settingsError = saved ? nil : errorMessage
+    }
+  }
+
   /// A setting as the Settings window shows it: the value being saved, else the engine's.
   func configValue(_ key: String, _ path: KeyPath<SettingsInfo, String>) -> String {
     pendingConfig[key] ?? desktop?.settings?[keyPath: path] ?? ""

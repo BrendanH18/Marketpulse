@@ -51,7 +51,7 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
    Old RRSP. The sort toggle reorders rows. No striped empty rows below the data.
 4. **Activity.** BUY and FEE are negative; SELL, DEPOSIT, and DIVIDEND are positive;
    the split shows "×2". No Old RRSP rows. The header reads "+ money in, − money out".
-5. **Accounts.** Exactly the two active accounts.
+5. **Accounts.** Exactly the two active accounts, and a "1 archived" link (no names).
 6. **Watchlist and alerts.** Add then remove a symbol. In Create alert, threshold
    `12,5` shows "Enter a number, like 12.5." (on an English system) and disables
    Create; `1,000` shows "Reads as 1,000". Create an alert, then delete it.
@@ -176,6 +176,24 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     **Delete** removes it and the totals refresh. On the split, **Edit…** is disabled and
     **Delete…** isn't (don't delete it). In the demo, both are disabled.
 
+22. **Manage accounts and contribution room.** In **Accounts**, **Edit account…** on Cash
+    Account opens "Edit account" with Cash Account, NONREG, USD and **Track cash balance**
+    on. Rename it to `everyday tfsa` and **Save changes**: the sheet says "An account named
+    'everyday tfsa' already exists." and nothing changes. Pick another type: a caution
+    about tax and contribution room appears; pick NONREG again. Rename it to `Spending`
+    and save: the window says "Account updated" and Overview, Holdings, Activity and the
+    ⌘N picker show Spending. **Edit account…** › **Archive…**: the confirmation says
+    Spending will be hidden everywhere and left out of totals, that its transactions are
+    kept, and that snapshots pause while it still holds investments or cash. **Cancel**
+    changes nothing. Archive it: Spending is gone from every workspace, picker and the menu
+    bar, a warning says it still holds investments or cash, and the link reads "2
+    archived". The link opens **Settings › Data**, where **Archived accounts (2)** expands
+    to Old RRSP and Spending; **Unarchive** Spending brings it back everywhere. Under
+    **Contribution room**, TFSA reads "Not set yet"; **Set…**, keep this year, enter
+    `7000`, **Save room**: the row reads "From 7,000.00 on January 1, <year>" with 7,000.00
+    remaining. **Update…** opens with that year and 7000 filled in. In the demo, Edit,
+    Archive and Set are disabled.
+
 Quit the QA app with ⌘Q when done.
 
 ## Tool limits and workarounds
@@ -193,6 +211,6 @@ menu bar. Then:
 
 ## Reporting
 
-Post results on the PR (or the issue being verified) as a table of items 1–21 with
+Post results on the PR (or the issue being verified) as a table of items 1–22 with
 PASS / FAIL / UNVERIFIED and evidence, then any bugs with exact steps to reproduce.
 Clean up with `rm -rf "$TMPDIR/marketpulse-qa"`.

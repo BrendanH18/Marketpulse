@@ -258,6 +258,12 @@ class Account:
             raise ValueError(f"Account '{self.name}' hasn't been saved yet.")
         return self.id
 
+    def revision(self, generation: str) -> str:
+        """As `Transaction.revision`: an edit, archive or unarchive sent with it is refused if the
+        account changed since it was loaded, or a restore replaced the ledger (and maybe this id)."""
+        fields = json.dumps({**asdict(self), "generation": generation}, sort_keys=True, default=str)
+        return hashlib.sha256(fields.encode()).hexdigest()[:16]
+
 
 _CASH_DIRECTION = {
     TxnType.BUY: -1,

@@ -618,18 +618,24 @@ class Store:
         return account
 
     def update_account(self, account: Account) -> None:
-        self._exec(
-            "UPDATE accounts SET name=?, type=?, currency=?, institution=?, track_cash=?, archived=? WHERE id=?",
-            (
-                account.name,
-                AccountType(account.type).value,
-                account.currency.upper(),
-                account.institution,
-                int(account.track_cash),
-                int(account.archived),
-                account.id,
-            ),
-        )
+        account.name = account.name.strip()
+        if not account.name:
+            raise ValueError("Account name is required.")
+        try:
+            self._exec(
+                "UPDATE accounts SET name=?, type=?, currency=?, institution=?, track_cash=?, archived=? WHERE id=?",
+                (
+                    account.name,
+                    AccountType(account.type).value,
+                    account.currency.upper(),
+                    account.institution,
+                    int(account.track_cash),
+                    int(account.archived),
+                    account.id,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            raise ValueError(f"An account named '{account.name}' already exists.") from None
 
     def delete_account(self, account_id: int) -> None:
         self._exec("DELETE FROM accounts WHERE id = ?", (account_id,))

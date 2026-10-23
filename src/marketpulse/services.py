@@ -149,6 +149,24 @@ class Tracker:
             self.store.update_transaction(txn)
         return txn
 
+    def update_account(self, account: Account, *, restore_id: str | None = None, revision: str | None = None) -> None:
+        """Save `account` over the stored row with its id. `restore_id` and `revision` (the stored
+        account's `Account.revision` as the caller saw it) work as for `update_transaction`, so an
+        account changed elsewhere, or replaced by a restore, is never overwritten."""
+        if restore_id is None:
+            restore_id = self.store.restore_id
+        with self.store.atomic():
+            self._refuse_if_restored(restore_id, retry="try again")
+            stored = self.store.get_account(account.saved_id)
+            if stored is None:
+                raise ValueError(f"No account #{account.saved_id}. It may have been deleted in another window.")
+            if revision is not None and stored.revision(self.store.restore_id) != revision:
+                raise ValueError(
+                    f"{stored.name} has changed since it was loaded, perhaps in another window. "
+                    "Nothing was changed. Check it and try again."
+                )
+            self.store.update_account(account)
+
     def delete_transaction(self, txn_id: int, *, restore_id: str | None = None, revision: str | None = None) -> None:
         """Delete a transaction, unless that leaves a later entry the ledger can't apply (a sale of
         shares the deleted purchase provided). `restore_id` and `revision` work as for
@@ -488,13 +506,15 @@ class Tracker:
         return capital_gains(report, inclusion_rate=self.config.capital_gains_inclusion), report
 
     def room(self) -> list[tuple[RoomStatus, list[Account]]]:
-        accounts = self.store.accounts()
+        # CRA counts every contribution, so an archived account's deposits still use up room;
+        # only active accounts are listed with it, since archived ones are hidden everywhere.
+        accounts = self.store.accounts(include_archived=True)
         flows = self.store.ledger().flows
         out = []
         for acct_type, (year, amount) in sorted(self.store.rooms().items()):
             members = [a for a in accounts if a.type.value == acct_type]
             status = contribution_room(acct_type, year, amount, flows, {a.saved_id for a in members})
-            out.append((status, members))
+            out.append((status, [a for a in members if not a.archived]))
         return out
 
     # ── menu bar / scripting payload ──────────────────────────────────────────
