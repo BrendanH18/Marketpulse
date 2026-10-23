@@ -79,7 +79,7 @@ struct NativeBridgeCheck {
     // Export CSV reports what the export itself found.
     let export = try decoder.decode(
       TaxExportResult.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[8])))
-    precondition(export.exported == 2 && export.issues.isEmpty)
+    precondition(export.exported == 2 && export.issues == ledgerTax.issues)  // the shown report is current
     precondition(export.message(year: 2025, file: "gains.csv") == "Saved 2 sales from 2025 to gains.csv")
     let withIssue = try decoder.decode(
       TaxExportResult.self,

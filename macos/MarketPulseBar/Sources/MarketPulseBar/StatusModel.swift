@@ -681,8 +681,8 @@ final class StatusModel: ObservableObject {
         let result = try decoder.decode(TaxExportResult.self, from: data)
         errorMessage = nil
         message = result.message(year: year, file: url.lastPathComponent)
-        // The export found issues the shown report doesn't have: it's out of date.
-        if result.issues.count != tax?.issues.count { loadTax(force: true) }
+        // The export found other issues than the shown report: it's out of date.
+        if result.issues != tax?.issues { loadTax(force: true) }
       } catch {
         errorMessage = error.localizedDescription
       }

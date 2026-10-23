@@ -352,7 +352,7 @@ struct TaxExportResult: Decodable {
   }
 }
 
-struct TaxIssue: Decodable, Identifiable {
+struct TaxIssue: Decodable, Identifiable, Equatable {
   var id: String { date + message }
   let date: String
   let message: String
