@@ -195,7 +195,8 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     Archive and Set are disabled.
 
 23. **Tax.** Open **Tax**. After "Working out your capital gains…", the latest sale's year is
-    selected and **AAPL** is listed with 1 sale from Cash Account (the sell from item 21).
+    selected and **AAPL** is listed with 1 sale from **Spending** (Cash Account renamed
+    in item 22; the sell edited in item 21).
     Its gain is positive, and **Net capital gain** matches the year's "Net gain" from
     `MARKETPULSE_DATA="$TMPDIR/marketpulse-qa/data" MARKETPULSE_CONFIG="$TMPDIR/marketpulse-qa/config.toml" uv run marketpulse tax`
     (live exchange rates, so compare the two, not a fixed figure). **Taxable capital
@@ -205,8 +206,8 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     are estimates and not tax advice. **Export CSV…** suggests
     `marketpulse-capital-gains-<year>.csv`; save it, then open it: one AAPL row with the
     same proceeds, cost, and gain. Turn on privacy (eye button): every amount and unit
-    count shows ••••. Turn it off. Record a buy of 1 AAPL in Cash Account dated today:
-    Tax reloads by itself; nothing else changes. Record a sale of `0.000125` AAPL:
+    count shows ••••. Turn it off. Record a buy of 1 AAPL in Spending dated today:
+    Tax reloads by itself; nothing else changes. Record a sale of `0.000125` AAPL in Spending:
     its expanded detail shows "0.000125 units", preserving every decimal, and privacy
     still masks it. In the demo, **NVDA** has 2 sales across the available years (use the
     year picker if they fall in different years), the first marked superficial, and
