@@ -335,6 +335,23 @@ struct TaxDisposition: Decodable, Identifiable {
   }
 }
 
+/// `marketpulse desktop tax-csv`: what the export itself wrote, and the issues that may have
+/// left sales out of the file. Not the loaded report's, which can be older.
+struct TaxExportResult: Decodable {
+  let exported: Int
+  let issues: [TaxIssue]
+
+  /// The confirmation: what was saved, and any issue that may have left a sale out.
+  func message(year: Int, file: String) -> String {
+    let saved = "Saved \(exported == 1 ? "1 sale" : "\(exported) sales") from \(year) to \(file)"
+    switch issues.count {
+    case 0: return saved
+    case 1: return saved + ". 1 issue may leave sales out of it: \(issues[0].date) \(issues[0].message)"
+    case let n: return saved + ". \(n) issues, listed under Needs attention, may leave sales out of it."
+    }
+  }
+}
+
 struct TaxIssue: Decodable, Identifiable {
   var id: String { date + message }
   let date: String

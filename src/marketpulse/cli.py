@@ -1418,23 +1418,19 @@ def tax(app: App, year: int | None, csv_path: Path | None) -> None:
     """Capital gains (pooled ACB, trade-date FX), superficial losses and contribution room."""
     tr = app.tracker
     if csv_path is not None:
-        from .csvio import export_capital_gains
+        from .desktop import write_tax_csv
 
-        with app.busy("Building tax report…"):
-            years, report = tr.tax_years()
-        if year is not None and not any(y.year == year for y in years):
-            fail(f"No capital gains or losses in {year}.")
         try:
-            with csv_path.open("w", newline="", encoding="utf-8") as f:
-                n = export_capital_gains(years, tr.store.account_map(), tr.base, f, year=year)
-        except OSError as e:
-            fail(f"Couldn't write {csv_path}: {e.strerror or e}")
-        app.ok(f"Exported {n} disposition(s) to {csv_path}")
-        if report.issues:
+            with app.busy("Building tax report…"):
+                result = write_tax_csv(tr, csv_path, year)
+        except ValueError as e:
+            fail(str(e))
+        app.ok(f"Exported {result['exported']} disposition(s) to {csv_path}")
+        if result["issues"]:
             # E.g. a transfer into a TFSA with no price: its deemed sale can't be in the file.
-            app.warn(f"{len(report.issues)} issue(s) may leave sales out of this file:")
-            for issue in report.issues:
-                app.warn(f"  {issue.date} {issue.message}")
+            app.warn(f"{len(result['issues'])} issue(s) may leave sales out of this file:")
+            for issue in result["issues"]:
+                app.warn(f"  {issue['date']} {issue['message']}")
         return
     with app.busy("Building tax report…"):
         years, report = tr.tax_years()
@@ -1855,6 +1851,20 @@ def desktop_tax(app: App, demo: bool) -> None:
     try:
         payload = demo_tax() if demo else tax_report(app.tracker)
         click.echo(json.dumps(payload, allow_nan=False))
+    except (ValueError, OSError) as e:
+        fail(str(e))
+
+
+@desktop.command("tax-csv")
+@click.option("-y", "--year", type=int, default=None, help="Only this year's dispositions.")
+@click.argument("path", type=click.Path(dir_okay=False, path_type=Path))
+@click.pass_obj
+def desktop_tax_csv(app: App, year: int | None, path: Path) -> None:
+    """Write the tax CSV and return JSON: how many rows, and issues that may leave sales out."""
+    from .desktop import write_tax_csv
+
+    try:
+        click.echo(json.dumps(write_tax_csv(app.tracker, path, year), allow_nan=False))
     except (ValueError, OSError) as e:
         fail(str(e))
 

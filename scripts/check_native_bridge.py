@@ -18,6 +18,7 @@ from marketpulse.desktop import (
     demo_tax,
     storage_info,
     tax_report,
+    write_tax_csv,
 )
 from marketpulse.models import Account, AccountType, Transaction, TxnType
 from marketpulse.services import Tracker
@@ -108,6 +109,8 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     offline = Tracker(ledger, DemoMarket(store=ledger), Config())  # no network: EUR has no rate
     ledger_tax = Path(tmp) / "tax.json"
     ledger_tax.write_text(json.dumps(tax_report(offline), allow_nan=False))
+    export = Path(tmp) / "tax-export.json"
+    export.write_text(json.dumps(write_tax_csv(offline, Path(tmp) / "gains.csv", 2025), allow_nan=False))
     ledger.close()
     subprocess.run(
         [
@@ -130,6 +133,7 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
             str(archived),
             str(demo_tax_report),
             str(ledger_tax),
+            str(export),
         ],
         check=True,
     )

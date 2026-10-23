@@ -665,24 +665,24 @@ final class StatusModel: ObservableObject {
     taxLoading = false
   }
 
-  /// One year's dispositions as CSV for an accountant (`marketpulse tax --csv`). Reads the
-  /// ledger only. Not in the demo, whose ledger the CLI can't reach.
+  /// One year's dispositions as CSV for an accountant (`marketpulse desktop tax-csv`). Reads
+  /// the ledger only. Not in the demo, whose ledger the CLI can't reach.
   func exportTax(year: Int) {
     guard !demo && desktop != nil else { return }
     let panel = NSSavePanel()
     panel.nameFieldStringValue = "marketpulse-capital-gains-\(year).csv"
     panel.allowedContentTypes = [.commaSeparatedText]
     guard panel.runModal() == .OK, let url = panel.url else { return }
-    let issues = tax?.issues.count ?? 0
     Task {
       do {
-        _ = try await CLI.run(["tax", "--year", String(year), "--csv", url.path])
+        let data = try await CLI.run(["desktop", "tax-csv", "--year", String(year), "--", url.path])
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let result = try decoder.decode(TaxExportResult.self, from: data)
         errorMessage = nil
-        message =
-          "Saved \(year) capital gains to \(url.lastPathComponent)"
-          + (issues == 0
-            ? ""
-            : ". \(issues == 1 ? "1 issue" : "\(issues) issues") under Needs attention may leave sales out of it.")
+        message = result.message(year: year, file: url.lastPathComponent)
+        // The export found issues the shown report doesn't have: it's out of date.
+        if result.issues.count != tax?.issues.count { loadTax(force: true) }
       } catch {
         errorMessage = error.localizedDescription
       }

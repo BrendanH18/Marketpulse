@@ -91,9 +91,11 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
 
 def ledger_revision(tracker: Tracker, generation: str = "") -> str:
     """Changes whenever anything a tax report reads does, archived accounts and their entries
-    included (the snapshot leaves those out): the app reloads its Tax workspace only then."""
+    included (the snapshot leaves those out): the app reloads its Tax workspace only then.
+    That includes the day: room rolls over on January 1, and superficial-loss windows close."""
     store = tracker.store
     parts = [
+        date.today().isoformat(),
         *(t.revision(generation) for t in store.transactions()),
         *(a.revision(generation) for a in store.accounts(include_archived=True)),
         json.dumps(sorted(store.rooms().items())),
@@ -101,6 +103,23 @@ def ledger_revision(tracker: Tracker, generation: str = "") -> str:
         repr(tracker.config.capital_gains_inclusion),
     ]
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
+def write_tax_csv(tracker: Tracker, path: Path, year: int | None = None) -> dict:
+    """Write the dispositions (one year's, or all) for an accountant; `marketpulse tax --csv`
+    and the app's Export CSV. Returns how many were written, and the ledger issues that may
+    have left sales out of the file (e.g. a transfer into a TFSA with no price)."""
+    from .csvio import export_capital_gains
+
+    years, report = tracker.tax_years()
+    if year is not None and not any(y.year == year for y in years):
+        raise ValueError(f"No capital gains or losses in {year}.")
+    try:
+        with path.open("w", newline="", encoding="utf-8") as f:
+            n = export_capital_gains(years, tracker.store.account_map(), tracker.base, f, year=year)
+    except OSError as e:
+        raise ValueError(f"Couldn't write {path}: {e.strerror or e}") from e
+    return {"exported": n, "issues": [{"date": i.date, "message": i.message} for i in report.issues]}
 
 
 def archived_accounts(accounts: dict[int, Account], generation: str = "") -> list[dict]:

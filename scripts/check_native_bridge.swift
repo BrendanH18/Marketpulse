@@ -76,6 +76,17 @@ struct NativeBridgeCheck {
     let archivedSale = ledgerTax.years[0].rows.first { $0.symbol == "ZAG.TO" }!
     precondition(archivedSale.archived && archivedSale.account == nil && archivedSale.accountLabel == "Archived account")
     precondition(archivedSale.allowedGain == 100 && ledgerTax.years[0].netGain == 100)
+    // Export CSV reports what the export itself found.
+    let export = try decoder.decode(
+      TaxExportResult.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[8])))
+    precondition(export.exported == 2 && export.issues.isEmpty)
+    precondition(export.message(year: 2025, file: "gains.csv") == "Saved 2 sales from 2025 to gains.csv")
+    let withIssue = try decoder.decode(
+      TaxExportResult.self,
+      from: Data(#"{"exported":1,"issues":[{"date":"2024-07-02","message":"No price"}]}"#.utf8))
+    precondition(
+      withIssue.message(year: 2024, file: "g.csv")
+        == "Saved 1 sale from 2024 to g.csv. 1 issue may leave sales out of it: 2024-07-02 No price")
 
     let transactions = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     for row in try decoder.decode([ValuedTransaction].self, from: transactions) {

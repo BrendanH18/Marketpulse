@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a "not tax advice" note. Amounts follow privacy mode. **Export CSV…** saves a
   year's sales for an accountant. New `marketpulse desktop tax` (versioned JSON, with
   `--demo`) feeds it, and `marketpulse tax --csv FILE` writes the CSV (and warns about
-  ledger issues that may leave sales out). `desktop snapshot` gains `ledger_revision`, so
-  the app recalculates only when something the report reads has changed. The demo
+  ledger issues that may leave sales out; `desktop tax-csv` does the same for the app, in
+  JSON). `desktop snapshot` gains `ledger_revision`, so the app recalculates when something
+  the report reads has changed, or a new day has started. The demo
   portfolio gains three NVDA trades in its taxable account (a superficial loss, then a
   gain), so the demo's Tax workspace has something to show.
 

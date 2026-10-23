@@ -184,6 +184,22 @@ def test_ledger_revision_follows_everything_the_tax_report_reads(tracker, ledger
     assert ledger_revision(tracker) != edited
 
 
+def test_ledger_revision_changes_with_the_day(tracker, ledger, monkeypatch):
+    """Room rolls over on January 1 and superficial-loss windows close: a new day, a new report."""
+    from datetime import date
+
+    from marketpulse.desktop import ledger_revision
+
+    class NewYear(date):
+        @classmethod
+        def today(cls):
+            return cls(2027, 1, 1)
+
+    today = ledger_revision(tracker)
+    monkeypatch.setattr("marketpulse.desktop.date", NewYear)
+    assert ledger_revision(tracker) != today
+
+
 def test_tax_csv_warns_about_sales_it_cannot_include(cli, store, tmp_path):
     taxable = store.add_account(Account(name="Fictional Taxable"))
     tfsa = store.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA))
@@ -203,6 +219,13 @@ def test_tax_csv_warns_about_sales_it_cannot_include(cli, store, tmp_path):
     out = cli("tax", "--year", "2024", "--csv", str(tmp_path / "gains.csv"))
     assert out.exit_code == 0 and "Exported 1 disposition(s)" in out.output
     assert "1 issue(s) may leave sales out of this file" in out.output and "2024-07-02" in out.output
+    # The app's export reports what this export found, not what its loaded report showed.
+    app = cli("desktop", "tax-csv", "--year", "2024", "--", str(tmp_path / "app.csv"))
+    result = json.loads(app.output)
+    assert result["exported"] == 1 and [i["date"] for i in result["issues"]] == ["2024-07-02"]
+    assert (tmp_path / "app.csv").read_text(encoding="utf-8") == (tmp_path / "gains.csv").read_text(encoding="utf-8")
+    missing = cli("desktop", "tax-csv", "--year", "2023", "--", str(tmp_path / "none.csv"))
+    assert missing.exit_code == 1 and "No capital gains or losses in 2023" in missing.output
 
 
 def test_tax_csv_quantities_are_never_rounded_or_in_exponent_form(tracker, store, tmp_path):
