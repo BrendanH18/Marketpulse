@@ -13,8 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changes its type, currency, institution, or cash tracking, and **Archive…** hides it
   after a confirmation that explains the consequences. **Settings › Data** lists archived
   accounts so they can be unarchived. **Set…** / **Update…** enters TFSA, RRSP, and FHSA
-  contribution room without the terminal. `desktop snapshot` gains `archived_accounts`
-  (id, name, and type only).
+  contribution room without the terminal, even before you open an account of that type.
+  `desktop snapshot` gains `archived_accounts` (id, name, type, and revision only), and
+  each account gains a `revision`. `accounts edit --revision` refuses the change if the
+  account was changed elsewhere, or the portfolio restored, since it was loaded; the app
+  always sends it.
 
 - Edit and delete transactions in the Mac app: in **Activity**, right-click an entry for
   **Edit…** (or double-click it) and **Delete…** (or press Delete). Edit opens the

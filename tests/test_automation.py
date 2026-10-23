@@ -274,7 +274,11 @@ def test_desktop_bridge_hides_archived_accounts(tracker):
     assert any("Archived account Old RRSP still holds" in w for w in payload["warnings"])
     assert payload["automation"]["snapshot_date"] is None
     # Listed on their own, with nothing but what Settings needs to offer to unarchive them.
-    assert payload["archived_accounts"] == [{"id": old.saved_id, "name": "Old RRSP", "type": "NONREG"}]
+    revision = old.revision(store.restore_id)
+    assert payload["archived_accounts"] == [
+        {"id": old.saved_id, "name": "Old RRSP", "type": "NONREG", "revision": revision}
+    ]
+    assert payload["accounts"][0]["revision"] == active.revision(store.restore_id)
     old.archived = False
     store.update_account(old)
     assert snapshot(tracker)["archived_accounts"] == []

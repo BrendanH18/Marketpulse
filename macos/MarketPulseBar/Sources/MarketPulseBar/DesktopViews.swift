@@ -778,11 +778,13 @@ private struct AccountsWorkspace: View {
   let edit: (DesktopAccount) -> Void
   let setRoom: (String) -> Void
   let showArchived: () -> Void
-  /// Room types worth showing: ones with room entered, or an account that uses them.
+  /// Room types worth showing: ones with room entered, or an account that uses them. With
+  /// neither, all of them, so room can be entered before the account is opened.
   private var roomTypes: [String] {
-    ContributionRoom.types.filter { type in
+    let used = ContributionRoom.types.filter { type in
       payload.room.contains { $0.accountType == type } || payload.accounts.contains { $0.type == type }
     }
+    return used.isEmpty ? ContributionRoom.types : used
   }
   var body: some View {
     let privacy = payload.status.privacy
@@ -821,42 +823,40 @@ private struct AccountsWorkspace: View {
             Button("Edit Account…") { edit(a) }.disabled(!canEdit)
           }
         }
-        if !roomTypes.isEmpty || !payload.room.isEmpty {
-          Surface("Contribution room", trailing: "IN CAD · FROM THE ROOM YOU ENTERED") {
-            ForEach(roomTypes, id: \.self) { type in
-              let room = payload.room.first { $0.accountType == type }
-              HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                  Text(type)
-                  Text(
-                    room.map {
-                      "From \(Format.money($0.startingRoom, "CAD", privacy: privacy)) on January 1, \(String($0.asOfYear))"
-                    } ?? "Not set yet"
-                  ).font(.system(size: 11)).foregroundStyle(Studio.muted)
-                }
-                Spacer()
-                if let room {
-                  Text(Format.money(room.remaining, "CAD", privacy: privacy)).foregroundStyle(
-                    Studio.trend(room.remaining)
-                  ).monospacedDigit()
-                }
-                Button(room == nil ? "Set…" : "Update…") { setRoom(type) }.disabled(!canEdit)
-                  .controlSize(.small)
+        Surface("Contribution room", trailing: "IN CAD · FROM THE ROOM YOU ENTERED") {
+          ForEach(roomTypes, id: \.self) { type in
+            let room = payload.room.first { $0.accountType == type }
+            HStack {
+              VStack(alignment: .leading, spacing: 4) {
+                Text(type)
+                Text(
+                  room.map {
+                    "From \(Format.money($0.startingRoom, "CAD", privacy: privacy)) on January 1, \(String($0.asOfYear))"
+                  } ?? "Not set yet"
+                ).font(.system(size: 11)).foregroundStyle(Studio.muted)
               }
-            }
-            // Room entered in the terminal for other types (e.g. RESP) is shown, not edited here.
-            ForEach(payload.room.filter { !ContributionRoom.types.contains($0.accountType) }) { r in
-              HStack {
-                Text(r.accountType)
-                Spacer()
-                Text(Format.money(r.remaining, "CAD", privacy: privacy)).foregroundStyle(Studio.trend(r.remaining))
-                  .monospacedDigit()
+              Spacer()
+              if let room {
+                Text(Format.money(room.remaining, "CAD", privacy: privacy)).foregroundStyle(
+                  Studio.trend(room.remaining)
+                ).monospacedDigit()
               }
+              Button(room == nil ? "Set…" : "Update…") { setRoom(type) }.disabled(!canEdit)
+                .controlSize(.small)
             }
-            Text(
-              "Deposits to your accounts of each type are subtracted. Confirm the figures against CRA My Account before contributing."
-            ).font(.system(size: 11)).foregroundStyle(Studio.muted)
           }
+          // Room entered in the terminal for other types (e.g. RESP) is shown, not edited here.
+          ForEach(payload.room.filter { !ContributionRoom.types.contains($0.accountType) }) { r in
+            HStack {
+              Text(r.accountType)
+              Spacer()
+              Text(Format.money(r.remaining, "CAD", privacy: privacy)).foregroundStyle(Studio.trend(r.remaining))
+                .monospacedDigit()
+            }
+          }
+          Text(
+            "Deposits to your accounts of each type are subtracted. Confirm the figures against CRA My Account before contributing."
+          ).font(.system(size: 11)).foregroundStyle(Studio.muted)
         }
       }.padding(.horizontal, 30).padding(.bottom, 24)
     }

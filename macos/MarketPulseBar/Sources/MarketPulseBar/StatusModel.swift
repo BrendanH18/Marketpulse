@@ -455,7 +455,7 @@ final class StatusModel: ObservableObject {
     guard !demo && !saving else { return }
     Task {
       let saved = await perform(
-        ["accounts", "edit", "--unarchive", "--", String(account.id)],
+        ["accounts", "edit", "--unarchive"] + account.revisionArguments + ["--", String(account.id)],
         success: "\(account.name) is back in your portfolio")
       settingsError = saved ? nil : errorMessage
     }

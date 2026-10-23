@@ -44,6 +44,9 @@ struct NativeBridgeCheck {
     let archived = try decoder.decode(
       [ArchivedAccount].self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[5])))
     precondition(archived.count == 1 && archived[0].name == "Old RRSP" && archived[0].type == "RRSP")
+    // Edits, archive and unarchive send the account's revision, so a changed or restored one is refused.
+    precondition(archived[0].revisionArguments.count == 2 && archived[0].revision?.count == 16)
+    precondition(payload.accounts.allSatisfy { $0.revisionArguments.count == 2 && $0.revision?.count == 16 })
     precondition(payload.accounts.allSatisfy { DesktopAccount.types.contains($0.type) })
     // The demo's TFSA room, as entered: the room sheet edits it from these fields.
     let year = Calendar.current.component(.year, from: .now)

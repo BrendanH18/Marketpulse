@@ -155,7 +155,9 @@ v99.0.0.
   reason, and nothing is changed.
 - **Accounts:** create accounts, and **Edit account…** (or right-click) to rename one or
   change its type, currency, institution, or cash tracking. **Archive…** in the same
-  sheet hides an account after a confirmation that says what will happen. Contribution
+  sheet hides an account after a confirmation that says what will happen. If the account
+  was changed in another window, or the portfolio restored from a backup, since the sheet
+  opened, the change is refused and nothing is saved. Contribution
   room for TFSA, RRSP, and FHSA shows what's left; **Set…** or **Update…** enters the
   room CRA reported for January 1 of a year (`marketpulse accounts room`), in Canadian
   dollars.

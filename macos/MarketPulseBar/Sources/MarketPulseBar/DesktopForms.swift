@@ -189,7 +189,7 @@ struct AccountSheet: View {
       Button("Archive") {
         Task {
           if await model.perform(
-            ["accounts", "edit", "--archive", "--", String(account.id)],
+            ["accounts", "edit", "--archive"] + account.revisionArguments + ["--", String(account.id)],
             success: "Archived \(account.name). You can unarchive it in Settings › Data.")
           {
             dismiss()
@@ -215,8 +215,8 @@ struct AccountSheet: View {
     // Every field the form shows, so the account ends up exactly as the form reads.
     return [
       "accounts", "edit", "--name", name, "--type", draft.type, "--currency", currency,
-      "--institution", draft.institution, draft.cash ? "--track-cash" : "--no-track-cash", "--", String(editing.id),
-    ]
+      "--institution", draft.institution, draft.cash ? "--track-cash" : "--no-track-cash",
+    ] + editing.revisionArguments + ["--", String(editing.id)]
   }
 
   private func hasActivity(_ account: DesktopAccount) -> Bool {

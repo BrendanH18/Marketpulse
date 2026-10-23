@@ -320,6 +320,26 @@ def test_accounts_edit_as_the_app_sends_it(cli, store):
     assert not store.get_account(ref).archived
 
 
+def test_accounts_edit_refuses_an_account_changed_or_restored_since_it_was_loaded(cli, store):
+    cli("accounts", "add", "Fictional TFSA", "-t", "TFSA")
+    acct = store.get_account("Fictional TFSA")
+    ref, seen = str(acct.saved_id), acct.revision(store.restore_id)  # what the app's sheet carries
+    cli("accounts", "edit", "--institution", "Changed elsewhere", "--", ref)  # another window
+    for args in (("--name", "Renamed"), ("--archive",)):
+        stale = cli("accounts", "edit", *args, "--revision", seen, "--", ref)
+        assert stale.exit_code == 1 and "has changed since it was loaded" in stale.output
+    kept = store.get_account(ref)
+    assert (kept.name, kept.institution, kept.archived) == ("Fictional TFSA", "Changed elsewhere", False)
+    # A restore can put a different account under the same id, even with identical fields.
+    current = kept.revision(store.restore_id)
+    store.restore(store.backup())
+    assert cli("accounts", "edit", "--archive", "--revision", current, "--", ref).exit_code == 1
+    assert not store.get_account(ref).archived
+    fresh = store.get_account(ref).revision(store.restore_id)
+    assert cli("accounts", "edit", "--archive", "--revision", fresh, "--", ref).exit_code == 0
+    assert store.get_account(ref).archived
+
+
 def test_accounts_room_as_the_app_sends_it(cli, store):
     assert cli("accounts", "room", "--", "TFSA", "2026", "-250.5").exit_code == 0  # over-contributed
     assert store.rooms() == {"TFSA": (2026, -250.5)}

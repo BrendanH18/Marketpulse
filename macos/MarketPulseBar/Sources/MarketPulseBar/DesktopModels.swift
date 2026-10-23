@@ -147,6 +147,11 @@ struct DesktopAccount: Decodable, Identifiable {
   let currency: String
   let institution: String
   let trackCash: Bool
+  /// Sent back with an edit or archive, which the engine refuses if the account changed since.
+  /// Absent from older engines.
+  let revision: String?
+  /// `accounts edit` options that make the change apply only to the account as shown.
+  var revisionArguments: [String] { revision.map { ["--revision", $0] } ?? [] }
 }
 
 /// An archived account: hidden everywhere, left out of totals, history kept.
@@ -154,6 +159,9 @@ struct ArchivedAccount: Decodable, Identifiable {
   let id: Int
   let name: String
   let type: String
+  /// As for `DesktopAccount`: unarchiving is refused if the account changed since.
+  let revision: String?
+  var revisionArguments: [String] { revision.map { ["--revision", $0] } ?? [] }
 }
 
 struct DesktopPosition: Decodable, Identifiable {
