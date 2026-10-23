@@ -9,6 +9,7 @@ enum Workspace: String, CaseIterable, Identifiable {
   case accounts = "Accounts"
   case watchlist = "Watchlist"
   case income = "Income"
+  case tax = "Tax"
   case automation = "Automation"
   var id: String { rawValue }
   var icon: String {
@@ -19,6 +20,7 @@ enum Workspace: String, CaseIterable, Identifiable {
     case .accounts: return "building.columns"
     case .watchlist: return "star"
     case .income: return "arrow.down.to.line"
+    case .tax: return "percent"
     case .automation: return "bolt"
     }
   }
@@ -30,6 +32,7 @@ enum Workspace: String, CaseIterable, Identifiable {
     case .accounts: return "Your accounts. Your bigger picture."
     case .watchlist: return "Keep an eye on what comes next."
     case .income: return "Distributions and interest you've recorded."
+    case .tax: return "Capital gains, superficial losses, and contribution room."
     case .automation: return "The small routines that keep things up to date."
     }
   }
@@ -306,6 +309,7 @@ struct PortfolioWindow: View {
         showArchived: { model.showSettingsWindow(tab: SettingsWindowController.dataTab) })
     case .watchlist: WatchlistWorkspace(model: model, addAlert: { draft.sheet = .alert })
     case .income: IncomeWorkspace(payload: p)
+    case .tax: TaxWorkspace(model: model)
     case .automation: AutomationWorkspace(model: model)
     }
   }
@@ -978,6 +982,280 @@ private struct IncomeWorkspace: View {
       }.padding(.horizontal, 30).padding(.bottom, 24)
     }
   }
+}
+
+/// Capital gains per tax year from `marketpulse desktop tax`: the same figures as `marketpulse tax`.
+private struct TaxWorkspace: View {
+  @ObservedObject var model: StatusModel
+  @StateObject private var draft = TaxWorkspaceDraft()
+  private var privacy: Bool { model.status?.privacy ?? false }
+
+  var body: some View {
+    ScrollView {
+      VStack(spacing: 20) {
+        if let tax = model.tax {
+          report(tax)
+        } else if let error = model.taxError {
+          ContentUnavailableView {
+            Label("Couldn't work out your capital gains", systemImage: "exclamationmark.triangle")
+          } description: {
+            Text(error)
+          } actions: {
+            Button("Try Again") { model.loadTax(force: true) }
+          }
+        } else {
+          ProgressView("Working out your capital gains…").frame(maxWidth: .infinity, minHeight: 260)
+        }
+      }.padding(.horizontal, 30).padding(.bottom, 24)
+    }
+    .onAppear { model.loadTax() }
+    .onChange(of: model.taxKey) { _, _ in model.loadTax() }
+  }
+
+  @ViewBuilder private func report(_ tax: TaxPayload) -> some View {
+    let year = tax.years.first { $0.year == draft.year } ?? tax.years.first
+    HStack(spacing: 12) {
+      if let year {
+        Picker("Tax year", selection: Binding(get: { year.year }, set: { draft.year = $0 })) {
+          ForEach(tax.years) { Text(String($0.year)).tag($0.year) }
+        }.frame(width: 170)
+      }
+      Spacer()
+      if model.taxLoading { ProgressView().controlSize(.small) }
+      if let error = model.taxError {
+        Label("Not updated", systemImage: "exclamationmark.triangle").foregroundStyle(Studio.warn)
+          .help(error)
+      }
+      Button("Recalculate", systemImage: "arrow.clockwise") { model.loadTax(force: true) }
+        .disabled(model.taxLoading)
+        .help("Work the figures out again, with fresh exchange rates")
+      if let year {
+        Button("Export CSV…", systemImage: "square.and.arrow.up") { model.exportTax(year: year.year) }
+          .disabled(model.demo || model.desktop == nil)
+          .help(
+            model.demo
+              ? "Export is available for your own portfolio."
+              : "Save \(String(year.year))'s sales as a spreadsheet for your accountant")
+      }
+    }.font(.system(size: 11))
+    if let year {
+      yearReport(year, tax)
+    } else {
+      ContentUnavailableView {
+        Label("No sales in taxable accounts yet", systemImage: "percent")
+      } description: {
+        Text(
+          "When you sell in a non-registered account, that year's capital gain or loss appears here, worked out with pooled cost base and each trade day's exchange rate. Gains in a TFSA, RRSP, or FHSA aren't taxed, so they aren't listed."
+        )
+      }.frame(minHeight: 220)
+    }
+    if !tax.issues.isEmpty {
+      Surface("Needs attention", trailing: "MAY CHANGE THESE FIGURES") {
+        ForEach(tax.issues) { issue in
+          HStack(alignment: .top) {
+            Text(issue.date).foregroundStyle(Studio.muted).frame(width: 90, alignment: .leading)
+            Text(issue.message).foregroundStyle(Studio.warn).textSelection(.enabled)
+              .fixedSize(horizontal: false, vertical: true)
+          }.font(.system(size: 12))
+        }
+      }
+    }
+    roomSurface(tax)
+    VStack(alignment: .leading, spacing: 6) {
+      ForEach(tax.notes, id: \.self) { note in
+        Label(note, systemImage: "info.circle")
+      }
+    }.font(.system(size: 11)).foregroundStyle(Studio.muted).frame(maxWidth: .infinity, alignment: .leading)
+      .fixedSize(horizontal: false, vertical: true)
+  }
+
+  @ViewBuilder private func yearReport(_ year: TaxYearReport, _ tax: TaxPayload) -> some View {
+    let base = tax.baseCurrency
+    HStack(spacing: 14) {
+      Metric(
+        title: "Net capital gain",
+        value: Format.money(year.netGain, base, privacy: privacy, sign: true),
+        detail:
+          "Proceeds \(Format.money(year.proceeds, base, privacy: privacy, decimals: 0)) · Cost \(Format.money(year.acb, base, privacy: privacy, decimals: 0))",
+        color: Studio.trend(year.netGain))
+      Metric(
+        title: "Taxable capital gain",
+        value: Format.money(year.taxable, base, privacy: privacy),
+        detail: year.netGain < 0
+          ? "A net loss isn't taxable; it can be carried to other years"
+          : "\(percent(year.inclusionRate)) of the net gain is included")
+      Metric(
+        title: "Denied losses",
+        value: Format.money(year.denied, base, privacy: privacy),
+        detail: year.denied > 0 ? "Don't reduce this year's gains" : "None this year",
+        color: year.denied > 0 ? Studio.warn : Studio.text)
+    }
+    if year.missingFx > 0 {
+      Label(
+        year.missingFx == 1
+          ? "1 sale is missing an exchange rate, so it's left out of these totals. Recalculate when you're online."
+          : "\(year.missingFx) sales are missing an exchange rate, so they're left out of these totals. Recalculate when you're online.",
+        systemImage: "exclamationmark.triangle"
+      ).font(.system(size: 11)).foregroundStyle(Studio.warn).frame(maxWidth: .infinity, alignment: .leading)
+    }
+    Surface("Realized gains by security", trailing: "\(String(year.year)) · \(base) · POOLED COST BASE") {
+      securityHeader
+      ForEach(year.securities) { security in
+        DisclosureGroup(
+          isExpanded: Binding(
+            get: { draft.expanded.contains(security.symbol) },
+            set: { open in
+              if open { draft.expanded.insert(security.symbol) } else { draft.expanded.remove(security.symbol) }
+            })
+        ) {
+          VStack(spacing: 8) {
+            ForEach(year.rows.filter { $0.symbol == security.symbol }) { row in
+              dispositionRow(row, base)
+            }
+          }.padding(.top, 6)
+        } label: {
+          securityRow(security, base)
+        }
+        Divider().overlay(Studio.line)
+      }
+    }
+    let denied = year.rows.filter { ($0.denied ?? 0) > 0 }
+    if !denied.isEmpty {
+      Surface("Denied losses", trailing: "WHY A LOSS DOESN'T COUNT") {
+        ForEach(denied) { row in
+          HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.circle").foregroundStyle(Studio.warn)
+            Text(explanation(row, base)).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+          }
+        }
+        if denied.contains(where: \.superficial) {
+          Text(
+            "A superficial loss is added to the cost base of the shares you bought back in taxable accounts, so it lowers your gain when you sell them. Shares bought back in a TFSA, RRSP, or FHSA don't get it, and the loss is lost."
+          ).font(.system(size: 11)).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+        }
+      }
+    }
+  }
+
+  private var securityHeader: some View {
+    HStack {
+      Text("SECURITY").frame(maxWidth: .infinity, alignment: .leading)
+      Text("SALES").frame(width: 50, alignment: .trailing)
+      Text("PROCEEDS").frame(width: 115, alignment: .trailing)
+      Text("COST BASE").frame(width: 115, alignment: .trailing)
+      Text("DENIED").frame(width: 95, alignment: .trailing)
+      Text("GAIN / LOSS").frame(width: 115, alignment: .trailing)
+    }.font(.system(size: 9, weight: .medium)).tracking(1.1).foregroundStyle(Studio.muted)
+      .padding(.leading, 20)
+  }
+
+  private func securityRow(_ s: TaxSecurity, _ base: String) -> some View {
+    HStack {
+      HStack(spacing: 6) {
+        Text(s.symbol).font(.system(size: 13, weight: .medium))
+        if s.missingFx > 0 {
+          Image(systemName: "exclamationmark.triangle").foregroundStyle(Studio.warn)
+            .help("Missing an exchange rate; left out of the totals")
+        }
+      }.frame(maxWidth: .infinity, alignment: .leading)
+      Text("\(s.dispositions)").foregroundStyle(Studio.muted).frame(width: 50, alignment: .trailing)
+      Text(Format.money(s.proceeds, base, privacy: privacy)).frame(width: 115, alignment: .trailing)
+      Text(Format.money(s.acb, base, privacy: privacy)).foregroundStyle(Studio.muted)
+        .frame(width: 115, alignment: .trailing)
+      Text(s.denied > 0 ? Format.money(s.denied, base, privacy: privacy) : "—")
+        .foregroundStyle(s.denied > 0 ? Studio.warn : Studio.muted).frame(width: 95, alignment: .trailing)
+      Text(Format.money(s.netGain, base, privacy: privacy, sign: true)).foregroundStyle(Studio.trend(s.netGain))
+        .frame(width: 115, alignment: .trailing)
+    }.font(.system(size: 12)).monospacedDigit().padding(.vertical, 4)
+  }
+
+  private func dispositionRow(_ r: TaxDisposition, _ base: String) -> some View {
+    HStack(alignment: .firstTextBaseline) {
+      VStack(alignment: .leading, spacing: 3) {
+        Text("\(r.date) · \(r.accountLabel)").font(.system(size: 11, weight: .medium))
+        Text(detail(r)).font(.system(size: 10)).foregroundStyle(Studio.muted)
+      }.frame(maxWidth: .infinity, alignment: .leading)
+      Text(Format.money(r.proceeds, base, privacy: privacy)).frame(width: 115, alignment: .trailing)
+      Text(Format.money(r.acb, base, privacy: privacy)).foregroundStyle(Studio.muted)
+        .frame(width: 115, alignment: .trailing)
+      Text((r.denied ?? 0) > 0 ? Format.money(r.denied, base, privacy: privacy) : "—")
+        .foregroundStyle((r.denied ?? 0) > 0 ? Studio.warn : Studio.muted).frame(width: 95, alignment: .trailing)
+      Text(Format.money(r.allowedGain, base, privacy: privacy, sign: true))
+        .foregroundStyle(r.complete ? Studio.trend(r.allowedGain) : Studio.muted)
+        .frame(width: 115, alignment: .trailing)
+    }.font(.system(size: 11)).monospacedDigit().padding(.leading, 20)
+  }
+
+  /// Units, trading currency and rate, and any note: "20 units · USD at 1.3604 · superficial".
+  private func detail(_ r: TaxDisposition) -> String {
+    var parts: [String] = [r.kindLabel]
+    if r.quantity > 0 { parts.append(privacy ? "\(Format.mask) units" : "\(units(r.quantity)) units") }
+    if r.currency != model.tax?.baseCurrency {
+      parts.append(r.fx.map { "\(r.currency) at \(String(format: "%.4f", $0))" } ?? "\(r.currency), no exchange rate")
+    }
+    if !r.note.isEmpty && r.complete { parts.append(r.note) }
+    return parts.joined(separator: " · ")
+  }
+
+  private func explanation(_ r: TaxDisposition, _ base: String) -> String {
+    let denied = Format.money(r.denied, base, privacy: privacy)
+    let account = r.archived ? "an archived account" : r.accountLabel
+    if r.deniedReason == "registered" {
+      return
+        "\(r.date) · \(r.symbol): moved from \(account) into a registered account at a loss. The \(denied) loss is never allowed."
+    }
+    let loss = Format.money(r.gain.map { -$0 }, base, privacy: privacy)
+    let counts =
+      privacy
+      ? ""
+      : " You sold \(units(r.quantity)), bought \(units(r.acquiredInWindow)) within 30 days before or after, and held \(units(r.heldAfterWindow)) 30 days later."
+    let open = r.windowOpen ? " The 30 days aren't over yet, so this can still change." : ""
+    return "\(r.date) · \(r.symbol): \(denied) of a \(loss) loss is superficial.\(counts)\(open)"
+  }
+
+  @ViewBuilder private func roomSurface(_ tax: TaxPayload) -> some View {
+    Surface("Contribution room", trailing: "IN CAD · FROM THE ROOM YOU ENTERED") {
+      if tax.room.isEmpty {
+        Text("Enter your TFSA, RRSP, or FHSA room in Accounts to see what's left.").foregroundStyle(Studio.muted)
+      }
+      ForEach(tax.room) { r in
+        HStack(alignment: .top) {
+          VStack(alignment: .leading, spacing: 4) {
+            Text(r.accountType).font(.system(size: 13, weight: .medium))
+            Text(roomWorking(r)).font(.system(size: 11)).foregroundStyle(Studio.muted)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          Spacer()
+          Text(Format.money(r.remaining, "CAD", privacy: privacy)).foregroundStyle(Studio.trend(r.remaining))
+            .font(.system(size: 15, weight: .medium)).monospacedDigit()
+        }
+      }
+      if !tax.room.isEmpty {
+        Text("Confirm the figures against CRA My Account before contributing.").font(.system(size: 11))
+          .foregroundStyle(Studio.muted)
+      }
+    }
+  }
+
+  /// "7,000.00 on January 1, 2025 + 7,000.00 new room − 2,000.00 contributed"
+  private func roomWorking(_ r: ContributionRoom) -> String {
+    func money(_ v: Double) -> String { Format.money(v, "CAD", privacy: privacy) }
+    var text = "\(money(r.startingRoom)) on January 1, \(String(r.asOfYear))"
+    if let v = r.newLimits, v > 0 { text += " + \(money(v)) new room" }
+    if let v = r.withdrawalsAddedBack, v > 0 { text += " + \(money(v)) withdrawals added back" }
+    if let v = r.contributions, v > 0 { text += " − \(money(v)) contributed" }
+    if let v = r.forfeited, v > 0.005 { text += " − \(money(v)) above the FHSA limits" }
+    return text
+  }
+
+  private func units(_ value: Double) -> String { NumberInput.editable(value) }
+  private func percent(_ rate: Double) -> String { rate.formatted(.percent.precision(.fractionLength(0...2))) }
+}
+
+private final class TaxWorkspaceDraft: ObservableObject {
+  /// nil shows the newest year.
+  @Published var year: Int?
+  @Published var expanded: Set<String> = []
 }
 
 private struct AutomationWorkspace: View {

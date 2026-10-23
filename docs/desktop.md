@@ -163,6 +163,19 @@ v99.0.0.
   dollars.
 - **Watchlist:** add/remove symbols and create/delete price or daily-change alerts.
 - **Income:** recorded monthly distributions and interest, converted at current FX.
+- **Tax:** capital gains for each year with a sale in a taxable account, with the same
+  figures as `marketpulse tax`: pooled cost base across your taxable accounts, and
+  each trade day's exchange rate. It shows the net and taxable capital gain, any
+  denied losses with the reason (a superficial loss shows what was bought back and
+  still held), and gains by security; expand a security to see each sale and its full
+  fractional quantity. Sales missing an exchange rate are flagged and left out of the
+  totals. Contribution room
+  shows how what's left was worked out. **Export CSV…** saves the year's sales for
+  your accountant (`marketpulse tax --year YYYY --csv FILE`). The report loads when
+  you open the workspace and again after the portfolio changes; **Recalculate**
+  fetches exchange rates again. Sales in archived accounts still count, as they do
+  for CRA, but the account is shown only as "Archived account". The figures are
+  estimates, not tax advice: check them against your T5008, T3, and T5 slips.
 - **Automation:** what runs while the app is open, a link to Settings, backup action, errors,
   snapshot/backup status, and the app and backend versions. **Backups** lists the
   backups on this Mac with **Restore…** and **Show in Finder**. A restore asks for
@@ -217,7 +230,7 @@ contain the original data. The portfolio window has light and dark palettes
 (**Settings › Appearance**); the menu bar continues to follow configured Omarchy themes.
 
 Advanced asset definitions, recording and editing transfers, DRIPs, splits, and
-returns of capital (the app can delete them), tax reports, and historical backfills
+returns of capital (the app can delete them), and historical backfills
 remain in the CLI/TUI. Portfolio charts show net worth,
 which includes contributions; they are not a time-weighted return chart.
 
@@ -255,7 +268,8 @@ In the app, choose **Help › Explore a Demo Portfolio** (or the option on the w
 sheet). The window and menu bar switch to a fictional portfolio with a "Demo" banner
 and a **Leave demo** button; writes, refreshes on a timer, and the terminal are off
 until you leave. The demo is built in a temporary folder by
-`marketpulse desktop snapshot --demo`, so your ledger isn't read or changed.
+`marketpulse desktop snapshot --demo` (and `desktop tax --demo` for the Tax workspace),
+so your ledger isn't read or changed.
 
 For screenshots and QA, build without installing, then launch the app in the demo for
 the whole session (it has no way back to a real ledger):
@@ -276,5 +290,6 @@ writes and notifications and never opens your real portfolio or fetches quotes.
 All demo values and history are fictional.
 
 For integration checks, `marketpulse desktop snapshot --demo` emits the same
-versioned JSON used by the app. This bridge includes raw financial amounts even
+versioned JSON used by the app, and `marketpulse desktop tax --demo` the Tax
+workspace's report. This bridge includes raw financial amounts even
 when privacy mode is enabled, just like the existing `status --json` API.

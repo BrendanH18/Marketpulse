@@ -16,6 +16,7 @@ struct NativeBridgeCheck {
     precondition(payload.status.netWorth! > 0)
     precondition(payload.positions.allSatisfy { $0.value != nil })
     precondition(payload.backend?.version.isEmpty == false && payload.backend?.python.isEmpty == false)
+    precondition(payload.ledgerRevision?.count == 16)  // the Tax workspace reloads when it changes
     // The demo's folder is temporary and never shown; a populated ledger never offers the welcome.
     precondition(payload.storage?.dataDir == nil && payload.storage?.empty == false && !payload.ledgerEmpty)
     let storage = try decoder.decode(
@@ -53,6 +54,39 @@ struct NativeBridgeCheck {
     precondition(payload.room.count == 1 && payload.room[0].accountType == "TFSA")
     precondition(payload.room[0].asOfYear == year && payload.room[0].startingRoom == 18000)
     precondition(ContributionRoom.firstYear("FHSA") == 2023 && ContributionRoom.firstYear("TFSA") == 2009)
+    precondition(payload.room[0].newLimits != nil && payload.room[0].contributions == 0)
+
+    // The Tax workspace (`desktop tax`): the demo's superficial loss, then a gain on the rebought shares.
+    let demoTax = try decoder.decode(
+      TaxPayload.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[6])))
+    precondition(demoTax.version == 1 && demoTax.demo && demoTax.baseCurrency == "CAD" && demoTax.inclusionRate == 0.5)
+    let demoSales = demoTax.years.reversed().flatMap(\.rows)
+    precondition(demoSales.map(\.superficial) == [true, false] && demoSales.allSatisfy(\.complete))
+    precondition(demoSales.allSatisfy { $0.allowedGain != nil && $0.fx != nil && $0.accountLabel == "Personal investing" })
+    precondition(demoSales[0].allowedGain == 0 && demoSales[0].denied! > 0 && demoSales[0].note == "superficial")
+    precondition(demoTax.years.allSatisfy { $0.securities.map(\.symbol) == ["NVDA"] && $0.missingFx == 0 })
+    precondition(demoTax.room.count == 1 && demoTax.issues.isEmpty)
+    precondition(demoTax.notes.contains { $0.contains("not tax advice") })
+    let ledgerTax = try decoder.decode(
+      TaxPayload.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[7])))
+    precondition(!ledgerTax.demo && ledgerTax.years.map(\.year) == [2025] && ledgerTax.years[0].missingFx == 1)
+    let unpriced = ledgerTax.years[0].rows.first { $0.symbol == "SAP.DE" }!
+    precondition(!unpriced.complete && unpriced.proceeds == nil && unpriced.allowedGain == nil && unpriced.fx == nil)
+    precondition(unpriced.note == "FX missing" && unpriced.accountLabel == "Fictional Taxable")
+    let archivedSale = ledgerTax.years[0].rows.first { $0.symbol == "ZAG.TO" }!
+    precondition(archivedSale.archived && archivedSale.account == nil && archivedSale.accountLabel == "Archived account")
+    precondition(archivedSale.allowedGain == 100 && ledgerTax.years[0].netGain == 100)
+    // Export CSV reports what the export itself found.
+    let export = try decoder.decode(
+      TaxExportResult.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[8])))
+    precondition(export.exported == 2 && export.issues == ledgerTax.issues)  // the shown report is current
+    precondition(export.message(year: 2025, file: "gains.csv") == "Saved 2 sales from 2025 to gains.csv")
+    let withIssue = try decoder.decode(
+      TaxExportResult.self,
+      from: Data(#"{"exported":1,"issues":[{"date":"2024-07-02","message":"No price"}]}"#.utf8))
+    precondition(
+      withIssue.message(year: 2024, file: "g.csv")
+        == "Saved 1 sale from 2024 to g.csv. 1 issue may leave sales out of it: 2024-07-02 No price")
 
     let transactions = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     for row in try decoder.decode([ValuedTransaction].self, from: transactions) {
@@ -103,6 +137,10 @@ struct NativeBridgeCheck {
     }
     precondition(NumberInput.editable(1234.5, locale: french) == "1234,5")
     precondition(NumberInput.editable(10, locale: english) == "10")
+    // Tax sale details and superficial-loss explanations must not turn fractional units into zero.
+    precondition(NumberInput.editable(0.000125, locale: english) == "0.000125")
+    precondition(NumberInput.editable(1.25e-9, locale: english) == "0.00000000125")
+    precondition(NumberInput.editable(0.000125, locale: french) == "0,000125")
     for day in ["2024-01-02", "2024-03-10", "2024-11-03", "2025-12-31"] {
       precondition(LedgerDate.date(day).map(LedgerDate.string) == day, day)
     }
@@ -142,7 +180,7 @@ struct NativeBridgeCheck {
     }
     precondition(retry == .recorded)
     print(
-      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, settings, activity values, import result, privacy formatting, number entry, editable numbers and dates, transaction save recovery"
+      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, activity values, import result, privacy formatting, number entry, editable numbers and dates, transaction save recovery"
     )
   }
 }
