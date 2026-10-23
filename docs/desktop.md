@@ -167,8 +167,9 @@ v99.0.0.
   figures as `marketpulse tax`: pooled cost base across your taxable accounts, and
   each trade day's exchange rate. It shows the net and taxable capital gain, any
   denied losses with the reason (a superficial loss shows what was bought back and
-  still held), and gains by security; expand a security to see each sale. Sales
-  missing an exchange rate are flagged and left out of the totals. Contribution room
+  still held), and gains by security; expand a security to see each sale and its full
+  fractional quantity. Sales missing an exchange rate are flagged and left out of the
+  totals. Contribution room
   shows how what's left was worked out. **Export CSV…** saves the year's sales for
   your accountant (`marketpulse tax --year YYYY --csv FILE`). The report loads when
   you open the workspace and again after the portfolio changes; **Recalculate**

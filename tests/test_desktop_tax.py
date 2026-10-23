@@ -148,7 +148,18 @@ def test_tax_csv_for_an_accountant(cli, ledger, tmp_path):
     assert not (tmp_path / "empty.csv").exists()
 
 
-def test_demo_tax_never_opens_the_real_ledger(monkeypatch, tmp_path):
+@pytest.mark.parametrize("today", ["2026-04-15", "2026-10-23"])
+def test_demo_tax_never_opens_the_real_ledger(monkeypatch, tmp_path, today):
+    """The demo works even when its two sales fall in different tax years."""
+    from datetime import date
+
+    class DemoDay(date):
+        @classmethod
+        def today(cls):
+            return cls.fromisoformat(today)
+
+    monkeypatch.setattr("marketpulse.desktop.date", DemoDay)
+
     def fail_open(*args, **kwargs):
         raise AssertionError("Real portfolio must not be opened")
 
@@ -160,7 +171,8 @@ def test_demo_tax_never_opens_the_real_ledger(monkeypatch, tmp_path):
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["demo"] is True and not (tmp_path / "data").exists()
-    rows = [r for y in payload["years"] for r in y["rows"]]
+    rows = [r for y in reversed(payload["years"]) for r in y["rows"]]
+    assert len(payload["years"]) == (2 if today == "2026-04-15" else 1)
     # A superficial loss, then a gain on the rebought shares, both converted from USD.
     assert [r["superficial"] for r in rows] == [True, False]
     assert all(r["complete"] and r["currency"] == "USD" and r["account"] == "Personal investing" for r in rows)
@@ -190,14 +202,21 @@ def test_ledger_revision_changes_with_the_day(tracker, ledger, monkeypatch):
 
     from marketpulse.desktop import ledger_revision
 
+    class NewYearsEve(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 12, 31)
+
     class NewYear(date):
         @classmethod
         def today(cls):
             return cls(2027, 1, 1)
 
-    today = ledger_revision(tracker)
+    monkeypatch.setattr("marketpulse.desktop.date", NewYearsEve)
+    before = ledger_revision(tracker)
+    assert ledger_revision(tracker) == before
     monkeypatch.setattr("marketpulse.desktop.date", NewYear)
-    assert ledger_revision(tracker) != today
+    assert ledger_revision(tracker) != before
 
 
 def test_tax_csv_warns_about_sales_it_cannot_include(cli, store, tmp_path):

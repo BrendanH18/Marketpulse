@@ -13,8 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   taxable account, with the same figures as `marketpulse tax` (pooled cost base,
   trade-date exchange rates). It shows net and taxable capital gain, denied losses with
   the reason (superficial losses show what was bought back and held), gains by security
-  with each sale, sales missing an exchange rate, contribution room with its working,
-  and a "not tax advice" note. Amounts follow privacy mode. **Export CSV…** saves a
+  with each sale (including exact fractional quantities), sales missing an exchange
+  rate, contribution room with its working, and a "not tax advice" note. Amounts
+  follow privacy mode. **Export CSV…** saves a
   year's sales for an accountant. New `marketpulse desktop tax` (versioned JSON, with
   `--demo`) feeds it, and `marketpulse tax --csv FILE` writes the CSV (and warns about
   ledger issues that may leave sales out; `desktop tax-csv` does the same for the app, in

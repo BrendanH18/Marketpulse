@@ -137,6 +137,10 @@ struct NativeBridgeCheck {
     }
     precondition(NumberInput.editable(1234.5, locale: french) == "1234,5")
     precondition(NumberInput.editable(10, locale: english) == "10")
+    // Tax sale details and superficial-loss explanations must not turn fractional units into zero.
+    precondition(NumberInput.editable(0.000125, locale: english) == "0.000125")
+    precondition(NumberInput.editable(1.25e-9, locale: english) == "0.00000000125")
+    precondition(NumberInput.editable(0.000125, locale: french) == "0,000125")
     for day in ["2024-01-02", "2024-03-10", "2024-11-03", "2025-12-31"] {
       precondition(LedgerDate.date(day).map(LedgerDate.string) == day, day)
     }

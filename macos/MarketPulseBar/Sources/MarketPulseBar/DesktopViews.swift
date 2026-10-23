@@ -1248,7 +1248,7 @@ private struct TaxWorkspace: View {
     return text
   }
 
-  private func units(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...4))) }
+  private func units(_ value: Double) -> String { NumberInput.editable(value) }
   private func percent(_ rate: Double) -> String { rate.formatted(.percent.precision(.fractionLength(0...2))) }
 }
 
