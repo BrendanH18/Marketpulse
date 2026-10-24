@@ -549,7 +549,7 @@ private struct OverviewWorkspace: View {
           }
           ForEach(payload.activity.prefix(4)) { t in
             HStack {
-              Text(t.type.capitalized).font(.system(size: 10, weight: .medium)).foregroundStyle(
+              Text(TransactionEntry.label(t.type)).font(.system(size: 10, weight: .medium)).foregroundStyle(
                 Studio.mint
               ).frame(width: 75, alignment: .leading)
               Text(t.symbol.isEmpty ? accountName(t.accountId, payload) : t.symbol).font(
@@ -585,6 +585,10 @@ private func accountName(_ id: Int, _ payload: DesktopPayload) -> String {
 /// and share-only entries (DRIP, transfers) carry no sign.
 private func activityAmount(_ t: DesktopTransaction, privacy: Bool) -> String {
   if t.type == "SPLIT" { return t.ratio > 0 ? "×\(t.ratio.formatted())" : "—" }
+  // Without a market price a transfer has no value to show, only what moved.
+  if t.type == "TRANSFER" && t.price == 0 {
+    return privacy ? "\(Format.mask) units" : "\(t.quantity.formatted(.number.precision(.fractionLength(0...4)))) units"
+  }
   return Format.money(t.signedValue, t.currency, privacy: privacy, sign: t.direction != 0)
 }
 private func activityColor(_ t: DesktopTransaction) -> Color {
@@ -693,7 +697,7 @@ private struct ActivityWorkspace: View {
       }.padding(.horizontal, 30)
       Table(rows, selection: $draft.selection) {
         TableColumn("Date", value: \.date).width(100)
-        TableColumn("Type") { t in Text(t.type.capitalized).modifier(RowTint(Studio.mint)) }.width(90)
+        TableColumn("Type") { t in Text(TransactionEntry.label(t.type)).modifier(RowTint(Studio.mint)) }.width(90)
         TableColumn("Symbol", value: \.symbol).width(85)
         TableColumn("Account") { t in
           Text(
@@ -747,13 +751,13 @@ private struct ActivityWorkspace: View {
   private func only(_ ids: Set<Int>) -> DesktopTransaction? {
     ids.count == 1 ? rows.first { ids.contains($0.id) } : nil
   }
-  /// The form edits the types it records; transfers, DRIPs, splits and the like aren't in it yet.
+  /// Transfers, DRIPs, splits and returns of capital can be deleted and recorded again, not edited.
   private func canEdit(_ t: DesktopTransaction) -> Bool {
-    model.canEdit && TransactionSheet.types.contains(t.type)
+    model.canEdit && TransactionEntry.editableTypes.contains(t.type)
   }
   private func describe(_ t: DesktopTransaction) -> String {
     [
-      t.date, [t.type.capitalized, t.symbol].filter { !$0.isEmpty }.joined(separator: " "),
+      t.date, [TransactionEntry.label(t.type), t.symbol].filter { !$0.isEmpty }.joined(separator: " "),
       activityAmount(t, privacy: payload.status.privacy), accountName(t.accountId, payload),
     ].joined(separator: " · ")
   }

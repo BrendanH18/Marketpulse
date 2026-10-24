@@ -1,0 +1,62 @@
+{
+  "about": "Entries typed into the Mac app's transaction form (TransactionEntry, en_US number format) and the exact CLI arguments it sends. scripts/check_native_bridge.swift checks the arguments; tests/test_cli.py runs the ones with arguments, in order, on a fictional ledger with accounts 1 Fictional TFSA, 2 Fictional Taxable (NONREG), and 3 Fictional RRSP.",
+  "cases": [
+    {
+      "entry": {"type": "DEPOSIT", "account": "2", "date": "2024-01-02", "amount": "1,000", "note": "-5 (fictional)"},
+      "valid": true,
+      "arguments": ["deposit", "--account", "2", "--date", "2024-01-02", "--note", "-5 (fictional)", "--", "1000.0"],
+      "expect": {"type": "DEPOSIT", "account_id": 2, "amount": 1000, "note": "-5 (fictional)"}
+    },
+    {
+      "entry": {"type": "BUY", "account": "2", "date": "2024-01-02", "symbol": " xeqt.to", "quantity": "10", "price": "30", "fees": "0", "currency": "cad"},
+      "valid": true,
+      "arguments": ["buy", "--account", "2", "--date", "2024-01-02", "--note", "", "--fees", "0.0", "--currency", "CAD", "--", "XEQT.TO", "10.0", "30.0"],
+      "expect": {"type": "BUY", "account_id": 2, "symbol": "XEQT.TO", "quantity": 10, "price": 30, "currency": "CAD"}
+    },
+    {
+      "entry": {"type": "DRIP", "account": "2", "date": "2024-03-15", "symbol": "xeqt.to", "quantity": "0.5", "price": "31"},
+      "valid": true,
+      "arguments": ["drip", "--account", "2", "--date", "2024-03-15", "--note", "", "--", "XEQT.TO", "0.5", "31.0"],
+      "expect": {"type": "DRIP", "account_id": 2, "symbol": "XEQT.TO", "quantity": 0.5, "price": 31, "currency": "CAD"}
+    },
+    {
+      "entry": {"type": "TRANSFER", "account": "2", "target": "1", "date": "2024-06-03", "symbol": "XEQT.TO", "quantity": "4", "price": "33.5", "priceRequired": "true"},
+      "valid": true,
+      "arguments": ["transfer", "--from", "2", "--to", "1", "--date", "2024-06-03", "--note", "", "--price", "33.5", "--", "XEQT.TO", "4.0"],
+      "expect": {"type": "TRANSFER", "account_id": 2, "target_account_id": 1, "symbol": "XEQT.TO", "quantity": 4, "price": 33.5}
+    },
+    {
+      "entry": {"type": "TRANSFER", "account": "1", "target": "3", "date": "2024-06-10", "symbol": "XEQT.TO", "quantity": "1", "price": " ", "note": "Between registered accounts"},
+      "valid": true,
+      "arguments": ["transfer", "--from", "1", "--to", "3", "--date", "2024-06-10", "--note", "Between registered accounts", "--", "XEQT.TO", "1.0"],
+      "expect": {"type": "TRANSFER", "account_id": 1, "target_account_id": 3, "quantity": 1, "price": 0}
+    },
+    {
+      "entry": {"type": "SPLIT", "account": "2", "date": "2024-07-02", "symbol": "xeqt.to", "splitNew": "3", "splitOld": "1", "currency": "USD"},
+      "valid": true,
+      "arguments": ["split", "--account", "2", "--date", "2024-07-02", "--note", "", "--", "XEQT.TO", "3.0"],
+      "expect": {"type": "SPLIT", "account_id": 2, "symbol": "XEQT.TO", "ratio": 3}
+    },
+    {
+      "entry": {"type": "SPLIT", "account": "1", "date": "2024-08-01", "symbol": "XEQT.TO", "splitNew": "1", "splitOld": "4"},
+      "valid": true,
+      "arguments": ["split", "--account", "1", "--date", "2024-08-01", "--note", "", "--", "XEQT.TO", "0.25"],
+      "expect": {"type": "SPLIT", "account_id": 1, "ratio": 0.25}
+    },
+    {
+      "entry": {"type": "ROC", "account": "2", "date": "2024-12-31", "symbol": "XEQT.TO", "amount": "12.5", "currency": "cad", "note": "T3 box 42"},
+      "valid": true,
+      "arguments": ["roc", "--account", "2", "--date", "2024-12-31", "--note", "T3 box 42", "--currency", "CAD", "--", "XEQT.TO", "12.5"],
+      "expect": {"type": "ROC", "account_id": 2, "symbol": "XEQT.TO", "amount": 12.5, "currency": "CAD"}
+    },
+    {"entry": {"type": "TRANSFER", "account": "2", "target": "1", "date": "2024-06-03", "symbol": "XEQT.TO", "quantity": "4", "price": "", "priceRequired": "true"}, "valid": false},
+    {"entry": {"type": "TRANSFER", "account": "2", "target": "2", "date": "2024-06-03", "symbol": "XEQT.TO", "quantity": "4"}, "valid": false},
+    {"entry": {"type": "TRANSFER", "account": "2", "target": "", "date": "2024-06-03", "symbol": "XEQT.TO", "quantity": "4"}, "valid": false},
+    {"entry": {"type": "SPLIT", "account": "2", "date": "2024-07-02", "symbol": "XEQT.TO", "splitNew": "2", "splitOld": "1", "currency": "CA"}, "valid": true},
+    {"entry": {"type": "DRIP", "account": "2", "date": "2024-03-15", "symbol": "XEQT.TO", "quantity": "1", "price": "31", "currency": "CA"}, "valid": false},
+    {"entry": {"type": "SPLIT", "account": "2", "date": "2024-07-02", "symbol": "XEQT.TO", "splitNew": "1", "splitOld": "1"}, "valid": false},
+    {"entry": {"type": "SPLIT", "account": "2", "date": "2024-07-02", "symbol": "XEQT.TO", "splitNew": "2", "splitOld": "0"}, "valid": false},
+    {"entry": {"type": "ROC", "account": "2", "date": "2024-12-31", "symbol": "XEQT.TO", "amount": "0"}, "valid": false},
+    {"entry": {"type": "DRIP", "account": "2", "date": "2024-03-15", "symbol": "", "quantity": "1", "price": "31"}, "valid": false}
+  ]
+}

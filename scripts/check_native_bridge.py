@@ -134,6 +134,7 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
             str(demo_tax_report),
             str(ledger_tax),
             str(export),
+            str(root / "tests/fixtures/transaction_forms.json"),
         ],
         check=True,
     )

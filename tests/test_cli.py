@@ -1,6 +1,7 @@
 import json
 import sqlite3
-from dataclasses import replace
+from dataclasses import asdict, replace
+from pathlib import Path
 from uuid import uuid4
 
 import click
@@ -50,11 +51,17 @@ def test_trading_flow(cli, store):
         ("dividend", "AAPL", "100"),
         ("interest", "100"),
         ("fee", "100"),
+        ("drip", "AAPL", "1", "100"),
+        ("split", "AAPL", "2"),
+        ("roc", "AAPL", "5"),
+        ("transfer", "--from", "Fictional TFSA", "--to", "Fictional Cash", "AAPL", "1"),
     ],
 )
 def test_native_save_retries_after_confirmation_failure(cli, store, monkeypatch, command):
     cli("accounts", "add", "Fictional TFSA", "--type", "TFSA")
-    if command[0] == "sell":
+    cli("accounts", "add", "Fictional Cash", "--type", "CASH")
+    cli("config", "set", "default_account", "Fictional TFSA")
+    if command[0] in ("sell", "split", "transfer"):
         cli("buy", "AAPL", "1", "90")
     before = len(store.transactions())
     request_id = str(uuid4())
@@ -356,7 +363,7 @@ def test_fhsa_room_shows_capped_carry_forward(cli, store):
 
 def test_bad_dates_are_usage_errors(cli):
     cli("accounts", "add", "Main")
-    cli("buy", "AAPL", "1", "100")
+    cli("buy", "AAPL", "1", "100", "-d", "2024-01-02")
     for args in (
         ("split", "AAPL", "2", "-d", "nope"),
         ("drip", "AAPL", "1", "100", "-d", "nope"),
@@ -552,3 +559,88 @@ def test_txn_edit_and_delete_refuse_an_entry_changed_meanwhile(cli, store, track
     result = cli("undo")  # the same for undo's confirmation
     assert result.exit_code == 1 and "has changed since it was loaded" in result.output
     assert [t.quantity for t in store.transactions()] == [8]
+
+
+def test_return_of_capital_lowers_cost_base_then_counts_as_a_gain(cli, store):
+    cli("accounts", "add", "Fictional Taxable", "-t", "NONREG", "--track-cash")
+    cli("deposit", "300", "-d", "2024-01-02")
+    cli("buy", "XEQT.TO", "10", "30", "-d", "2024-01-02")  # cost base 300.00
+    out = cli("roc", "XEQT.TO", "50", "-d", "2024-12-31", "-m", "T3 box 42").output
+    assert "Return of capital 50.00 CAD on XEQT.TO in Fictional Taxable" in out
+    assert "cost base now 250.00 CAD" in out and "capital gain" not in out
+    beyond = cli("roc", "XEQT.TO", "275", "--currency", "cad", "-d", "2025-12-31").output
+    assert "cost base now 0.00 CAD" in beyond
+    assert "25.00 CAD counts as a capital gain" in beyond  # 275 − the 250 left
+    state = store.ledger()
+    assert state.holdings[(1, "XEQT.TO")].book == 0
+    assert [(r.txn_id, r.gain) for r in state.realized] == [(store.transactions()[-1].id, 25.0)]
+    assert state.cash[(1, "CAD")] == 325  # both payments are cash in
+    t = store.transactions()[-1]
+    assert (t.type, t.amount, t.currency) == ("ROC", 275.0, "CAD")
+    negative = cli("roc", "XEQT.TO", "--", "-5")
+    assert negative.exit_code == 1 and "Amount cannot be negative" in negative.output
+
+
+def test_return_of_capital_with_nothing_held_warns(cli, store):
+    cli("accounts", "add", "Fictional Taxable", "-t", "NONREG")
+    out = cli("roc", "VFV.TO", "12", "-c", "CAD").output
+    assert "holds no VFV.TO now" in out
+    assert len(store.transactions()) == 1
+
+
+def test_transfers_and_splits_are_checked_against_holdings_on_their_date(cli, store):
+    cli("accounts", "add", "Fictional Taxable", "-t", "NONREG")
+    cli("accounts", "add", "Fictional TFSA", "-t", "TFSA")
+    cli("buy", "AAPL", "10", "100", "-a", "Fictional Taxable", "-d", "2024-03-01")
+    cli("sell", "AAPL", "4", "120", "-a", "Fictional Taxable", "-d", "2024-09-01")
+
+    def move(qty: str, day: str):
+        args = ("transfer", "AAPL", qty, "--from", "Fictional Taxable", "--to", "Fictional TFSA")
+        return cli(*args, "--price", "110", "-d", day)
+
+    too_many = move("11", "2024-06-03")
+    assert too_many.exit_code == 1
+    assert "Not recorded: on 2024-06-03, transfer of 11.0000 AAPL exceeds" in too_many.output
+    early = move("1", "2024-02-01")
+    assert early.exit_code == 1 and "transfer of AAPL with nothing held" in early.output
+    # 10 were held in June, but the September sale needs 4 of them.
+    breaks_sale = move("7", "2024-06-03")
+    assert breaks_sale.exit_code == 1 and "would no longer add up" in breaks_sale.output
+    assert move("6", "2024-06-03").exit_code == 0
+    t = max(store.transactions(), key=lambda t: t.id or 0)
+    assert (t.type, t.quantity, t.price, t.currency, t.target_account_id) == ("TRANSFER", 6, 110, "USD", 2)
+
+    nothing = cli("split", "AAPL", "2", "-a", "Fictional TFSA", "-d", "2024-05-01")
+    assert nothing.exit_code == 1 and "split of AAPL with nothing held" in nothing.output
+    assert cli("split", "AAPL", "2", "-a", "Fictional TFSA", "-d", "2024-10-01").exit_code == 0
+    assert store.ledger().holdings[(2, "AAPL")].quantity == 12
+    assert len(store.transactions()) == 4 and store.ledger().issues == []
+
+
+def test_drip_takes_an_explicit_currency(cli, store, fake):
+    cli("accounts", "add", "Fictional TFSA", "-t", "TFSA")
+    fake.offline = True
+    assert cli("drip", "VFV.TO", "0.25", "140", "-c", "cad").exit_code == 0
+    t = store.transactions()[-1]
+    assert (t.type, t.quantity, t.price, t.currency) == ("DRIP", 0.25, 140, "CAD")
+
+
+def test_transaction_form_commands_record_what_the_app_shows(cli, store):
+    """The commands the Mac app's transaction form sends (checked on the Swift side by
+    scripts/check_native_bridge.swift) record the entries the form describes."""
+    cases = json.loads((Path(__file__).parent / "fixtures/transaction_forms.json").read_text())["cases"]
+    cli("accounts", "add", "Fictional TFSA", "-t", "TFSA")
+    cli("accounts", "add", "Fictional Taxable", "-t", "NONREG")
+    cli("accounts", "add", "Fictional RRSP", "-t", "RRSP")
+    for case in (c for c in cases if "arguments" in c):
+        args = case["arguments"]
+        # As TransactionSaveRequest sends it.
+        result = cli(args[0], "--request-id", str(uuid4()), *args[1:])
+        assert result.exit_code == 0, (args, result.output)
+        saved = asdict(max(store.transactions(), key=lambda t: t.id or 0))
+        assert {k: saved[k] for k in case["expect"]} == case["expect"], args
+    state = store.ledger()
+    assert state.issues == []
+    held = {key: h.quantity for key, h in state.holdings.items() if h.quantity}
+    assert held == {(2, "XEQT.TO"): 19.5, (1, "XEQT.TO"): 0.75, (3, "XEQT.TO"): 1}
+    assert state.holdings[(2, "XEQT.TO")].book == pytest.approx((300 + 15.5) * 6.5 / 10.5 - 12.5)

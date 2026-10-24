@@ -45,6 +45,119 @@ private struct TransactionSaveStatus: Decodable {
   let transactionId: Int?
 }
 
+/// The transaction form's fields as typed, and the CLI command they become.
+struct TransactionEntry {
+  /// Every type the form records.
+  static let types = [
+    "BUY", "SELL", "DEPOSIT", "WITHDRAWAL", "DIVIDEND", "INTEREST", "FEE", "DRIP", "TRANSFER", "SPLIT", "ROC",
+  ]
+  /// The ones it can also edit; the others can be deleted and recorded again.
+  static let editableTypes = ["BUY", "SELL", "DEPOSIT", "WITHDRAWAL", "DIVIDEND", "INTEREST", "FEE"]
+  /// For lists and confirmations, where space is short.
+  static func label(_ type: String) -> String {
+    ["DRIP": "DRIP", "ROC": "ROC"][type] ?? type.capitalized
+  }
+  /// For the form's type picker.
+  static func title(_ type: String) -> String {
+    [
+      "DRIP": "Reinvested dividend (DRIP)", "TRANSFER": "Transfer in kind", "SPLIT": "Stock split",
+      "ROC": "Return of capital",
+    ][type] ?? type.capitalized
+  }
+
+  var type = "BUY"
+  /// Account id; for a transfer, the account the shares leave.
+  var account = ""
+  /// Transfer destination account id.
+  var target = ""
+  /// `yyyy-MM-dd`
+  var date = ""
+  var symbol = ""
+  var quantity = ""
+  var price = ""
+  var amount = ""
+  var fees = "0"
+  var currency = ""
+  var note = ""
+  /// A split of `splitNew` shares for every `splitOld`: 2 and 1 for a 2-for-1, 1 and 10 for a consolidation.
+  var splitNew = "2"
+  var splitOld = "1"
+  /// A transfer between a registered and a non-registered account: tax needs its market value.
+  var priceRequired = false
+
+  var trade: Bool { type == "BUY" || type == "SELL" }
+  var needsSymbol: Bool { !["DEPOSIT", "WITHDRAWAL", "INTEREST", "FEE"].contains(type) }
+  /// Splits move no money, so they have no currency.
+  var usesCurrency: Bool { type != "SPLIT" }
+  var symbolCode: String { symbol.trimmingCharacters(in: .whitespaces).uppercased() }
+  var currencyCode: String { CurrencyInput.normalize(currency) }
+  func ratio(locale: Locale = .current) -> Double? {
+    guard let new = NumberInput.parse(splitNew, locale: locale), let old = NumberInput.parse(splitOld, locale: locale),
+      new > 0, old > 0
+    else { return nil }
+    return new / old
+  }
+
+  func isValid(locale: Locale = .current) -> Bool {
+    func positive(_ value: String) -> Bool { (NumberInput.parse(value, locale: locale) ?? 0) > 0 }
+    func nonnegative(_ value: String) -> Bool { (NumberInput.parse(value, locale: locale) ?? -1) >= 0 }
+    guard !account.isEmpty, !usesCurrency || currencyCode.isEmpty || CurrencyInput.isValid(currencyCode),
+      !needsSymbol || !symbolCode.isEmpty
+    else { return false }
+    switch type {
+    case "BUY", "SELL": return positive(quantity) && nonnegative(price) && nonnegative(fees)
+    case "DRIP": return positive(quantity) && nonnegative(price)
+    case "TRANSFER":
+      let priced = priceRequired ? positive(price) : price.trimmingCharacters(in: .whitespaces).isEmpty || nonnegative(price)
+      return !target.isEmpty && target != account && positive(quantity) && priced
+    case "SPLIT": return ratio(locale: locale).map { $0 != 1 } ?? false
+    default: return positive(amount)
+    }
+  }
+
+  /// The command that records this entry. User text and numbers go after `--`.
+  func arguments(locale: Locale = .current) -> [String] {
+    func number(_ value: String) -> String { NumberInput.cli(value, locale: locale) }
+    let common = ["--date", date, "--note", note]
+    // Blank lets the CLI infer the listing currency, so a USD stock in a CAD account stays USD.
+    let currency = currencyCode.isEmpty || !usesCurrency ? [] : ["--currency", currencyCode]
+    switch type {
+    case "TRANSFER":
+      let price = self.price.trimmingCharacters(in: .whitespaces).isEmpty ? [] : ["--price", number(self.price)]
+      return ["transfer", "--from", account, "--to", target] + common + price + currency
+        + ["--", symbolCode, number(quantity)]
+    case "SPLIT":
+      return ["split", "--account", account] + common + ["--", symbolCode, ratio(locale: locale).map { String($0) } ?? ""]
+    case "DRIP":
+      return ["drip", "--account", account] + common + currency + ["--", symbolCode, number(quantity), number(price)]
+    case "ROC":
+      return ["roc", "--account", account] + common + currency + ["--", symbolCode, number(amount)]
+    default:
+      let command = [
+        "BUY": "buy", "SELL": "sell", "DEPOSIT": "deposit", "WITHDRAWAL": "withdraw",
+        "DIVIDEND": "dividend", "INTEREST": "interest", "FEE": "fee",
+      ][type]!
+      let fees = trade ? ["--fees", number(self.fees)] : []
+      let values = (needsSymbol ? [symbolCode] : []) + (trade ? [quantity, price] : [amount]).map(number)
+      return [command, "--account", account] + common + fees + currency + ["--"] + values
+    }
+  }
+
+  /// `txn edit` for an editable type, with every field the form shows, so the stored entry ends up
+  /// exactly as the form reads. A blank currency is sent too: the CLI then works it out as for a new entry.
+  func editArguments(id: Int, revision: [String], locale: Locale = .current) -> [String] {
+    func number(_ value: String) -> String { NumberInput.cli(value, locale: locale) }
+    var options = ["txn", "edit", "--account", account, "--date", date, "--currency", currencyCode, "--note", note]
+    if needsSymbol { options += ["--symbol", symbolCode] }
+    if trade {
+      options += ["--quantity", number(quantity), "--price", number(price), "--fees", number(fees)]
+    } else {
+      options += ["--amount", number(amount)]
+    }
+    return options + revision + ["--", String(id)]
+  }
+}
+
 /// Version 1 of `marketpulse desktop snapshot`; separate from the stable status API.
 struct DesktopPayload: Decodable {
   let version: Int
@@ -150,6 +263,8 @@ struct DesktopAccount: Decodable, Identifiable {
   let currency: String
   let institution: String
   let trackCash: Bool
+  /// Tax-sheltered (TFSA, RRSP, …). Absent from older engines.
+  let registered: Bool?
   /// Sent back with an edit or archive, which the engine refuses if the account changed since.
   /// Absent from older engines.
   let revision: String?

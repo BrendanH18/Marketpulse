@@ -214,6 +214,25 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     **Denied losses** explains it ("bought 15 within 30 days … held 65"); **Export CSV…**
     is disabled.
 
+24. **Transfers, DRIPs, splits, and return of capital.** Press ⌘N and choose **Transfer in
+    kind**. The account picker becomes **From account**, with a **To account** picker that
+    never lists the account it's moving from. From Cash Account to Everyday TFSA, symbol
+    `aapl`: the caption reads "Cash Account holds … AAPL now." The price field reads
+    **Market price per share** and explains the tax effect; **Save transaction** stays
+    disabled until it has a price. Enter Quantity 99 and price 230, then save: the sheet
+    says "Not recorded: on <date>, transfer of 99.0000 AAPL exceeds … held." Set Quantity
+    to 1 and save: Activity shows "Transfer · AAPL · Cash Account → Everyday TFSA ·
+    230.00 USD" with no sign, and Holdings lists 1 AAPL in Everyday TFSA. Record a
+    **Reinvested dividend (DRIP)** in Everyday TFSA of 0.5 `XEQT.TO` at 31: Activity shows
+    "DRIP" and 15.50 CAD with no sign. Record a **Stock split** of XEQT.TO in Everyday TFSA:
+    with 1 and 1, Save is disabled; with 2 and 1, the caption says what the current
+    quantity becomes. Save: Activity shows ×2, and Holdings shows twice the units at the same
+    cost. A split of XEQT.TO in Cash Account says "Cash Account holds no XEQT.TO now…", and
+    saving it says "Not recorded: on <date>, split of XEQT.TO with nothing held." Record a
+    **Return of capital** of 12.5 on XEQT.TO in Everyday TFSA: Activity shows "ROC" and
+    +12.50 CAD, and XEQT.TO's cost in Holdings is 12.50 lower. Right-click each new entry:
+    **Edit…** is disabled and **Delete…** isn't. In the demo, Save is disabled.
+
 Quit the QA app with ⌘Q when done.
 
 ## Tool limits and workarounds
@@ -231,6 +250,6 @@ menu bar. Then:
 
 ## Reporting
 
-Post results on the PR (or the issue being verified) as a table of items 1–23 with
+Post results on the PR (or the issue being verified) as a table of items 1–24 with
 PASS / FAIL / UNVERIFIED and evidence, then any bugs with exact steps to reproduce.
 Clean up with `rm -rf "$TMPDIR/marketpulse-qa"`.

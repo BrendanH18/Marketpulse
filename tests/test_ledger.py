@@ -96,6 +96,24 @@ def test_split_keeps_cost_base():
     s = replay([txn(TxnType.BUY, "2024-01-01", "A", 10, 100), txn(TxnType.SPLIT, "2024-06-01", "A", ratio=4)], ACCOUNTS)
     h = s.holdings[(1, "A")]
     assert h.quantity == 40 and h.book == pytest.approx(1000) and h.avg_cost == pytest.approx(25)
+    assert s.issues == []
+
+
+def test_split_with_nothing_held_is_an_issue():
+    # Before the buy, and in an account that never held it: both do nothing, and both are flagged.
+    s = replay(
+        [
+            txn(TxnType.SPLIT, "2024-01-01", "A", ratio=2, id=1),
+            txn(TxnType.BUY, "2024-02-01", "A", 10, 100, id=2),
+            txn(TxnType.SPLIT, "2024-06-01", "A", ratio=2, account=2, id=3),
+        ],
+        ACCOUNTS,
+    )
+    assert s.holdings[(1, "A")].quantity == 10
+    assert [(i.txn_id, i.message) for i in s.issues] == [
+        (1, "Split of A with nothing held"),
+        (3, "Split of A with nothing held"),
+    ]
 
 
 def test_return_of_capital_reduces_acb_and_excess_is_gain():

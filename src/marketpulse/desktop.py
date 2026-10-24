@@ -43,7 +43,11 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         "demo": False,
         "status": status,
         # Each with the revision an edit, archive or unarchive sends back (`accounts edit --revision`).
-        "accounts": [{**asdict(a), "revision": a.revision(generation)} for a in tracker.store.accounts()],
+        "accounts": [
+            # `registered`: tax-sheltered, so an in-kind transfer across that line needs a market price.
+            {**asdict(a), "registered": a.type.registered, "revision": a.revision(generation)}
+            for a in tracker.store.accounts()
+        ],
         "archived_accounts": archived_accounts(amap, generation),
         "positions": [
             {

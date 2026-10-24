@@ -687,3 +687,40 @@ def test_archived_accounts_still_use_contribution_room(tracker, store):
     [(after, members)] = tracker.room()
     assert after.contributions == pytest.approx(6000) and after.remaining == pytest.approx(1000)
     assert [a.name for a in members] == ["Fictional TFSA"]  # archived accounts stay hidden
+
+
+def test_share_entries_are_checked_in_the_order_replay_applies_them(tracker, store):
+    a, b, c = (store.add_account(Account(name=n, type=AccountType.TFSA)) for n in ("A", "B", "C"))
+
+    def add(kind, account, day, **fields):
+        return tracker.add_transaction(
+            Transaction(account_id=account.saved_id, type=kind, date=day, symbol="XEQT.TO", currency="CAD", **fields)
+        )
+
+    add(TxnType.BUY, a, "2024-01-02", quantity=10, price=30)
+    # Same day, one after the other: the second moves shares the first has just moved in.
+    add(TxnType.TRANSFER, a, "2024-02-01", quantity=10, target_account_id=b.saved_id)
+    add(TxnType.TRANSFER, b, "2024-02-01", quantity=5, target_account_id=c.saved_id)
+    add(TxnType.SPLIT, c, "2024-02-02", ratio=2)
+    assert store.ledger().holdings[(c.saved_id, "XEQT.TO")].quantity == 10
+    # A date in another format is read as the date it is, before the check.
+    with pytest.raises(ValueError, match="split of XEQT.TO with nothing held"):
+        add(TxnType.SPLIT, b, "2024/01/15", ratio=2)
+    assert store.ledger().issues == []
+
+
+def test_drip_and_return_of_capital_must_be_in_the_holding_currency(tracker, store):
+    acct = store.add_account(Account(name="Fictional Taxable"))
+    tracker.add_transaction(
+        Transaction(account_id=acct.saved_id, type=TxnType.BUY, symbol="AAPL", quantity=10, price=100, currency="USD")
+    )
+    for kind, fields in ((TxnType.DRIP, {"quantity": 1, "price": 140}), (TxnType.ROC, {"amount": 140})):
+        with pytest.raises(ValueError, match="held in USD in this account"):
+            tracker.add_transaction(
+                Transaction(account_id=acct.saved_id, type=kind, symbol="AAPL", currency="CAD", **fields)
+            )
+        tracker.add_transaction(
+            Transaction(account_id=acct.saved_id, type=kind, symbol="AAPL", currency="USD", **fields)
+        )
+    h = store.ledger().holdings[(acct.saved_id, "AAPL")]
+    assert (h.quantity, h.book, h.currency) == (11, 1000, "USD")  # 1,000 + 140 DRIP − 140 ROC

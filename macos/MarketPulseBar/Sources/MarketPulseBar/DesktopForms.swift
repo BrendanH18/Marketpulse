@@ -1,23 +1,30 @@
 import SwiftUI
 
 struct TransactionSheet: View {
-  /// The types this form records, and so the ones it can edit.
-  static let types = ["BUY", "SELL", "DEPOSIT", "WITHDRAWAL", "DIVIDEND", "INTEREST", "FEE"]
   @StateObject private var draft = TransactionSheetDraft()
   @ObservedObject var model: StatusModel
   /// An existing entry to change with `marketpulse txn edit`, instead of recording a new one.
   var editing: DesktopTransaction? = nil
   @Environment(\.dismiss) private var dismiss
-  private var trade: Bool { draft.type == "BUY" || draft.type == "SELL" }
-  private var needsSymbol: Bool { trade || draft.type == "DIVIDEND" }
-  private var currency: String { CurrencyInput.normalize(draft.currency) }
-  private var symbol: String { draft.symbol.trimmingCharacters(in: .whitespaces).uppercased() }
-  private var valid: Bool {
-    !draft.account.isEmpty && (currency.isEmpty || CurrencyInput.isValid(currency))
-      && (!needsSymbol || !symbol.isEmpty)
-      && (trade
-        ? positive(draft.quantity) && nonnegative(draft.price) && nonnegative(draft.fees)
-        : positive(draft.amount))
+  private var entry: TransactionEntry {
+    TransactionEntry(
+      type: draft.type, account: draft.account, target: draft.target, date: LedgerDate.string(draft.date),
+      symbol: draft.symbol, quantity: draft.quantity, price: draft.price, amount: draft.amount, fees: draft.fees,
+      currency: draft.currency, note: draft.note, splitNew: draft.splitNew, splitOld: draft.splitOld,
+      priceRequired: crossesRegistered)
+  }
+  private var accounts: [DesktopAccount] { model.desktop?.accounts ?? [] }
+  private func account(_ id: String) -> DesktopAccount? { accounts.first { String($0.id) == id } }
+  /// An in-kind move into or out of a registered account, which tax treats as a sale or a new cost base.
+  private var crossesRegistered: Bool {
+    guard draft.type == "TRANSFER", let from = account(draft.account)?.registered,
+      let to = account(draft.target)?.registered
+    else { return false }
+    return from != to
+  }
+  /// What the chosen account holds of the symbol now, for share entries.
+  private var held: DesktopPosition? {
+    model.desktop?.positions.first { String($0.accountId) == draft.account && $0.symbol == entry.symbolCode }
   }
   var body: some View {
     SheetLayout(
@@ -29,33 +36,40 @@ struct TransactionSheet: View {
     ) {
       Form {
         Picker("Type", selection: $draft.type) {
-          ForEach(Self.types, id: \.self) { Text($0.capitalized).tag($0) }
+          ForEach(TransactionEntry.types, id: \.self) { Text(TransactionEntry.title($0)).tag($0) }
         }.disabled(editing != nil)
           .help(editing == nil ? "" : "To change the type, delete this entry and record a new one.")
-        Picker("Account", selection: $draft.account) {
+        Picker(draft.type == "TRANSFER" ? "From account" : "Account", selection: $draft.account) {
           Text("Choose account").tag("")
-          ForEach(model.desktop?.accounts ?? []) { Text($0.name).tag(String($0.id)) }
+          ForEach(accounts) { Text($0.name).tag(String($0.id)) }
+        }
+        if draft.type == "TRANSFER" {
+          Picker("To account", selection: $draft.target) {
+            Text("Choose account").tag("")
+            ForEach(accounts.filter { String($0.id) != draft.account }) { Text($0.name).tag(String($0.id)) }
+          }
         }
         DatePicker("Date", selection: $draft.date, in: ...Date.now, displayedComponents: .date)
-        if needsSymbol { TextField("Symbol", text: $draft.symbol, prompt: Text("XEQT.TO")) }
-        if trade {
-          NumberField(title: "Quantity", text: $draft.quantity)
-          NumberField(title: "Price per share", text: $draft.price)
-          NumberField(title: "Fees", text: $draft.fees)
-        } else {
-          NumberField(title: "Amount", text: $draft.amount)
+        if entry.needsSymbol {
+          TextField("Symbol", text: $draft.symbol, prompt: Text("XEQT.TO"))
+          if let note = holdingNote { caption(note) }
         }
-        TextField("Transaction currency", text: $draft.currency, prompt: Text("Automatic"))
-        Text(
-          "Leave blank to use the symbol's listing currency (or the account's for cash entries). Enter one if the price is in another currency."
-        ).font(.caption).foregroundStyle(.secondary)
+        fields
+        if entry.usesCurrency {
+          TextField(
+            draft.type == "TRANSFER" ? "Currency of the price" : "Transaction currency", text: $draft.currency,
+            prompt: Text("Automatic"))
+          caption(
+            "Leave blank to use the symbol's listing currency (or the account's for cash entries). Enter one if the price is in another currency."
+          )
+        }
         TextField("Note (optional)", text: $draft.note)
       }.formStyle(.grouped).disabled(model.saving || draft.request != nil)
       .onAppear {
         if let editing, !draft.loaded {
           draft.load(editing)
         } else if draft.account.isEmpty, let id = model.desktop?.settings?.defaultAccountId,
-          model.desktop?.accounts.contains(where: { $0.id == id }) == true
+          accounts.contains(where: { $0.id == id })
         {
           // Settings › Portfolio › Default account, when it's one of the accounts listed.
           draft.account = String(id)
@@ -64,7 +78,12 @@ struct TransactionSheet: View {
       .onChange(of: draft.symbol) { _, _ in
         // The original currency belongs to the original symbol: work it out again for a new
         // one, unless the user typed a currency themselves.
-        if let editing, symbol != editing.symbol, currency == editing.currency { draft.currency = "" }
+        if let editing, entry.symbolCode != editing.symbol, entry.currencyCode == editing.currency {
+          draft.currency = ""
+        }
+      }
+      .onChange(of: draft.account) { _, account in
+        if draft.target == account { draft.target = "" }
       }
       if draft.request != nil && !model.saving {
         Text("The save outcome is unknown. Retry the same entry before changing or closing it.")
@@ -77,12 +96,11 @@ struct TransactionSheet: View {
         Button(editing != nil ? "Save changes" : draft.request == nil ? "Save transaction" : "Retry save") {
           if let editing {
             // An edit sets the same values again when repeated, so it needs no save receipt.
-            Task {
-              if await model.perform(editArguments(editing.id), success: "Transaction updated") { dismiss() }
-            }
+            let args = entry.editArguments(id: editing.id, revision: editing.revisionArguments)
+            Task { if await model.perform(args, success: "Transaction updated") { dismiss() } }
             return
           }
-          let attempt = draft.request ?? TransactionSaveRequest(arguments: arguments)
+          let attempt = draft.request ?? TransactionSaveRequest(arguments: entry.arguments())
           draft.request = attempt
           Task {
             switch await model.recordTransaction(attempt) {
@@ -93,40 +111,67 @@ struct TransactionSheet: View {
           }
         }
         .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(
-          !valid || !model.canEdit)
+          !entry.isValid() || !model.canEdit)
       }
     }.interactiveDismissDisabled(model.saving || draft.request != nil)
   }
-  private var arguments: [String] {
-    let command = [
-      "BUY": "buy", "SELL": "sell", "DEPOSIT": "deposit", "WITHDRAWAL": "withdraw",
-      "DIVIDEND": "dividend", "INTEREST": "interest", "FEE": "fee",
-    ][draft.type]!
-    var options = ["--account", draft.account, "--date", LedgerDate.string(draft.date), "--note", draft.note]
-    if trade { options += ["--fees", NumberInput.cli(draft.fees)] }
-    // Blank lets the CLI infer the listing currency, so a USD stock in a CAD account stays USD.
-    if !currency.isEmpty { options += ["--currency", currency] }
-    var values = needsSymbol ? [symbol] : []
-    values += (trade ? [draft.quantity, draft.price] : [draft.amount]).map { NumberInput.cli($0) }
-    return [command] + options + ["--"] + values
-  }
-  /// Every field the form shows, so the stored entry ends up exactly as the form reads.
-  /// A blank currency is sent too: the CLI then works it out as for a new entry.
-  private func editArguments(_ id: Int) -> [String] {
-    var options = [
-      "txn", "edit", "--account", draft.account, "--date", LedgerDate.string(draft.date),
-      "--currency", currency, "--note", draft.note,
-    ]
-    if needsSymbol { options += ["--symbol", symbol] }
-    if trade {
-      options += [
-        "--quantity", NumberInput.cli(draft.quantity), "--price", NumberInput.cli(draft.price),
-        "--fees", NumberInput.cli(draft.fees),
-      ]
-    } else {
-      options += ["--amount", NumberInput.cli(draft.amount)]
+
+  @ViewBuilder private var fields: some View {
+    switch draft.type {
+    case "BUY", "SELL":
+      NumberField(title: "Quantity", text: $draft.quantity)
+      NumberField(title: "Price per share", text: $draft.price)
+      NumberField(title: "Fees", text: $draft.fees)
+    case "DRIP":
+      NumberField(title: "New shares", text: $draft.quantity)
+      NumberField(title: "Price per share", text: $draft.price)
+      caption("The reinvested dividend counts as income and adds to the cost base. No cash moves.")
+    case "TRANSFER":
+      NumberField(title: "Quantity", text: $draft.quantity)
+      NumberField(title: entry.priceRequired ? "Market price per share" : "Market price (optional)", text: $draft.price)
+      caption(
+        entry.priceRequired
+          ? "Moving shares into a registered account counts as selling them at market value for tax (a loss is denied), and moving them out sets a new cost base at market value. Enter the price on the transfer date."
+          : "The shares move at their cost base. A price is only needed between a registered and a non-registered account."
+      )
+    case "SPLIT":
+      NumberField(title: "New shares", text: $draft.splitNew)
+      NumberField(title: "For every old share(s)", text: $draft.splitOld)
+      caption(splitNote)
+    case "ROC":
+      NumberField(title: "Amount", text: $draft.amount)
+      caption(
+        "Funds and ETFs report it in box 42 of the T3 slip. It lowers the cost base; once that reaches zero, the rest counts as a capital gain."
+      )
+    default:
+      NumberField(title: "Amount", text: $draft.amount)
     }
-    return options + (editing?.revisionArguments ?? []) + ["--", String(id)]
+  }
+
+  /// For entries that act on shares already held: how many there are now.
+  private var holdingNote: String? {
+    guard ["TRANSFER", "SPLIT", "ROC"].contains(draft.type), !entry.symbolCode.isEmpty, !draft.account.isEmpty
+    else { return nil }
+    let name = account(draft.account)?.name ?? "This account"
+    if let held { return "\(name) holds \(Self.quantity(held.quantity)) \(held.symbol) now." }
+    return draft.type == "ROC"
+      ? "\(name) holds no \(entry.symbolCode) now. A return of capital only lowers the cost of shares held on its date."
+      : "\(name) holds no \(entry.symbolCode) now. An earlier date is checked against what it held then."
+  }
+
+  private var splitNote: String {
+    let example = "For a 2-for-1 split, enter 2 and 1; for a 1-for-10 consolidation, 1 and 10."
+    guard let ratio = entry.ratio(), ratio != 1, let held else { return example + " The cost base doesn't change." }
+    return
+      "\(Self.quantity(held.quantity)) \(held.symbol) become \(Self.quantity(held.quantity * ratio)), at the same total cost base. \(example)"
+  }
+
+  private static func quantity(_ value: Double) -> String {
+    value.formatted(.number.precision(.fractionLength(0...6)))
+  }
+
+  private func caption(_ text: String) -> some View {
+    Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
   }
 }
 
@@ -547,6 +592,7 @@ private final class TransactionSheetDraft: ObservableObject {
   var loaded = false
   @Published var type = "BUY"
   @Published var account = ""
+  @Published var target = ""
   @Published var symbol = ""
   @Published var quantity = ""
   @Published var price = ""
@@ -555,6 +601,8 @@ private final class TransactionSheetDraft: ObservableObject {
   @Published var currency = ""
   @Published var note = ""
   @Published var date = Date.now
+  @Published var splitNew = "2"
+  @Published var splitOld = "1"
 
   func load(_ t: DesktopTransaction) {
     loaded = true

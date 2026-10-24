@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Record transfers, DRIPs, splits, and returns of capital in the Mac app. The transaction
+  form gains **Transfer in kind** (from and to accounts; a market price is required, with
+  the reason, between a registered and a non-registered account), **Reinvested dividend
+  (DRIP)**, **Stock split** (entered as new shares for old, such as 2 for 1), and
+  **Return of capital**, and says how much of the symbol the account holds now. Activity
+  labels them DRIP and ROC, and shows a transfer without a price as the units moved. They
+  can be deleted, not edited. New `marketpulse roc SYMBOL AMOUNT` records a return of
+  capital and says the new cost base, and any part that counts as a capital gain.
+  `drip` and `transfer` accept `--currency`, and `transfer` accepts `--request-id`, so
+  the app can retry a save without recording it twice. `desktop snapshot` accounts gain
+  `registered`.
+
 - A **Tax** workspace in the Mac app: capital gains for each year with a sale in a
   taxable account, with the same figures as `marketpulse tax` (pooled cost base,
   trade-date exchange rates). It shows net and taxable capital gain, denied losses with
@@ -117,6 +129,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native CLI subprocesses time out instead of leaving refresh stuck indefinitely.
 
 ### Changed
+
+- Recording a transfer or a split (in the CLI, TUI, or app) is checked against what the
+  account held on its date, and refused with the reason if it moves more shares than
+  were held, moves shares a later sale needs, or splits a position the account didn't
+  hold. A split with nothing held, already in a ledger, is now listed as a ledger issue
+  instead of being ignored silently, so deleting the purchase it relies on is refused.
+  A DRIP or return of capital in a currency other than the holding's is refused, since
+  both change a cost base kept in the holding's currency.
 
 - `marketpulse txn edit`, `txn delete`, and `undo` (and edits and deletes in the TUI)
   now check the ledger the way it's replayed, each entry at its own date, and refuse a

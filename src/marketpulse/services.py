@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
 from . import alerts as alerts_mod
@@ -30,6 +30,7 @@ from .models import (
     FxRates,
     Quote,
     Transaction,
+    TxnType,
     guess_currency,
     parse_date,
 )
@@ -105,6 +106,8 @@ class Tracker:
                 raise ValueError("Unknown account.")
             # May fetch a quote, so it stays outside the write lock below.
             txn.currency, _ = self.resolve_currency(txn.symbol, acct)
+        # Replay sorts by the date text, so the checks below need the stored ISO form.
+        txn.date = parse_date(txn.date)
         txn.validate()
         # The checks and the write hold the write lock together: no restore (or sale in another
         # window) can land between them.
@@ -117,6 +120,21 @@ class Tracker:
                 if txn.quantity > held + EPSILON:
                     raise ValueError(
                         f"Cannot sell {fmt.qty(txn.quantity)} {txn.symbol} — only {fmt.qty(held)} held in this account."
+                    )
+            elif txn.type in (TxnType.TRANSFER, TxnType.SPLIT):
+                # Judged at the entry's own date, so a backdated move (or split) of shares that
+                # weren't there yet, or that a later sale needs, is refused. The id it will get
+                # sorts it after entries already on that day, as replay will.
+                before = self.store.transactions()
+                probe_id = max((t.id or 0 for t in before), default=0) + 1
+                self._refuse_new_issues(before, [*before, replace(txn, id=probe_id)], probe_id, "recorded")
+            elif txn.type in (TxnType.DRIP, TxnType.ROC):
+                # Both change the cost base, which is kept in the holding's own currency.
+                h = self.store.ledger().holdings.get((txn.account_id, txn.symbol))
+                if h and h.currency and h.currency != txn.currency:
+                    raise ValueError(
+                        f"{txn.symbol} is held in {h.currency} in this account, so enter this "
+                        f"{'DRIP' if txn.type is TxnType.DRIP else 'return of capital'} in {h.currency}."
                     )
             return self.store.add_transaction(txn)
 

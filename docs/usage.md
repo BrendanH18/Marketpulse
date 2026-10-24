@@ -16,6 +16,9 @@ marketpulse deposit 7000 --account "My TFSA"
 marketpulse buy XEQT.TO 20 30.00 --account "My TFSA" --date 2024-01-02
 marketpulse sell XEQT.TO 5 35.00 --account "My TFSA" --date 2024-06-03
 marketpulse dividend XEQT.TO 22.00 --account "My TFSA"
+marketpulse drip XEQT.TO 0.62 35.40 --account "My TFSA"
+marketpulse split XEQT.TO 2 --account "My TFSA"
+marketpulse roc XEQT.TO 1.10 --account "My TFSA" --date 2024-12-31
 marketpulse activity
 ```
 
@@ -24,6 +27,13 @@ as `XEQT.TO` for a Toronto listing and `BTC-USD` for Bitcoin. Omit a buy or
 sell price to use the current quote; for historical records, provide the actual
 execution price and date. `--fees` records commissions. `marketpulse undo`
 deletes the latest transaction after confirmation.
+
+`drip` records a reinvested dividend: new shares at a price, counted as income. `split`
+takes the new shares per old share: `2` for a 2-for-1 split, `0.1` for a 1-for-10
+consolidation; the cost base doesn't change. `roc` records a return of capital (box 42 of
+a T3 slip), which lowers the cost base; once that reaches zero, the rest counts as a
+capital gain. A split, or a transfer (below), is checked against what the account held on
+its date, and refused if the shares weren't there or a later sale needs them.
 
 To fix a mistake, find the entry's id with `marketpulse activity`, then change it with
 `marketpulse txn edit ID` (`--date`, `--account`, `--symbol`, `--quantity`, `--price`,
