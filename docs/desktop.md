@@ -239,8 +239,8 @@ charts. Quotes and percentage changes remain visible. CSV and JSON exports
 contain the original data. The portfolio window has light and dark palettes
 (**Settings › Appearance**); the menu bar continues to follow configured Omarchy themes.
 
-Advanced asset definitions, recording and editing transfers, DRIPs, splits, and
-returns of capital (the app can delete them), and historical backfills
+Advanced asset definitions, editing transfers, DRIPs, splits, and returns of capital
+(the app records and deletes them), and historical backfills
 remain in the CLI/TUI. Portfolio charts show net worth,
 which includes contributions; they are not a time-weighted return chart.
 

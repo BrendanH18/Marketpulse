@@ -743,6 +743,45 @@ def split(app: App, symbol, ratio, account, when, note) -> None:
     app.ok(f"Split {symbol.upper()} ×{ratio:g} in {acct.name}")
 
 
+def _warn_roc_gain(app: App, txn: Transaction, sym: str, *, account_book_exceeded: bool) -> None:
+    """Say whether a return of capital creates a capital gain, from the tax engine.
+
+    Tax pools the cost base across every taxable account, so this account's book
+    value alone can't tell. Only base-currency rates are known offline, so the
+    figure is exact only when every taxable entry for the symbol is in the base
+    currency (a missing rate can reach the cost base indirectly, e.g. through a
+    superficial loss). Otherwise point to `marketpulse tax` instead of guessing,
+    and only when this account's cost base ran out, to stay quiet.
+    """
+    from . import tax
+    from .ledger import transaction_currency
+
+    base = app.tracker.base
+    txns = app.store.transactions()
+    accounts = app.store.account_map()
+    exact = all(
+        transaction_currency(t, accounts).upper() == base
+        for t in txns
+        if t.symbol == sym
+        and (
+            tax.is_taxable(accounts.get(t.account_id))
+            or (t.target_account_id is not None and tax.is_taxable(accounts.get(t.target_account_id)))
+        )
+    )
+    if exact:
+        report = tax.compute(txns, accounts, tax.fx_lookup({}, base))
+        d = next((d for d in report.dispositions if d.txn_id == txn.id and d.kind == "roc"), None)
+        if d is None:
+            return
+        if d.complete:  # e.g. an unpriced transfer in leaves the cost base unknown
+            app.warn(
+                f"the pooled cost base of {sym} reached zero, so {fmt.money(d.gain)} {base} counts as a capital gain"
+            )
+            return
+    if account_book_exceeded:
+        app.warn(f"the cost base of {sym} here reached zero; `marketpulse tax` works out any capital gain")
+
+
 @main.command()
 @click.argument("symbol")
 @click.argument("amount", type=float)
@@ -777,9 +816,8 @@ def roc(app: App, symbol, amount, currency, account, when, note) -> None:
     if h and h.quantity > EPSILON:
         msg += f" · cost base now {fmt.money(h.book)} {h.currency}"
     app.ok(msg)
-    gain = next((r.gain for r in state.realized if r.txn_id == txn.id), None)
-    if gain is not None:
-        app.warn(f"the cost base reached zero, so {fmt.money(gain)} {txn.currency} counts as a capital gain")
+    if not acct.type.registered:
+        _warn_roc_gain(app, txn, sym, account_book_exceeded=any(r.txn_id == txn.id for r in state.realized))
     if h is None or h.quantity <= EPSILON:
         app.warn(f"{acct.name} holds no {sym} now; a return of capital only lowers the cost of shares held on its date")
 

@@ -216,18 +216,18 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
 
 24. **Transfers, DRIPs, splits, and return of capital.** Press ⌘N and choose **Transfer in
     kind**. The account picker becomes **From account**, with a **To account** picker that
-    never lists the account it's moving from. From Cash Account to Everyday TFSA, symbol
-    `aapl`: the caption reads "Cash Account holds … AAPL now." The price field reads
+    never lists the account it's moving from. From Spending (item 22 renamed Cash Account) to
+    Everyday TFSA, symbol `aapl`: the caption reads "Spending holds … AAPL now." The price field reads
     **Market price per share** and explains the tax effect; **Save transaction** stays
     disabled until it has a price. Enter Quantity 99 and price 230, then save: the sheet
     says "Not recorded: on <date>, transfer of 99.0000 AAPL exceeds … held." Set Quantity
-    to 1 and save: Activity shows "Transfer · AAPL · Cash Account → Everyday TFSA ·
+    to 1 and save: Activity shows "Transfer · AAPL · Spending → Everyday TFSA ·
     230.00 USD" with no sign, and Holdings lists 1 AAPL in Everyday TFSA. Record a
     **Reinvested dividend (DRIP)** in Everyday TFSA of 0.5 `XEQT.TO` at 31: Activity shows
     "DRIP" and 15.50 CAD with no sign. Record a **Stock split** of XEQT.TO in Everyday TFSA:
     with 1 and 1, Save is disabled; with 2 and 1, the caption says what the current
     quantity becomes. Save: Activity shows ×2, and Holdings shows twice the units at the same
-    cost. A split of XEQT.TO in Cash Account says "Cash Account holds no XEQT.TO now…", and
+    cost. A split of XEQT.TO in Spending says "Spending holds no XEQT.TO now…", and
     saving it says "Not recorded: on <date>, split of XEQT.TO with nothing held." Record a
     **Return of capital** of 12.5 on XEQT.TO in Everyday TFSA: Activity shows "ROC" and
     +12.50 CAD, and XEQT.TO's cost in Holdings is 12.50 lower. Right-click each new entry:

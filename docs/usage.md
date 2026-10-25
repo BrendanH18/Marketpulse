@@ -32,7 +32,8 @@ deletes the latest transaction after confirmation.
 takes the new shares per old share: `2` for a 2-for-1 split, `0.1` for a 1-for-10
 consolidation; the cost base doesn't change. `roc` records a return of capital (box 42 of
 a T3 slip), which lowers the cost base; once that reaches zero, the rest counts as a
-capital gain. A split, or a transfer (below), is checked against what the account held on
+capital gain. In non-registered accounts that is the cost base pooled across all of them,
+as `marketpulse tax` works it out; `roc` says so when it can tell without exchange rates. A split, or a transfer (below), is checked against what the account held on
 its date, and refused if the shares weren't there or a later sale needs them.
 
 To fix a mistake, find the entry's id with `marketpulse activity`, then change it with

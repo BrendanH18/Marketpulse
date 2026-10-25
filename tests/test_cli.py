@@ -570,7 +570,7 @@ def test_return_of_capital_lowers_cost_base_then_counts_as_a_gain(cli, store):
     assert "cost base now 250.00 CAD" in out and "capital gain" not in out
     beyond = cli("roc", "XEQT.TO", "275", "--currency", "cad", "-d", "2025-12-31").output
     assert "cost base now 0.00 CAD" in beyond
-    assert "25.00 CAD counts as a capital gain" in beyond  # 275 − the 250 left
+    assert "cost base of XEQT.TO reached zero, so 25.00 CAD counts as a capital gain" in beyond  # 275 − 250
     state = store.ledger()
     assert state.holdings[(1, "XEQT.TO")].book == 0
     assert [(r.txn_id, r.gain) for r in state.realized] == [(store.transactions()[-1].id, 25.0)]
@@ -579,6 +579,59 @@ def test_return_of_capital_lowers_cost_base_then_counts_as_a_gain(cli, store):
     assert (t.type, t.amount, t.currency) == ("ROC", 275.0, "CAD")
     negative = cli("roc", "XEQT.TO", "--", "-5")
     assert negative.exit_code == 1 and "Amount cannot be negative" in negative.output
+
+
+def test_return_of_capital_gain_warning_follows_the_pooled_tax_cost_base(cli, store):
+    cli("accounts", "add", "Fictional Taxable", "-t", "NONREG")
+    cli("accounts", "add", "Fictional Margin", "-t", "NONREG")
+    cli("accounts", "add", "Fictional TFSA", "-t", "TFSA")
+    cli("buy", "XEQT.TO", "10", "10", "-a", "Fictional Taxable", "-d", "2024-01-02")  # 100 here
+    cli("buy", "XEQT.TO", "10", "100", "-a", "Fictional Margin", "-d", "2024-01-02")  # 1,000 there
+    # This account's book runs out, but the pooled ACB (1,100) only falls to 950: no gain.
+    out = cli("roc", "XEQT.TO", "150", "-c", "CAD", "-a", "Fictional Taxable", "-d", "2024-06-28").output
+    assert "cost base now 0.00 CAD" in out and "capital gain" not in out
+    # Past the pooled ACB, the tax engine's excess is the gain.
+    out = cli("roc", "XEQT.TO", "1000", "-c", "CAD", "-a", "Fictional Margin", "-d", "2024-12-31").output
+    assert "pooled cost base of XEQT.TO reached zero, so 50.00 CAD counts as a capital gain" in out
+    # A registered account has no capital gains, however far its book value falls.
+    cli("buy", "XEQT.TO", "1", "30", "-a", "Fictional TFSA", "-d", "2024-01-02")
+    out = cli("roc", "XEQT.TO", "40", "-c", "CAD", "-a", "Fictional TFSA", "-d", "2024-12-31").output
+    assert "cost base now 0.00 CAD" in out and "capital gain" not in out
+
+
+def test_return_of_capital_in_another_currency_points_to_the_tax_report(cli, store):
+    cli("accounts", "add", "Fictional Taxable", "-t", "NONREG")
+    cli("buy", "AAPL", "1", "100", "-c", "USD", "-d", "2024-01-02")
+    out = cli("roc", "AAPL", "5", "-c", "USD", "-d", "2024-06-28").output
+    assert "cost base now 95.00 USD" in out and "capital gain" not in out
+    out = cli("roc", "AAPL", "120", "-c", "USD", "-d", "2024-12-31").output
+    # Converting needs exchange rates, which this command doesn't fetch.
+    assert "reached zero; `marketpulse tax` works out any capital gain" in out
+    assert "counts as a capital gain" not in out
+
+
+def test_return_of_capital_gain_is_not_guessed_when_an_earlier_sale_needs_a_rate(cli, store):
+    cli("accounts", "add", "Fictional Taxable", "-t", "NONREG")
+    cli("buy", "XEQT.TO", "10", "10", "-c", "CAD", "-d", "2024-01-01")
+    # Sold in USD with no rate offline, then rebought: a superficial loss offline, a gain with rates.
+    cli("sell", "XEQT.TO", "5", "20", "-c", "USD", "-d", "2024-01-10")
+    cli("buy", "XEQT.TO", "1", "10", "-c", "CAD", "-d", "2024-01-11")
+    out = cli("roc", "XEQT.TO", "200", "-c", "CAD", "-d", "2024-02-15").output
+    assert "counts as a capital gain" not in out
+    assert "reached zero; `marketpulse tax` works out any capital gain" in out
+
+
+def test_return_of_capital_gain_is_not_guessed_after_an_unpriced_transfer_in(cli, store):
+    cli("accounts", "add", "Fictional TFSA", "-t", "TFSA")
+    cli("accounts", "add", "Fictional Taxable", "-t", "NONREG")
+    cli("buy", "XEQT.TO", "10", "10", "-c", "CAD", "-a", "Fictional TFSA", "-d", "2024-01-02")
+    # No price: tax doesn't know the cost base this transfer brings into the pool.
+    cli("transfer", "XEQT.TO", "10", "--from", "Fictional TFSA", "--to", "Fictional Taxable", "-d", "2024-02-01")
+    out = cli("roc", "XEQT.TO", "25", "-c", "CAD", "-a", "Fictional Taxable", "-d", "2024-06-28").output
+    assert "cost base now 75.00 CAD" in out and "capital gain" not in out
+    out = cli("roc", "XEQT.TO", "100", "-c", "CAD", "-a", "Fictional Taxable", "-d", "2024-07-28").output
+    assert "counts as a capital gain" not in out
+    assert "reached zero; `marketpulse tax` works out any capital gain" in out
 
 
 def test_return_of_capital_with_nothing_held_warns(cli, store):

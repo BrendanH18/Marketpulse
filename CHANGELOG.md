@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Return of capital**, and says how much of the symbol the account holds now. Activity
   labels them DRIP and ROC, and shows a transfer without a price as the units moved. They
   can be deleted, not edited. New `marketpulse roc SYMBOL AMOUNT` records a return of
-  capital and says the new cost base, and any part that counts as a capital gain.
+  capital and says the new cost base, and any part that counts as a capital gain under
+  the pooled cost base `marketpulse tax` uses (never in a registered account).
   `drip` and `transfer` accept `--currency`, and `transfer` accepts `--request-id`, so
   the app can retry a save without recording it twice. `desktop snapshot` accounts gain
   `registered`.
