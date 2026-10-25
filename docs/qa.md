@@ -63,9 +63,23 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
    of AAPL in Everyday TFSA with the currency left blank ("Automatic"); Activity
    shows it in US dollars, negative.
 10. **Import (⌘I).** Choose the sample CSV path the script printed (⌘⇧G to type
-    the path), default account Everyday TFSA, Preview: 2 new, 0 duplicates, 2
-    skipped (line 3 archived account, line 5 invalid date), new account New FHSA.
-    Import shows "Imported 2 entries…". Previewing again shows 0 new, 2 duplicates.
+    the path), Broker format Auto-detect, default account Everyday TFSA, Preview:
+    "Detected format: Generic CSV", 2 new, 0 duplicates, 2 skipped, new account New
+    FHSA. The Skipped lines table shows line 3 (account, Old RRSP, archived) and
+    line 5 (date, 2024-13-40, invalid date). Import shows "Imported 2 entries…".
+    Previewing again shows 0 new, 2 duplicates, and the Duplicates disclosure lists
+    lines 2 and 4 with a one-line summary each.
+    - **Questrade:** import the printed `questrade-export.csv` with Auto-detect and
+      "Use accounts named in the CSV": "Detected format: Questrade", 8 new, 3 skipped
+      (line 6 amount -22.00 reversal; lines 8 and 12 type, with the reason), new
+      accounts Questrade Individual TFSA 90001234 and Questrade Individual margin 90005678.
+      Import, then check Holdings: XEQT.TO 100 in the TFSA, AAPL 3 in the margin account.
+    - **Wealthsimple:** choose `wealthsimple-export.csv`, Broker format Questrade,
+      Preview: the error says the file doesn't look like a Questrade export. Switch to
+      Auto-detect, default account Everyday TFSA, Preview: "Detected format:
+      Wealthsimple", 7 new, 2 skipped (lines 6 NRT and 9 LOAN). Import, then check
+      Activity shows BUY XEQT.TO and BUY AAPL in CAD.
+    - With privacy on, the Value column and duplicate summaries are masked.
 11. **Privacy.** The eye button masks amounts as "••••" and hides charts; toggling
     back restores them.
 12. **Menu bar.** The waveform item opens a popover with net worth and accounts (no

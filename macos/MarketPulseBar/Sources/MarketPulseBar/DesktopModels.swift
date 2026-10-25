@@ -505,6 +505,39 @@ struct ImportPreview: Decodable, Equatable {
   let backup: String?
   /// Identifies the preview's inputs; the commit sends it back so nothing changed is imported.
   let fingerprint: String
+  /// The broker profile that read the file (absent from older engines).
+  let profile: String?
+  let profileLabel: String?
+  /// One per skipped line, with the field at fault; `skipped` has the same lines.
+  let issues: [ImportRowIssue]?
+  let duplicateRows: [ImportDuplicate]?
+}
+
+/// Broker export formats the importer reads; `marketpulse import --profile` takes the ids.
+struct ImportProfile: Identifiable {
+  let id: String
+  let label: String
+  static let all = [
+    ImportProfile(id: "auto", label: "Auto-detect"),
+    ImportProfile(id: "questrade", label: "Questrade"),
+    ImportProfile(id: "wealthsimple", label: "Wealthsimple"),
+    ImportProfile(id: "generic", label: "Generic CSV"),
+  ]
+}
+
+struct ImportRowIssue: Decodable, Identifiable, Equatable {
+  var id: Int { line }
+  let line: Int
+  /// The import field at fault (date, type, symbol, quantity, …); empty when no single one is.
+  let field: String
+  let value: String
+  let reason: String
+}
+
+struct ImportDuplicate: Decodable, Identifiable, Equatable {
+  var id: Int { line }
+  let line: Int
+  let summary: String
 }
 
 struct ImportIssue: Decodable, Identifiable, Equatable {

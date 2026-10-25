@@ -33,6 +33,7 @@ from marketpulse.db import Store
 from marketpulse.menubar import assemble_app, info_plist, swift_build
 from marketpulse.models import Account, AccountType, Alert, Transaction, TxnType
 
+ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ID = "dev.marketpulse.qa"  # separate from the real app's defaults and login item
 APP_NAME = "MarketPulse QA"
 MARKER = ".marketpulse-qa"  # written into --out, so the script only ever reuses or resets its own folder
@@ -197,6 +198,9 @@ def main() -> None:
         if not args.empty:
             seed(data)
     sample_csv(out / "sample-import.csv")
+    # Fictional broker exports, the same ones the tests use.
+    for broker in ("questrade", "wealthsimple"):
+        shutil.copyfile(ROOT / "tests" / "fixtures" / "brokers" / f"{broker}.csv", out / f"{broker}-export.csv")
     update_feed(out / "update-feed.json")
     app = build_app(out, args.menubar, args.bundled)
     # The bundled app finds its own backend; otherwise point it at this checkout's CLI.
@@ -214,6 +218,7 @@ def main() -> None:
     print(f"QA app:        {app}")
     print(f"Scratch data:  {data}")
     print(f"Sample CSV:    {out / 'sample-import.csv'}")
+    print(f"Broker CSVs:   {out / 'questrade-export.csv'}, {out / 'wealthsimple-export.csv'}")
     print(f"Launch:        {launch}")
     print("Checklist:     docs/qa.md")
 

@@ -29,6 +29,7 @@ final class StatusModel: ObservableObject {
   @Published var importName = ""
   @Published var importPreview: ImportPreview?
   @Published var importAccount = ""
+  @Published var importProfile = "auto"
   @Published var showImport = false
   @Published var hotKeyEnabled: Bool {
     didSet {
@@ -551,11 +552,12 @@ final class StatusModel: ObservableObject {
     importURL = nil
     importPreview = nil
     importAccount = ""
+    importProfile = "auto"
     showImport = false
   }
 
   private var importArguments: [String] {
-    importAccount.isEmpty ? [] : ["--account", importAccount]
+    (importAccount.isEmpty ? [] : ["--account", importAccount]) + ["--profile", importProfile]
   }
 
   func previewImport() async {
