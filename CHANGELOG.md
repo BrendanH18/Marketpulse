@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `desktop import` accept `--profile auto|questrade|wealthsimple|generic`. Broker codes
   are translated through a table; transfers, currency conversions, corporate actions,
   withholding tax, and amounts with the wrong sign for their type are skipped with a
-  reason rather than guessed. See [usage](docs/usage.md#import-and-export).
+  reason rather than guessed. A Wealthsimple dividend goes to the listing the account
+  holds (a converted US stock keeps its US symbol). See [usage](docs/usage.md#import-and-export).
 - Clearer import reports: each skipped row names its line, field, value, and what was
   expected, and duplicates are listed with a one-line summary. `desktop import` results
   gain `profile`, `profile_label`, `issues` (`line`, `field`, `value`, `reason`) and

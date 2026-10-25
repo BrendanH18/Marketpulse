@@ -121,6 +121,69 @@ def test_wealthsimple_tickers_become_yahoo_symbols(store, ticker, currency, fx, 
     assert [t.symbol for t in store.transactions()] == [expected]
 
 
+WS_HEADER = "date,transaction,description,amount,balance,currency\n"
+WS_AAPL_BUY = (
+    '2025-01-06,BUY,"AAPL - Apple Inc.: Bought 2.0000 shares (executed at 2025-01-06), FX Rate: 1.4400",-518.40,0,CAD\n'
+)
+WS_XEQT_BUY = '2025-01-03,BUY,"XEQT - iShares: Bought 5.0000 shares (executed at 2025-01-03)",-150.00,0,CAD\n'
+
+
+def ws_dividend(ticker: str) -> str:
+    return f'2025-02-14,DIV,"{ticker} - Fictional: Cash dividend distribution, received on 2025-02-14",0.70,0,CAD\n'
+
+
+def test_a_wealthsimple_dividend_goes_to_the_listing_the_account_holds(store):
+    acct = store.add_account(Account(name="WS"))
+    # A converted US purchase, then its dividend paid in CAD (no FX rate on the dividend).
+    result = import_transactions(
+        store, io.StringIO(WS_HEADER + WS_AAPL_BUY + ws_dividend("AAPL")), default_account=acct
+    )
+    assert (result.added, result.issues) == (2, [])
+    assert [(t.type, t.symbol) for t in store.transactions()] == [(TxnType.BUY, "AAPL"), (TxnType.DIVIDEND, "AAPL")]
+    # A later statement: the purchase is already in the ledger, and re-importing finds the duplicate.
+    later = import_transactions(store, io.StringIO(WS_HEADER + ws_dividend("AAPL")), default_account=acct)
+    assert (later.added, later.duplicates, later.issues) == (0, 1, [])
+    # A Canadian listing still resolves to its Yahoo symbol.
+    import_transactions(store, io.StringIO(WS_HEADER + WS_XEQT_BUY + ws_dividend("XEQT")), default_account=acct)
+    assert [t.symbol for t in store.transactions() if t.type is TxnType.DIVIDEND] == ["AAPL", "XEQT.TO"]
+
+
+def test_reimporting_a_dividend_finds_its_duplicate_once_both_listings_are_held(store):
+    acct = store.add_account(Account(name="WS"))
+    text = (
+        WS_HEADER
+        + '2025-01-02,BUY,"ENB - Fictional: Bought 1.0000 shares (executed at 2025-01-02), FX Rate: 1.4",-60,0,CAD\n'
+        + '2025-01-03,DIV,"ENB - Fictional: Cash dividend distribution, received on 2025-01-03",0.90,0,CAD\n'
+        + '2025-01-04,BUY,"ENB - Fictional: Bought 1.0000 shares (executed at 2025-01-04)",-58,0,CAD\n'
+    )
+    first = import_transactions(store, io.StringIO(text), default_account=acct)
+    assert (first.added, first.issues) == (3, [])
+    again = import_transactions(store, io.StringIO(text), default_account=acct)
+    assert (again.added, again.duplicates, again.issues) == (0, 3, [])
+
+
+def test_a_wealthsimple_dividend_for_an_unknown_listing_is_reported(store):
+    acct = store.add_account(Account(name="WS"))
+    result = import_transactions(store, io.StringIO(WS_HEADER + ws_dividend("VFV")), default_account=acct)
+    assert result.added == 0
+    assert result.issues == [
+        RowIssue(
+            2,
+            "symbol",
+            "VFV.TO",
+            "can't tell whether this is VFV.TO or VFV: the account holds neither; record it by hand",
+        )
+    ]
+    both = (
+        WS_HEADER
+        + WS_XEQT_BUY
+        + '2025-01-04,BUY,"XEQT - iShares: Bought 1.0000 shares (executed at 2025-01-04), FX Rate: 1.4",-40,0,CAD\n'
+        + ws_dividend("XEQT")
+    )
+    result = import_transactions(store, io.StringIO(both), default_account=acct)
+    assert result.added == 2 and "holds both" in result.issues[0].reason
+
+
 def test_wealthsimple_statement(store):
     acct = store.add_account(Account(name="WS TFSA", type=AccountType.TFSA))
     result = import_transactions(store, WEALTHSIMPLE, default_account=acct)

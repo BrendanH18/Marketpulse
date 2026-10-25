@@ -3,6 +3,8 @@
 The importer works on canonical fields (`date`, `type`, `symbol`, `quantity`, `price`,
 `amount`, `fees`, `currency`, `account`, `note`, `ratio`, `target_account`). A profile
 turns one row of a broker's export into those fields, or rejects the row with a reason.
+A profile that can't tell which listing a row is about sets `symbol_choices` (listings
+separated by spaces); the importer uses the one the account holds, or skips the row.
 
 - `generic` maps common column names (see `_ALIASES`) and guesses transaction types
   from keywords. It's the fallback for any file no other profile recognizes.
@@ -216,17 +218,18 @@ _WS_SYMBOL = re.compile(r"^\s*([A-Z0-9][A-Z0-9.\-]*)\s+-\s+")
 _WS_SHARES = re.compile(r"\b(?:bought|sold|purchased|reinvested)\s+([\d,]*\.?\d+)\s+shares?\b", re.IGNORECASE)
 
 
-def _wealthsimple_symbol(description: str, currency: str) -> str:
+def _wealthsimple_symbols(description: str, currency: str) -> list[str]:
+    """The listings a statement's bare ticker may stand for, most likely first."""
     m = _WS_SYMBOL.match(description)
     if not m:
-        return ""
+        return []
     symbol = m.group(1)
-    # Statements give the bare ticker. A CAD trade without an FX conversion is a Canadian
-    # listing, which Yahoo quotes with an exchange suffix; assume the TSX (".TO"). Yahoo
-    # writes share classes and trust units with a dash (RCI.B → RCI-B.TO, REI.UN → REI-UN.TO).
+    # A CAD amount without an FX conversion suggests a Canadian listing, which Yahoo quotes
+    # with an exchange suffix; assume the TSX (".TO"). Yahoo writes share classes and trust
+    # units with a dash (RCI.B → RCI-B.TO, REI.UN → REI-UN.TO).
     if currency.upper() == "CAD" and "fx rate" not in description.lower() and not symbol.endswith(_CANADIAN_SUFFIXES):
-        symbol = symbol.replace(".", "-") + ".TO"
-    return symbol
+        return [symbol.replace(".", "-") + ".TO", symbol]
+    return [symbol]
 
 
 def _convert_wealthsimple(row: Mapping[str, str]) -> Fields:
@@ -248,9 +251,14 @@ def _convert_wealthsimple(row: Mapping[str, str]) -> Fields:
         "note": description,
     }
     if mapped.needs_symbol:
-        fields["symbol"] = _wealthsimple_symbol(description, currency)
-        if not fields["symbol"]:
+        symbols = _wealthsimple_symbols(description, currency)
+        if not symbols:
             raise RowError("couldn't read the symbol from the description", "symbol", description)
+        fields["symbol"] = symbols[0]
+        if not mapped.uses_quantity and len(symbols) > 1:
+            # A trade's FX rate shows a converted US purchase; a dividend paid in CAD doesn't
+            # say, so it goes to whichever listing the account holds.
+            fields["symbol_choices"] = " ".join(symbols)
     if mapped.uses_quantity:
         m = _WS_SHARES.search(description)
         if not m:

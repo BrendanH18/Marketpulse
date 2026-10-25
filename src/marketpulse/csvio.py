@@ -352,13 +352,19 @@ def _import(
         # the loop because resolve_account() may already write.
         result.backup = store.backup(reason="import")
 
+    def key_of(account_id: int, when: str, kind: TxnType, symbol: str, qty: float, price: float, cash: float) -> tuple:
+        return (account_id, when, kind, symbol, round(qty, 6), round(price, 6), round(cash, 2))
+
     def key(t: Transaction) -> tuple:
-        return (t.account_id, t.date, t.type, t.symbol, round(t.quantity, 6), round(t.price, 6), round(t.amount, 2))
+        return key_of(t.account_id, t.date, t.type, t.symbol, t.quantity, t.price, t.amount)
 
     # A multiset: each file row consumes one matching stored row, so re-importing the
     # same export is a no-op while genuine repeated fills (two identical partial
     # executions on one day) are all kept.
-    existing = Counter(key(t) for t in store.transactions())
+    stored = store.transactions()
+    existing = Counter(key(t) for t in stored)
+    # Symbols each account has entries for, in the ledger or earlier in this file.
+    held = {(t.account_id, t.symbol) for t in stored} | {(t.target_account_id, t.symbol) for t in stored}
     pending: list[Transaction] = []
     created: list[Account] = []
 
@@ -405,6 +411,20 @@ def _import(
             price = cash / qty
         if txn_type.uses_amount and not cash and qty and price:
             cash = qty * price
+        if choices := get("symbol_choices").upper().split():
+            # A row imported before under one of its listings is that listing (a re-import
+            # finds the duplicate); otherwise it is the one listing the account holds.
+            stored = [c for c in choices if existing[key_of(acct.id, when, txn_type, c, qty, price, cash)] > 0]
+            matches = stored or [c for c in choices if (acct.id, c) in held]
+            if len(matches) != 1:
+                listed = " or ".join(choices)
+                found = "both" if matches else "neither"
+                raise RowError(
+                    f"can't tell whether this is {listed}: the account holds {found}; record it by hand",
+                    "symbol",
+                    get("symbol"),
+                )
+            symbol = matches[0]
         # Only transfers have a destination; other rows never create one.
         target_name = get("target_account") if txn_type is TxnType.TRANSFER else ""
         target = resolve_account(target_name) if target_name else None
@@ -449,6 +469,7 @@ def _import(
             result.duplicate_rows.append(DuplicateRow(line_no, _summary(txn, acct.name)))
             continue
         pending.append(txn)
+        held.update({(txn.account_id, txn.symbol), (txn.target_account_id, txn.symbol)})
 
     # An account created only for rows that were then skipped would be left empty.
     used = {t.account_id for t in pending} | {t.target_account_id for t in pending}
