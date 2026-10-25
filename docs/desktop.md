@@ -150,7 +150,8 @@ v99.0.0.
   entry to **Edit…** (or double-click it) or **Delete…** (or select it and press Delete).
   Edit opens the transaction form filled in; the type is fixed, so delete the entry and
   record a new one to change it. Buys, sells, deposits, withdrawals, dividends,
-  interest, and fees can be edited; any entry can be deleted, after a confirmation. A
+  interest, and fees can be edited; transfers, DRIPs, splits, and returns of capital can
+  be deleted and recorded again. Any entry can be deleted, after a confirmation. A
   change that would leave a sale of more than was held at the time is refused, with the
   reason, and nothing is changed.
 - **Accounts:** create accounts, and **Edit account…** (or right-click) to rename one or
@@ -183,7 +184,16 @@ v99.0.0.
   file or one from a newer version without changing anything, and reloads the window
   ([details](data.md#restore-a-database)).
 
-Use **⌘N** to record a transaction, **⌘R** to refresh, **⌘I** to import, and **⌘E**
+Use **⌘N** to record a transaction: a buy, sell, deposit, withdrawal, dividend,
+interest, fee, reinvested dividend (DRIP), in-kind transfer between your accounts, stock
+split (entered as new shares for old, such as 2 for 1, or 1 for 10 for a consolidation),
+or return of capital. For a transfer, split, or return of capital the form says how much
+of the symbol the account holds now. A transfer between a registered and a
+non-registered account needs the market price on its date, because tax treats it as a
+sale (or a new cost base); between two accounts of the same kind, shares move at cost
+and no price is needed. A transfer or split is checked against what the account held on
+its date: one of shares it didn't hold, or that a later sale needs, is refused with the
+reason. Use **⌘R** to refresh, **⌘I** to import, and **⌘E**
 to export. Import first previews new entries, duplicates, skipped lines, and new
 accounts. The preview runs the real import against a temporary copy of your
 ledger, so it reports exactly what Import will do. The app imports its own copy
@@ -229,8 +239,8 @@ charts. Quotes and percentage changes remain visible. CSV and JSON exports
 contain the original data. The portfolio window has light and dark palettes
 (**Settings › Appearance**); the menu bar continues to follow configured Omarchy themes.
 
-Advanced asset definitions, recording and editing transfers, DRIPs, splits, and
-returns of capital (the app can delete them), and historical backfills
+Advanced asset definitions, editing transfers, DRIPs, splits, and returns of capital
+(the app records and deletes them), and historical backfills
 remain in the CLI/TUI. Portfolio charts show net worth,
 which includes contributions; they are not a time-weighted return chart.
 

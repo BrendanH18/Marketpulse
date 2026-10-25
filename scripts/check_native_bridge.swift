@@ -49,6 +49,9 @@ struct NativeBridgeCheck {
     precondition(archived[0].revisionArguments.count == 2 && archived[0].revision?.count == 16)
     precondition(payload.accounts.allSatisfy { $0.revisionArguments.count == 2 && $0.revision?.count == 16 })
     precondition(payload.accounts.allSatisfy { DesktopAccount.types.contains($0.type) })
+    // The transfer form asks for a market price between registered and non-registered accounts.
+    precondition(payload.accounts.allSatisfy { $0.registered == ["TFSA", "RRSP", "FHSA"].contains($0.type) })
+    precondition(Set(payload.accounts.compactMap(\.registered)) == [true, false])
     // The demo's TFSA room, as entered: the room sheet edits it from these fields.
     let year = Calendar.current.component(.year, from: .now)
     precondition(payload.room.count == 1 && payload.room[0].accountType == "TFSA")
@@ -179,8 +182,30 @@ struct NativeBridgeCheck {
       return Data()
     }
     precondition(retry == .recorded)
+
+    // The transaction form: the commands tests/test_cli.py runs on a fictional ledger.
+    let forms = try JSONDecoder().decode(
+      FormCases.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[9])))
+    let us = Locale(identifier: "en_US")
+    precondition(forms.cases.count > 10)
+    for form in forms.cases {
+      let f = form.entry
+      let entry = TransactionEntry(
+        type: f["type"]!, account: f["account"] ?? "", target: f["target"] ?? "", date: f["date"] ?? "",
+        symbol: f["symbol"] ?? "", quantity: f["quantity"] ?? "", price: f["price"] ?? "", amount: f["amount"] ?? "",
+        fees: f["fees"] ?? "0", currency: f["currency"] ?? "", note: f["note"] ?? "", splitNew: f["splitNew"] ?? "2",
+        splitOld: f["splitOld"] ?? "1", priceRequired: f["priceRequired"] == "true")
+      precondition(entry.isValid(locale: us) == form.valid, "Form validity differs for \(f)")
+      if let expected = form.arguments {
+        let sent = entry.arguments(locale: us)
+        precondition(sent == expected, "Form arguments differ: \(sent)")
+      }
+    }
+    precondition(Set(forms.cases.map { $0.entry["type"]! }).isSuperset(of: ["DRIP", "TRANSFER", "SPLIT", "ROC"]))
+    precondition(TransactionEntry.types.count == 11 && TransactionEntry.editableTypes.count == 7)
+    precondition(TransactionEntry.label("ROC") == "ROC" && TransactionEntry.label("TRANSFER") == "Transfer")
     print(
-      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, activity values, import result, privacy formatting, number entry, editable numbers and dates, transaction save recovery"
+      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, activity values, import result, privacy formatting, number entry, editable numbers and dates, transaction save recovery, transaction form commands"
     )
   }
 }
@@ -188,4 +213,13 @@ struct NativeBridgeCheck {
 private struct ValuedTransaction: Decodable {
   let transaction: DesktopTransaction
   let expectedSignedValue: Double
+}
+
+private struct FormCases: Decodable {
+  struct Case: Decodable {
+    let entry: [String: String]
+    let valid: Bool
+    let arguments: [String]?
+  }
+  let cases: [Case]
 }

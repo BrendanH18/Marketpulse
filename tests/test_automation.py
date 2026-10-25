@@ -279,6 +279,7 @@ def test_desktop_bridge_hides_archived_accounts(tracker):
         {"id": old.saved_id, "name": "Old RRSP", "type": "NONREG", "revision": revision}
     ]
     assert payload["accounts"][0]["revision"] == active.revision(store.restore_id)
+    assert payload["accounts"][0]["registered"] is False  # NONREG: transfers into a TFSA need a price
     old.archived = False
     store.update_account(old)
     assert snapshot(tracker)["archived_accounts"] == []

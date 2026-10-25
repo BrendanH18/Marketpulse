@@ -199,8 +199,11 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
 
     elif t is TxnType.SPLIT:
         h = state.holdings.get((acct, txn.symbol))
-        if h:
-            h.quantity *= txn.ratio
+        if h is None or h.quantity <= EPSILON:
+            # Most likely the wrong account or date: flag it rather than drop it silently.
+            state.issues.append(LedgerIssue(txn.id, txn.date, f"Split of {txn.symbol} with nothing held"))
+            return
+        h.quantity *= txn.ratio
 
     elif t is TxnType.ROC:
         h = state.holdings.get((acct, txn.symbol))

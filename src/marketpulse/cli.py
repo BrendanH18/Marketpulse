@@ -148,7 +148,8 @@ def _date_callback(ctx: click.Context, param: click.Parameter, value: str | None
         raise click.BadParameter(str(e), ctx=ctx, param=param) from None
 
 
-def txn_options(f):
+def retryable(f):
+    """Add `--request-id`, so the app can retry a save without recording it twice."""
     original = f
 
     @wraps(original)
@@ -171,7 +172,13 @@ def txn_options(f):
         except ValueError as e:
             fail(str(e))
 
-    f = click.option("--request-id", type=click.UUID, help="Retry identity for a native transaction save.")(requested)
+    return click.option("--request-id", type=click.UUID, help="Retry identity for a native transaction save.")(
+        requested
+    )
+
+
+def txn_options(f):
+    f = retryable(f)
     f = click.option("-m", "--note", default="", help="Free-text note.")(f)
     f = click.option(
         "-d",
@@ -655,12 +662,13 @@ def dividend(app: App, symbol, amount, currency, account, when, note) -> None:
 @click.argument("symbol")
 @click.argument("quantity", type=float)
 @click.argument("price", type=float)
+@click.option("-c", "--currency", default="", help="Currency of PRICE (default: the listing's).")
 @txn_options
 @pass_app
-def drip(app: App, symbol, quantity, price, account, when, note) -> None:
+def drip(app: App, symbol, quantity, price, currency, account, when, note) -> None:
     """Record a reinvested dividend (new shares at PRICE)."""
     acct = app.account(account)
-    ccy, _ = app.tracker.resolve_currency(symbol, acct)
+    ccy = currency.upper() or app.tracker.resolve_currency(symbol, acct)[0]
     _record(
         app,
         Transaction(
@@ -735,6 +743,85 @@ def split(app: App, symbol, ratio, account, when, note) -> None:
     app.ok(f"Split {symbol.upper()} ×{ratio:g} in {acct.name}")
 
 
+def _warn_roc_gain(app: App, txn: Transaction, sym: str, *, account_book_exceeded: bool) -> None:
+    """Say whether a return of capital creates a capital gain, from the tax engine.
+
+    Tax pools the cost base across every taxable account, so this account's book
+    value alone can't tell. Only base-currency rates are known offline, so the
+    figure is exact only when every taxable entry for the symbol is in the base
+    currency (a missing rate can reach the cost base indirectly, e.g. through a
+    superficial loss). Otherwise point to `marketpulse tax` instead of guessing,
+    and only when this account's cost base ran out, to stay quiet.
+    """
+    from . import tax
+    from .ledger import transaction_currency
+
+    base = app.tracker.base
+    txns = app.store.transactions()
+    accounts = app.store.account_map()
+    exact = all(
+        transaction_currency(t, accounts).upper() == base
+        for t in txns
+        if t.symbol == sym
+        and (
+            tax.is_taxable(accounts.get(t.account_id))
+            or (t.target_account_id is not None and tax.is_taxable(accounts.get(t.target_account_id)))
+        )
+    )
+    if exact:
+        report = tax.compute(txns, accounts, tax.fx_lookup({}, base))
+        d = next((d for d in report.dispositions if d.txn_id == txn.id and d.kind == "roc"), None)
+        if d is None:
+            return
+        if d.complete:  # e.g. an unpriced transfer in leaves the cost base unknown
+            app.warn(
+                f"the pooled cost base of {sym} reached zero, so {fmt.money(d.gain)} {base} counts as a capital gain"
+            )
+            return
+    if account_book_exceeded:
+        app.warn(f"the cost base of {sym} here reached zero; `marketpulse tax` works out any capital gain")
+
+
+@main.command()
+@click.argument("symbol")
+@click.argument("amount", type=float)
+@click.option("-c", "--currency", default="", help="Currency of AMOUNT (default: the listing's).")
+@txn_options
+@pass_app
+def roc(app: App, symbol, amount, currency, account, when, note) -> None:
+    """Record a return of capital: AMOUNT paid out that lowers the cost base.
+
+    \b
+    Funds and ETFs report it in box 42 of the T3 slip. Once the cost base
+    reaches zero, the rest counts as a capital gain.
+    """
+    acct = app.account(account)
+    sym = symbol.upper()
+    day = when or date.today().isoformat()
+    txn = _record(
+        app,
+        Transaction(
+            account_id=acct.saved_id,
+            type=TxnType.ROC,
+            date=day,
+            symbol=sym,
+            amount=amount,
+            currency=currency.upper(),
+            note=note,
+        ),
+    )
+    state = app.store.ledger()
+    msg = f"Return of capital {fmt.money(amount)} {txn.currency} on {sym} in {acct.name} on {day}"
+    h = state.holdings.get((acct.saved_id, sym))
+    if h and h.quantity > EPSILON:
+        msg += f" · cost base now {fmt.money(h.book)} {h.currency}"
+    app.ok(msg)
+    if not acct.type.registered:
+        _warn_roc_gain(app, txn, sym, account_book_exceeded=any(r.txn_id == txn.id for r in state.realized))
+    if h is None or h.quantity <= EPSILON:
+        app.warn(f"{acct.name} holds no {sym} now; a return of capital only lowers the cost of shares held on its date")
+
+
 @main.command()
 @click.argument("symbol")
 @click.argument("quantity", type=float)
@@ -748,10 +835,12 @@ def split(app: App, symbol, ratio, account, when, note) -> None:
     help="Market value per unit on the transfer date. Needed for tax when moving between "
     "a taxable and a registered account (defaults to the live price when dated today).",
 )
+@click.option("-c", "--currency", default="", help="Currency of --price (default: the listing's).")
 @click.option("-d", "--date", "when", default=None, callback=_date_callback)
 @click.option("-m", "--note", default="")
+@retryable
 @pass_app
-def transfer(app: App, symbol, quantity, source, target, price, when, note) -> None:
+def transfer(app: App, symbol, quantity, source, target, price, currency, when, note) -> None:
     """Move shares between accounts (e.g. in-kind to a TFSA).
 
     \b
@@ -762,7 +851,7 @@ def transfer(app: App, symbol, quantity, source, target, price, when, note) -> N
     """
     src, dst = app.account(source), app.account(target)
     day = parse_date(when)
-    currency = ""
+    currency = currency.upper()
     # Only a move across the registered/taxable line has a tax effect.
     crosses = src.type.registered != dst.type.registered
     if price is None and crosses:
