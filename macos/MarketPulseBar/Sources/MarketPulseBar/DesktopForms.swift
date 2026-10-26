@@ -406,21 +406,30 @@ struct ImportSheet: View {
       title: "A clearer way to import",
       subtitle: model.importName.isEmpty ? "CSV import" : model.importName, model: model
     ) {
+      Picker("Broker format", selection: $model.importProfile) {
+        ForEach(ImportProfile.all) { Text($0.label).tag($0.id) }
+      }.onChange(of: model.importProfile) { _, _ in model.importPreview = nil }.disabled(model.saving)
       Picker("Default account for rows without one", selection: $model.importAccount) {
         Text("Use accounts named in the CSV").tag("")
         ForEach(model.desktop?.accounts ?? []) { Text($0.name).tag(String($0.id)) }
-      }.onChange(of: model.importAccount) { _, _ in model.importPreview = nil }
+      }.onChange(of: model.importAccount) { _, _ in model.importPreview = nil }.disabled(model.saving)
       Button("Preview import") { Task { await model.previewImport() } }.disabled(model.saving)
       if let preview = model.importPreview {
+        if let label = preview.profileLabel {
+          Text(model.importProfile == "auto" ? "Detected format: \(label)" : "Read as: \(label)")
+            .font(.callout).foregroundStyle(.secondary)
+        }
         HStack(spacing: 24) {
           previewCount("New entries", preview.added)
           previewCount("Duplicates", preview.duplicates)
           previewCount("Skipped", preview.skipped.count)
-        }.padding(.vertical, 14)
+        }.padding(.vertical, 8)
         if !preview.accountsCreated.isEmpty {
           Text("New accounts: \(preview.accountsCreated.joined(separator: ", "))").font(.callout)
         }
-        if !preview.skipped.isEmpty {
+        if let issues = preview.issues, !issues.isEmpty {
+          skippedTable(issues)
+        } else if !preview.skipped.isEmpty {
           ScrollView {
             VStack(alignment: .leading, spacing: 8) {
               ForEach(preview.skipped) { issue in
@@ -429,12 +438,17 @@ struct ImportSheet: View {
             }
           }.frame(maxHeight: 160)
         }
+        if let duplicates = preview.duplicateRows, !duplicates.isEmpty {
+          duplicateList(duplicates)
+        }
         Text(
           "Only valid new rows will be imported. Skipped rows stay out of the ledger. A safety backup is taken before the import."
         ).font(.caption).foregroundStyle(.secondary)
       } else {
-        Text("Preview maps your CSV columns and checks for duplicates without changing the ledger.")
-          .font(.callout).foregroundStyle(.secondary).padding(.vertical, 16)
+        Text(
+          "Preview reads your broker's export, checks for duplicates, and lists any rows it can't use, without changing the ledger."
+        )
+        .font(.callout).foregroundStyle(.secondary).padding(.vertical, 16)
       }
       HStack {
         Button("Cancel") { model.closeImport() }.keyboardShortcut(.cancelAction).disabled(
@@ -449,6 +463,49 @@ struct ImportSheet: View {
       }
     }
   }
+
+  private var privacy: Bool { model.status?.privacy ?? false }
+
+  /// Each skipped line with the field at fault, its value, and why, so the file can be fixed.
+  private func skippedTable(_ issues: [ImportRowIssue]) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text("Skipped lines").font(.callout.weight(.semibold))
+      ScrollView {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 6) {
+          GridRow {
+            Text("Line")
+            Text("Field")
+            Text("Value")
+            Text("Reason")
+          }.font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+          ForEach(issues) { issue in
+            GridRow {
+              Text("\(issue.line)").monospacedDigit()
+              Text(issue.field.isEmpty ? "—" : issue.field)
+              // Values come from the file and may be amounts; privacy mode hides them.
+              Text(issue.value.isEmpty ? "—" : privacy ? Format.mask : issue.value)
+                .lineLimit(1).truncationMode(.middle).frame(maxWidth: 110, alignment: .leading)
+              Text(issue.reason).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
+            }
+          }
+        }.font(.caption).textSelection(.enabled)
+      }.frame(maxHeight: 180)
+    }
+  }
+
+  private func duplicateList(_ duplicates: [ImportDuplicate]) -> some View {
+    DisclosureGroup("Duplicates already in the ledger (\(duplicates.count))") {
+      VStack(alignment: .leading, spacing: 4) {
+        ForEach(duplicates.prefix(20)) { row in
+          Text(privacy ? "Line \(row.line)" : "Line \(row.line): \(row.summary)")
+        }
+        if duplicates.count > 20 {
+          Text("…and \(duplicates.count - 20) more").foregroundStyle(.secondary)
+        }
+      }.font(.caption).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
+    }.font(.callout)
+  }
+
   private func previewCount(_ title: String, _ count: Int) -> some View {
     VStack(alignment: .leading, spacing: 6) {
       Text("\(count)").font(.title2).monospacedDigit()

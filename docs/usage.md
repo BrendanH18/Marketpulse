@@ -116,11 +116,33 @@ marketpulse import activities.csv --account "My TFSA"
 marketpulse export ledger.csv
 ```
 
-The importer recognizes common broker header and transaction-type aliases.
-`date` and `type` are required; other fields depend on the transaction type.
-See [the sample CSV](../examples/transactions.csv) for the canonical columns.
-Unsupported or invalid rows are skipped with reasons, and matching transactions
-are counted as duplicates. Always review the summary and skipped rows.
+The importer reads each file through a **broker profile**, detected from the
+header row. `--profile` chooses one explicitly; a named profile refuses a file
+that doesn't have its columns.
+
+| Profile | File | Notes |
+| --- | --- | --- |
+| `questrade` | Questrade account activity export, saved as CSV | A dividend reinvestment is imported as a buy, since its dividend is a separate row. Rows name their account: new accounts are called `Questrade <account type> <account number>` (e.g. `Questrade Individual TFSA 90001234`). Create an account with that exact name first to choose its type and currency. |
+| `wealthsimple` | Wealthsimple monthly statement CSV (`date,transaction,description,amount,balance,currency`) | One account per file, so pass `--account`. The symbol and share count are read from the description. Statements give bare tickers: a CAD trade without an FX rate is assumed to be on the TSX (`XEQT` → `XEQT.TO`, `RCI.B` → `RCI-B.TO`); edit NEO or CSE listings afterwards. A dividend paid in CAD doesn't say which listing it is for, so it goes to whichever of the two (`XEQT.TO` or `XEQT`) the account already holds, in the ledger or earlier in the file; if it holds neither or both, the row is skipped for you to record. A US stock bought with conversion is recorded at the CAD price paid. |
+| `generic` | Anything else, including MarketPulse's own export | Maps common column names and transaction words. `date` and `type` are required; other fields depend on the transaction type. See [the sample CSV](../examples/transactions.csv). |
+
+```bash
+marketpulse import activity.csv --dry-run                       # Questrade, detected
+marketpulse import statement.csv --account "WS TFSA" --profile wealthsimple --dry-run
+```
+
+Broker profiles translate the broker's own codes through a table and never
+guess. Rows they can't represent are skipped with a reason: transfers between
+institutions, currency conversions, corporate actions, withholding tax, and any
+amount with the wrong sign for its type (a reversal or correction). Record those
+by hand. Broker formats change; if rows you expected are skipped, preview with
+`--profile generic` or rename the columns to MarketPulse's own.
+
+Every skipped row is listed with its line, the field at fault, its value, and
+what was expected (`line 4, date '2024-13-01': Invalid date…`). Rows that match
+a transaction already in the ledger are counted as duplicates, with the first
+few shown, so importing the same export twice adds nothing. Always preview and
+review the summary first.
 
 An account column takes precedence over the fallback account. Named accounts
 can be created during a real import unless `--no-create-accounts` is supplied.

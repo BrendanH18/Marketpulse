@@ -697,3 +697,30 @@ def test_transaction_form_commands_record_what_the_app_shows(cli, store):
     held = {key: h.quantity for key, h in state.holdings.items() if h.quantity}
     assert held == {(2, "XEQT.TO"): 19.5, (1, "XEQT.TO"): 0.75, (3, "XEQT.TO"): 1}
     assert state.holdings[(2, "XEQT.TO")].book == pytest.approx((300 + 15.5) * 6.5 / 10.5 - 12.5)
+
+
+BROKERS = Path(__file__).parent / "fixtures" / "brokers"
+QUESTRADE = BROKERS / "questrade.csv"
+WEALTHSIMPLE = BROKERS / "wealthsimple.csv"
+
+
+def test_cli_import_names_the_profile_and_each_skipped_field(cli, store):
+    result = cli("import", str(QUESTRADE), "--dry-run")
+    assert result.exit_code == 0, result.output
+    assert "Would import 8 transaction(s); 0 duplicate(s) skipped. (Questrade)" in result.output
+    assert "line 6, amount '-22.00': negative amount on a DIVIDEND" in result.output
+    assert "line 8, type 'FX conversion': currency conversions aren't imported" in result.output
+    assert store.transactions() == []
+    wrong = cli("import", str(QUESTRADE), "--profile", "wealthsimple")
+    assert wrong.exit_code == 1 and "doesn't look like a Wealthsimple export" in wrong.output
+    assert "questrade" in cli("import", "--help").output
+
+
+def test_desktop_import_reports_profile_issues_and_duplicates(cli, store):
+    cli("accounts", "add", "WS TFSA", "-t", "TFSA")
+    first = json.loads(cli("desktop", "import", "--profile", "wealthsimple", "--", str(WEALTHSIMPLE)).output)
+    assert (first["profile"], first["profile_label"], first["added"]) == ("wealthsimple", "Wealthsimple", 7)
+    assert first["issues"][0] == {"line": 6, "field": "type", "value": "NRT", "reason": first["skipped"][0][1]}
+    again = json.loads(cli("desktop", "import", "--dry-run", "--", str(WEALTHSIMPLE)).output)
+    assert again["duplicates"] == 7
+    assert again["duplicate_rows"][0] == {"line": 2, "summary": "2025-01-02 DEPOSIT 5,000.00 CAD · WS TFSA"}

@@ -1579,7 +1579,7 @@ class MarketPulseApp(App):
             PromptScreen(
                 "Import transactions from CSV",
                 "~/Downloads/activities.csv",
-                hint="Recognizes common broker columns; duplicates are skipped.",
+                hint="Detects Questrade and Wealthsimple exports and common columns; duplicates are skipped.",
             ),
             done,
         )
@@ -1597,6 +1597,8 @@ class MarketPulseApp(App):
             self.call_from_thread(self.notify, str(e), title="Import failed", severity="error")
             return
         message = f"Imported {result.added} · {result.duplicates} duplicates · {len(result.skipped)} skipped"
+        if result.profile != "generic":
+            message = f"{result.profile_label}: {message}"
         if result.backup is not None:
             # Same safety net as the CLI: name the file that undoes this import.
             message += f"\nbackup: {result.backup.name}"

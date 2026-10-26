@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import hashlib
 import io
 import json
@@ -22,6 +21,7 @@ from rich.text import Text
 from rich.theme import Theme as RichTheme
 
 from . import __version__, fmt, render
+from .brokers import PROFILE_NAMES
 from .config import Config, config_path
 from .market import BARS_PER_YEAR, PERIOD_INTERVALS, PERIODS, MarketError
 from .models import (
@@ -43,6 +43,7 @@ from .tax import TaxReport
 from .themes import OMARCHY_PALETTES, omarchy_active, pretty_name, resolve_palette, rich_styles
 
 if TYPE_CHECKING:  # for annotations only; the real imports stay lazy
+    from .csvio import RowIssue
     from .db import Store
     from .services import Tracker
 
@@ -1554,46 +1555,76 @@ def backfill(app: App) -> None:
     app.ok(f"Rebuilt {n:,} daily snapshots.")
 
 
-def _import_default(app: App, account: str | None, path: Path) -> Account | None:
-    """Account for rows without one. A file with its own account column gets no default,
+def _import_default(app: App, account: str | None, path: Path, profile: str) -> Account | None:
+    """Account for rows without one. A file whose rows name their own account gets no default,
     so rows are never silently filed into whichever account happens to be first."""
-    from .csvio import map_headers
+    from .brokers import names_accounts, resolve
+    from .csvio import read_headers
 
     if account:
         return app.account(account)
-    with path.open(encoding="utf-8-sig", newline="") as f:
-        headers = next(csv.reader(f), [])
-    return None if "account" in map_headers(headers) else app.account(None)
+    headers = read_headers(path.read_text(encoding="utf-8-sig"))
+    return None if names_accounts(resolve(profile, headers), headers) else app.account(None)
+
+
+def _import_line(issue: RowIssue) -> str:
+    where = f"line {issue.line}"
+    if issue.field:
+        where += f", {issue.field}" + (f" '{issue.value}'" if issue.value else "")
+    return f"{where}: {issue.reason}"
 
 
 @main.command("import")
 @click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("-a", "--account", default=None, help="Account for rows without an account column.")
+@click.option(
+    "--profile",
+    type=click.Choice(PROFILE_NAMES),
+    default="auto",
+    show_default=True,
+    help="Broker export format; auto detects it from the header row.",
+)
 @click.option("--dry-run", is_flag=True)
 @click.option("--no-create-accounts", is_flag=True)
 @pass_app
-def import_cmd(app: App, path: Path, account, dry_run, no_create_accounts) -> None:
-    """Import transactions from a broker or MarketPulse CSV."""
+def import_cmd(app: App, path: Path, account, profile, dry_run, no_create_accounts) -> None:
+    """Import transactions from a broker or MarketPulse CSV.
+
+    \b
+    Profiles:
+      questrade     Questrade account activity export
+      wealthsimple  Wealthsimple monthly statement CSV
+      generic       common column names (any other file)
+    """
     from .csvio import import_transactions
 
-    default = _import_default(app, account, path)
     try:
+        default = _import_default(app, account, path, profile)
         result = import_transactions(
-            app.store, path, default_account=default, create_accounts=not no_create_accounts, dry_run=dry_run
+            app.store,
+            path,
+            default_account=default,
+            create_accounts=not no_create_accounts,
+            dry_run=dry_run,
+            profile=profile,
         )
     except ValueError as e:
         fail(str(e))
     verb = "Would import" if dry_run else "Imported"
-    app.ok(f"{verb} {result.added} transaction(s); {result.duplicates} duplicate(s) skipped.")
+    app.ok(f"{verb} {result.added} transaction(s); {result.duplicates} duplicate(s) skipped. ({result.profile_label})")
     if result.backup is not None:
         # Tell the user how to undo the whole import, not just the last row.
         app.console.print(Text(f"  pre-import backup: {result.backup}", style="muted"))
     for name in result.accounts_created:
         app.warn(f"created account {name}")
-    for line, reason in result.skipped[:15]:
-        app.warn(f"line {line}: {reason}")
-    if len(result.skipped) > 15:
-        app.warn(f"…and {len(result.skipped) - 15} more skipped rows")
+    for dup in result.duplicate_rows[:5]:
+        app.console.print(Text(f"  duplicate, line {dup.line}: {dup.summary}", style="muted"))
+    if len(result.duplicate_rows) > 5:
+        app.console.print(Text(f"  …and {len(result.duplicate_rows) - 5} more duplicates", style="muted"))
+    for issue in result.issues[:15]:
+        app.warn(_import_line(issue))
+    if len(result.issues) > 15:
+        app.warn(f"…and {len(result.issues) - 15} more skipped rows")
 
 
 @main.command("export")
@@ -1973,24 +2004,26 @@ def desktop_install(app: App) -> None:
 @desktop.command("import")
 @click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("--account", type=str)
+@click.option("--profile", type=click.Choice(PROFILE_NAMES), default="auto")
 @click.option("--dry-run", is_flag=True)
 @click.option("--expect-fingerprint", help="Commit only if nothing changed since the preview that returned this.")
 @click.pass_obj
-def desktop_import(app: App, path: Path, account: str | None, dry_run: bool, expect_fingerprint: str | None) -> None:
+def desktop_import(
+    app: App, path: Path, account: str | None, profile: str, dry_run: bool, expect_fingerprint: str | None
+) -> None:
     """Preview or import CSV, returning a structured result for the app."""
     from dataclasses import asdict
 
-    from .csvio import import_transactions
+    from .brokers import names_accounts, resolve
+    from .csvio import import_transactions, read_headers
 
     try:
         # Preview must never create a default account in the user's ledger.
-        from .csvio import map_headers
-
-        headers = next(csv.reader(io.StringIO(path.read_text(encoding="utf-8-sig"))), [])
+        headers = read_headers(path.read_text(encoding="utf-8-sig"))
         default = app.store.get_account(account) if account else None
         if account and default is None:
             raise ValueError("Selected account no longer exists.")
-        if not account and "account" not in map_headers(headers):
+        if not account and not names_accounts(resolve(profile, headers), headers):
             accounts = app.store.accounts()
             if not accounts:
                 raise ValueError("Create an account first, or use a CSV with an account column.")
@@ -1999,7 +2032,12 @@ def desktop_import(app: App, path: Path, account: str | None, dry_run: bool, exp
             default = accounts[0]
         result = asdict(
             import_transactions(
-                app.store, path, default_account=default, dry_run=dry_run, expect_fingerprint=expect_fingerprint
+                app.store,
+                path,
+                default_account=default,
+                dry_run=dry_run,
+                expect_fingerprint=expect_fingerprint,
+                profile=profile,
             )
         )
         if result["backup"] is not None:

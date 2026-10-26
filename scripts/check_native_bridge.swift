@@ -113,6 +113,21 @@ struct NativeBridgeCheck {
     precondition(result.added == 2 && result.duplicates == 1)
     precondition(result.skipped.first?.line == 4 && result.skipped.first?.reason == "Invalid date")
     precondition(result.accountsCreated == ["TFSA"] && result.backup == nil && result.fingerprint == "abc")
+    precondition(result.profile == nil && result.issues == nil && result.duplicateRows == nil)  // an older engine
+    // A real Questrade preview from the CLI, after the same file was imported once.
+    let broker = try decoder.decode(
+      ImportPreview.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[10])))
+    precondition(broker.profile == "questrade" && broker.profileLabel == "Questrade")
+    precondition(broker.added == 0 && broker.duplicates == 8 && broker.duplicateRows?.count == 8)
+    let firstDuplicate = broker.duplicateRows?.first
+    precondition(firstDuplicate?.line == 2 && firstDuplicate?.summary.contains("DEPOSIT") == true)
+    let issues = broker.issues ?? []
+    precondition(issues.map(\.line) == broker.skipped.map(\.line))
+    precondition(issues.map(\.reason) == broker.skipped.map(\.reason))
+    precondition(issues.first?.field == "amount" && issues.first?.value == "-22.00")
+    let profileIds = try JSONDecoder().decode(
+      [String].self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[11])))
+    precondition(ImportProfile.all.map(\.id) == profileIds, "Import profiles differ from the engine's")
     precondition(CurrencyInput.normalize(" usd\n") == "USD" && CurrencyInput.isValid("USD"))
     precondition(!CurrencyInput.isValid("12$") && !CurrencyInput.isValid("CA") && !CurrencyInput.isValid("ÉUR"))
     precondition(Format.money(12345, "CAD", privacy: true) == Format.mask)
@@ -205,7 +220,7 @@ struct NativeBridgeCheck {
     precondition(TransactionEntry.types.count == 11 && TransactionEntry.editableTypes.count == 7)
     precondition(TransactionEntry.label("ROC") == "ROC" && TransactionEntry.label("TRANSFER") == "Transfer")
     print(
-      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, activity values, import result, privacy formatting, number entry, editable numbers and dates, transaction save recovery, transaction form commands"
+      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, activity values, import result, broker import preview and profiles, privacy formatting, number entry, editable numbers and dates, transaction save recovery, transaction form commands"
     )
   }
 }

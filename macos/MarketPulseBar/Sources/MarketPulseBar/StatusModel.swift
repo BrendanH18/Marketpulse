@@ -29,6 +29,7 @@ final class StatusModel: ObservableObject {
   @Published var importName = ""
   @Published var importPreview: ImportPreview?
   @Published var importAccount = ""
+  @Published var importProfile = "auto"
   @Published var showImport = false
   @Published var hotKeyEnabled: Bool {
     didSet {
@@ -551,11 +552,12 @@ final class StatusModel: ObservableObject {
     importURL = nil
     importPreview = nil
     importAccount = ""
+    importProfile = "auto"
     showImport = false
   }
 
   private var importArguments: [String] {
-    importAccount.isEmpty ? [] : ["--account", importAccount]
+    (importAccount.isEmpty ? [] : ["--account", importAccount]) + ["--profile", importProfile]
   }
 
   func previewImport() async {
@@ -563,13 +565,21 @@ final class StatusModel: ObservableObject {
     saving = true
     importPreview = nil
     defer { saving = false }
+    let arguments = importArguments
+    // A preview answers for the file, broker format and account it was run with; if any of
+    // them changed while it ran, its result (or error) no longer describes the sheet.
+    var current: Bool { importURL == url && importArguments == arguments }
     do {
-      let data = try await CLI.run(["desktop", "import", "--dry-run"] + importArguments + ["--", url.path])
+      let data = try await CLI.run(["desktop", "import", "--dry-run"] + arguments + ["--", url.path])
       let decoder = JSONDecoder()
       decoder.keyDecodingStrategy = .convertFromSnakeCase
-      importPreview = try decoder.decode(ImportPreview.self, from: data)
+      let preview = try decoder.decode(ImportPreview.self, from: data)
+      guard current else { return }
+      importPreview = preview
       errorMessage = nil
-    } catch { errorMessage = error.localizedDescription }
+    } catch {
+      if current { errorMessage = error.localizedDescription }
+    }
   }
 
   func commitImport() async {

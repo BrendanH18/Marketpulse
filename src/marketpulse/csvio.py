@@ -1,8 +1,9 @@
 """CSV import/export of the transaction ledger.
 
-The importer maps common broker column names (Wealthsimple, Questrade, IBKR
-and generic exports use variations of these) onto MarketPulse transactions.
-Anything it can't interpret is skipped with a reason rather than guessed.
+The importer reads a file through a broker profile (`brokers.py`): a named one for
+exports it recognizes (Questrade, Wealthsimple), or the generic one, which maps common
+column names onto MarketPulse transactions. Anything it can't interpret is skipped
+with the line, the field and a reason rather than guessed.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import io
 import json
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -21,7 +22,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, TextIO
 
+from . import brokers
 from .analytics import disposition_note
+from .brokers import RowError, map_headers, parse_number
 from .models import Account, AccountType, Transaction, TxnType, guess_currency, parse_date
 
 if TYPE_CHECKING:
@@ -43,21 +46,6 @@ EXPORT_COLUMNS = [
     "target_account",
 ]
 
-_ALIASES = {
-    "date": ["date", "trade date", "transaction date", "settlement date", "process date", "activity date", "tradedate"],
-    "type": ["type", "action", "transaction type", "activity type", "activity", "transaction", "buy/sell"],
-    "symbol": ["symbol", "ticker", "security", "instrument", "stock symbol"],
-    "quantity": ["quantity", "qty", "shares", "units", "no. of shares"],
-    "price": ["price", "unit price", "price per share", "trade price", "t. price"],
-    "amount": ["amount", "net amount", "value", "total", "net cash", "proceeds", "gross amount", "market value"],
-    "fees": ["fees", "fee", "commission", "commissions", "comm/fee", "comm in usd"],
-    "currency": ["currency", "ccy", "curr"],
-    "account": ["account", "account name", "account type", "account #", "account number"],
-    "note": ["note", "notes", "description", "memo", "details"],
-    "ratio": ["ratio", "split ratio"],
-    "target_account": ["target_account", "target account", "to account"],
-}
-
 _TYPE_KEYWORDS = [
     (("reinvest", "drip"), TxnType.DRIP),
     (("return of capital", "roc"), TxnType.ROC),
@@ -75,44 +63,53 @@ _TYPE_KEYWORDS = [
 
 
 @dataclass
+class RowIssue:
+    """A skipped line: which field was at fault (empty if no single one), its value, and why."""
+
+    line: int
+    field: str
+    value: str
+    reason: str
+
+
+@dataclass
+class DuplicateRow:
+    """A line matching a transaction already in the ledger, so it was left out."""
+
+    line: int
+    summary: str
+
+
+@dataclass
 class ImportResult:
     added: int = 0
     duplicates: int = 0
-    skipped: list[tuple[int, str]] = field(default_factory=list)
+    skipped: list[tuple[int, str]] = field(default_factory=list)  # (line, reason); `issues` has the detail
     accounts_created: list[str] = field(default_factory=list)
     backup: Path | None = None  # pre-import snapshot of the database (None on a dry run)
     fingerprint: str = ""  # the import's inputs; pass to `expect_fingerprint` to commit exactly a preview
+    profile: str = brokers.GENERIC.name  # the broker profile that read the file
+    profile_label: str = brokers.GENERIC.label
+    issues: list[RowIssue] = field(default_factory=list)  # one per skipped line, in the same order
+    duplicate_rows: list[DuplicateRow] = field(default_factory=list)
 
 
-def _norm(header: str) -> str:
-    return re.sub(r"\s+", " ", header.strip().lower().replace("_", " "))
+# Which field a `Transaction.validate()` message is about.
+_VALIDATION_FIELDS = [
+    ("symbol", "symbol"),
+    ("quantity", "quantity"),
+    ("price", "price"),
+    ("amount", "amount"),
+    ("fees", "fees"),
+    ("split ratio", "ratio"),
+    ("transfer", "target_account"),
+    ("date", "date"),
+]
 
 
-def map_headers(headers: list[str]) -> dict[str, str]:
-    """Map MarketPulse field names onto the CSV's actual column headers."""
-    normalized = {_norm(h): h for h in headers}
-    mapping = {}
-    for field_name, aliases in _ALIASES.items():
-        for alias in aliases:
-            if _norm(alias) in normalized:
-                mapping[field_name] = normalized[_norm(alias)]
-                break
-    return mapping
-
-
-def _number(raw: str | None) -> float | None:
-    if raw is None:
-        return None
-    s = raw.strip().replace(",", "").replace("$", "").replace("€", "").replace("£", "")
-    if not s or s in {"-", "—"}:
-        return None
-    neg = s.startswith("(") and s.endswith(")")
-    s = s.strip("()")
-    try:
-        v = float(s)
-    except ValueError:
-        return None
-    return -v if neg else v
+def _validation_field(message: str) -> str:
+    lowered = message.lower()
+    return next((f for word, f in _VALIDATION_FIELDS if word in lowered), "")
 
 
 def parse_type(raw: str) -> TxnType | None:
@@ -234,19 +231,28 @@ def import_transactions(
     create_accounts: bool = True,
     dry_run: bool = False,
     expect_fingerprint: str | None = None,
+    profile: str = "auto",
 ) -> ImportResult:
     """Import (or preview) CSV rows. A commit given `expect_fingerprint` from its preview
-    refuses to write anything if the file or the ledger changed in between."""
+    refuses to write anything if the file or the ledger changed in between. `profile` names
+    a broker profile from `brokers.PROFILES`; "auto" picks one from the header row."""
     text = Path(source).read_text(encoding="utf-8-sig") if isinstance(source, Path | str) else source.read()
     if not dry_run:
         # One transaction from the check to the last write: no other process can change the
         # ledger in between, and a failure leaves no half-import (or new accounts) behind.
         with store.transaction():
             default_account = _reread(store, default_account)
-            fingerprint = import_fingerprint(store, text, default_account, create_accounts)
+            fingerprint = import_fingerprint(store, text, default_account, create_accounts, profile)
             if expect_fingerprint is not None and expect_fingerprint != fingerprint:
                 raise ValueError("The ledger or the file changed since the preview. Preview the import again.")
-            result = _import(store, text, default_account=default_account, create_accounts=create_accounts, backup=True)
+            result = _import(
+                store,
+                text,
+                default_account=default_account,
+                create_accounts=create_accounts,
+                profile=profile,
+                backup=True,
+            )
         result.fingerprint = fingerprint
         return result
     # A preview runs the real import against a throwaway copy of the ledger, so its
@@ -259,9 +265,14 @@ def import_transactions(
             # Use the exact copy the preview runs on, not the live ledger (or the caller's
             # account object) as it was a moment earlier.
             default_account = _reread(scratch, default_account)
-            fingerprint = import_fingerprint(scratch, text, default_account, create_accounts)
+            fingerprint = import_fingerprint(scratch, text, default_account, create_accounts, profile)
             result = _import(
-                scratch, text, default_account=default_account, create_accounts=create_accounts, backup=False
+                scratch,
+                text,
+                default_account=default_account,
+                create_accounts=create_accounts,
+                profile=profile,
+                backup=False,
             )
         finally:
             scratch.close()
@@ -279,12 +290,15 @@ def _reread(store: Store, account: Account | None) -> Account | None:
     return current
 
 
-def import_fingerprint(store: Store, text: str, default_account: Account | None, create_accounts: bool) -> str:
+def import_fingerprint(
+    store: Store, text: str, default_account: Account | None, create_accounts: bool, profile: str = "auto"
+) -> str:
     """Everything an import's outcome depends on: the file, the options, the ledger, and the
     day (dates in the future are rejected, so a preview from yesterday may no longer hold)."""
     inputs = {
         "today": date.today().isoformat(),
         "csv": text,
+        "profile": profile,
         "default_account": default_account.id if default_account else None,
         "create_accounts": create_accounts,
         "accounts": [asdict(a) for a in store.accounts(include_archived=True)],
@@ -293,20 +307,44 @@ def import_fingerprint(store: Store, text: str, default_account: Account | None,
     return hashlib.sha256(json.dumps(inputs, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def read_headers(text: str) -> list[str]:
+    return next(csv.reader(io.StringIO(text)), [])
+
+
+def _row_reader(profile: brokers.BrokerProfile, headers: list[str]) -> Callable[[dict], dict[str, str]]:
+    """A function from one CSV row to the importer's canonical fields."""
+    convert = profile.convert
+    if convert is None:
+        cols = map_headers(headers)
+        missing = [f for f in ("date", "type") if f not in cols]
+        if missing:
+            raise ValueError(f"CSV is missing required column(s): {', '.join(missing)}. Found: {', '.join(headers)}")
+        return lambda row: {name: (row.get(col) or "").strip() for name, col in cols.items()}
+    # Short rows leave None values and long ones a None key; profiles see normalized headers.
+    return lambda row: convert({brokers.norm(k): v or "" for k, v in row.items() if isinstance(k, str)})
+
+
+def _summary(txn: Transaction, account: str) -> str:
+    """One line describing a transaction, for duplicate reports."""
+    if txn.type.uses_quantity:
+        what = f"{txn.quantity:g} {txn.symbol} @ {txn.price:g}"
+    elif txn.type.uses_amount:
+        what = f"{txn.symbol} {txn.amount:,.2f}".strip()
+    else:
+        what = txn.symbol
+    return f"{txn.date} {txn.type.value} {what} {txn.currency} · {account}"
+
+
 def _import(
-    store: Store, text: str, *, default_account: Account | None, create_accounts: bool, backup: bool
+    store: Store, text: str, *, default_account: Account | None, create_accounts: bool, profile: str, backup: bool
 ) -> ImportResult:
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames:
         raise ValueError("CSV has no header row.")
-    cols = map_headers(list(reader.fieldnames))
-    missing = [f for f in ("date", "type") if f not in cols]
-    if missing:
-        raise ValueError(
-            f"CSV is missing required column(s): {', '.join(missing)}. Found: {', '.join(reader.fieldnames)}"
-        )
+    broker = brokers.resolve(profile, list(reader.fieldnames))
+    fields_of = _row_reader(broker, list(reader.fieldnames))
 
-    result = ImportResult()
+    result = ImportResult(profile=broker.name, profile_label=broker.label)
     if backup:
         # An import can add hundreds of rows (and new accounts) in one go, and
         # a mis-mapped CSV is easy to do. Snapshot the ledger first so the
@@ -314,19 +352,21 @@ def _import(
         # the loop because resolve_account() may already write.
         result.backup = store.backup(reason="import")
 
+    def key_of(account_id: int, when: str, kind: TxnType, symbol: str, qty: float, price: float, cash: float) -> tuple:
+        return (account_id, when, kind, symbol, round(qty, 6), round(price, 6), round(cash, 2))
+
     def key(t: Transaction) -> tuple:
-        return (t.account_id, t.date, t.type, t.symbol, round(t.quantity, 6), round(t.price, 6), round(t.amount, 2))
+        return key_of(t.account_id, t.date, t.type, t.symbol, t.quantity, t.price, t.amount)
 
     # A multiset: each file row consumes one matching stored row, so re-importing the
     # same export is a no-op while genuine repeated fills (two identical partial
     # executions on one day) are all kept.
-    existing = Counter(key(t) for t in store.transactions())
+    stored = store.transactions()
+    existing = Counter(key(t) for t in stored)
+    # Symbols each account has entries for, in the ledger or earlier in this file.
+    held = {(t.account_id, t.symbol) for t in stored} | {(t.target_account_id, t.symbol) for t in stored}
     pending: list[Transaction] = []
     created: list[Account] = []
-
-    def get(row: dict, name: str) -> str:
-        col = cols.get(name)
-        return (row.get(col) or "").strip() if col else ""
 
     def resolve_account(name: str) -> Account | None:
         if not name:
@@ -340,41 +380,56 @@ def _import(
             created.append(acct)
         return acct
 
-    for line_no, row in enumerate(reader, start=2):
-        txn_type = parse_type(get(row, "type"))
+    def magnitude(fields: dict[str, str], name: str) -> float:
+        # Brokers sign quantities and amounts by direction; the type already says which way.
+        return abs(parse_number(fields.get(name), name) or 0.0)
+
+    def build(fields: dict[str, str]) -> tuple[Transaction, Account]:
+        def get(name: str) -> str:
+            return (fields.get(name) or "").strip()
+
+        txn_type = parse_type(get("type"))
         if txn_type is None:
-            result.skipped.append((line_no, f"unrecognized type '{get(row, 'type')}'"))
-            continue
+            raise RowError(f"unrecognized type '{get('type')}'", "type", get("type"))
+        raw_date = get("date")
         try:
-            when = parse_date(get(row, "date")[:10] if re.match(r"\d{4}", get(row, "date")) else get(row, "date"))
+            when = parse_date(raw_date[:10] if re.match(r"\d{4}", raw_date) else raw_date)
         except ValueError as e:
-            result.skipped.append((line_no, str(e)))
-            continue
-        acct = resolve_account(get(row, "account"))
+            raise RowError(str(e), "date", raw_date) from None
+        acct = resolve_account(get("account"))
         if acct is None or acct.id is None:
-            result.skipped.append(
-                (line_no, f"unknown account '{get(row, 'account')}'" if get(row, "account") else "no account")
+            raise RowError(
+                f"unknown account '{get('account')}'" if get("account") else "no account", "account", get("account")
             )
-            continue
         # Archived accounts are closed to new entries; their rows would vanish from view.
         if acct.archived:
-            result.skipped.append((line_no, f"account '{acct.name}' is archived"))
-            continue
-        symbol = get(row, "symbol").upper()
-        qty = abs(_number(get(row, "quantity")) or 0.0)
-        price = abs(_number(get(row, "price")) or 0.0)
-        amount = abs(_number(get(row, "amount")) or 0.0)
-        fees = abs(_number(get(row, "fees")) or 0.0)
-        if txn_type in (TxnType.BUY, TxnType.SELL) and not price and qty and amount:
-            price = amount / qty
-        if txn_type.uses_amount and not amount and qty and price:
-            amount = qty * price
+            raise RowError(f"account '{acct.name}' is archived", "account", get("account"))
+        symbol = get("symbol").upper()
+        qty, price, cash, fees = (magnitude(fields, f) for f in ("quantity", "price", "amount", "fees"))
+        ratio = parse_number(get("ratio"), "ratio") or 0.0
+        if txn_type in (TxnType.BUY, TxnType.SELL) and not price and qty and cash:
+            price = cash / qty
+        if txn_type.uses_amount and not cash and qty and price:
+            cash = qty * price
+        if choices := get("symbol_choices").upper().split():
+            # A row imported before under one of its listings is that listing (a re-import
+            # finds the duplicate); otherwise it is the one listing the account holds.
+            stored = [c for c in choices if existing[key_of(acct.id, when, txn_type, c, qty, price, cash)] > 0]
+            matches = stored or [c for c in choices if (acct.id, c) in held]
+            if len(matches) != 1:
+                listed = " or ".join(choices)
+                found = "both" if matches else "neither"
+                raise RowError(
+                    f"can't tell whether this is {listed}: the account holds {found}; record it by hand",
+                    "symbol",
+                    get("symbol"),
+                )
+            symbol = matches[0]
         # Only transfers have a destination; other rows never create one.
-        target_name = get(row, "target_account") if txn_type is TxnType.TRANSFER else ""
+        target_name = get("target_account") if txn_type is TxnType.TRANSFER else ""
         target = resolve_account(target_name) if target_name else None
         if target is not None and target.archived:
-            result.skipped.append((line_no, f"account '{target.name}' is archived"))
-            continue
+            raise RowError(f"account '{target.name}' is archived", "target_account", target_name)
         txn = Transaction(
             account_id=acct.id,
             type=txn_type,
@@ -382,27 +437,39 @@ def _import(
             symbol=symbol,
             quantity=qty,
             price=price,
-            amount=amount,
+            amount=cash,
             fees=fees,
-            currency=get(row, "currency").upper()
-            or (guess_currency(symbol, acct.currency) if symbol else acct.currency),
-            note=get(row, "note"),
-            ratio=_number(get(row, "ratio")) or 0.0,
+            currency=get("currency").upper() or (guess_currency(symbol, acct.currency) if symbol else acct.currency),
+            note=get("note"),
+            ratio=ratio,
             target_account_id=target.id if target else None,
         )
         try:
             txn.validate()
             if txn_type.uses_amount and txn.amount <= 0:
-                raise ValueError(f"{txn_type.value} row has no amount")
+                raise RowError(f"{txn_type.value} row has no amount", "amount", get("amount"))
+        except RowError:
+            raise
         except ValueError as e:
-            result.skipped.append((line_no, str(e)))
+            name = _validation_field(str(e))
+            raise RowError(str(e), name, get(name) if name else "") from None
+        return txn, acct
+
+    for line_no, row in enumerate(reader, start=2):
+        try:
+            txn, acct = build(fields_of(row))
+        except RowError as e:
+            result.skipped.append((line_no, e.reason))
+            result.issues.append(RowIssue(line_no, e.field, e.value, e.reason))
             continue
         k = key(txn)
         if existing[k] > 0:
             existing[k] -= 1
             result.duplicates += 1
+            result.duplicate_rows.append(DuplicateRow(line_no, _summary(txn, acct.name)))
             continue
         pending.append(txn)
+        held.update({(txn.account_id, txn.symbol), (txn.target_account_id, txn.symbol)})
 
     # An account created only for rows that were then skipped would be left empty.
     used = {t.account_id for t in pending} | {t.target_account_id for t in pending}

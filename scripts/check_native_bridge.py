@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from uuid import uuid4
 
+from marketpulse.brokers import PROFILE_NAMES
 from marketpulse.config import Config
 from marketpulse.db import Store
 from marketpulse.desktop import (
@@ -65,6 +66,21 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
             cli + ["desktop", "transaction-status", request_id], env=env, capture_output=True, check=True
         ).stdout
     )
+    # A broker import, previewed after a first import: profile, skipped fields and duplicates.
+    import_env = {**env, "MARKETPULSE_DATA": str(Path(tmp) / "import-data")}
+    questrade = str(root / "tests/fixtures/brokers/questrade.csv")
+    subprocess.run(cli + ["desktop", "import", "--", questrade], env=import_env, capture_output=True, check=True)
+    broker_preview = Path(tmp) / "broker-import.json"
+    broker_preview.write_bytes(
+        subprocess.run(
+            cli + ["desktop", "import", "--dry-run", "--profile", "auto", "--", questrade],
+            env=import_env,
+            capture_output=True,
+            check=True,
+        ).stdout
+    )
+    profiles = Path(tmp) / "profiles.json"
+    profiles.write_text(json.dumps(PROFILE_NAMES))
     # The real ledger's storage object (the CLI runs above may already have taken a daily backup).
     ledger = Store(Path(tmp) / "data" / "marketpulse.db")
     for reason in ("daily", "pre-restore"):
@@ -135,6 +151,8 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
             str(ledger_tax),
             str(export),
             str(root / "tests/fixtures/transaction_forms.json"),
+            str(broker_preview),
+            str(profiles),
         ],
         check=True,
     )

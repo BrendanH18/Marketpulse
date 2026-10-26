@@ -198,9 +198,14 @@ to export. Import first previews new entries, duplicates, skipped lines, and new
 accounts. The preview runs the real import against a temporary copy of your
 ledger, so it reports exactly what Import will do. The app imports its own copy
 of the file taken when you chose it, so later edits to the file don't apply.
-Select a default account for files without an account column. Clicking Import
-adds the valid new entries, skipping the reported invalid ones, and takes a
-safety backup first.
+Select a default account for files without an account column. **Broker format**
+detects Questrade activity exports and Wealthsimple statements from the header
+row (or choose one); the preview names the format it used. Each skipped line is
+listed with the field at fault, its value, and the reason, and duplicates show a
+one-line summary of the entry already in the ledger; with privacy on, values and
+summaries are hidden. See [Import and export](usage.md#import-and-export) for
+what each broker profile reads and skips. Clicking Import adds the valid new
+entries, skipping the reported invalid ones, and takes a safety backup first.
 
 Archived accounts never appear in the app: not in lists, pickers, holdings,
 activity, totals, or the menu bar. Their history stays in the ledger, and income,

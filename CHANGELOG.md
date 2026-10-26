@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Broker CSV profiles for **Questrade** account activity exports and **Wealthsimple**
+  monthly statements, detected from the header row. `marketpulse import` and
+  `desktop import` accept `--profile auto|questrade|wealthsimple|generic`. Broker codes
+  are translated through a table; transfers, currency conversions, corporate actions,
+  withholding tax, and amounts with the wrong sign for their type are skipped with a
+  reason rather than guessed. A Wealthsimple dividend goes to the listing the account
+  holds (a converted US stock keeps its US symbol). See [usage](docs/usage.md#import-and-export).
+- Clearer import reports: each skipped row names its line, field, value, and what was
+  expected, and duplicates are listed with a one-line summary. `desktop import` results
+  gain `profile`, `profile_label`, `issues` (`line`, `field`, `value`, `reason`) and
+  `duplicate_rows` (`line`, `summary`); existing fields are unchanged.
+- The Mac app's import sheet has a **Broker format** menu (Auto-detect, Questrade,
+  Wealthsimple, Generic CSV), names the format the preview used, lists skipped lines in
+  a table of line, field, value, and reason, and lists duplicates under a disclosure.
+
 - Record transfers, DRIPs, splits, and returns of capital in the Mac app. The transaction
   form gains **Transfer in kind** (from and to accounts; a market price is required, with
   the reason, between a registered and a non-registered account), **Reinvested dividend
@@ -113,6 +128,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- CSV import no longer reads an unreadable number (such as `2x` in a price or fees
+  column) as zero; the row is skipped and reported with the column and value.
 - Contribution room still counts deposits to archived accounts. Archiving a TFSA, RRSP
   or FHSA used to drop its contributions, overstating the room left. Archived accounts
   stay out of the room table's account list.
