@@ -408,11 +408,11 @@ struct ImportSheet: View {
     ) {
       Picker("Broker format", selection: $model.importProfile) {
         ForEach(ImportProfile.all) { Text($0.label).tag($0.id) }
-      }.onChange(of: model.importProfile) { _, _ in model.importPreview = nil }
+      }.onChange(of: model.importProfile) { _, _ in model.importPreview = nil }.disabled(model.saving)
       Picker("Default account for rows without one", selection: $model.importAccount) {
         Text("Use accounts named in the CSV").tag("")
         ForEach(model.desktop?.accounts ?? []) { Text($0.name).tag(String($0.id)) }
-      }.onChange(of: model.importAccount) { _, _ in model.importPreview = nil }
+      }.onChange(of: model.importAccount) { _, _ in model.importPreview = nil }.disabled(model.saving)
       Button("Preview import") { Task { await model.previewImport() } }.disabled(model.saving)
       if let preview = model.importPreview {
         if let label = preview.profileLabel {
