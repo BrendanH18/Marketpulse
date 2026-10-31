@@ -113,7 +113,8 @@ Tests are isolated by autouse fixtures that point `MARKETPULSE_DATA`/`MARKETPULS
 Hand off whenever you might not finish: usage limits, a long-running task, a
 blocker, or the end of a session. It takes two minutes and saves the next agent an hour.
 
-Post this comment **on the issue**:
+Post this comment **on the issue**. If you cannot access GitHub, return the
+handoff block in your response for the maintainer to post:
 
 ```markdown
 ### Handoff — <agent/model>, <YYYY-MM-DD>
