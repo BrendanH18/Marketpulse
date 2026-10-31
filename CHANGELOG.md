@@ -112,6 +112,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shared maintenance cycle and `automation run` worker (continuous or `--once`)
   for refresh, daily snapshots, alert checks, and daily safety backups.
 - Native checks that decode the real Python demo payload and CI coverage for them.
+- A CI coverage gate for the financial core: `scripts/check_coverage.py` fails when branch
+  coverage of the ledger, tax, database and migration, valuation, analytics, or import modules
+  drops below its floor in `pyproject.toml`. New tests cover selling or transferring more
+  than is held and legacy JSON files with unreadable files or bad rows.
 - An app icon for the Dock, Finder, and Login Items.
 - `scripts/build_app.py` builds a standalone `MarketPulse.app` (arm64 and x86_64) that
   carries its own pinned Python and locked dependencies, so it runs without Python, uv,

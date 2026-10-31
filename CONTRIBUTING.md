@@ -55,9 +55,18 @@ Run these before submitting code changes:
 uv run --locked ruff check .
 uv run --locked ruff format --check .
 uv run --locked mypy
-uv run --locked pytest -q
+uv run --locked pytest -q --cov
+uv run --locked python scripts/check_coverage.py
 uv build --no-sources
 ```
+
+`check_coverage.py` is the coverage gate for the financial core (ledger, tax,
+database and migrations, valuation, analytics, CSV import, models). Each module has a
+branch-coverage floor in `[tool.marketpulse.coverage-floors]` in `pyproject.toml`; CI
+fails below it. If it fails, find the uncovered lines with
+`uv run --locked pytest --cov --cov-report=term-missing` and add tests on fictional
+data rather than lowering the floor. When your tests raise a module's coverage, raise
+its floor to about two points below the new figure.
 
 Use `uv run --locked ruff format .` to apply formatting. To run a focused test,
 use a file path or `-k`, for example `uv run --locked pytest tests/test_csvio.py -q`.

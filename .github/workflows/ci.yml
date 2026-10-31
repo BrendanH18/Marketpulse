@@ -54,6 +54,22 @@ jobs:
       - name: Test
         run: uv run --locked pytest -q
 
+  coverage:
+    name: Coverage gate (financial core)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --dev --python 3.11
+      - name: Test with coverage
+        run: uv run --locked pytest -q --cov
+      - name: Check core coverage floors
+        run: uv run --locked python scripts/check_coverage.py
+
   package:
     runs-on: ubuntu-latest
     timeout-minutes: 15

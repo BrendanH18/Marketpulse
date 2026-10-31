@@ -51,11 +51,33 @@ path = "src/marketpulse/__init__.py"
 dev = [
     "mypy>=2.3.1",
     "pytest>=8.0",
+    "pytest-cov>=6.0",
     "ruff>=0.8",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["marketpulse"]
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true
+
+# Coverage gate for the financial core (#20), checked by scripts/check_coverage.py in CI.
+# Branch coverage, measured on Python 3.11. Each floor sits about two points under the
+# coverage when it was set: raise it when you add tests, and don't lower it to make CI pass.
+[tool.marketpulse.coverage-floors]
+"marketpulse/ledger.py" = 97
+"marketpulse/tax.py" = 98
+"marketpulse/db.py" = 93
+"marketpulse/valuation.py" = 91
+"marketpulse/analytics.py" = 89
+"marketpulse/csvio.py" = 94
+"marketpulse/brokers.py" = 96
+"marketpulse/models.py" = 94
 
 [tool.ruff]
 line-length = 120

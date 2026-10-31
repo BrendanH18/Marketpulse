@@ -47,7 +47,7 @@ epic [#32](https://github.com/BrendanH18/Marketpulse/issues/32).
 ```bash
 uv sync --locked --dev
 uv run --locked ruff check . && uv run --locked ruff format --check . && uv run --locked mypy
-uv run --locked pytest -q
+uv run --locked pytest -q --cov && uv run --locked python scripts/check_coverage.py
 # macOS, for app or bridge changes:
 swift build -c release --package-path macos/MarketPulseBar
 uv run --locked python scripts/check_native_bridge.py

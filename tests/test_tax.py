@@ -327,3 +327,37 @@ def test_roc_without_an_fx_rate_flags_the_pool():
     ]
     (d,) = run(txns, usd({"2024-01-02": 1.3, "2024-03-01": 1.3})).dispositions
     assert not d.complete  # the ACB reduction is unknown, so the gain is too
+
+
+# ── Quantities the ledger doesn't hold ────────────────────────────────────────
+# ledger.replay() reports these as issues; the tax engine must only count what was held.
+
+
+def test_selling_more_than_is_held_disposes_only_what_is_held():
+    txns = [
+        txn(TxnType.BUY, "2024-01-01", qty=10, price=10),
+        txn(TxnType.SELL, "2024-02-01", qty=15, price=12),  # 10 held: 10 × $12 − $100 = +$20
+        txn(TxnType.SELL, "2024-03-01", "Y", qty=5, price=9),  # never bought: no disposition
+    ]
+    (d,) = run(txns).dispositions
+    assert (d.symbol, d.quantity, d.gain) == ("X", 10, pytest.approx(20))
+
+
+def test_moving_or_splitting_unheld_shares_changes_no_pool():
+    txns = [
+        txn(TxnType.TRANSFER, "2024-01-01", "Y", qty=5, price=10, target_account_id=WS),
+        txn(TxnType.SPLIT, "2024-01-02", "Y", ratio=2),
+        txn(TxnType.TRANSFER, "2024-01-03", "Y", qty=5, price=10, target_account_id=TFSA),
+    ]
+    report = run(txns)
+    assert report.dispositions == [] and report.pools == {} and report.issues == []
+
+
+def test_contribution_in_kind_beyond_the_holding_is_a_deemed_sale_of_the_holding():
+    txns = [
+        txn(TxnType.BUY, "2024-01-01", qty=10, price=50),
+        txn(TxnType.TRANSFER, "2024-02-01", qty=15, price=80, target_account_id=TFSA),
+    ]
+    (d,) = run(txns).dispositions
+    # 10 × $80 − $500 = +$300; the 5 extra units were never in the pool.
+    assert (d.kind, d.quantity, d.gain) == ("deemed", 10, pytest.approx(300))
