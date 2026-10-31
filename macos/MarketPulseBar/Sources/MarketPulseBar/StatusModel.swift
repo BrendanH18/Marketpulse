@@ -393,7 +393,9 @@ final class StatusModel: ObservableObject {
     await perform(args) { _ in success }
   }
 
-  func recordTransaction(_ request: TransactionSaveRequest) async -> TransactionSaveResult {
+  func recordTransaction(_ request: TransactionSaveRequest, success: String = "Transaction recorded") async
+    -> TransactionSaveResult
+  {
     guard !demo && !saving else { return .unknown("Another save is in progress.") }
     saving = true
     defer { saving = false }
@@ -402,7 +404,7 @@ final class StatusModel: ObservableObject {
     case .recorded, .recovered:
       errorMessage = nil
       message = result == .recovered
-        ? "Transaction recorded. Its confirmation failed." : "Transaction recorded"
+        ? "\(success). Its confirmation failed." : success
       await reload()
     case .notRecorded(let error), .unknown(let error):
       errorMessage = error

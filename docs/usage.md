@@ -160,6 +160,7 @@ watchlist entries, or snapshots. Use `marketpulse backup` for that.
 marketpulse perf
 marketpulse income
 marketpulse allocation --target etf=80 --target fixed_income=15 --target cash=5
+marketpulse allocation --clear-targets --target etf=90 --target cash=10 --quiet   # replace them; don't price holdings
 marketpulse chart NVDA --period 1y --vs QQQ
 marketpulse compare XEQT.TO VEQT.TO VFV.TO --period 5y
 marketpulse backfill

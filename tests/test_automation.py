@@ -153,7 +153,9 @@ def test_demo_never_opens_real_tracker(monkeypatch, tmp_path, notifications):
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["demo"] is True
-    assert len(payload["positions"]) == 5
+    assert len(payload["positions"]) == 5 + 1  # five market holdings and a GIC
+    assert [a["symbol"] for a in payload["assets"]] == ["GIC-DEMO"]
+    assert {r["bucket"] for r in payload["rebalance"]} == {"etf", "equity", "fixed_income", "cash"}
     assert len(payload["status"]["history"]) == 181
     assert payload["storage"] == {"data_dir": None, "empty": False, "backup_dir": None, "backups": []}
     # The demo's settings are its own and never point at the user's config file.

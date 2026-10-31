@@ -5,6 +5,7 @@ import SwiftUI
 enum Workspace: String, CaseIterable, Identifiable {
   case overview = "Overview"
   case holdings = "Holdings"
+  case allocation = "Allocation"
   case activity = "Activity"
   case accounts = "Accounts"
   case watchlist = "Watchlist"
@@ -16,6 +17,7 @@ enum Workspace: String, CaseIterable, Identifiable {
     switch self {
     case .overview: return "square.grid.2x2"
     case .holdings: return "chart.pie"
+    case .allocation: return "scope"
     case .activity: return "arrow.left.arrow.right"
     case .accounts: return "building.columns"
     case .watchlist: return "star"
@@ -28,6 +30,7 @@ enum Workspace: String, CaseIterable, Identifiable {
     switch self {
     case .overview: return "A little perspective on your portfolio."
     case .holdings: return "Every position, in one place."
+    case .allocation: return "Your mix, against the one you're aiming for."
     case .activity: return "The ledger behind your portfolio."
     case .accounts: return "Your accounts. Your bigger picture."
     case .watchlist: return "Keep an eye on what comes next."
@@ -40,6 +43,7 @@ enum Workspace: String, CaseIterable, Identifiable {
 
 enum DesktopSheet: String, Identifiable {
   case transaction, editTransaction, account, editAccount, room, alert, welcome
+  case fixedAsset, manualAsset, valuation, assetClass, targets
   var id: String { rawValue }
 }
 
@@ -157,6 +161,11 @@ struct PortfolioWindow: View {
       case .editAccount: AccountSheet(model: model, editing: draft.editingAccount)
       case .room: RoomSheet(model: model, type: draft.roomType)
       case .alert: AlertSheet(model: model)
+      case .fixedAsset: AssetSheet(model: model, kind: "FIXED")
+      case .manualAsset: AssetSheet(model: model, kind: "MANUAL")
+      case .valuation: AssetSheet(model: model, kind: "VALUE", symbol: draft.assetSymbol)
+      case .assetClass: AssetClassSheet(model: model, symbol: draft.assetSymbol)
+      case .targets: TargetsSheet(model: model)
       case .welcome:
         WelcomeSheet(
           model: model,
@@ -287,7 +296,16 @@ struct PortfolioWindow: View {
         newTransaction: { draft.sheet = .transaction }, welcome: { draft.sheet = .welcome },
         canEdit: model.canEdit)
     case .holdings:
-      HoldingsWorkspace(payload: p, search: draft.search, accountFilter: $draft.accountFilter)
+      HoldingsWorkspace(
+        payload: p, search: draft.search, accountFilter: $draft.accountFilter, canEdit: model.canEdit,
+        showSheet: { sheet, symbol in
+          draft.assetSymbol = symbol
+          draft.sheet = sheet
+        })
+    case .allocation:
+      AllocationWorkspace(
+        payload: p, canEdit: model.canEdit, setTargets: { draft.sheet = .targets },
+        showHoldings: { draft.section = .holdings })
     case .activity:
       ActivityWorkspace(
         payload: p, model: model, search: draft.search, accountFilter: $draft.accountFilter,
@@ -611,6 +629,9 @@ private struct HoldingsWorkspace: View {
   let payload: DesktopPayload
   let search: String
   @Binding var accountFilter: Int
+  let canEdit: Bool
+  /// Opens an asset sheet, for the given symbol where it needs one.
+  let showSheet: (DesktopSheet, String) -> Void
   private var rows: [DesktopPosition] {
     payload.positions.filter {
       (accountFilter == 0 || $0.accountId == accountFilter)
@@ -619,21 +640,32 @@ private struct HoldingsWorkspace: View {
     }
     .sorted { draft.sortByValue ? ($0.value ?? 0) > ($1.value ?? 0) : $0.symbol < $1.symbol }
   }
+  private func asset(_ symbol: String) -> DesktopAsset? { payload.assets?.first { $0.symbol == symbol } }
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack {
         AccountFilter(accounts: payload.accounts, selected: $accountFilter)
         Spacer()
+        Menu {
+          Button("GIC or bond…") { showSheet(.fixedAsset, "") }
+          Button("Property or other asset…") { showSheet(.manualAsset, "") }
+        } label: {
+          Label("Add asset", systemImage: "plus")
+        }.fixedSize().disabled(!canEdit || payload.accounts.isEmpty || payload.assets == nil)
+          .help("Add something the market can't price: a GIC or bond valued by its interest, or an asset you value yourself.")
         Button(draft.sortByValue ? "Sort: value ↓" : "Sort: symbol A–Z") {
           draft.sortByValue.toggle()
         }.buttonStyle(.bordered)
         Text("\(rows.count) positions").foregroundStyle(Studio.muted)
       }.font(.system(size: 11)).padding(.horizontal, 30)
-      Table(rows) {
+      Table(rows, selection: $draft.selection) {
         TableColumn("Asset") { p in
           VStack(alignment: .leading, spacing: 3) {
             Text(p.symbol).fontWeight(.medium)
             Text(p.name).font(.system(size: 10)).foregroundStyle(Studio.muted).lineLimit(1)
+            if let summary = asset(p.symbol)?.summary {
+              Text(summary).font(.system(size: 10)).foregroundStyle(Studio.muted).lineLimit(1)
+            }
           }.padding(.vertical, 6)
         }.width(min: 140, ideal: 190)
         TableColumn("Account", value: \.account).width(min: 100, ideal: 140)
@@ -661,6 +693,15 @@ private struct HoldingsWorkspace: View {
             .monospacedDigit()
         }.width(75)
       }.scrollContentBackground(.hidden).alternatingRowBackgrounds(.disabled)
+        .contextMenu(forSelectionType: DesktopPosition.ID.self) { ids in
+          if ids.count == 1, let p = rows.first(where: { ids.contains($0.id) }) {
+            if asset(p.symbol)?.manual == true {
+              Button("Record a valuation…") { showSheet(.valuation, p.symbol) }.disabled(!canEdit)
+            }
+            Button("Change asset class…") { showSheet(.assetClass, p.symbol) }
+              .disabled(!canEdit || payload.assets == nil)
+          }
+        }
         .overlay {
           if rows.isEmpty {
             ContentUnavailableView(
@@ -669,6 +710,97 @@ private struct HoldingsWorkspace: View {
           }
         }
     }
+  }
+}
+
+/// The asset-class mix against the user's targets (`marketpulse allocation`). Suggestions only.
+private struct AllocationWorkspace: View {
+  let payload: DesktopPayload
+  let canEdit: Bool
+  let setTargets: () -> Void
+  let showHoldings: () -> Void
+  private var s: StatusPayload { payload.status }
+  private var rows: [RebalanceRow] { payload.rebalance ?? [] }
+  var body: some View {
+    ScrollView {
+      VStack(spacing: 20) {
+        if payload.targets == nil {
+          ContentUnavailableView(
+            "Update MarketPulse to set targets", systemImage: "scope",
+            description: Text("This version of the engine doesn't report allocation targets."))
+        } else if rows.isEmpty {
+          ContentUnavailableView {
+            Label("Set the mix you're aiming for", systemImage: "scope")
+          } description: {
+            Text(
+              "Give each asset class a target percentage, and MarketPulse shows how far your portfolio is from it."
+            )
+          } actions: {
+            Button("Set targets…", action: setTargets).buttonStyle(.borderedProminent).disabled(!canEdit)
+          }
+        } else {
+          Surface("Against your targets", trailing: "BY ASSET CLASS · \(s.base)") {
+            HStack {
+              Text("Allocated: \(percent(payload.targets?.map(\.weight).reduce(0, +) ?? 0))")
+                .font(.system(size: 12)).foregroundStyle(Studio.muted)
+              Spacer()
+              Button("Change targets…", action: setTargets).disabled(!canEdit)
+            }
+            if s.privacy {
+              ContentUnavailableView("Allocation hidden in privacy mode", systemImage: "eye.slash").frame(
+                height: 160)
+            } else {
+              targetsGrid
+            }
+            Text(
+              "Suggestions only: MarketPulse never places trades. Amounts use today's prices and exchange rates, and leave out fees and taxes. A symbol's class comes from its listing; to change it, right-click it in Holdings."
+            ).font(.system(size: 11)).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+            HStack {
+              Spacer()
+              Button("Show Holdings", action: showHoldings)
+            }
+          }
+        }
+      }.padding(.horizontal, 30).padding(.bottom, 24)
+    }
+  }
+  private var targetsGrid: some View {
+    Grid(alignment: .trailing, horizontalSpacing: 18, verticalSpacing: 12) {
+      GridRow {
+        heading("Class").gridColumnAlignment(.leading)
+        heading("Now")
+        heading("Target")
+        heading("Drift")
+        heading("To reach the target")
+      }
+      Divider().overlay(Studio.line).gridCellUnsizedAxes(.horizontal)
+      ForEach(rows) { row in
+        GridRow {
+          Text(row.label).fontWeight(.medium)
+          Text(percent(row.weight)).monospacedDigit()
+          Text(row.target > 0 ? percent(row.target) : "—").monospacedDigit().foregroundStyle(Studio.muted)
+          Text(drift(row.drift)).monospacedDigit()
+            .foregroundStyle(abs(row.drift) >= 5 ? Studio.warn : Studio.muted)
+          Text(suggestion(row)).monospacedDigit()
+        }
+      }
+    }.font(.system(size: 12))
+  }
+  private func heading(_ text: String) -> some View {
+    Text(text).font(.system(size: 10, weight: .medium)).foregroundStyle(Studio.muted)
+  }
+  private func percent(_ value: Double) -> String {
+    value.formatted(.number.precision(.fractionLength(1))) + "%"
+  }
+  private func drift(_ value: Double) -> String {
+    (value > 0 ? "+" : "") + value.formatted(.number.precision(.fractionLength(1))) + " pts"
+  }
+  /// The amount to buy or sell, or nothing once it's within a rounding error.
+  private func suggestion(_ row: RebalanceRow) -> String {
+    if s.privacy { return Format.mask }
+    if abs(row.delta) < 1 { return "On target" }
+    let amount = Format.money(abs(row.delta), s.base, privacy: false, decimals: 0)
+    return row.delta > 0 ? "Add \(amount)" : "Reduce by \(amount)"
   }
 }
 
@@ -1444,6 +1576,8 @@ private final class PortfolioWindowDraft: ObservableObject {
   @Published var editingAccount: DesktopAccount?
   /// The type the `.room` sheet opens on.
   @Published var roomType = "TFSA"
+  /// The symbol the `.valuation` and `.assetClass` sheets change.
+  @Published var assetSymbol = ""
   @Published var section: Workspace? = .overview
   @Published var search = ""
   @Published var accountFilter = 0
@@ -1455,6 +1589,7 @@ private final class OverviewWorkspaceDraft: ObservableObject {
 
 private final class HoldingsWorkspaceDraft: ObservableObject {
   @Published var sortByValue = true
+  @Published var selection: String?
 }
 
 private final class WatchlistWorkspaceDraft: ObservableObject {

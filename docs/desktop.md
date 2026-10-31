@@ -143,6 +143,17 @@ v99.0.0.
   asset allocation, account balances, and recent activity.
 - **Holdings:** search, account filters, value/symbol ordering, and native/base
   currency labels. Missing prices remain unavailable rather than becoming zero.
+  **Add asset** adds what the market can't price (`marketpulse asset`): a **GIC or
+  bond**, valued by the interest it earns from its start date to maturity, or a
+  **property or other asset** you value yourself, with its asset class. The symbol is a
+  short code of your own and can't be one already in your portfolio. Right-click a row
+  to **Record a valuation…** of an asset you value yourself (its value is the latest
+  one), or to **Change asset class…** of any symbol, which moves it in Allocation.
+- **Allocation:** each asset class against the targets you set with **Set targets…**
+  (`marketpulse allocation --target`): its share now, its target, the drift in
+  percentage points, and the amount to add or reduce to reach the target at today's
+  prices. These are suggestions only; MarketPulse never places trades. Targets can't add
+  up to more than 100%; saving replaces them all, and clearing every field removes them.
 - **Activity:** searchable ledger entries and amounts in the original currency,
   signed from the account's point of view: **+** money in (sells, deposits,
   income), **−** money out (buys, withdrawals, fees). DRIPs and transfers move

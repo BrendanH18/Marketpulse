@@ -360,18 +360,20 @@ def perf(app: App) -> None:
 @click.option(
     "--target", "targets", multiple=True, metavar="CLASS=PCT", help="Set an asset-class target, e.g. --target etf=80."
 )
-@click.option("--clear-targets", is_flag=True, help="Remove all targets.")
+@click.option("--clear-targets", is_flag=True, help="Remove all targets (with --target: replace them).")
+@click.option("-q", "--quiet", is_flag=True, help="Only save targets; don't price holdings or show the allocation.")
 @pass_app
-def allocation(app: App, by: str, targets: tuple[str, ...], clear_targets: bool) -> None:
+def allocation(app: App, by: str, targets: tuple[str, ...], clear_targets: bool, quiet: bool) -> None:
     """Allocation breakdown and rebalancing against asset-class targets."""
     from .analytics import rebalance
 
     store = app.store
-    if clear_targets:
+    if clear_targets and not targets:
         store.set_targets({})
         app.ok("Targets cleared.")
     if targets:
-        parsed = dict(store.targets())
+        # Checked in full before anything is saved, so a rejected entry never clears the old targets.
+        parsed = {} if clear_targets else dict(store.targets())
         valid = {c.value for c in AssetClass}
         for item in targets:
             key, _, value = item.partition("=")
@@ -387,6 +389,8 @@ def allocation(app: App, by: str, targets: tuple[str, ...], clear_targets: bool)
             fail(f"Targets add up to {total:g}% — keep them at or under 100%.")
         store.set_targets(parsed)
         app.ok(f"Targets saved ({total:g}% allocated).")
+    if quiet:
+        return
     with app.busy("Pricing holdings…"):
         view = app.tracker.valuation()
     breakdown = {"class": view.by_class, "account": view.by_account, "currency": view.by_currency}[by]
@@ -1215,6 +1219,7 @@ def asset_list(app: App) -> None:
 @click.option("--name", default="")
 @click.option("-c", "--currency", default=None)
 @click.option("-a", "--account", default=None)
+@retryable
 @pass_app
 def asset_fixed(app: App, symbol, principal, rate, start, maturity, compounding, name, currency, account) -> None:
     """Add a GIC / term deposit / bond held to maturity, valued by accrual."""
@@ -1260,6 +1265,7 @@ def asset_fixed(app: App, symbol, principal, rate, start, maturity, compounding,
 @click.option("-c", "--currency", default=None)
 @click.option("-a", "--account", default=None)
 @click.option("-d", "--date", "when", default=None, callback=_date_callback, help="Acquisition date.")
+@retryable
 @pass_app
 def asset_manual(app: App, symbol, value, name, asset_class, currency, account, when) -> None:
     """Add a manually valued asset (property, private shares, collectibles, pension…)."""
@@ -1296,6 +1302,7 @@ def asset_manual(app: App, symbol, value, name, asset_class, currency, account, 
 @click.argument("symbol")
 @click.argument("value", type=float)
 @click.option("-d", "--date", "when", default=None, callback=_date_callback)
+@retryable
 @pass_app
 def asset_value(app: App, symbol, value, when) -> None:
     """Record a new valuation for a manual asset (per unit)."""

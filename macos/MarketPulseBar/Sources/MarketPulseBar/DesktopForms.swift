@@ -399,6 +399,241 @@ struct AlertSheet: View {
   }
 }
 
+/// A GIC or bond (`asset fixed`), an asset valued by hand (`asset manual`), or a new valuation
+/// of one (`asset value`). Each records a ledger entry, so it saves with a request ID like a transaction.
+struct AssetSheet: View {
+  @StateObject private var draft = AssetSheetDraft()
+  @ObservedObject var model: StatusModel
+  /// An `AssetEntry.kinds` value.
+  let kind: String
+  /// The asset a valuation is for.
+  var symbol = ""
+  @Environment(\.dismiss) private var dismiss
+  private var entry: AssetEntry {
+    AssetEntry(
+      kind: kind, account: draft.account, symbol: kind == "VALUE" ? symbol : draft.symbol, name: draft.name,
+      value: draft.value, rate: draft.rate, date: LedgerDate.string(draft.date),
+      maturity: LedgerDate.string(draft.maturity), compounding: draft.compounding, assetClass: draft.assetClass,
+      currency: draft.currency)
+  }
+  private var accounts: [DesktopAccount] { model.desktop?.accounts ?? [] }
+  /// A new asset can't reuse a symbol: its details would replace the other one's.
+  private var taken: Bool {
+    guard kind != "VALUE", !entry.symbolCode.isEmpty, let desktop = model.desktop else { return false }
+    return desktop.assets?.contains { $0.symbol == entry.symbolCode } == true
+      || desktop.positions.contains { $0.symbol == entry.symbolCode }
+  }
+  private var held: DesktopPosition? { model.desktop?.positions.first(where: { $0.symbol == symbol }) }
+  private var valueTitle: String {
+    guard let held else { return "New value" }
+    return "New value (\(held.currency))"
+  }
+  private var title: String {
+    switch kind {
+    case "FIXED": return "Add a GIC or bond"
+    case "MANUAL": return "Add an asset you value yourself"
+    default: return "Record a valuation"
+    }
+  }
+  private var subtitle: String {
+    switch kind {
+    case "FIXED":
+      return "It's valued by the interest it earns, up to maturity. The principal is recorded as a purchase on the start date."
+    case "MANUAL":
+      return "Property, private shares, a pension, collectibles: anything the market can't price. Update its value whenever you like."
+    default:
+      return "What \(symbol) is worth now. Its value in your portfolio uses the latest valuation."
+    }
+  }
+  var body: some View {
+    SheetLayout(title: title, subtitle: subtitle, model: model) {
+      Form {
+        if kind == "VALUE" {
+          LabeledContent("Asset", value: held.map { "\($0.symbol) · \($0.name)" } ?? symbol)
+          if let held {
+            LabeledContent(
+              "Current value",
+              value: Format.money(held.price, held.currency, privacy: model.status?.privacy ?? false))
+          }
+          NumberField(title: valueTitle, text: $draft.value)
+          DatePicker("Valued on", selection: $draft.date, in: ...Date.now, displayedComponents: .date)
+        } else {
+          Picker("Account", selection: $draft.account) {
+            Text("Choose account").tag("")
+            ForEach(accounts) { Text($0.name).tag(String($0.id)) }
+          }
+          TextField("Symbol", text: $draft.symbol, prompt: Text(kind == "FIXED" ? "GIC-2027" : "COTTAGE"))
+          if taken {
+            caution("\(entry.symbolCode) is already in your portfolio. Choose another symbol.")
+          } else {
+            caption("A short code of your own. It names the asset in Holdings and Activity.")
+          }
+          TextField("Name (optional)", text: $draft.name, prompt: Text(kind == "FIXED" ? "2-year GIC" : "Family cottage"))
+          if kind == "FIXED" {
+            NumberField(title: "Principal", text: $draft.value)
+            NumberField(title: "Annual rate (%)", text: $draft.rate)
+            DatePicker("Start date", selection: $draft.date, in: ...Date.now, displayedComponents: .date)
+            DatePicker("Matures on", selection: $draft.maturity, displayedComponents: .date)
+            if entry.maturity <= entry.date { caution("The maturity date must be after the start date.") }
+            Picker("Compounding", selection: $draft.compounding) {
+              ForEach(AssetEntry.compoundings, id: \.self) { Text($0.capitalized).tag($0) }
+            }
+          } else {
+            NumberField(title: "Value", text: $draft.value)
+            Picker("Asset class", selection: $draft.assetClass) {
+              ForEach(AssetClassOption.all) { Text($0.label).tag($0.key) }
+            }
+            DatePicker("Acquired on", selection: $draft.date, in: ...Date.now, displayedComponents: .date)
+          }
+          TextField("Currency", text: $draft.currency, prompt: Text("Account's currency"))
+        }
+      }.formStyle(.grouped).disabled(model.saving || draft.request != nil)
+        .onAppear {
+          if draft.account.isEmpty, let id = model.desktop?.settings?.defaultAccountId,
+            accounts.contains(where: { $0.id == id })
+          {
+            draft.account = String(id)
+          }
+        }
+      if draft.request != nil && !model.saving {
+        Text("The save outcome is unknown. Retry the same entry before changing or closing it.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      HStack {
+        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving || draft.request != nil)
+        Spacer()
+        if model.saving { ProgressView().controlSize(.small) }
+        Button(draft.request == nil ? (kind == "VALUE" ? "Save valuation" : "Add asset") : "Retry save") {
+          let attempt =
+            draft.request
+            ?? TransactionSaveRequest(arguments: entry.arguments(), commandWords: AssetEntry.commandWords)
+          draft.request = attempt
+          let success = kind == "VALUE" ? "Valuation recorded" : "\(entry.symbolCode) added"
+          Task {
+            switch await model.recordTransaction(attempt, success: success) {
+            case .recorded, .recovered: dismiss()
+            case .notRecorded: draft.request = nil
+            case .unknown: break
+            }
+          }
+        }
+        .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+        .disabled(!entry.isValid() || taken || !model.canEdit)
+      }
+    }.interactiveDismissDisabled(model.saving || draft.request != nil)
+  }
+
+  private func caption(_ text: String) -> some View {
+    Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+  }
+
+  private func caution(_ text: String) -> some View {
+    Text(text).font(.caption).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
+  }
+}
+
+/// The asset class a symbol counts toward in Allocation (`marketpulse asset classify`).
+struct AssetClassSheet: View {
+  @StateObject private var draft = AssetClassSheetDraft()
+  @ObservedObject var model: StatusModel
+  let symbol: String
+  @Environment(\.dismiss) private var dismiss
+  /// The class shown in Holdings now: the saved one, or the one the listing reports.
+  private var current: String? {
+    if let saved = model.desktop?.assets?.first(where: { $0.symbol == symbol })?.assetClass { return saved }
+    let label = model.desktop?.positions.first(where: { $0.symbol == symbol })?.assetClass
+    return AssetClassOption.all.first { $0.label == label }?.key
+  }
+  var body: some View {
+    SheetLayout(
+      title: "Change asset class",
+      subtitle: "Which class \(symbol) counts toward in Allocation and your targets, in every account.",
+      model: model
+    ) {
+      Form {
+        Picker("Asset class", selection: $draft.key) {
+          ForEach(AssetClassOption.all) { Text($0.label).tag($0.key) }
+        }
+      }.formStyle(.grouped).disabled(model.saving)
+        .onAppear {
+          guard !draft.loaded else { return }
+          draft.loaded = true
+          draft.key = current ?? "other"
+        }
+      HStack {
+        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving)
+        Spacer()
+        if model.saving { ProgressView().controlSize(.small) }
+        Button("Save") {
+          let label = AssetClassOption.all.first(where: { $0.key == draft.key })?.label ?? draft.key
+          Task {
+            if await model.perform(["asset", "classify", "--", symbol, draft.key], success: "\(symbol) counts as \(label)") {
+              dismiss()
+            }
+          }
+        }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+          .disabled(!model.canEdit || draft.key == current)
+      }
+    }
+  }
+}
+
+/// Target percentages per asset class (`marketpulse allocation --target`). Saving replaces them all.
+struct TargetsSheet: View {
+  @StateObject private var draft = TargetsSheetDraft()
+  @ObservedObject var model: StatusModel
+  @Environment(\.dismiss) private var dismiss
+  private var entry: TargetsEntry { TargetsEntry(weights: draft.weights) }
+  private func now(_ key: String) -> String {
+    let weight = model.desktop?.allocation.first(where: { $0.key == key })?.weight ?? 0
+    return "Now " + weight.formatted(.number.precision(.fractionLength(1))) + "%"
+  }
+  private func binding(_ key: String) -> Binding<String> {
+    Binding(get: { draft.weights[key] ?? "" }, set: { draft.weights[key] = $0 })
+  }
+  var body: some View {
+    SheetLayout(
+      title: "Allocation targets",
+      subtitle: "The share of your portfolio you want in each asset class. Leave a class blank for none.",
+      model: model
+    ) {
+      Form {
+        ForEach(AssetClassOption.all) { option in
+          LabeledContent {
+            TextField("Target for \(option.label) (%)", text: binding(option.key), prompt: Text("None"))
+              .labelsHidden().multilineTextAlignment(.trailing).frame(width: 90)
+          } label: {
+            Text(option.label)
+            Text(model.status?.privacy == true ? "" : now(option.key))
+          }
+        }
+        LabeledContent("Total", value: entry.total().formatted(.number.precision(.fractionLength(0...2))) + "%")
+        if !entry.isValid() {
+          Text("Each target is a percentage from 0 to 100, and together they can't pass 100%.")
+            .font(.caption).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
+        }
+      }.formStyle(.grouped).disabled(model.saving).frame(maxHeight: 460)
+        .onAppear {
+          guard !draft.loaded else { return }
+          draft.loaded = true
+          for target in model.desktop?.targets ?? [] {
+            draft.weights[target.bucket] = NumberInput.editable(target.weight)
+          }
+        }
+      HStack {
+        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving)
+        Button("Clear all") { draft.weights = [:] }.disabled(model.saving || draft.weights.values.allSatisfy(\.isEmpty))
+        Spacer()
+        if model.saving { ProgressView().controlSize(.small) }
+        Button("Save targets") {
+          Task { if await model.perform(entry.arguments(), success: "Allocation targets saved") { dismiss() } }
+        }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+          .disabled(!model.canEdit || !entry.isValid())
+      }
+    }
+  }
+}
+
 struct ImportSheet: View {
   @ObservedObject var model: StatusModel
   var body: some View {
@@ -708,4 +943,29 @@ private final class AlertSheetDraft: ObservableObject {
   @Published var condition = "above"
   @Published var threshold = ""
   @Published var note = ""
+}
+
+private final class AssetSheetDraft: ObservableObject {
+  @Published var request: TransactionSaveRequest?
+  @Published var account = ""
+  @Published var symbol = ""
+  @Published var name = ""
+  /// The principal (GIC or bond), value (an asset you value yourself), or new value (a valuation).
+  @Published var value = ""
+  @Published var rate = ""
+  @Published var date = Date.now
+  @Published var maturity = Calendar.current.date(byAdding: .year, value: 1, to: .now) ?? .now
+  @Published var compounding = "annual"
+  @Published var assetClass = "real_estate"
+  @Published var currency = ""
+}
+
+private final class AssetClassSheetDraft: ObservableObject {
+  var loaded = false
+  @Published var key = "other"
+}
+
+private final class TargetsSheetDraft: ObservableObject {
+  var loaded = false
+  @Published var weights: [String: String] = [:]
 }
