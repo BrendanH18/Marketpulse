@@ -1,9 +1,8 @@
 # Agent guide
 
 Instructions for AI coding agents (Claude Code, Codex, Cursor, and others) and
-the people directing them. The maintainer switches between agents, so **write
-everything down where the next agent will find it**: the issue, the branch, and
-the PR. Chat history is not shared and is not the backlog.
+the people directing them. Keep durable project context in this file and the
+repository docs so it is available to every agent and fresh clone.
 
 ## What this project is
 
@@ -24,13 +23,7 @@ epic [#32](https://github.com/BrendanH18/Marketpulse/issues/32).
 
 ## Start of every session
 
-1. Read this file, then the issue you're working on **including its latest comments**.
-   A `Handoff` comment means another agent started; continue from it.
-2. `git fetch origin` and check for an existing branch or PR for the issue
-   (`gh pr list --search "<issue number>"`). Continue it rather than starting over.
-3. If the issue is unclaimed, claim it with a comment:
-   `Claiming for <agent/model>. Branch: <branch>.`
-4. Prefer issues labelled `agent-ready`. Skip `needs-decision` issues; ask the maintainer instead.
+Read this file and the relevant project docs before working.
 
 ## Checks
 
@@ -111,32 +104,15 @@ Tests are isolated by autouse fixtures that point `MARKETPULSE_DATA`/`MARKETPULS
 - Keep changes focused on one issue. Refactors stay behavior-preserving.
 - Add a line to `CHANGELOG.md` under **Unreleased** for user-visible changes, and update the docs you affect.
 
-## Handoff protocol
-
-Hand off whenever you might not finish: usage limits, a long-running task, a
-blocker, or the end of a session. It takes two minutes and saves the next agent an hour.
-
-Post this comment **on the issue**:
-
-```markdown
-### Handoff — <agent/model>, <YYYY-MM-DD>
-**Status:** in progress | blocked | ready for review
-**Branch / PR:** `<branch>` / #<pr>
-**Done:**
-- …
-**Next steps (in order):**
-1. …
-**Verified:** <commands run and results; QA items checked>
-**Not verified / known issues:** …
-**Gotchas:** <anything surprising: environment quirks, failed approaches, decisions made>
-**Open questions for the maintainer:** …
-```
-
-The next agent starts from the latest handoff comment, not from scratch.
-
 ## Agent-specific notes
 
 - **Claude Code** reads `CLAUDE.md`, which only imports this file.
 - **Codex** and **Cursor** read `AGENTS.md` directly.
-- Agents without GitHub access can't read issues: the maintainer should paste the
-  issue and its latest handoff comment into the session.
+
+## Context maintenance
+
+- Keep project rules and durable project knowledge in tracked `AGENTS.md` and
+  repository docs; do not store them in agent auto-memory or machine-local notes.
+- `CLAUDE.md` contains only `@AGENTS.md`. Shared hooks, scripts and settings
+  belong in tracked files. Do not ignore instruction files or shared settings;
+  ignore only machine-local settings and agent worktrees.
