@@ -240,7 +240,7 @@ struct NativeBridgeCheck {
     precondition(AssetClassOption.all.map { [$0.key, $0.label] } == classes, "Asset classes differ from Python's")
     let assetForms = try JSONDecoder().decode(
       AssetFormCases.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[12])))
-    precondition(assetForms.assets.count >= 8 && assetForms.targets.count >= 4)
+    precondition(assetForms.assets.count >= 9 && assetForms.targets.count >= 4)
     for form in assetForms.assets {
       let f = form.entry
       let entry = AssetEntry(

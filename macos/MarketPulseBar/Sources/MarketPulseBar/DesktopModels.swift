@@ -193,9 +193,11 @@ struct AssetEntry {
   var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
 
   func isValid(locale: Locale = .current) -> Bool {
-    guard !symbolCode.isEmpty, (NumberInput.parse(value, locale: locale) ?? 0) > 0 else { return false }
+    guard !symbolCode.isEmpty, let amount = NumberInput.parse(value, locale: locale) else { return false }
     switch kind {
-    case "VALUE": return true
+    // Something can become worthless; what's bought costs something.
+    case "VALUE": return amount >= 0
+    case _ where amount <= 0: return false
     case "FIXED":
       guard let rate = NumberInput.parse(rate, locale: locale), rate >= 0 else { return false }
       return !account.isEmpty && validCurrency && AssetEntry.compoundings.contains(compounding)

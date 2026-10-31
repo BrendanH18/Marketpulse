@@ -463,7 +463,7 @@ struct AssetSheet: View {
             ForEach(accounts) { Text($0.name).tag(String($0.id)) }
           }
           TextField("Symbol", text: $draft.symbol, prompt: Text(kind == "FIXED" ? "GIC-2027" : "COTTAGE"))
-          if taken {
+          if taken && draft.request == nil {
             caution("\(entry.symbolCode) is already in your portfolio. Choose another symbol.")
           } else {
             caption("A short code of your own. It names the asset in Holdings and Activity.")
@@ -518,7 +518,8 @@ struct AssetSheet: View {
           }
         }
         .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-        .disabled(!entry.isValid() || taken || !model.canEdit)
+        // An uncertain save always retries as it was, even once a refresh shows the asset it added.
+        .disabled(!entry.isValid() || (taken && draft.request == nil) || !model.canEdit)
       }
     }.interactiveDismissDisabled(model.saving || draft.request != nil)
   }

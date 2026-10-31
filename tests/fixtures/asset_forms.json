@@ -30,13 +30,19 @@
       "valid": false
     },
     {
+      "entry": {"kind": "VALUE", "symbol": "COTTAGE", "value": "0", "date": "2024-03-01"},
+      "valid": true,
+      "arguments": ["asset", "value", "--date", "2024-03-01", "--", "COTTAGE", "0.0"],
+      "expect": {"type": "VALUATION", "account_id": 2, "symbol": "COTTAGE", "price": 0, "currency": "CAD"}
+    },
+    {
       "entry": {"kind": "VALUE", "symbol": "COTTAGE", "value": "380,000", "date": "2024-06-01"},
       "valid": true,
       "arguments": ["asset", "value", "--date", "2024-06-01", "--", "COTTAGE", "380000.0"],
       "expect": {"type": "VALUATION", "account_id": 2, "symbol": "COTTAGE", "price": 380000, "currency": "CAD"}
     },
     {
-      "entry": {"kind": "VALUE", "symbol": "COTTAGE", "value": "0", "date": "2024-06-01"},
+      "entry": {"kind": "VALUE", "symbol": "COTTAGE", "value": "-1", "date": "2024-06-01"},
       "valid": false
     }
   ],
