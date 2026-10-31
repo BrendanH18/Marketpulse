@@ -147,6 +147,31 @@ def test_migrates_schema1_positions(tmp_path):
     assert (h.symbol, h.quantity, h.avg_cost, h.currency, h.first_date) == ("VFV.TO", 5, 100, "CAD", "2023-05-01")
 
 
+def test_legacy_migration_skips_unreadable_files_and_bad_rows(tmp_path):
+    (tmp_path / "broken.json").write_text("{not json")
+    _write(tmp_path / "settings.json", {"theme": "dark"})  # not a portfolio
+    _write(
+        tmp_path / "default.json",
+        {
+            "name": "default",
+            "positions": {"AAPL": {"ticker": "AAPL", "shares": 10, "avg_cost": 150}},
+            "transactions": [
+                {"ticker": "AAPL", "action": "BUY", "shares": 10, "price": 150, "date": "2024-01-02"},
+                {"ticker": "AAPL", "action": "HODL", "shares": 99, "price": 1, "date": "2024-01-03"},
+                {"ticker": "AAPL", "action": "BUY", "price": 1, "date": "2024-01-04"},  # no shares
+            ],
+        },
+    )
+    store = Store(tmp_path / "db.sqlite")
+    store.add_account(Account(name="Main"))
+    assert migrate_legacy_json(store, tmp_path) == ["default.json"]
+    imported = store.get_account("Main (imported)")
+    assert imported is not None  # an existing account is never merged into
+    (h,) = store.ledger().open_holdings()
+    assert (h.account_id, h.quantity, h.avg_cost) == (imported.id, 10, 150)
+    assert len(store.transactions()) == 1  # bad rows are dropped, not reconciled with a SELL
+
+
 def test_fresh_install_seeds_watchlist():
     store = Store.open_default()
     assert store.watchlist() == DEFAULT_WATCHLIST
