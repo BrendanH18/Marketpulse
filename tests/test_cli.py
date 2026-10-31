@@ -756,6 +756,18 @@ def test_asset_save_retried_with_its_request_id_records_once(cli, store):
     assert status["recorded"] is True
 
 
+def test_manual_asset_is_valued_on_its_valuation_not_a_later_purchase(cli, tracker):
+    from marketpulse.desktop import snapshot
+
+    cli("accounts", "add", "Fictional Taxable", "-t", "NONREG")
+    cli("asset", "manual", "ART", "1000", "-d", "2024-01-02")
+    cli("asset", "value", "ART", "1500", "-d", "2024-06-01")
+    cli("buy", "ART", "1", "1600", "-d", "2025-01-02", "--currency", "CAD")
+    payload = snapshot(tracker)
+    assert {a["symbol"]: a["valued_on"] for a in payload["assets"]} == {"ART": "2024-06-01"}
+    assert [p["value"] for p in payload["positions"]] == [pytest.approx(2 * 1500)]  # still the June valuation
+
+
 def test_rejected_targets_keep_the_saved_ones(cli, store):
     cli("allocation", "--quiet", "--target", "etf=50")
     result = cli("allocation", "--quiet", "--clear-targets", "--target", "etf=70", "--target", "equity=40")

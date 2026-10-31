@@ -39,11 +39,12 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
     amap = tracker.store.account_map()
     archived = {i for i, a in amap.items() if a.archived}
     targets = tracker.store.targets()
-    # The latest valuation (or the purchase) of each manual asset: what its value rests on.
+    # What each manual asset's value rests on: the valuation pricing uses, else the latest purchase.
     valued: dict[str, str] = {}
     for t in tracker.store.transactions():
-        if t.type in (TxnType.VALUATION, TxnType.BUY) and t.date >= valued.get(t.symbol, ""):
+        if t.type is TxnType.BUY and t.date > valued.get(t.symbol, ""):
             valued[t.symbol] = t.date
+    valued.update({symbol: day for symbol, (day, _) in state.valuations.items()})
     return {
         "version": 1,
         "demo": False,
