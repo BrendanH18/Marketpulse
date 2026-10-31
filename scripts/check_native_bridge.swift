@@ -9,7 +9,7 @@ struct NativeBridgeCheck {
     decoder.keyDecodingStrategy = .convertFromSnakeCase
     let payload = try decoder.decode(DesktopPayload.self, from: data)
     precondition(payload.version == 1 && payload.demo)
-    precondition(payload.accounts.count == 3 && payload.positions.count == 5)
+    precondition(payload.accounts.count == 3 && payload.positions.count == 6)
     precondition(payload.status.history.count == 181 && payload.incomeMonths.count == 12)
     precondition(payload.warnings.isEmpty && payload.automation.backup == nil)
     precondition(payload.automation.errors.isEmpty && payload.automation.quoteErrors.isEmpty)
@@ -219,8 +219,55 @@ struct NativeBridgeCheck {
     precondition(Set(forms.cases.map { $0.entry["type"]! }).isSuperset(of: ["DRIP", "TRANSFER", "SPLIT", "ROC"]))
     precondition(TransactionEntry.types.count == 11 && TransactionEntry.editableTypes.count == 7)
     precondition(TransactionEntry.label("ROC") == "ROC" && TransactionEntry.label("TRANSFER") == "Transfer")
+
+    // Assets and allocation: the demo's GIC and targets, and the forms' commands.
+    let gic = payload.assets?.first { $0.symbol == "GIC-DEMO" }
+    precondition(payload.assets?.count == 1 && gic?.fixedIncome == true && gic?.assetClass == "fixed_income")
+    precondition(gic?.valuedOn == nil && gic?.summary?.hasPrefix("4.1% annual · matures ") == true)
+    precondition(payload.positions.contains { $0.symbol == "GIC-DEMO" && ($0.value ?? 0) > 8000 })
+    precondition(payload.targets?.map(\.bucket) == ["equity", "etf", "fixed_income"])
+    let rebalance = payload.rebalance ?? []
+    precondition(Set(rebalance.map(\.bucket)) == ["equity", "etf", "fixed_income", "cash"])
+    precondition(rebalance.allSatisfy { abs($0.drift - ($0.weight - $0.target)) < 1e-9 })
+    let manual = try decoder.decode(
+      DesktopAsset.self,
+      from: Data(
+        #"{"symbol":"COTTAGE","kind":"manual","name":"Cottage","asset_class":"real_estate","asset_class_label":"Real Estate","currency":"CAD","rate":0,"compounding":"annual","start_date":"","maturity_date":"","valued_on":"2024-06-01"}"#
+          .utf8))
+    precondition(manual.manual && manual.summary == "Valued by you · 2024-06-01")
+    let classes = try JSONDecoder().decode(
+      [[String]].self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[13])))
+    precondition(AssetClassOption.all.map { [$0.key, $0.label] } == classes, "Asset classes differ from Python's")
+    let assetForms = try JSONDecoder().decode(
+      AssetFormCases.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[12])))
+    precondition(assetForms.assets.count >= 9 && assetForms.targets.count >= 4)
+    for form in assetForms.assets {
+      let f = form.entry
+      let entry = AssetEntry(
+        kind: f["kind"]!, account: f["account"] ?? "", symbol: f["symbol"] ?? "", name: f["name"] ?? "",
+        value: f["value"] ?? "", rate: f["rate"] ?? "", date: f["date"] ?? "", maturity: f["maturity"] ?? "",
+        compounding: f["compounding"] ?? "annual", assetClass: f["assetClass"] ?? "real_estate",
+        currency: f["currency"] ?? "")
+      precondition(entry.isValid(locale: us) == form.valid, "Asset form validity differs for \(f)")
+      if let expected = form.arguments {
+        let sent = entry.arguments(locale: us)
+        precondition(sent == expected, "Asset form arguments differ: \(sent)")
+        let save = TransactionSaveRequest(arguments: sent, id: "R", commandWords: AssetEntry.commandWords)
+        precondition(Array(save.arguments.prefix(4)) == [sent[0], sent[1], "--request-id", "R"])
+      }
+    }
+    precondition(Set(assetForms.assets.map { $0.entry["kind"]! }) == Set(AssetEntry.kinds))
+    for form in assetForms.targets {
+      let entry = TargetsEntry(weights: form.weights)
+      precondition(entry.isValid(locale: us) == form.valid, "Targets validity differs for \(form.weights)")
+      if let expected = form.arguments {
+        precondition(entry.arguments(locale: us) == expected, "Targets arguments differ: \(entry.arguments(locale: us))")
+      }
+    }
+    // Other commands keep the request ID right after the command, as before.
+    precondition(TransactionSaveRequest(arguments: ["deposit", "--", "1"], id: "R").arguments == ["deposit", "--request-id", "R", "--", "1"])
     print(
-      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, activity values, import result, broker import preview and profiles, privacy formatting, number entry, editable numbers and dates, transaction save recovery, transaction form commands"
+      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, activity values, import result, broker import preview and profiles, privacy formatting, number entry, editable numbers and dates, transaction save recovery, transaction form commands, assets, allocation targets and rebalancing, asset and targets form commands"
     )
   }
 }
@@ -228,6 +275,21 @@ struct NativeBridgeCheck {
 private struct ValuedTransaction: Decodable {
   let transaction: DesktopTransaction
   let expectedSignedValue: Double
+}
+
+private struct AssetFormCases: Decodable {
+  struct Asset: Decodable {
+    let entry: [String: String]
+    let valid: Bool
+    let arguments: [String]?
+  }
+  struct Targets: Decodable {
+    let weights: [String: String]
+    let valid: Bool
+    let arguments: [String]?
+  }
+  let assets: [Asset]
+  let targets: [Targets]
 }
 
 private struct FormCases: Decodable {

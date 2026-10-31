@@ -6,9 +6,11 @@ struct TransactionSaveRequest {
   let arguments: [String]
   var statusArguments: [String] { ["desktop", "transaction-status", id] }
 
-  init(arguments: [String], id: String = UUID().uuidString) {
+  /// `commandWords` is how many leading arguments name the command (2 for `asset fixed`): the
+  /// request ID goes right after them.
+  init(arguments: [String], id: String = UUID().uuidString, commandWords: Int = 1) {
     self.id = id
-    self.arguments = [arguments[0], "--request-id", id] + arguments.dropFirst()
+    self.arguments = Array(arguments.prefix(commandWords)) + ["--request-id", id] + arguments.dropFirst(commandWords)
   }
 
   func submit(using run: ([String]) async throws -> Data) async -> TransactionSaveResult {
@@ -158,6 +160,125 @@ struct TransactionEntry {
   }
 }
 
+/// The asset forms (`marketpulse asset fixed|manual|value`) as typed, and the command they become.
+struct AssetEntry {
+  /// A GIC or bond valued by accrual; an asset valued by hand; a new valuation of one.
+  static let kinds = ["FIXED", "MANUAL", "VALUE"]
+  /// As `marketpulse asset fixed --compounding` accepts them.
+  static let compoundings = ["annual", "semiannual", "quarterly", "monthly", "simple"]
+  /// `asset fixed`, `asset manual`, `asset value`: the request ID goes after both words.
+  static let commandWords = 2
+
+  var kind = "FIXED"
+  /// Account id; not used for a valuation, which applies to the asset wherever it's held.
+  var account = ""
+  var symbol = ""
+  var name = ""
+  /// The principal (FIXED), the value (MANUAL), or the new value (VALUE).
+  var value = ""
+  /// Annual rate in percent.
+  var rate = ""
+  /// `yyyy-MM-dd`: the start (FIXED), acquisition (MANUAL) or valuation (VALUE) date.
+  var date = ""
+  /// `yyyy-MM-dd`, FIXED only.
+  var maturity = ""
+  var compounding = "annual"
+  /// An `AssetClassOption` key, MANUAL only.
+  var assetClass = "real_estate"
+  /// Blank uses the account's currency. Not used for a valuation, which is in the holding's.
+  var currency = ""
+
+  var symbolCode: String { symbol.trimmingCharacters(in: .whitespaces).uppercased() }
+  var currencyCode: String { CurrencyInput.normalize(currency) }
+  var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
+
+  func isValid(locale: Locale = .current) -> Bool {
+    guard !symbolCode.isEmpty, let amount = NumberInput.parse(value, locale: locale) else { return false }
+    switch kind {
+    // Something can become worthless; what's bought costs something.
+    case "VALUE": return amount >= 0
+    case _ where amount <= 0: return false
+    case "FIXED":
+      guard let rate = NumberInput.parse(rate, locale: locale), rate >= 0 else { return false }
+      return !account.isEmpty && validCurrency && AssetEntry.compoundings.contains(compounding)
+        && !maturity.isEmpty && maturity > date
+    default:
+      return !account.isEmpty && validCurrency && AssetClassOption.all.contains { $0.key == assetClass }
+    }
+  }
+
+  private var validCurrency: Bool { currencyCode.isEmpty || CurrencyInput.isValid(currencyCode) }
+
+  /// The command that records this entry. User text and numbers go after `--`.
+  func arguments(locale: Locale = .current) -> [String] {
+    func number(_ value: String) -> String { NumberInput.cli(value, locale: locale) }
+    let currency = currencyCode.isEmpty ? [] : ["--currency", currencyCode]
+    switch kind {
+    case "VALUE":
+      return ["asset", "value", "--date", date, "--", symbolCode, number(value)]
+    case "FIXED":
+      return [
+        "asset", "fixed", "--account", account, "--start", date, "--maturity", maturity, "--rate", number(rate),
+        "--compounding", compounding, "--name", trimmedName,
+      ] + currency + ["--", symbolCode, number(value)]
+    default:
+      return ["asset", "manual", "--account", account, "--date", date, "--class", assetClass, "--name", trimmedName]
+        + currency + ["--", symbolCode, number(value)]
+    }
+  }
+}
+
+/// An asset class, as `marketpulse allocation --target` and `asset classify` name it.
+struct AssetClassOption: Identifiable, Equatable {
+  var id: String { key }
+  let key: String
+  let label: String
+  /// Python's `AssetClass`, in its order; scripts/check_native_bridge.py checks they match.
+  static let all = [
+    AssetClassOption(key: "equity", label: "Equity"),
+    AssetClassOption(key: "etf", label: "ETF"),
+    AssetClassOption(key: "fund", label: "Fund"),
+    AssetClassOption(key: "crypto", label: "Crypto"),
+    AssetClassOption(key: "fixed_income", label: "Fixed Income"),
+    AssetClassOption(key: "cash", label: "Cash"),
+    AssetClassOption(key: "real_estate", label: "Real Estate"),
+    AssetClassOption(key: "commodity", label: "Commodity"),
+    AssetClassOption(key: "alternative", label: "Alternative"),
+    AssetClassOption(key: "other", label: "Other"),
+  ]
+}
+
+/// The targets form: a percentage per asset class as typed, blank for none.
+struct TargetsEntry {
+  var weights: [String: String] = [:]
+
+  func percent(_ key: String, locale: Locale = .current) -> Double? {
+    NumberInput.parse(weights[key] ?? "", locale: locale)
+  }
+  func total(locale: Locale = .current) -> Double {
+    AssetClassOption.all.compactMap { percent($0.key, locale: locale) }.reduce(0, +)
+  }
+
+  /// Each entry blank or 0–100, and no more than 100% in all (the CLI's own limit).
+  func isValid(locale: Locale = .current) -> Bool {
+    for option in AssetClassOption.all {
+      let text = (weights[option.key] ?? "").trimmingCharacters(in: .whitespaces)
+      if text.isEmpty { continue }
+      guard let value = NumberInput.parse(text, locale: locale), (0...100).contains(value) else { return false }
+    }
+    return total(locale: locale) <= 100.0001
+  }
+
+  /// Replaces every saved target with these, without pricing holdings. Zero and blank mean none.
+  func arguments(locale: Locale = .current) -> [String] {
+    ["allocation", "--quiet", "--clear-targets"]
+      + AssetClassOption.all.flatMap { option -> [String] in
+        guard let value = percent(option.key, locale: locale), value > 0 else { return [] }
+        return ["--target", "\(option.key)=\(value)"]
+      }
+  }
+}
+
 /// Version 1 of `marketpulse desktop snapshot`; separate from the stable status API.
 struct DesktopPayload: Decodable {
   let version: Int
@@ -169,6 +290,13 @@ struct DesktopPayload: Decodable {
   let positions: [DesktopPosition]
   let activity: [DesktopTransaction]
   let allocation: [AllocationBucket]
+  /// Asset-class targets, and how far the portfolio is from them (empty without targets).
+  /// Absent from older engines.
+  let targets: [AllocationTarget]?
+  let rebalance: [RebalanceRow]?
+  /// Saved asset details: GICs and bonds, assets valued by hand, and class overrides.
+  /// Absent from older engines.
+  let assets: [DesktopAsset]?
   let incomeMonths: [HistoryPoint]
   let room: [ContributionRoom]
   let alerts: [DesktopAlert]
@@ -333,6 +461,62 @@ struct AllocationBucket: Decodable, Identifiable {
   let label: String
   let value: Double
   let weight: Double
+}
+
+struct AllocationTarget: Decodable, Identifiable {
+  var id: String { bucket }
+  /// An `AssetClassOption` key.
+  let bucket: String
+  /// Percent of the portfolio.
+  let weight: Double
+}
+
+/// One asset class against its target, as `marketpulse allocation` shows it.
+struct RebalanceRow: Decodable, Identifiable {
+  var id: String { bucket }
+  let bucket: String
+  let label: String
+  /// Base currency.
+  let value: Double
+  /// Percent of the portfolio now, and the target (0 for a class without one).
+  let weight: Double
+  let target: Double
+  /// `weight - target`, in percentage points.
+  let drift: Double
+  /// Base currency to buy (+) or sell (−) to reach the target. A suggestion only.
+  let delta: Double
+}
+
+/// A symbol's saved details (`marketpulse asset list`).
+struct DesktopAsset: Decodable, Identifiable {
+  var id: String { symbol }
+  let symbol: String
+  /// fixed_income (valued by accrual), manual (valued by hand), market (a class override), or cash.
+  let kind: String
+  let name: String
+  /// An `AssetClassOption` key, or nil for the class the market reports.
+  let assetClass: String?
+  let assetClassLabel: String?
+  let currency: String
+  /// Fixed income: annual percent, compounding, and `yyyy-MM-dd` term.
+  let rate: Double
+  let compounding: String
+  let startDate: String
+  let maturityDate: String
+  /// Manual: the date of the valuation (or purchase) its value rests on.
+  let valuedOn: String?
+
+  var fixedIncome: Bool { kind == "fixed_income" }
+  var manual: Bool { kind == "manual" }
+  /// Shown under the asset's name in Holdings.
+  var summary: String? {
+    if fixedIncome {
+      let rate = self.rate.formatted(.number.precision(.fractionLength(0...3)))
+      return "\(rate)% \(compounding) · matures \(maturityDate)"
+    }
+    if manual, let valuedOn { return "Valued by you · \(valuedOn)" }
+    return nil
+  }
 }
 
 /// Room CRA works out in Canadian dollars, whatever currency totals are shown in.

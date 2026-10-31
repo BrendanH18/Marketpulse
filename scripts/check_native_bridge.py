@@ -21,7 +21,7 @@ from marketpulse.desktop import (
     tax_report,
     write_tax_csv,
 )
-from marketpulse.models import Account, AccountType, Transaction, TxnType
+from marketpulse.models import Account, AccountType, AssetClass, Transaction, TxnType
 from marketpulse.services import Tracker
 
 root = Path(__file__).resolve().parents[1]
@@ -81,6 +81,8 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     )
     profiles = Path(tmp) / "profiles.json"
     profiles.write_text(json.dumps(PROFILE_NAMES))
+    asset_classes = Path(tmp) / "asset-classes.json"
+    asset_classes.write_text(json.dumps([[c.value, c.label] for c in AssetClass]))
     # The real ledger's storage object (the CLI runs above may already have taken a daily backup).
     ledger = Store(Path(tmp) / "data" / "marketpulse.db")
     for reason in ("daily", "pre-restore"):
@@ -153,6 +155,8 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
             str(root / "tests/fixtures/transaction_forms.json"),
             str(broker_preview),
             str(profiles),
+            str(root / "tests/fixtures/asset_forms.json"),
+            str(asset_classes),
         ],
         check=True,
     )

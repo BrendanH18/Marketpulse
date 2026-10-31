@@ -14,12 +14,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from . import __version__
-from .analytics import disposition_note, income_by_month
+from .analytics import disposition_note, income_by_month, rebalance
 from .automation import run_cycle
 from .config import Config, config_path
 from .db import Snapshot, Store
 from .market import MarketData, MarketError
-from .models import Account, AccountType, Quote, Transaction, TxnType
+from .models import Account, AccountType, Asset, AssetClass, AssetKind, Quote, Transaction, TxnType
 from .services import Tracker
 from .tax import Disposition
 
@@ -38,6 +38,13 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
     # holdings); their own transactions are hidden too, though the ledger keeps them.
     amap = tracker.store.account_map()
     archived = {i for i, a in amap.items() if a.archived}
+    targets = tracker.store.targets()
+    # What each manual asset's value rests on: the valuation pricing uses, else the latest purchase.
+    valued: dict[str, str] = {}
+    for t in tracker.store.transactions():
+        if t.type is TxnType.BUY and t.date > valued.get(t.symbol, ""):
+            valued[t.symbol] = t.date
+    valued.update({symbol: day for symbol, (day, _) in state.valuations.items()})
     return {
         "version": 1,
         "demo": False,
@@ -76,6 +83,13 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
             if t.account_id not in archived
         ],
         "allocation": [asdict(b) for b in view.by_class],
+        # Asset-class targets (`allocation --target`) and how far the portfolio is from each, as
+        # `marketpulse allocation` shows them. Suggestions only: MarketPulse never trades.
+        "targets": [{"bucket": k, "weight": w} for k, w in targets.items()],
+        "rebalance": [{**asdict(r), "drift": r.drift} for r in rebalance(view.by_class, targets, view.net_worth)]
+        if targets
+        else [],
+        "assets": [asset_row(a, valued) for a in tracker.store.assets().values()],
         "income_months": [{"date": d, "value": v} for d, v in income_by_month(state, view.fx.convert)],
         "room": [asdict(r) for r, _ in tracker.room()],
         "alerts": [{**asdict(a), "description": a.describe()} for a in tracker.store.alerts()],
@@ -90,6 +104,17 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
             *[f"Excluded from totals: {s}" for s in view.excluded],
             *[archived_warning(name) for name in view.archived_with_value],
         ],
+    }
+
+
+def asset_row(a: Asset, valued: dict[str, str]) -> dict:
+    """A symbol's saved details (`marketpulse asset list`): a GIC or bond valued by accrual, an
+    asset valued by hand, or a market symbol whose asset class was overridden."""
+    return {
+        **asdict(a),
+        "asset_class": a.asset_class.value if a.asset_class else None,
+        "asset_class_label": a.asset_class.label if a.asset_class else None,
+        "valued_on": valued.get(a.symbol) if a.kind is AssetKind.MANUAL else None,
     }
 
 
@@ -397,6 +422,32 @@ def demo_tracker() -> Iterator[Tracker]:
                         currency="CAD",
                     )
                 )
+            # A GIC valued by accrual, and targets for the Allocation workspace.
+            gic_start = date.today() - timedelta(days=200)
+            store.upsert_asset(
+                Asset(
+                    symbol="GIC-DEMO",
+                    kind=AssetKind.FIXED_INCOME,
+                    name="Fictional 2-year GIC",
+                    asset_class=AssetClass.FIXED_INCOME,
+                    currency="CAD",
+                    rate=4.1,
+                    start_date=gic_start.isoformat(),
+                    maturity_date=(gic_start + timedelta(days=730)).isoformat(),
+                )
+            )
+            store.add_transaction(
+                Transaction(
+                    account_id=rrsp.saved_id,
+                    type=TxnType.BUY,
+                    date=gic_start.isoformat(),
+                    symbol="GIC-DEMO",
+                    quantity=1,
+                    price=8000,
+                    currency="CAD",
+                )
+            )
+            store.set_targets({"etf": 55, "equity": 35, "fixed_income": 10})
             store.add_watch(["AAPL", "MSFT", "NVDA", "XEQT.TO"])
             store.set_room("TFSA", date.today().year, 18000)
             yield tracker

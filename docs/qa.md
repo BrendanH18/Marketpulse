@@ -247,6 +247,25 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     +12.50 CAD, and XEQT.TO's cost in Holdings is 12.50 lower. Right-click each new entry:
     **Edit…** is disabled and **Delete…** isn't. In the demo, Save is disabled.
 
+25. **GICs, other assets, and allocation targets.** In **Holdings**, **Add asset › GIC or
+    bond…**: with the maturity date on or before the start date, the sheet says so and
+    **Add asset** stays disabled. Add `gic-qa` to Everyday TFSA, principal 10,000 at 4.5%
+    annual, starting a year ago and maturing a year from now: Holdings lists GIC-QA under
+    its name with "4.5% annual · matures <date>", worth about 10,450 CAD, and
+    `marketpulse holdings` (with the QA app's `MARKETPULSE_DATA` and `MARKETPULSE_CONFIG`)
+    shows the same value. Adding another asset with symbol `AAPL` says it's already in your
+    portfolio. **Add asset › Property or other asset…**: `art-qa`, value 3,500, class
+    Alternative, in Everyday TFSA. Right-click it: **Record a valuation…** of 3,800; the
+    row shows 3,800 and "Valued by you · <today>". Right-click AAPL: there's no
+    **Record a valuation…**, and **Change asset class…** to Fund moves AAPL under Fund in
+    **Allocation**. Open **Allocation**: with no targets, it offers **Set targets…**. Enter
+    ETF 70 and Equity 40: the sheet says they can't pass 100% and Save is disabled. Enter
+    ETF 60, Fixed Income 30, and save: the table lists each class with its share now, its
+    target, the drift, and "Add …" or "Reduce by …", and the note says these are
+    suggestions only. Privacy mode hides the table. **Clear all** and save: the workspace
+    offers **Set targets…** again. In the demo, Allocation shows the demo's targets with the
+    fictional GIC under Fixed Income, and **Add asset** and **Change targets…** are disabled.
+
 Quit the QA app with ⌘Q when done.
 
 ## Tool limits and workarounds

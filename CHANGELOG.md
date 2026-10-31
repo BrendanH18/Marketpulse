@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GICs, bonds, and assets you value yourself, and allocation targets, in the Mac app.
+  In **Holdings**, **Add asset** adds a GIC or bond (principal, rate, start, maturity,
+  compounding; valued by the interest it earns) or a property or other asset with its
+  value and asset class. Right-click a row to **Record a valuation…** of an asset you
+  value yourself, or **Change asset class…** of any symbol. A new **Allocation**
+  workspace shows each asset class against your targets, with the amount to add or
+  reduce to reach them (suggestions only; MarketPulse never trades), and **Set
+  targets…** edits them. `asset fixed`, `asset manual`, and `asset value` accept
+  `--request-id`, so the app can retry a save without recording it twice. `allocation`
+  gains `--quiet` (save targets without pricing holdings), and `--clear-targets` with
+  `--target` now replaces the targets in one step, keeping the old ones if a new one is
+  rejected. `desktop snapshot` gains `targets`, `rebalance`, and `assets`. The demo
+  portfolio gains a fictional GIC and targets.
+
 - Broker CSV profiles for **Questrade** account activity exports and **Wealthsimple**
   monthly statements, detected from the header row. `marketpulse import` and
   `desktop import` accept `--profile auto|questrade|wealthsimple|generic`. Broker codes
@@ -132,6 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `allocation --clear-targets --target …` no longer clears the saved targets when one of
+  the new ones is rejected.
 - CSV import no longer reads an unreadable number (such as `2x` in a price or fees
   column) as zero; the row is skipped and reported with the column and value.
 - Contribution room still counts deposits to archived accounts. Archiving a TFSA, RRSP

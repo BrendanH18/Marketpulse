@@ -699,6 +699,86 @@ def test_transaction_form_commands_record_what_the_app_shows(cli, store):
     assert state.holdings[(2, "XEQT.TO")].book == pytest.approx((300 + 15.5) * 6.5 / 10.5 - 12.5)
 
 
+def test_asset_form_commands_value_holdings_as_the_cli_does(cli, store, tracker):
+    """The commands the Mac app's asset and targets forms send (checked on the Swift side by
+    scripts/check_native_bridge.swift) record what the forms describe, and the snapshot the
+    app shows values them exactly as `marketpulse` does."""
+    from marketpulse.desktop import snapshot
+
+    forms = json.loads((Path(__file__).parent / "fixtures/asset_forms.json").read_text())
+    cli("accounts", "add", "Fictional TFSA", "-t", "TFSA")
+    cli("accounts", "add", "Fictional Taxable", "-t", "NONREG")
+    for case in (c for c in forms["assets"] if "arguments" in c):
+        args = case["arguments"]
+        # As TransactionSaveRequest sends it, with AssetEntry.commandWords.
+        result = cli(*args[:2], "--request-id", str(uuid4()), *args[2:])
+        assert result.exit_code == 0, (args, result.output)
+        saved = asdict(max(store.transactions(), key=lambda t: t.id or 0))
+        assert {k: saved[k] for k in case["expect"]} == case["expect"], args
+    for case in (c for c in forms["targets"] if "arguments" in c):
+        result = cli(*case["arguments"])
+        assert result.exit_code == 0, (case, result.output)
+        assert "Pricing" not in result.output and "Allocation by" not in result.output  # --quiet
+        assert store.targets() == case["expect"]
+    assets = store.assets()
+    assert assets["GIC-2025"].name == "Fictional 1-year GIC" and assets["COTTAGE"].name == "-Fictional cottage"
+    assert assets["COTTAGE"].asset_class.value == "real_estate" and assets["GIC-2025"].rate == 4.5
+
+    payload = snapshot(tracker)
+    gic = 10000 * 1.045 ** (366 / 365)  # 2024 is a leap year; accrual stops at maturity
+    values = {p["symbol"]: p["value"] for p in payload["positions"]}
+    assert values == {"GIC-2025": pytest.approx(gic), "COTTAGE": pytest.approx(380000)}
+    view = tracker.valuation(record=False)
+    assert payload["status"]["net_worth"] == pytest.approx(view.net_worth) == pytest.approx(gic + 380000)
+    assert {p.symbol: p.value_base for p in view.positions} == values
+    rows = {r["bucket"]: r for r in payload["rebalance"]}
+    assert payload["targets"] == [{"bucket": "etf", "weight": 60}, {"bucket": "fixed_income", "weight": 30}]
+    assert rows["fixed_income"]["delta"] == pytest.approx(0.3 * (gic + 380000) - gic)
+    assert rows["etf"]["delta"] == pytest.approx(0.6 * (gic + 380000)) and rows["etf"]["value"] == 0
+    assert rows["real_estate"]["target"] == 0 and rows["real_estate"]["drift"] == pytest.approx(
+        380000 / (gic + 380000) * 100
+    )
+    by_symbol = {a["symbol"]: a for a in payload["assets"]}
+    assert by_symbol["COTTAGE"]["valued_on"] == "2024-06-01" and by_symbol["GIC-2025"]["valued_on"] is None
+    assert by_symbol["GIC-2025"]["kind"] == "fixed_income" and by_symbol["GIC-2025"]["maturity_date"] == "2025-01-15"
+    # `marketpulse allocation` shows the same suggestion.
+    assert "To rebalance" in cli("allocation").output
+
+
+def test_asset_save_retried_with_its_request_id_records_once(cli, store):
+    cli("accounts", "add", "Fictional TFSA", "-t", "TFSA")
+    request = str(uuid4())
+    args = ("asset", "fixed", "--request-id", request, "--rate", "4", "--maturity", "2030-01-01", "--", "GIC1", "5000")
+    assert "Added GIC1" in cli(*args).output
+    assert "already recorded" in cli(*args).output
+    assert len(store.transactions()) == 1
+    status = json.loads(cli("desktop", "transaction-status", request).output)
+    assert status["recorded"] is True
+
+
+def test_manual_asset_is_valued_on_its_valuation_not_a_later_purchase(cli, tracker):
+    from marketpulse.desktop import snapshot
+
+    cli("accounts", "add", "Fictional Taxable", "-t", "NONREG")
+    cli("asset", "manual", "ART", "1000", "-d", "2024-01-02")
+    cli("asset", "value", "ART", "1500", "-d", "2024-06-01")
+    cli("buy", "ART", "1", "1600", "-d", "2025-01-02", "--currency", "CAD")
+    payload = snapshot(tracker)
+    assert {a["symbol"]: a["valued_on"] for a in payload["assets"]} == {"ART": "2024-06-01"}
+    assert [p["value"] for p in payload["positions"]] == [pytest.approx(2 * 1500)]  # still the June valuation
+
+
+def test_rejected_targets_keep_the_saved_ones(cli, store):
+    cli("allocation", "--quiet", "--target", "etf=50")
+    result = cli("allocation", "--quiet", "--clear-targets", "--target", "etf=70", "--target", "equity=40")
+    assert result.exit_code == 1 and "add up to 110%" in result.output
+    bad = cli("allocation", "--quiet", "--clear-targets", "--target", "nope=10")
+    assert bad.exit_code == 1
+    assert store.targets() == {"etf": 50}
+    cli("allocation", "--quiet", "--clear-targets")
+    assert store.targets() == {}
+
+
 BROKERS = Path(__file__).parent / "fixtures" / "brokers"
 QUESTRADE = BROKERS / "questrade.csv"
 WEALTHSIMPLE = BROKERS / "wealthsimple.csv"

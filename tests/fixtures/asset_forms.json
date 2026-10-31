@@ -1,0 +1,71 @@
+{
+  "about": "Entries typed into the Mac app's asset forms (AssetEntry) and targets form (TargetsEntry), en_US number format, and the exact CLI arguments they send. scripts/check_native_bridge.swift checks the arguments; tests/test_cli.py runs the ones with arguments, in order, on a fictional ledger with accounts 1 Fictional TFSA and 2 Fictional Taxable (NONREG), then checks the values Holdings and Overview show.",
+  "assets": [
+    {
+      "entry": {"kind": "FIXED", "account": "1", "symbol": " gic-2025 ", "name": "Fictional 1-year GIC ", "value": "10,000", "rate": "4.5", "date": "2024-01-15", "maturity": "2025-01-15", "compounding": "annual"},
+      "valid": true,
+      "arguments": ["asset", "fixed", "--account", "1", "--start", "2024-01-15", "--maturity", "2025-01-15", "--rate", "4.5", "--compounding", "annual", "--name", "Fictional 1-year GIC", "--", "GIC-2025", "10000.0"],
+      "expect": {"type": "BUY", "account_id": 1, "symbol": "GIC-2025", "quantity": 1, "price": 10000, "currency": "CAD"}
+    },
+    {
+      "entry": {"kind": "FIXED", "account": "1", "symbol": "GIC-BAD", "value": "1000", "rate": "4", "date": "2024-06-01", "maturity": "2024-06-01"},
+      "valid": false
+    },
+    {
+      "entry": {"kind": "FIXED", "account": "1", "symbol": "GIC-BAD", "value": "1000", "rate": "-1", "date": "2024-01-01", "maturity": "2025-01-01"},
+      "valid": false
+    },
+    {
+      "entry": {"kind": "FIXED", "account": "", "symbol": "GIC-BAD", "value": "1000", "rate": "4", "date": "2024-01-01", "maturity": "2025-01-01"},
+      "valid": false
+    },
+    {
+      "entry": {"kind": "MANUAL", "account": "2", "symbol": "cottage", "name": "-Fictional cottage", "value": "350,000", "date": "2023-06-01", "assetClass": "real_estate"},
+      "valid": true,
+      "arguments": ["asset", "manual", "--account", "2", "--date", "2023-06-01", "--class", "real_estate", "--name", "-Fictional cottage", "--", "COTTAGE", "350000.0"],
+      "expect": {"type": "BUY", "account_id": 2, "symbol": "COTTAGE", "quantity": 1, "price": 350000, "currency": "CAD"}
+    },
+    {
+      "entry": {"kind": "MANUAL", "account": "2", "symbol": "ART-1", "value": "1200", "date": "2023-06-01", "assetClass": "alternative", "currency": "us"},
+      "valid": false
+    },
+    {
+      "entry": {"kind": "VALUE", "symbol": "COTTAGE", "value": "0", "date": "2024-03-01"},
+      "valid": true,
+      "arguments": ["asset", "value", "--date", "2024-03-01", "--", "COTTAGE", "0.0"],
+      "expect": {"type": "VALUATION", "account_id": 2, "symbol": "COTTAGE", "price": 0, "currency": "CAD"}
+    },
+    {
+      "entry": {"kind": "VALUE", "symbol": "COTTAGE", "value": "380,000", "date": "2024-06-01"},
+      "valid": true,
+      "arguments": ["asset", "value", "--date", "2024-06-01", "--", "COTTAGE", "380000.0"],
+      "expect": {"type": "VALUATION", "account_id": 2, "symbol": "COTTAGE", "price": 380000, "currency": "CAD"}
+    },
+    {
+      "entry": {"kind": "VALUE", "symbol": "COTTAGE", "value": "-1", "date": "2024-06-01"},
+      "valid": false
+    }
+  ],
+  "targets": [
+    {
+      "weights": {"etf": "60", "equity": "-5"},
+      "valid": false
+    },
+    {
+      "weights": {"etf": "70", "equity": "40"},
+      "valid": false
+    },
+    {
+      "weights": {},
+      "valid": true,
+      "arguments": ["allocation", "--quiet", "--clear-targets"],
+      "expect": {}
+    },
+    {
+      "weights": {"etf": "60", "fixed_income": "30", "real_estate": " ", "cash": "0"},
+      "valid": true,
+      "arguments": ["allocation", "--quiet", "--clear-targets", "--target", "etf=60.0", "--target", "fixed_income=30.0"],
+      "expect": {"etf": 60, "fixed_income": 30}
+    }
+  ]
+}
