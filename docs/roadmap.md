@@ -37,11 +37,11 @@ Windows), and phases are in the [App 1.0 plan](app-plan.md). Verify app changes 
 
 ## For agents
 
-Read [AGENTS.md](../AGENTS.md) first: it covers claiming issues, branches, checks, and the
+Read [AGENTS.md](../AGENTS.md) first: it covers claiming issues, checks, and the
 handoff protocol for switching between agents mid-task.
 
 
 1. Pick **one** open issue from the table (prefer higher priority).
 2. Treat that issue’s scope and acceptance checkboxes as the contract.
-3. Open a focused PR that links the issue; do not bundle unrelated roadmap items.
+3. Keep the work to that issue; do not bundle unrelated roadmap items.
 4. Use fictional portfolio data in tests, docs, and screenshots.
