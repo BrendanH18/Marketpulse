@@ -23,7 +23,11 @@ epic [#32](https://github.com/BrendanH18/Marketpulse/issues/32).
 
 ## Start of every session
 
-Read this file and the relevant project docs before working.
+1. Read this file, then the issue you're working on **including its latest comments**.
+   A `Handoff` comment means another agent started; continue from it.
+2. If the issue is unclaimed, claim it with a comment:
+   `Claiming for <agent/model>. Branch: <branch>.`
+3. Prefer issues labelled `agent-ready`. Skip `needs-decision` issues; ask the maintainer instead.
 
 ## Checks
 
@@ -104,10 +108,35 @@ Tests are isolated by autouse fixtures that point `MARKETPULSE_DATA`/`MARKETPULS
 - Keep changes focused on one issue. Refactors stay behavior-preserving.
 - Add a line to `CHANGELOG.md` under **Unreleased** for user-visible changes, and update the docs you affect.
 
+## Handoff protocol
+
+Hand off whenever you might not finish: usage limits, a long-running task, a
+blocker, or the end of a session. It takes two minutes and saves the next agent an hour.
+
+Post this comment **on the issue**:
+
+```markdown
+### Handoff — <agent/model>, <YYYY-MM-DD>
+**Status:** in progress | blocked | ready for review
+**Branch / PR:** `<branch>` / #<pr>
+**Done:**
+- …
+**Next steps (in order):**
+1. …
+**Verified:** <commands run and results; QA items checked>
+**Not verified / known issues:** …
+**Gotchas:** <anything surprising: environment quirks, failed approaches, decisions made>
+**Open questions for the maintainer:** …
+```
+
+The next agent starts from the latest handoff comment, not from scratch.
+
 ## Agent-specific notes
 
 - **Claude Code** reads `CLAUDE.md`, which only imports this file.
 - **Codex** and **Cursor** read `AGENTS.md` directly.
+- Agents without GitHub access can't read issues: the maintainer should paste the
+  issue and its latest handoff comment into the session.
 
 ## Context maintenance
 
