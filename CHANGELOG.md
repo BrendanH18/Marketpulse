@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-03
+
+The first release with the standalone Mac app (App 1.0 for macOS): `MarketPulse.app`
+for Apple silicon and Intel, with its own copy of the engine, installed with one command
+or from a DMG. The app now covers everyday work without a terminal: onboarding, editing
+transactions and accounts, every transaction type, broker CSV imports, the tax workspace,
+GICs and manually valued assets, allocation targets, backups and restore, settings, an
+update check, and keyboard and VoiceOver support. Minor bump: the CLI, `status --json`, and
+the database stay backward compatible (see **Changed** for stricter checks).
+
 ### Added
 
 - Keyboard and VoiceOver support in the Mac app. A new **Workspace** menu opens each
@@ -210,7 +220,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warned, and daily snapshots and history rebuilds (`backfill`) wait until it's resolved.
 - CSV imports skip rows that name an archived account, with that reason.
 
-No database migration is required.
+### Upgrade notes
+
+1. **Back up before upgrading.** Quit the TUI and menu bar companion, then run
+   `marketpulse backup` (or copy `~/.marketpulse/` to another disk).
+2. **No database migration.** The schema is unchanged from 2.1.0, so 2.1.0 can
+   still open the ledger if you roll back.
+3. **Mac app.** Install it with the one-line command or the DMG in the
+   [install guide](docs/install.md). It shares `~/.marketpulse` with the CLI and TUI.
+   A companion installed from a checkout (`MarketPulse Bar.app`) is a separate app; if you
+   switch, quit it and [remove it](docs/install.md#uninstall) so two apps don't refresh one ledger.
+4. **Update the CLI from a release tag:**
+
+   ```bash
+   marketpulse backup
+   uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v2.2.0
+   marketpulse --version
+   ```
+
+5. Archived accounts no longer count in totals or `status --json` (see **Changed**), and
+   tax figures remain **estimates**: check them against your slips before filing.
 
 ## [2.1.0] - 2026-10-06
 
@@ -278,6 +307,7 @@ Initial 2.0 overhaul: transaction ledger engine, SQLite store, Yahoo market
 client, Omarchy-styled Textual TUI, and native macOS menu bar companion.
 See PR [#3](https://github.com/BrendanH18/Marketpulse/pull/3).
 
-[Unreleased]: https://github.com/BrendanH18/Marketpulse/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/BrendanH18/Marketpulse/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/BrendanH18/Marketpulse/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/BrendanH18/Marketpulse/compare/08b9aff...v2.1.0
 [2.0.0]: https://github.com/BrendanH18/Marketpulse/tree/08b9aff
