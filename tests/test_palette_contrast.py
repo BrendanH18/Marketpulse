@@ -48,10 +48,11 @@ def test_chart_colours_stand_out_from_panels(mode):
         assert contrast(colour[mode], named["panel"][mode]) >= 3, colour
 
 
-def test_light_mint_carries_white_button_labels():
-    # Mint is the window's tint: prominent buttons draw white text on it.
+@pytest.mark.parametrize("mode", [0, 1], ids=["light", "dark"])
+def test_filled_buttons_carry_white_labels(mode):
+    # Prominent buttons draw white text on their fill in both appearances.
     named, _ = palette()
-    assert contrast(named["mint"][0], "#ffffff") >= 4.5
+    assert contrast(named["fill"][mode], "#ffffff") >= 4.5
 
 
 def tint(colour: str, surface: str, alpha: float) -> str:

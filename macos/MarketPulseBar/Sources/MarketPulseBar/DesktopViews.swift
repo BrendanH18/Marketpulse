@@ -426,7 +426,7 @@ private struct OverviewWorkspace: View {
           } description: {
             Text("Create an account, then record a transaction or import your broker's CSV.")
           } actions: {
-            Button("Create an account", action: newAccount).buttonStyle(.borderedProminent)
+            Button("Create an account", action: newAccount).buttonStyle(.borderedProminent).tint(Studio.fill)
               .disabled(!canEdit)
             Button("Other ways to start…", action: welcome)
           }
@@ -753,7 +753,8 @@ private struct AllocationWorkspace: View {
               "Give each asset class a target percentage, and MarketPulse shows how far your portfolio is from it."
             )
           } actions: {
-            Button("Set targets…", action: setTargets).buttonStyle(.borderedProminent).disabled(!canEdit)
+            Button("Set targets…", action: setTargets).buttonStyle(.borderedProminent).tint(Studio.fill)
+              .disabled(!canEdit)
           }
         } else {
           Surface("Against your targets", trailing: "BY ASSET CLASS · \(s.base)") {
