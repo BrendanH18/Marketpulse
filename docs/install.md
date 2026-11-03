@@ -5,7 +5,7 @@
 `MarketPulse.app` runs on macOS 14 (Sonoma) or later, on Apple silicon and Intel Macs. It
 carries its own copy of the MarketPulse engine, so you don't need Python, Homebrew, or
 developer tools. Each [GitHub Release](https://github.com/BrendanH18/Marketpulse/releases)
-from the first one after 2.1.0 has the app for both kinds of Mac.
+from 2.2.0 has the app for both kinds of Mac.
 
 ## Install with one command (recommended)
 

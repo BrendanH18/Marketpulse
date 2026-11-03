@@ -59,8 +59,8 @@ Prefer to download it yourself? Get the DMG from the
 Apple, so on macOS 15 and later you allow it once in **System Settings › Privacy & Security ›
 Open Anyway**. The guide also explains [why the app is unsigned](docs/install.md#why-the-app-is-unsigned),
 how to [verify a download](docs/install.md#verify-a-download), and how to
-[uninstall](docs/install.md#uninstall). The app ships with releases after 2.1.0; for 2.1.0,
-build it from a checkout ([macOS and Omarchy](#macos-and-omarchy)).
+[uninstall](docs/install.md#uninstall). Releases from 2.2.0 include the app; for 2.1.0 and
+earlier, build it from a checkout ([macOS and Omarchy](#macos-and-omarchy)).
 
 ### Command line and terminal interface
 
@@ -72,10 +72,10 @@ platforms; the menu bar companion requires macOS 14+ and the Xcode Command Line 
 
 Install a pinned release so you are not tracking `main`. Prefer the tag shown on
 the [latest GitHub Release](https://github.com/BrendanH18/Marketpulse/releases)
-(examples below use `v2.1.0`, now published):
+(examples below use `v2.2.0`):
 
 ```bash
-uv tool install --python 3.11 git+https://github.com/BrendanH18/Marketpulse.git@v2.1.0
+uv tool install --python 3.11 git+https://github.com/BrendanH18/Marketpulse.git@v2.2.0
 marketpulse --version
 ```
 
@@ -84,7 +84,7 @@ Without uv, the same pin works with pip in a virtual environment:
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-pip install git+https://github.com/BrendanH18/Marketpulse.git@v2.1.0
+pip install git+https://github.com/BrendanH18/Marketpulse.git@v2.2.0
 marketpulse --version
 ```
 
@@ -154,7 +154,7 @@ Quit the TUI and menu bar companion, back up, then reinstall from the newer tag
 
 ```bash
 marketpulse backup
-uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v2.1.0
+uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v2.2.0
 ```
 
 On an unpinned `@main` or editable install, pull or reinstall from `@main`
@@ -225,7 +225,7 @@ pinned to the same release tag as the CLI (the published wheel / non-editable
 git-tag install does not bundle the Swift project):
 
 ```bash
-git clone --branch v2.1.0 --depth 1 https://github.com/BrendanH18/Marketpulse.git
+git clone --branch v2.2.0 --depth 1 https://github.com/BrendanH18/Marketpulse.git
 cd Marketpulse
 uv tool install --python 3.11 --editable .
 xcode-select --install  # if the Command Line Tools are not installed
