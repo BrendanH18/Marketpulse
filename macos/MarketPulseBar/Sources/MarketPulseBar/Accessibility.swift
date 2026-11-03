@@ -12,7 +12,9 @@ enum Spoken {
   /// "March 4, 2026" from a snapshot's `YYYY-MM-DD`.
   static func day(_ raw: String) -> String {
     guard let date = ISO8601DateFormatter().date(from: raw + "T12:00:00Z") else { return raw }
-    return date.formatted(.dateTime.month(.wide).day().year())
+    // In UTC: noon UTC is already tomorrow in UTC+12 and later.
+    let utc = TimeZone(secondsFromGMT: 0) ?? .current
+    return date.formatted(Date.FormatStyle(timeZone: utc).month(.wide).day().year())
   }
 
   /// "March 2026" from an income month's `YYYY-MM`.
