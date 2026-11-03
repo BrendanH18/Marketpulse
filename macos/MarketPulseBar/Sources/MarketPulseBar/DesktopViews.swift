@@ -69,7 +69,7 @@ struct PortfolioWindow: View {
               model.message = nil
             } label: {
               Image(systemName: "xmark")
-            }.buttonStyle(.plain)
+            }.buttonStyle(.plain).help("Dismiss").accessibilityLabel("Dismiss message")
           }.padding(12).background(Studio.mint.opacity(0.1))
         }
         if model.showUpdateBanner, let update = model.availableUpdate {
@@ -84,7 +84,7 @@ struct PortfolioWindow: View {
               model.dismissUpdate()
             } label: {
               Image(systemName: "xmark")
-            }.buttonStyle(.plain).help("Hide until the next version")
+            }.buttonStyle(.plain).help("Hide until the next version").accessibilityLabel("Hide update notice")
           }.padding(.horizontal, 30).padding(.vertical, 8).background(Studio.mint.opacity(0.08))
         }
         if let payload = model.desktop {
@@ -137,13 +137,14 @@ struct PortfolioWindow: View {
           Image(systemName: (model.status?.privacy ?? false) ? "eye.slash" : "eye")
         }
         .help("Toggle privacy mode")
+        .accessibilityLabel((model.status?.privacy ?? false) ? "Show amounts" : "Hide amounts")
         .disabled(!model.canEdit)
         Button {
           model.refresh()
         } label: {
           Image(systemName: "arrow.clockwise")
         }
-        .help("Refresh portfolio (⌘R)").keyboardShortcut("r")
+        .help("Refresh portfolio (⌘R)").accessibilityLabel("Refresh portfolio").keyboardShortcut("r")
         .disabled(model.loading || model.saving)
         Button {
           draft.sheet = .transaction
@@ -233,6 +234,7 @@ struct PortfolioWindow: View {
             .foregroundStyle(Studio.muted)
         }
       }.padding(.horizontal, 20).padding(.top, 28).padding(.bottom, 30)
+        .accessibilityElement(children: .ignore).accessibilityLabel("MarketPulse, your personal ledger")
       Text("WORKSPACE").font(.system(size: 10, weight: .medium)).tracking(1.5).foregroundStyle(
         Studio.muted
       ).padding(.leading, 22)
@@ -335,6 +337,7 @@ struct PortfolioWindow: View {
   private var footer: some View {
     HStack(spacing: 8) {
       Circle().fill(model.errorMessage != nil ? Studio.red : Studio.mint).frame(width: 5, height: 5)
+        .accessibilityHidden(true)
       Text(
         model.loading
           ? "Refreshing portfolio…" : model.saving ? "Saving…" : model.demo ? "Demo portfolio" : "Local ledger")
@@ -377,6 +380,8 @@ private struct Surface<Content: View>: View {
     }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
       .background(Studio.panel, in: RoundedRectangle(cornerRadius: 12))
       .overlay(RoundedRectangle(cornerRadius: 12).stroke(Studio.line))
+      // A named group: without it, VoiceOver merges the combined rows inside into one element.
+      .accessibilityElement(children: .contain).accessibilityLabel(title)
   }
 }
 
@@ -393,6 +398,7 @@ private struct Metric: View {
       Text(detail).font(.system(size: 10)).foregroundStyle(Studio.muted)
     }.frame(maxWidth: .infinity, alignment: .leading).padding(20).background(
       Studio.panel, in: RoundedRectangle(cornerRadius: 10))
+      .accessibilityElement(children: .combine)
   }
 }
 
@@ -420,7 +426,7 @@ private struct OverviewWorkspace: View {
           } description: {
             Text("Create an account, then record a transaction or import your broker's CSV.")
           } actions: {
-            Button("Create an account", action: newAccount).buttonStyle(.borderedProminent)
+            Button("Create an account", action: newAccount).buttonStyle(.borderedProminent).tint(Studio.fill)
               .disabled(!canEdit)
             Button("Other ways to start…", action: welcome)
           }
@@ -437,7 +443,7 @@ private struct OverviewWorkspace: View {
             title: "Unrealized gain",
             value: Format.money(s.unrealized, s.base, privacy: s.privacy, sign: true),
             detail: Format.pct(s.unrealizedPct) + " on cost", color: Studio.trend(s.unrealized))
-        }
+        }.accessibilityElement(children: .contain)
         Surface("Portfolio value", trailing: "\(s.base) · DAILY SNAPSHOTS") {
           HStack {
             Text(s.privacy ? "Values hidden" : "The bigger picture").font(.system(size: 12))
@@ -470,10 +476,16 @@ private struct OverviewWorkspace: View {
               .foregroundStyle(
                 LinearGradient(
                   colors: [Studio.mint.opacity(0.22), Studio.mint.opacity(0.01)], startPoint: .top,
-                  endPoint: .bottom))
+                  endPoint: .bottom)
+              )
+              .accessibilityHidden(true)
               LineMark(x: .value("Date", chartDate(point.date)), y: .value("Value", point.value))
                 .foregroundStyle(Studio.mint).lineStyle(StrokeStyle(lineWidth: 2.5))
+                .accessibilityLabel(Spoken.day(point.date))
+                .accessibilityValue(Format.money(point.value, s.base, privacy: false, decimals: 0))
             }
+            .accessibilityLabel("Portfolio value chart")
+            .accessibilityValue(Spoken.history(points, base: s.base))
             .chartYScale(domain: lowerBound...upperBound)
             .chartYAxis {
               AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) { value in
@@ -512,8 +524,12 @@ private struct OverviewWorkspace: View {
                   .foregroundStyle(
                     Studio.colors[
                       payload.allocation.firstIndex(where: { $0.id == b.id })! % Studio.colors.count
-                    ])
+                    ]
+                  )
+                  .accessibilityLabel(b.label)
+                  .accessibilityValue(String(format: "%.1f%%", b.weight))
                 }.frame(width: 150, height: 150)
+                  .accessibilityLabel("Allocation chart, \(payload.positions.count) positions")
                   .chartBackground { _ in
                     VStack(spacing: 4) {
                       Text("\(payload.positions.count)").font(.system(size: 24, weight: .medium))
@@ -529,7 +545,7 @@ private struct OverviewWorkspace: View {
                       Spacer()
                       Text(String(format: "%.1f%%", bucket.weight)).font(.system(size: 11))
                         .monospacedDigit().foregroundStyle(Studio.muted)
-                    }
+                    }.accessibilityElement(children: .combine)
                   }
                 }
               }.padding(.vertical, 10)
@@ -545,6 +561,7 @@ private struct OverviewWorkspace: View {
                 Image(systemName: "building.columns").foregroundStyle(Studio.mint).frame(
                   width: 32, height: 32
                 ).background(Studio.mint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                  .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
                   Text(account.name).font(.system(size: 12, weight: .medium))
                   Text(
@@ -556,7 +573,7 @@ private struct OverviewWorkspace: View {
                 Text(Format.money(value, s.base, privacy: s.privacy, decimals: 0)).font(
                   .system(size: 12)
                 ).monospacedDigit()
-              }
+              }.accessibilityElement(children: .combine)
             }
           }
         }
@@ -579,7 +596,7 @@ private struct OverviewWorkspace: View {
               Text(activityAmount(t, privacy: s.privacy)).font(.system(size: 12))
                 .monospacedDigit().foregroundStyle(activityColor(t))
                 .frame(width: 120, alignment: .trailing)
-            }
+            }.accessibilityElement(children: .combine)
           }
         }
       }.padding(.horizontal, 30).padding(.bottom, 24)
@@ -666,7 +683,7 @@ private struct HoldingsWorkspace: View {
             if let summary = asset(p.symbol)?.summary {
               Text(summary).font(.system(size: 10)).foregroundStyle(Studio.muted).lineLimit(1)
             }
-          }.padding(.vertical, 6)
+          }.padding(.vertical, 6).accessibilityElement(children: .combine)
         }.width(min: 140, ideal: 190)
         TableColumn("Account", value: \.account).width(min: 100, ideal: 140)
         TableColumn("Quantity") { p in
@@ -677,7 +694,7 @@ private struct HoldingsWorkspace: View {
         }.width(80)
         TableColumn("Price") { p in
           Text("\(Format.price(p.price)) \(p.currency)\(p.stale ? " · cached" : "")")
-            .foregroundStyle(Studio.muted).monospacedDigit()
+            .modifier(RowTint(Studio.muted)).monospacedDigit()
         }.width(125)
         TableColumn("Value (\(payload.status.base))") { p in
           Text(Format.money(p.value, payload.status.base, privacy: payload.status.privacy))
@@ -686,10 +703,10 @@ private struct HoldingsWorkspace: View {
         TableColumn("Gain") { p in
           Text(
             Format.money(p.gain, payload.status.base, privacy: payload.status.privacy, sign: true)
-          ).foregroundStyle(Studio.trend(p.gain)).monospacedDigit()
+          ).modifier(RowTint(Studio.trend(p.gain))).monospacedDigit()
         }.width(110)
         TableColumn("Today") { p in
-          Text(p.dayChangePct.map(Format.pct) ?? "—").foregroundStyle(Studio.trend(p.dayChangePct))
+          Text(p.dayChangePct.map(Format.pct) ?? "—").modifier(RowTint(Studio.trend(p.dayChangePct)))
             .monospacedDigit()
         }.width(75)
       }.scrollContentBackground(.hidden).alternatingRowBackgrounds(.disabled)
@@ -736,7 +753,8 @@ private struct AllocationWorkspace: View {
               "Give each asset class a target percentage, and MarketPulse shows how far your portfolio is from it."
             )
           } actions: {
-            Button("Set targets…", action: setTargets).buttonStyle(.borderedProminent).disabled(!canEdit)
+            Button("Set targets…", action: setTargets).buttonStyle(.borderedProminent).tint(Studio.fill)
+              .disabled(!canEdit)
           }
         } else {
           Surface("Against your targets", trailing: "BY ASSET CLASS · \(s.base)") {
@@ -950,6 +968,7 @@ private struct AccountsWorkspace: View {
                     + " · \(a.currency)"
                 ).font(.system(size: 11)).foregroundStyle(Studio.muted)
                 Button("Edit account…") { edit(a) }.disabled(!canEdit).controlSize(.small)
+                  .accessibilityLabel("Edit \(a.name)")
               }
               Spacer()
               Text(
@@ -982,7 +1001,7 @@ private struct AccountsWorkspace: View {
                 ).monospacedDigit()
               }
               Button(room == nil ? "Set…" : "Update…") { setRoom(type) }.disabled(!canEdit)
-                .controlSize(.small)
+                .controlSize(.small).accessibilityLabel(room == nil ? "Set \(type) room" : "Update \(type) room")
             }
           }
           // Room entered in the terminal for other types (e.g. RESP) is shown, not edited here.
@@ -1047,6 +1066,7 @@ private struct WatchlistWorkspace: View {
               } label: {
                 Image(systemName: "minus.circle")
               }.buttonStyle(.plain).disabled(!model.canEdit).help("Remove \(q.symbol)")
+                .accessibilityLabel("Remove \(q.symbol) from watchlist")
             }
           }
         }
@@ -1065,7 +1085,8 @@ private struct WatchlistWorkspace: View {
           ForEach(model.desktop?.alerts ?? []) { a in
             HStack {
               Image(systemName: a.triggeredAt.isEmpty ? "bell" : "bell.badge").foregroundStyle(
-                Studio.mint)
+                Studio.mint
+              ).accessibilityHidden(true)
               VStack(alignment: .leading, spacing: 4) {
                 Text(a.description)
                 if !a.note.isEmpty {
@@ -1083,6 +1104,7 @@ private struct WatchlistWorkspace: View {
               } label: {
                 Image(systemName: "trash")
               }.buttonStyle(.plain).disabled(!model.canEdit).help("Delete alert")
+                .accessibilityLabel("Delete alert: \(a.description)")
             }
           }
         }
@@ -1108,7 +1130,11 @@ private struct IncomeWorkspace: View {
             Chart(payload.incomeMonths) { p in
               BarMark(x: .value("Month", monthLabel(p.date)), y: .value("Income", p.value))
                 .foregroundStyle(Studio.mint.gradient).cornerRadius(5)
+                .accessibilityLabel(Spoken.month(p.date))
+                .accessibilityValue(Format.money(p.value, payload.status.base, privacy: false))
             }
+            .accessibilityLabel("Monthly income chart")
+            .accessibilityValue(Spoken.income(payload.incomeMonths, base: payload.status.base))
             .frame(height: 230)
           }
           Text("Amounts use today's exchange rates. Only income you've entered is included.").font(
@@ -1225,7 +1251,7 @@ private struct TaxWorkspace: View {
         value: Format.money(year.denied, base, privacy: privacy),
         detail: year.denied > 0 ? "Don't reduce this year's gains" : "None this year",
         color: year.denied > 0 ? Studio.warn : Studio.text)
-    }
+    }.accessibilityElement(children: .contain)
     if year.missingFx > 0 {
       Label(
         year.missingFx == 1
@@ -1260,7 +1286,7 @@ private struct TaxWorkspace: View {
       Surface("Denied losses", trailing: "WHY A LOSS DOESN'T COUNT") {
         ForEach(denied) { row in
           HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "exclamationmark.circle").foregroundStyle(Studio.warn)
+            Image(systemName: "exclamationmark.circle").foregroundStyle(Studio.warn).accessibilityHidden(true)
             Text(explanation(row, base)).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
           }
         }
@@ -1292,6 +1318,7 @@ private struct TaxWorkspace: View {
         if s.missingFx > 0 {
           Image(systemName: "exclamationmark.triangle").foregroundStyle(Studio.warn)
             .help("Missing an exchange rate; left out of the totals")
+            .accessibilityLabel("Missing an exchange rate")
         }
       }.frame(maxWidth: .infinity, alignment: .leading)
       Text("\(s.dispositions)").foregroundStyle(Studio.muted).frame(width: 50, alignment: .trailing)
@@ -1303,6 +1330,16 @@ private struct TaxWorkspace: View {
       Text(Format.money(s.netGain, base, privacy: privacy, sign: true)).foregroundStyle(Studio.trend(s.netGain))
         .frame(width: 115, alignment: .trailing)
     }.font(.system(size: 12)).monospacedDigit().padding(.vertical, 4)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(
+        [
+          s.symbol, s.dispositions == 1 ? "1 sale" : "\(s.dispositions) sales",
+          s.missingFx > 0 ? "missing an exchange rate" : nil,
+          "proceeds \(Format.money(s.proceeds, base, privacy: privacy))",
+          "cost base \(Format.money(s.acb, base, privacy: privacy))",
+          s.denied > 0 ? "denied \(Format.money(s.denied, base, privacy: privacy))" : nil,
+          "\(s.netGain < 0 ? "loss" : "gain") \(Format.money(s.netGain, base, privacy: privacy, sign: true))",
+        ].compactMap { $0 }.joined(separator: ", "))
   }
 
   private func dispositionRow(_ r: TaxDisposition, _ base: String) -> some View {
@@ -1320,6 +1357,15 @@ private struct TaxWorkspace: View {
         .foregroundStyle(r.complete ? Studio.trend(r.allowedGain) : Studio.muted)
         .frame(width: 115, alignment: .trailing)
     }.font(.system(size: 11)).monospacedDigit().padding(.leading, 20)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(
+        [
+          "\(r.date), \(r.accountLabel)", detail(r),
+          "proceeds \(Format.money(r.proceeds, base, privacy: privacy))",
+          "cost base \(Format.money(r.acb, base, privacy: privacy))",
+          (r.denied ?? 0) > 0 ? "denied \(Format.money(r.denied, base, privacy: privacy))" : nil,
+          "\((r.allowedGain ?? 0) < 0 ? "loss" : "gain") \(Format.money(r.allowedGain, base, privacy: privacy, sign: true))",
+        ].compactMap { $0 }.joined(separator: ", "))
   }
 
   /// Units, trading currency and rate, and any note: "20 units · USD at 1.3604 · superficial".
@@ -1480,7 +1526,7 @@ private struct AutomationWorkspace: View {
   }
   private func automationRow(_ icon: String, _ title: String, _ detail: String) -> some View {
     HStack(alignment: .top, spacing: 14) {
-      Image(systemName: icon).foregroundStyle(Studio.mint).frame(width: 24)
+      Image(systemName: icon).foregroundStyle(Studio.mint).frame(width: 24).accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 6) {
         Text(title).font(.system(size: 13, weight: .medium))
         Text(detail).font(.system(size: 11)).foregroundStyle(Studio.muted).fixedSize(
@@ -1514,6 +1560,7 @@ private struct BackupsPanel: View {
       ForEach(draft.showAll ? backups : Array(backups.prefix(Self.collapsedCount))) { backup in
         HStack(spacing: 14) {
           Image(systemName: "externaldrive").foregroundStyle(Studio.mint).frame(width: 24)
+            .accessibilityHidden(true)
           VStack(alignment: .leading, spacing: 4) {
             Text(backup.when).font(.system(size: 13, weight: .medium))
             Text(
@@ -1526,7 +1573,9 @@ private struct BackupsPanel: View {
           } label: {
             Image(systemName: "magnifyingglass")
           }.buttonStyle(.plain).help("Show \(backup.name) in Finder")
+            .accessibilityLabel("Show the backup from \(backup.when) in Finder")
           Button("Restore…") { draft.pending = backup }.disabled(!model.canEdit)
+            .accessibilityLabel("Restore the backup from \(backup.when)")
         }
       }
       HStack {

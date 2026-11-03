@@ -23,6 +23,9 @@ struct MarketPulseBarApp: App {
             CommandGroup(after: .newItem) {
                 LedgerFileCommands(model: delegate.model)
             }
+            CommandMenu("Workspace") {
+                WorkspaceCommands(model: delegate.model)
+            }
             CommandGroup(replacing: .help) {
                 HelpCommands(model: delegate.model)
             }
@@ -50,6 +53,21 @@ struct LedgerFileCommands: View {
         Divider()
         Button("Import CSV…") { model.chooseImport() }.keyboardShortcut("i").disabled(!model.canEdit)
         Button("Export ledger…") { model.exportLedger() }.keyboardShortcut("e").disabled(!model.canEdit)
+    }
+}
+
+/// ⌘1 to ⌘9 open each workspace, in sidebar order, from anywhere in the app.
+struct WorkspaceCommands: View {
+    @ObservedObject var model: StatusModel
+
+    var body: some View {
+        ForEach(Array(Workspace.allCases.enumerated()), id: \.element) { index, workspace in
+            Button(workspace.rawValue) { model.showWorkspace(workspace) }
+                .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
+        }
+        Divider()
+        Button((model.status?.privacy ?? false) ? "Show Amounts" : "Hide Amounts") { model.togglePrivacy() }
+            .keyboardShortcut("h", modifiers: [.command, .shift]).disabled(!model.canEdit)
     }
 }
 
@@ -164,7 +182,7 @@ struct MarketDot: View {
         default: ("closed", palette.muted)
         }
         HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 6, height: 6)
+            Circle().fill(color).frame(width: 6, height: 6).accessibilityHidden(true)
             Text(label).foregroundStyle(palette.muted).font(.system(size: 10, design: .monospaced))
         }
     }
@@ -186,13 +204,13 @@ struct Dashboard: View {
                     Chip(text: "\(Format.arrow(status.dayChange)) \(Format.money(status.dayChange, status.base, privacy: status.privacy, decimals: 0, sign: true))  \(Format.pct(status.dayChangePct))", color: palette.trend(status.dayChange))
                     Text("today").foregroundStyle(palette.muted)
                     if status.stale {
-                        Text("◌ offline").foregroundStyle(palette.down)
+                        Text("◌ offline").foregroundStyle(palette.down).accessibilityLabel("Offline, cached quotes")
                     }
                 }
             }
 
             if status.recentHistory.count > 1 {
-                HistoryChart(points: status.recentHistory, palette: palette)
+                HistoryChart(points: status.recentHistory, palette: palette, base: status.base, privacy: status.privacy)
             }
 
             HStack(spacing: 10) {
@@ -246,6 +264,7 @@ struct Dashboard: View {
                     ForEach(status.alerts) { alert in
                         HStack {
                             Image(systemName: alert.triggered ? "bell.badge.fill" : "bell").foregroundStyle(alert.triggered ? palette.accent : palette.muted)
+                                .accessibilityLabel(alert.triggered ? "Triggered" : "Watching")
                             Text(alert.summary)
                             Spacer()
                         }
@@ -271,6 +290,8 @@ extension StatusPayload {
 struct HistoryChart: View {
     let points: [HistoryPoint]
     let palette: Palette
+    let base: String
+    let privacy: Bool
 
     var body: some View {
         let values = points.map(\.value)
@@ -291,6 +312,10 @@ struct HistoryChart: View {
         .chartYAxis(.hidden)
         .chartYScale(domain: (lo - pad)...(hi + pad))
         .frame(height: 64)
+        // The popover keeps showing this chart in privacy mode; then it speaks only the direction.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Net worth, last 30 days")
+        .accessibilityValue(Spoken.history(points, base: base, amounts: !privacy))
     }
 }
 
@@ -308,8 +333,10 @@ struct Sparkline: View {
             .chartXAxis(.hidden)
             .chartYAxis(.hidden)
             .chartYScale(domain: lo...hi)
+            // The change next to it says the same in words.
+            .accessibilityHidden(true)
         } else {
-            Rectangle().fill(color.opacity(0.3)).frame(height: 1)
+            Rectangle().fill(color.opacity(0.3)).frame(height: 1).accessibilityHidden(true)
         }
     }
 }
@@ -327,15 +354,20 @@ struct ActionBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            BarButton(symbol: "macwindow", label: "Portfolio", hint: nil, palette: palette) {
+            BarButton(symbol: "macwindow", label: "Portfolio", hint: nil, name: "Open portfolio", palette: palette) {
                 model.showPortfolio()
             }
-            BarButton(symbol: "terminal", label: nil, hint: nil, palette: palette) { model.openTUI() }
-            BarButton(symbol: "arrow.clockwise", label: nil, hint: nil, palette: palette) { model.refresh() }
-            BarButton(symbol: (model.status?.privacy ?? false) ? "eye.slash" : "eye", label: nil, hint: nil, palette: palette) { model.togglePrivacy() }
-            BarButton(symbol: "gearshape", label: nil, hint: nil, palette: palette) { model.showSettingsWindow() }
+            BarButton(symbol: "terminal", label: nil, hint: nil, name: "Open terminal", palette: palette) { model.openTUI() }
+            BarButton(symbol: "arrow.clockwise", label: nil, hint: nil, name: "Refresh", palette: palette) { model.refresh() }
+            BarButton(
+                symbol: (model.status?.privacy ?? false) ? "eye.slash" : "eye", label: nil, hint: nil,
+                name: (model.status?.privacy ?? false) ? "Show amounts" : "Hide amounts", palette: palette
+            ) { model.togglePrivacy() }
+            BarButton(symbol: "gearshape", label: nil, hint: nil, name: "Settings", palette: palette) { model.showSettingsWindow() }
             Spacer()
-            BarButton(symbol: "power", label: nil, hint: nil, palette: palette) { NSApplication.shared.terminate(nil) }
+            BarButton(symbol: "power", label: nil, hint: nil, name: "Quit MarketPulse", palette: palette) {
+                NSApplication.shared.terminate(nil)
+            }
         }
     }
 }
@@ -344,6 +376,8 @@ struct BarButton: View {
     let symbol: String
     let label: String?
     let hint: String?
+    /// What VoiceOver and the tooltip call it; most of these buttons are icons only.
+    let name: String
     let palette: Palette
     let action: () -> Void
     @StateObject private var hover = HoverState()
@@ -361,6 +395,8 @@ struct BarButton: View {
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(hover.on ? palette.accent : palette.border, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .help(name)
+        .accessibilityLabel(name)
         .onHover { hover.on = $0 }
     }
 }

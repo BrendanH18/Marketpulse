@@ -649,7 +649,9 @@ struct ImportSheet: View {
         Text("Use accounts named in the CSV").tag("")
         ForEach(model.desktop?.accounts ?? []) { Text($0.name).tag(String($0.id)) }
       }.onChange(of: model.importAccount) { _, _ in model.importPreview = nil }.disabled(model.saving)
+      // Return previews first; once a preview has new entries, it imports them.
       Button("Preview import") { Task { await model.previewImport() } }.disabled(model.saving)
+        .keyboardShortcut(model.importPreview == nil ? .defaultAction : nil)
       if let preview = model.importPreview {
         if let label = preview.profileLabel {
           Text(model.importProfile == "auto" ? "Detected format: \(label)" : "Read as: \(label)")
@@ -694,8 +696,8 @@ struct ImportSheet: View {
         Button("Import \(model.importPreview?.added ?? 0) entries") {
           Task { await model.commitImport() }
         }
-        .buttonStyle(.borderedProminent).disabled(
-          !model.canEdit || (model.importPreview?.added ?? 0) == 0)
+        .buttonStyle(.borderedProminent).keyboardShortcut(model.importPreview == nil ? nil : .defaultAction)
+        .disabled(!model.canEdit || (model.importPreview?.added ?? 0) == 0)
       }
     }
   }
@@ -828,14 +830,14 @@ struct WelcomeSheet: View {
   ) -> some View {
     Button(action: action) {
       HStack(spacing: 14) {
-        Image(systemName: icon).font(.title2).frame(width: 30).foregroundStyle(.tint)
+        Image(systemName: icon).font(.title2).frame(width: 30).foregroundStyle(.tint).accessibilityHidden(true)
         VStack(alignment: .leading, spacing: 3) {
           Text(title).font(.headline)
           Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(
             horizontal: false, vertical: true)
         }
         Spacer(minLength: 0)
-        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+        Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
       }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
         .contentShape(RoundedRectangle(cornerRadius: 10))

@@ -266,6 +266,17 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     offers **Set targets…** again. In the demo, Allocation shows the demo's targets with the
     fictional GIC under Fixed Income, and **Add asset** and **Change targets…** are disabled.
 
+26. **Keyboard and VoiceOver.** ⌘1 to ⌘9 switch to each workspace in sidebar order, and the
+    **Workspace** menu lists them; ⇧⌘H masks and unmasks amounts. In every form sheet, Return
+    saves (when allowed) and Esc cancels; in Import, Return previews, then imports. With VoiceOver on (⌘F5): the toolbar's eye and
+    refresh buttons, the watchlist's remove button, an alert's delete button, and a
+    backup's magnifying glass each speak a name, not "button" or an icon name. The
+    Overview chart speaks a summary such as "… to … , up 4.20%. Low …, high …", and the
+    Income chart its total and highest month. A Holdings row's asset cell, an Overview
+    account or recent-activity row, and a Tax security row each read as one line, with
+    "gain" or "loss" spoken. Accessibility Inspector's audit (Xcode › Open Developer Tool)
+    reports no errors on any workspace.
+
 Quit the QA app with ⌘Q when done.
 
 ## Tool limits and workarounds
@@ -283,6 +294,6 @@ menu bar. Then:
 
 ## Reporting
 
-Post results on the PR (or the issue being verified) as a table of items 1–24 with
+Post results on the PR (or the issue being verified) as a table of items 1–26 with
 PASS / FAIL / UNVERIFIED and evidence, then any bugs with exact steps to reproduce.
 Clean up with `rm -rf "$TMPDIR/marketpulse-qa"`.

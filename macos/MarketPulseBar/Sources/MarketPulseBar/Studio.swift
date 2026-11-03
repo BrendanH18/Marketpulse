@@ -11,7 +11,11 @@ enum Studio {
     nsColor: dynamic(light: .black.withAlphaComponent(0.1), dark: .white.withAlphaComponent(0.08)))
   static let text = Color(light: "#162125", dark: "#edf2f2")
   static let muted = Color(light: "#56656c", dark: "#8d9ba3")
-  static let mint = Color(light: "#17785b", dark: "#9cdbc5")
+  /// Light mint also stays legible on its own 10% tint (the demo and update banners).
+  static let mint = Color(light: "#157356", dark: "#9cdbc5")
+  /// Filled (prominent) buttons in the window. White labels need a dark fill in both appearances;
+  /// dark mode's light mint would leave them at about 3:1.
+  static let fill = Color(light: "#157356", dark: "#157356")
   static let red = Color(light: "#b42d36", dark: "#f09696")
   /// Cautions (cached quotes, ledger checks). System orange is unreadable on white.
   static let warn = Color(light: "#965200", dark: "#ff9f0a")
