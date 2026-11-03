@@ -260,6 +260,30 @@ Advanced asset definitions, editing transfers, DRIPs, splits, and returns of cap
 remain in the CLI/TUI. Portfolio charts show net worth,
 which includes contributions; they are not a time-weighted return chart.
 
+## Keyboard and accessibility
+
+| Shortcut | Does |
+| --- | --- |
+| ⌘1 to ⌘9 | Overview, Holdings, Allocation, Activity, Accounts, Watchlist, Income, Tax, Automation (**Workspace** menu) |
+| ⌘N | Record a transaction |
+| ⌘R | Refresh |
+| ⇧⌘H | Hide or show amounts (privacy mode) |
+| ⌘I / ⌘E | Import a CSV / export the ledger |
+| ⌘0 | Open the portfolio window |
+| ⌘, | Settings |
+| Return / Esc | Save / cancel in every form; in Import, Return previews, then imports |
+| Delete | Delete the selected transaction in **Activity** (asks first) |
+
+With **Keyboard navigation** on (System Settings › Keyboard), Tab reaches every button
+and field. VoiceOver names every icon-only button, reads each chart as a summary (the
+value history's start, end, change in words, low and high; each asset class's share;
+income's total and best month) with each point or bar available on its own, and reads a
+holding, account, recent transaction, or tax row as one line. Gains and losses always
+carry a sign or the words "gain"/"loss", never colour alone. The window's text colours
+meet WCAG AA contrast (4.5:1) in light and dark appearance, including on tinted banners;
+`tests/test_palette_contrast.py` keeps it that way. The app has no animations of its own,
+so **Reduce motion** applies through the system's.
+
 ## Automation
 
 While the app runs, every refresh checks quotes and alerts, records a daily

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Keyboard and VoiceOver support in the Mac app. A new **Workspace** menu opens each
+  workspace with ⌘1 to ⌘9, and ⇧⌘H hides or shows amounts. VoiceOver names every
+  icon-only button (in the window and the menu bar popover), summarizes each chart in
+  words (start, end, change, range; allocation shares; income total and best month), and
+  reads holdings, accounts, activity, and tax rows as one line each, with gains and losses
+  spoken rather than shown only in colour. Light-mode mint is slightly darker so banner
+  text meets WCAG AA contrast, and a selected Holdings row no longer draws green or red
+  text on the selection colour. See [keyboard and accessibility](docs/desktop.md#keyboard-and-accessibility).
+
 - GICs, bonds, and assets you value yourself, and allocation targets, in the Mac app.
   In **Holdings**, **Add asset** adds a GIC or bond (principal, rate, start, maturity,
   compounding; valued by the interest it earns) or a property or other asset with its

@@ -52,3 +52,22 @@ def test_light_mint_carries_white_button_labels():
     # Mint is the window's tint: prominent buttons draw white text on it.
     named, _ = palette()
     assert contrast(named["mint"][0], "#ffffff") >= 4.5
+
+
+def tint(colour: str, surface: str, alpha: float) -> str:
+    """`colour.opacity(alpha)` drawn over `surface`."""
+    mixed = (round(alpha * int(colour[i : i + 2], 16) + (1 - alpha) * int(surface[i : i + 2], 16)) for i in (1, 3, 5))
+    return "#" + "".join(f"{c:02x}" for c in mixed)
+
+
+@pytest.mark.parametrize("mode", [0, 1], ids=["light", "dark"])
+@pytest.mark.parametrize("surface", ["background", "panel"])
+@pytest.mark.parametrize("ink", ["mint", "red", "warn"])
+def test_banners_stay_legible_on_their_own_tint(mode, surface, ink):
+    # Notices and banners draw a colour's text on up to 10% of the same colour (`notice` in
+    # DesktopViews.swift), and the dismissible message draws text and muted text on mint.
+    named, _ = palette()
+    banner = tint(named[ink][mode], named[surface][mode], 0.1)
+    for fg in (ink, "text", "muted"):
+        ratio = contrast(named[fg][mode], banner)
+        assert ratio >= 4.5, f"{fg} on {ink} tint over {surface}: {ratio:.2f}:1"
