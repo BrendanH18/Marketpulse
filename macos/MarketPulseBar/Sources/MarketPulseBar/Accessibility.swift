@@ -29,13 +29,17 @@ enum Spoken {
     guard let first = points.first, let last = points.last, points.count > 1 else {
       return "Not enough history yet"
     }
-    let pct = first.value != 0 ? (last.value - first.value) / abs(first.value) * 100 : 0
     let span = "\(day(first.date)) to \(day(last.date))"
-    guard amounts else { return "\(span), \(change(pct))" }
+    // From zero there's no percentage, only a direction.
+    let delta = last.value - first.value
+    let direction =
+      first.value != 0
+      ? change(delta / abs(first.value) * 100) : delta > 0 ? "up" : delta < 0 ? "down" : "unchanged"
+    guard amounts else { return "\(span), \(direction)" }
     func money(_ v: Double) -> String { Format.money(v, base, privacy: false, decimals: 0) }
     let values = points.map(\.value)
     return
-      "\(money(first.value)) on \(day(first.date)) to \(money(last.value)) on \(day(last.date)), \(change(pct)). "
+      "\(money(first.value)) on \(day(first.date)) to \(money(last.value)) on \(day(last.date)), \(direction). "
       + "Low \(money(values.min() ?? 0)), high \(money(values.max() ?? 0))."
   }
 

@@ -210,7 +210,7 @@ struct Dashboard: View {
             }
 
             if status.recentHistory.count > 1 {
-                HistoryChart(points: status.recentHistory, palette: palette)
+                HistoryChart(points: status.recentHistory, palette: palette, base: status.base, privacy: status.privacy)
             }
 
             HStack(spacing: 10) {
@@ -290,6 +290,8 @@ extension StatusPayload {
 struct HistoryChart: View {
     let points: [HistoryPoint]
     let palette: Palette
+    let base: String
+    let privacy: Bool
 
     var body: some View {
         let values = points.map(\.value)
@@ -310,10 +312,10 @@ struct HistoryChart: View {
         .chartYAxis(.hidden)
         .chartYScale(domain: (lo - pad)...(hi + pad))
         .frame(height: 64)
-        // The popover keeps showing this chart in privacy mode, so it speaks only the direction.
+        // The popover keeps showing this chart in privacy mode; then it speaks only the direction.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Net worth, last 30 days")
-        .accessibilityValue(Spoken.history(points, base: "", amounts: false))
+        .accessibilityValue(Spoken.history(points, base: base, amounts: !privacy))
     }
 }
 
