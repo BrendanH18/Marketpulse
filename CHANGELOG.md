@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace with ⌘1 to ⌘9, and ⇧⌘H hides or shows amounts. VoiceOver names every
   icon-only button (in the window and the menu bar popover), summarizes each chart in
   words (start, end, change, range; allocation shares; income total and best month), and
-  reads holdings, accounts, activity, and tax rows as one line each, with gains and losses
-  spoken rather than shown only in colour. Light-mode mint is slightly darker so banner
+  reads Overview's accounts and recent activity and each tax row as one line, with gains and
+  losses spoken rather than shown only in colour. Light-mode mint is slightly darker so banner
   text meets WCAG AA contrast, and a selected Holdings row no longer draws green or red
   text on the selection colour. See [keyboard and accessibility](docs/desktop.md#keyboard-and-accessibility).
 

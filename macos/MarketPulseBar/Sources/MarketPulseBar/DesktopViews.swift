@@ -380,6 +380,8 @@ private struct Surface<Content: View>: View {
     }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
       .background(Studio.panel, in: RoundedRectangle(cornerRadius: 12))
       .overlay(RoundedRectangle(cornerRadius: 12).stroke(Studio.line))
+      // A named group: without it, VoiceOver merges the combined rows inside into one element.
+      .accessibilityElement(children: .contain).accessibilityLabel(title)
   }
 }
 
@@ -441,7 +443,7 @@ private struct OverviewWorkspace: View {
             title: "Unrealized gain",
             value: Format.money(s.unrealized, s.base, privacy: s.privacy, sign: true),
             detail: Format.pct(s.unrealizedPct) + " on cost", color: Studio.trend(s.unrealized))
-        }
+        }.accessibilityElement(children: .contain)
         Surface("Portfolio value", trailing: "\(s.base) · DAILY SNAPSHOTS") {
           HStack {
             Text(s.privacy ? "Values hidden" : "The bigger picture").font(.system(size: 12))
@@ -1248,7 +1250,7 @@ private struct TaxWorkspace: View {
         value: Format.money(year.denied, base, privacy: privacy),
         detail: year.denied > 0 ? "Don't reduce this year's gains" : "None this year",
         color: year.denied > 0 ? Studio.warn : Studio.text)
-    }
+    }.accessibilityElement(children: .contain)
     if year.missingFx > 0 {
       Label(
         year.missingFx == 1

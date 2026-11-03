@@ -277,8 +277,9 @@ which includes contributions; they are not a time-weighted return chart.
 With **Keyboard navigation** on (System Settings › Keyboard), Tab reaches every button
 and field. VoiceOver names every icon-only button, reads each chart as a summary (the
 value history's start, end, change in words, low and high; each asset class's share;
-income's total and best month) with each point or bar available on its own, and reads a
-holding, account, recent transaction, or tax row as one line. Gains and losses always
+income's total and best month) with each point or bar available on its own, and reads an
+account, recent transaction, or tax row as one line. The Holdings and Activity tables read
+row by row with their column headings, and a holding's symbol, name, and details are one cell. Gains and losses always
 carry a sign or the words "gain"/"loss", never colour alone. The window's text colours
 meet WCAG AA contrast (4.5:1) in light and dark appearance, including on tinted banners;
 `tests/test_palette_contrast.py` keeps it that way. The app has no animations of its own,
