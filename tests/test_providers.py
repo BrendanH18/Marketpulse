@@ -240,3 +240,19 @@ def test_doctor_reports_yahoo_and_the_fallback_without_the_key(cli, tracker, fak
     tracker.store.cache_quotes([q])
     out = cli("doctor").output
     assert "Alpha Vantage (failing: Alpha Vantage: apikey ***: 25 requests per day)" in out and KEY not in out
+
+
+def test_a_refusal_partway_keeps_the_quotes_already_sent(av):
+    class LimitAfterOne(FakeAlphaVantage):
+        def get_json(self, url, params):
+            if self.calls:
+                self.calls.append(dict(params))
+                return {"Note": "5 calls per minute"}
+            return super().get_json(url, params)
+
+    t = LimitAfterOne()
+    t.quotes = av.quotes
+    quotes, errors = AlphaVantage(KEY, t).quotes(["XEQT.TO", "AAPL", "USDCAD=X"])
+    assert list(quotes) == ["XEQT.TO"]
+    assert set(errors) == {"AAPL", "USDCAD=X"} and "5 calls per minute" in errors["AAPL"]
+    assert AlphaVantage(KEY, av).covers("XEQT.TO") and not AlphaVantage(KEY, av).covers("^GSPTSE")

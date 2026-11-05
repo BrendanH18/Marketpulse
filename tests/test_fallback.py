@@ -19,6 +19,9 @@ class StubProvider:
     min_interval = 900.0
     daily_limit = 5
 
+    def covers(self, symbol):
+        return not symbol.startswith("^")
+
     def __init__(self, prices: dict[str, float] | None = None, error: str | None = None):
         self.prices = prices or {}
         self.error = error
@@ -183,3 +186,10 @@ def test_two_processes_cannot_both_spend_the_budget(tmp_path):
     finally:
         for s in stores:
             s.close()
+
+
+def test_symbols_the_fallback_cannot_quote_do_not_use_its_budget(fake, store):
+    fake.offline = True
+    stub = StubProvider({"A1": 1.0})
+    MarketData(fake, store, stub).quotes(["^GSPTSE", "^GSPC", "A1"], use_cache=False)
+    assert stub.calls == [["A1"]]

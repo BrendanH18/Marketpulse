@@ -208,6 +208,10 @@ class QuoteProvider(Protocol):
     min_interval: float  # seconds between attempts, across processes
     daily_limit: int  # symbols per local day
 
+    def covers(self, symbol: str) -> bool:
+        """Whether it can quote this (Yahoo-spelled) symbol at all."""
+        ...
+
     def quotes(self, symbols: list[str]) -> tuple[dict[str, Quote], dict[str, str]]:
         """Quotes it found, and why the others are missing. Raises `MarketError` when the
         provider can't be reached or refuses the request (bad key, rate limit)."""
@@ -328,7 +332,7 @@ class MarketData:
             return {}
         cutoff = time.time() - FALLBACK_AFTER
         wanted = sorted(
-            (s for s in symbols if s not in cached or cached[s].fetched_at < cutoff),
+            (s for s in symbols if self.fallback.covers(s) and (s not in cached or cached[s].fetched_at < cutoff)),
             key=lambda s: cached[s].fetched_at if s in cached else -1.0,
         )
         n = self._fallback_budget(len(wanted)) if wanted else 0

@@ -145,18 +145,29 @@ class AlphaVantage:
             fetched_at=time.time(),
         )
 
+    def covers(self, symbol: str) -> bool:
+        sym = symbol.upper()
+        return bool(_FX.match(sym) or _CRYPTO.match(sym) or self.listing(sym))
+
     def quotes(self, symbols: list[str]) -> tuple[dict[str, Quote], dict[str, str]]:
         out: dict[str, Quote] = {}
         errors: dict[str, str] = {}
-        for symbol in symbols:
+        for i, symbol in enumerate(symbols):
             sym = symbol.upper()
-            if m := _FX.match(sym) or _CRYPTO.match(sym):
-                q = self._rate_quote(sym, m.group(1), m.group(2))
-            elif listing := self.listing(sym):
-                q = self._listing_quote(sym, *listing)
-            else:
-                errors[sym] = f"not covered by {self.label}"
-                continue
+            try:
+                if m := _FX.match(sym) or _CRYPTO.match(sym):
+                    q = self._rate_quote(sym, m.group(1), m.group(2))
+                elif listing := self.listing(sym):
+                    q = self._listing_quote(sym, *listing)
+                else:
+                    errors[sym] = f"not covered by {self.label}"
+                    continue
+            except MarketError as e:
+                if not out:
+                    raise
+                # Refused partway (say, its per-minute limit): keep what it already sent.
+                errors.update((s.upper(), str(e)) for s in symbols[i:])
+                break
             if q is None:
                 errors[sym] = "symbol not found"
             else:
