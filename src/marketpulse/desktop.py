@@ -20,6 +20,7 @@ from .config import Config, config_path
 from .db import Snapshot, Store
 from .market import MarketData, MarketError
 from .models import Account, AccountType, Asset, AssetClass, AssetKind, Quote, Transaction, TxnType
+from .providers import PROVIDERS
 from .services import Tracker
 from .tax import Disposition
 
@@ -74,6 +75,9 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
                 "day_change_pct": p.day_change_pct,
                 "weight": p.weight,
                 "stale": p.stale,
+                # Who supplied the price ("" for manual and fixed-income assets) and how old it is.
+                "quote_source": p.quote.source if p.quote else "",
+                "quote_age_seconds": p.quote.age() if p.quote else None,
             }
             for p in view.positions
         ],
@@ -94,6 +98,8 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         "room": [asdict(r) for r, _ in tracker.room()],
         "alerts": [{**asdict(a), "description": a.describe()} for a in tracker.store.alerts()],
         "automation": cycle.report,
+        # Yahoo, then the fallback provider when one is set up, with each one's latest attempt.
+        "providers": [asdict(st) for st in tracker.market.provider_status()],
         # Which engine answered: the app shows it, and release builds check it matches the tag.
         "backend": {"version": __version__, "python": platform.python_version()},
         "storage": storage_info(tracker.store),
@@ -188,6 +194,12 @@ def settings_info(tracker: Tracker) -> dict:
         "menubar_display": config.menubar_display,
         "menubar_symbol": config.menubar_symbol,
         "config_path": str(config_path()),
+        # The fallback quote provider. Only whether a key is set leaves the engine, never the key.
+        "quote_provider": config.quote_provider,
+        "quote_provider_key_set": bool(config.quote_api_key),
+        "quote_providers_available": [
+            {"name": info.name, "label": info.label, "signup_url": info.signup_url} for info in PROVIDERS.values()
+        ],
     }
 
 

@@ -34,6 +34,7 @@ from .models import (
     guess_currency,
     parse_date,
 )
+from .providers import make_fallback
 from .tax import TaxReport
 from .themes import resolve_palette
 from .valuation import PortfolioView, build_view, market_symbols
@@ -71,8 +72,9 @@ class Tracker:
 
     @classmethod
     def open(cls, config: Config | None = None) -> Tracker:
+        config = config or Config.load()
         store = Store.open_default()
-        return cls(store, MarketData(store=store), config or Config.load())
+        return cls(store, MarketData(store=store, fallback=make_fallback(config)), config)
 
     @property
     def base(self) -> str:

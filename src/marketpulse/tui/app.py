@@ -659,7 +659,7 @@ class MarketPulseApp(App):
 
         sub = Text(f"invested {fmt.money(v.invested, v.base, privacy=priv, decimals=0)}", style="muted")
         if v.stale:
-            sub.append("  ◌ offline", style="warn")
+            sub.append(f"  ◌ {render.stale_note(v).removeprefix('offline — ')}", style="warn")
         self.query_one("#tile-networth", Tile).set_builder(
             money_tile(f"net worth · {v.base}", v.net_worth, v.base, sub, privacy=priv)
         )

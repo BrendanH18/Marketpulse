@@ -69,3 +69,17 @@ def trend_style(value: float | None) -> str:
     if value is None or abs(value) < 1e-12:
         return "flat"
     return "up" if value > 0 else "down"
+
+
+def age(seconds: float | None) -> str:
+    """A short, rounded-down age: "45 s", "12 min", "3 h", "2 d"."""
+    if seconds is None:
+        return "unknown age"
+    s = max(int(seconds), 0)
+    if s < 60:
+        return f"{s} s"
+    if s < 3600:
+        return f"{s // 60} min"
+    if s < 86400:
+        return f"{s // 3600} h"
+    return f"{s // 86400} d"

@@ -254,8 +254,10 @@ For Waybar and other status bars, see [integrations](docs/usage.md#integrations)
 | `~/.config/marketpulse/config.toml` | Display and reporting settings | `MARKETPULSE_CONFIG` sets the **file**; `XDG_CONFIG_HOME` sets the default config root |
 
 Market data requests go to Yahoo Finance's public endpoints. Your ledger is
-stored locally, but symbol lookups require network access. Cached quotes can be
-shown as stale when the network is unavailable.
+stored locally, but symbol lookups require network access. When Yahoo can't be
+reached, an optional fallback provider that uses your own free key can fill in,
+and cached quotes are shown as stale, with their age. See
+[market data and stale prices](docs/data.md#market-data-and-stale-prices).
 
 Privacy mode masks amounts in the interface; it does not encrypt the database
 or remove amounts from JSON and CSV exports. See [data and backups](docs/data.md)

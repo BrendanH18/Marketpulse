@@ -9,7 +9,7 @@ import platform
 import shutil
 import sys
 import time
-from dataclasses import fields, replace
+from dataclasses import asdict, fields, replace
 from datetime import date, datetime
 from functools import wraps
 from pathlib import Path
@@ -23,7 +23,7 @@ from rich.theme import Theme as RichTheme
 from . import __version__, fmt, render
 from .brokers import PROFILE_NAMES
 from .config import Config, config_path
-from .market import BARS_PER_YEAR, PERIOD_INTERVALS, PERIODS, MarketError
+from .market import BARS_PER_YEAR, PERIOD_INTERVALS, PERIODS, PRIMARY, MarketError
 from .models import (
     ALERT_CONDITIONS,
     EPSILON,
@@ -38,6 +38,7 @@ from .models import (
     parse_date,
     parse_symbols,
 )
+from .providers import PROVIDERS, make_fallback, provider_label
 from .requests import AlreadyRecorded, check_request, receipt, record_once
 from .tax import TaxReport
 from .themes import OMARCHY_PALETTES, omarchy_active, pretty_name, resolve_palette, rich_styles
@@ -1786,8 +1787,8 @@ def config(ctx: click.Context) -> None:
     if ctx.invoked_subcommand is None:
         app = ctx.ensure_object(App)
         app.console.print(Text(str(config_path()), style="muted"))
-        for f in fields(Config):
-            app.console.print(Text(f"{f.name:<24}", style="accent") + Text(repr(getattr(app.config, f.name))))
+        for name, value in app.config.redacted().items():
+            app.console.print(Text(f"{name:<24}", style="accent") + Text(repr(value)))
 
 
 @config.command("set")
@@ -1798,6 +1799,9 @@ def config_set(app: App, key: str, value: tuple[str, ...]) -> None:
     known = {f.name: f for f in fields(Config)}
     if key not in known:
         fail(f"Unknown setting '{key}'. Known: {', '.join(known)}")
+    if key == "quote_api_key":
+        # On the command line it would sit in shell history and be visible in `ps`.
+        fail("Set the key with `marketpulse provider key NAME`, which reads it from standard input.")
     raw = " ".join(value)
     current = getattr(app.config, key)
     parsed: object  # bool, int, float, list[str] or str, matching the setting's type
@@ -1830,6 +1834,8 @@ def config_set(app: App, key: str, value: tuple[str, ...]) -> None:
         fail("capital_gains_inclusion is a fraction: > 0 and <= 1 (e.g. 0.5).")
     if key == "refresh_seconds" and isinstance(parsed, int) and parsed < 5:
         fail("refresh_seconds must be at least 5.")
+    if key == "quote_provider" and parsed and parsed not in PROVIDERS:
+        fail(f"quote_provider must be empty or one of {', '.join(PROVIDERS)}.")
     setattr(app.config, key, parsed)
     app.config.save()
     app.ok(f"{key} = {parsed!r}")
@@ -1847,6 +1853,91 @@ def config_edit(app: App) -> None:
     if not path.exists():
         app.config.save(path)
     click.edit(filename=str(path))
+
+
+# ── Quote providers ───────────────────────────────────────────────────────────
+
+
+@main.group()
+def provider() -> None:
+    """Quote providers: Yahoo, and an optional fallback that uses your own API key."""
+
+
+@provider.command("status")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+@pass_app
+def provider_status(app: App, as_json: bool) -> None:
+    """Each provider's latest attempt, as the last refresh saw it."""
+    rows = app.tracker.market.provider_status()
+    if as_json:
+        click.echo(json.dumps([asdict(r) for r in rows], ensure_ascii=False))
+        return
+    for r in rows:
+        if r.ok is None:
+            state = Text("not tried", style="muted")
+        else:
+            state = Text("ok", style="up") if r.ok else Text("failing", style="down")
+        line = Text(f"{r.label:<16}", style="accent") + Text(f"{r.role:<10}", style="muted") + state
+        if r.last_success:
+            line.append(f"   last success {r.last_success}", style="muted")
+        app.console.print(line)
+        if r.ok is False and r.last_error:
+            app.console.print(Text(f"  {r.last_error}", style="warn"))
+    if app.config.quote_provider and app.tracker.market.fallback is None:
+        app.warn(f"{provider_label(app.config.quote_provider)} has no key yet: `marketpulse provider key NAME`.")
+    elif not app.config.quote_provider:
+        names = ", ".join(PROVIDERS)
+        app.console.print(
+            Text(f"No fallback provider. Add one with `marketpulse provider key NAME` ({names}).", style="muted")
+        )
+
+
+@provider.command("key")
+@click.argument("name", type=click.Choice(sorted(PROVIDERS)))
+@pass_app
+def provider_key(app: App, name: str) -> None:
+    """Save your API key for NAME and use it as the fallback. Reads the key from standard input."""
+    if sys.stdin.isatty():
+        key = click.prompt(f"{provider_label(name)} API key", hide_input=True, default="", show_default=False)
+    else:
+        key = sys.stdin.read()
+    key = key.strip()
+    if not key:
+        fail("No key given.")
+    if any(c.isspace() or not c.isprintable() for c in key) or len(key) > 256:
+        fail("That doesn't look like an API key: it has spaces or unusual characters.")
+    app.config.quote_provider = name
+    app.config.quote_api_key = key
+    app.config.save()
+    app.ok(f"Saved. {provider_label(name)} will supply quotes when Yahoo can't be reached.")
+
+
+@provider.command("clear")
+@pass_app
+def provider_clear(app: App) -> None:
+    """Remove the fallback provider and its key."""
+    app.config.quote_provider = ""
+    app.config.quote_api_key = ""
+    app.config.save()
+    app.ok("Removed the fallback quote provider.")
+
+
+@provider.command("test")
+@click.argument("symbol", default="XEQT.TO")
+@pass_app
+def provider_test(app: App, symbol: str) -> None:
+    """Ask the fallback provider for one quote, to check your key works."""
+    fallback = make_fallback(app.config)
+    if fallback is None:
+        fail("No fallback provider is set up. Add one with `marketpulse provider key NAME`.")
+    try:
+        quotes, errors = fallback.quotes([symbol.upper()])
+    except MarketError as e:
+        fail(f"{fallback.label}: {e}")
+    q = quotes.get(symbol.upper())
+    if q is None:
+        fail(f"{fallback.label}: {errors.get(symbol.upper(), 'no quote')}")
+    app.ok(f"{fallback.label}: {q.symbol} {fmt.price(q.price)} {q.currency}")
 
 
 @main.group()
@@ -1915,11 +2006,21 @@ def doctor(app: App) -> None:
     issues = tr.store.ledger().issues
     row("ledger checks", f"{len(issues)} issue(s)" if issues else "consistent", not issues)
     t0 = time.perf_counter()
-    try:
-        tr.market.quotes(["SPY"], use_cache=False)
+    quotes, errors = tr.market.quotes(["SPY"], use_cache=False)
+    spy = quotes.get("SPY")
+    if spy is not None and not spy.stale and spy.source == PRIMARY:
         row("market data", f"Yahoo reachable ({(time.perf_counter() - t0) * 1000:.0f} ms)")
-    except MarketError as e:
-        row("market data", str(e), False)
+    else:
+        # `quotes` doesn't raise when Yahoo is down: it falls back, then serves cached prices.
+        yahoo = tr.market.provider_status()[0]
+        row("market data", f"Yahoo unreachable: {yahoo.last_error or errors.get('SPY', 'no data')}", False)
+    fallback = tr.market.fallback
+    if fallback is not None:
+        st = tr.market.provider_status()[-1]
+        state = "not used yet" if st.ok is None else ("ok" if st.ok else f"failing: {st.last_error}")
+        row("fallback quotes", f"{fallback.label} ({state})", st.ok)
+    elif app.config.quote_provider:
+        row("fallback quotes", f"{provider_label(app.config.quote_provider)}: no key set", False)
     active = omarchy_active()
     row(
         "theme",

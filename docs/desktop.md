@@ -99,7 +99,7 @@ opens the Settings window. Every change applies straight away, without a restart
 
 | Tab | Settings | Stored in |
 | --- | --- | --- |
-| General | Refresh interval, launch at login, [update checks](#update-checks), what the menu bar shows (day change, net worth, or a symbol's price), the terminal app, and the ⌥⌘M shortcut | App preferences; the menu bar display is `menubar_display` / `menubar_symbol` in the config file |
+| General | Refresh interval, launch at login, [update checks](#update-checks), what the menu bar shows (day change, net worth, or a symbol's price), the terminal app, the ⌥⌘M shortcut, and **Market data**: an optional [fallback quote provider](data.md#market-data-and-stale-prices) and its key | App preferences; the menu bar display is `menubar_display` / `menubar_symbol` in the config file; the provider is `quote_provider` / `quote_api_key`, saved with `marketpulse provider key` (the key goes to standard input, never into the command line) |
 | Appearance | System, Light, or Dark for the portfolio and Settings windows and their sheets | App preferences (`appearance`) |
 | Portfolio | The currency totals are shown in, the default account, and privacy mode | Config file: `base_currency`, `default_account`, `privacy` |
 | Data | Where the portfolio and the settings file are, with **Reveal in Finder**, the backups kept, and archived accounts to unarchive | — |
@@ -291,6 +291,13 @@ While the app runs, every refresh checks quotes and alerts, records a daily
 snapshot when valuation is fresh and complete, and takes a daily backup when
 the latest backup is at least 24 hours old. Missing or stale prices are visible;
 stale quotes do not fire alerts or create performance snapshots.
+
+**Automation › Quote providers** lists Yahoo and, if you set one up, the fallback
+provider. Each shows its status in words (OK, Failing, Not tried, or No key), when it last
+succeeded, how many quotes it served on the last refresh, and its last error. When
+prices come from the offline cache, the panel says how many there are and how old the
+oldest is. A stale price in **Holdings** has a tooltip giving its age, and a price from
+the fallback names its provider. See [market data and stale prices](data.md#market-data-and-stale-prices).
 
 If the portfolio window's data can't be refreshed, the menu bar falls back to
 `marketpulse status --json` and keeps working; the window shows the error.

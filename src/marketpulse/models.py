@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import re
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta, timezone
 from enum import StrEnum
@@ -405,6 +406,13 @@ class Quote:
     intraday: list[float] = field(default_factory=list)
     fetched_at: float = 0.0
     stale: bool = False  # served from the offline cache
+    source: str = "yahoo"  # the provider that supplied it (market.PRIMARY or a fallback's name)
+
+    def age(self, now: float | None = None) -> float | None:
+        """Seconds since it was fetched, or None if unknown."""
+        if not self.fetched_at:
+            return None
+        return max((time.time() if now is None else now) - self.fetched_at, 0.0)
 
     @property
     def change(self) -> float:

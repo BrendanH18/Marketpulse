@@ -33,6 +33,8 @@ The directory is created when settings are saved. Use
 | `menubar_display` | `"day_pct"` | `day_pct`, `day_change`, `net_worth`, or `symbol` |
 | `menubar_symbol` | `""` | Symbol for `menubar_display = "symbol"` |
 | `terminal` | `"auto"` | Terminal for the macOS companion: `auto`, `ghostty`, `iterm`, `terminal`, `kitty`, or `wezterm` |
+| `quote_provider` | `""` | Fallback quote provider used when Yahoo can't be reached: `""` (none) or `alphavantage`. See [market data](data.md#market-data-and-stale-prices) |
+| `quote_api_key` | `""` | Your key for that provider. Set it with `marketpulse provider key NAME`; `config` shows only `(set)` |
 
 The benchmark field is currently stored but is not used to calculate benchmark
 performance. The companion also has settings in its own popover.
@@ -58,7 +60,7 @@ settings separate as well, also set `MARKETPULSE_CONFIG` to another TOML file.
 | --- | --- |
 | `marketpulse: command not found` | For a `uv tool` install, run `uv tool update-shell`, reopen the terminal, and check `uv tool list`. For a pip/venv install, activate the environment first. |
 | Several accounts / ambiguous account | Select a full name with `--account`, or set `default_account` |
-| Quotes unavailable or stale | Check connectivity, symbol spelling, and `marketpulse doctor`; Yahoo may throttle or change its endpoints |
+| Quotes unavailable or stale | Check connectivity, symbol spelling, `marketpulse doctor`, and `marketpulse provider status`. Yahoo may throttle or change its endpoints; an optional [fallback provider](data.md#market-data-and-stale-prices) can fill in |
 | Missing history or FX | Review report warnings; cached quotes do not supply missing historical data |
 | Configuration changes seem ignored | Check `MARKETPULSE_CONFIG` and `XDG_CONFIG_HOME`, validate TOML types, and restart the app |
 | Swift sources not found | The menu bar companion needs an editable source checkout (`uv tool install --editable .`); a git-tag or wheel install does not include the Swift project |

@@ -301,6 +301,9 @@ struct DesktopPayload: Decodable {
   let room: [ContributionRoom]
   let alerts: [DesktopAlert]
   let automation: AutomationReport
+  /// Where quotes come from: the primary provider, then the fallback when one is configured.
+  /// Absent from older engines and may be absent from the demo.
+  let providers: [QuoteProvider]?
   /// Absent from older engines (e.g. an old CLI behind MARKETPULSE_CLI).
   let backend: BackendInfo?
   /// Absent from older engines.
@@ -315,6 +318,119 @@ struct DesktopPayload: Decodable {
   /// Nobody has used this ledger yet, so the app offers its welcome. Older engines don't
   /// report archived accounts, so fall back to what the window can see.
   var ledgerEmpty: Bool { storage?.empty ?? (accounts.isEmpty && activity.isEmpty) }
+
+  /// The primary provider's name, or nil when the engine doesn't report providers.
+  var primaryProvider: String? { providers?.first { $0.primary }?.name }
+
+  /// A provider's display name: from the status list, else the providers the engine offers.
+  func providerLabel(_ name: String) -> String {
+    providers?.first { $0.name == name }?.label
+      ?? settings?.quoteProvidersAvailable?.first { $0.name == name }?.label ?? name
+  }
+}
+
+/// One quote provider and how its last refresh went.
+struct QuoteProvider: Decodable, Identifiable {
+  var id: String { name }
+  let name: String
+  let label: String
+  /// "primary" or "fallback".
+  let role: String
+  /// For a fallback, whether its API key is set. The primary needs no key.
+  let configured: Bool
+  /// nil when it hasn't been tried yet.
+  let ok: Bool?
+  /// Local ISO times, e.g. "2026-11-05T14:02:11".
+  let lastAttempt: String?
+  let lastSuccess: String?
+  /// A short reason for the last failure. Never contains the API key.
+  let lastError: String?
+  /// Quotes it served in the last refresh.
+  let quotes: Int
+
+  var primary: Bool { role == "primary" }
+  var lastSuccessDate: Date? { lastSuccess.flatMap(BridgeDate.parse) }
+  var lastAttemptDate: Date? { lastAttempt.flatMap(BridgeDate.parse) }
+
+  enum Health: Equatable {
+    case ok, failing, notTried, notConfigured
+    var label: String {
+      switch self {
+      case .ok: return "OK"
+      case .failing: return "Failing"
+      case .notTried: return "Not tried"
+      case .notConfigured: return "No key"
+      }
+    }
+  }
+
+  var health: Health {
+    if !configured { return .notConfigured }
+    switch ok {
+    case true?: return .ok
+    case false?: return .failing
+    case nil: return .notTried
+    }
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case name, label, role, configured, ok, lastAttempt, lastSuccess, lastError, quotes
+  }
+
+  init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    name = try c.decode(String.self, forKey: .name)
+    label = try c.decodeIfPresent(String.self, forKey: .label) ?? name
+    role = try c.decodeIfPresent(String.self, forKey: .role) ?? "primary"
+    configured = try c.decodeIfPresent(Bool.self, forKey: .configured) ?? true
+    ok = try c.decodeIfPresent(Bool.self, forKey: .ok)
+    lastAttempt = try c.decodeIfPresent(String.self, forKey: .lastAttempt)
+    lastSuccess = try c.decodeIfPresent(String.self, forKey: .lastSuccess)
+    lastError = try c.decodeIfPresent(String.self, forKey: .lastError)
+    quotes = try c.decodeIfPresent(Int.self, forKey: .quotes) ?? 0
+  }
+}
+
+/// A fallback quote provider the engine can use once the user gives it an API key.
+struct QuoteProviderOption: Decodable, Identifiable, Equatable {
+  var id: String { name }
+  let name: String
+  let label: String
+  /// Where to get a key. Absent or empty when there's nothing to link to.
+  let signupUrl: String?
+
+  var signup: URL? {
+    guard let signupUrl, let url = URL(string: signupUrl), url.scheme == "https" else { return nil }
+    return url
+  }
+}
+
+/// Times the engine writes: local ISO times without a zone ("2026-11-05T14:02:11"), with or
+/// without fractional seconds, or full ISO 8601 with an offset.
+enum BridgeDate {
+  static func parse(_ raw: String) -> Date? {
+    let text = raw.trimmingCharacters(in: .whitespaces)
+    guard !text.isEmpty else { return nil }
+    let iso = ISO8601DateFormatter()
+    if let date = iso.date(from: text) { return date }
+    iso.formatOptions.insert(.withFractionalSeconds)
+    if let date = iso.date(from: text) { return date }
+    let local = DateFormatter()
+    local.locale = Locale(identifier: "en_US_POSIX")
+    local.calendar = Calendar(identifier: .gregorian)
+    for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss"] {
+      local.dateFormat = format
+      if let date = local.date(from: text) { return date }
+    }
+    return nil
+  }
+
+  /// "5 minutes ago", for labels VoiceOver reads too.
+  static func relative(_ date: Date, now: Date = .now) -> String {
+    // A refresh moments ago (or a clock a little ahead) reads as "now", never "in 2 seconds".
+    if abs(date.timeIntervalSince(now)) < 60 { return "just now" }
+    return min(date, now).formatted(.relative(presentation: .named, unitsStyle: .wide))
+  }
 }
 
 /// The engine that produced the payload.
@@ -346,6 +462,12 @@ struct SettingsInfo: Decodable {
   let menubarSymbol: String
   /// nil in the demo, whose settings are its own.
   let configPath: String?
+  /// The fallback quote provider's name, "" for none. Absent from older engines.
+  let quoteProvider: String?
+  /// Whether its API key is saved. The key itself is never sent to the app.
+  let quoteProviderKeySet: Bool?
+  /// Fallback providers the engine supports. Absent from older engines.
+  let quoteProvidersAvailable: [QuoteProviderOption]?
 }
 
 /// One file in the backups folder (`marketpulse backup list`).
@@ -427,6 +549,11 @@ struct DesktopPosition: Decodable, Identifiable {
   let dayChangePct: Double?
   let weight: Double
   let stale: Bool
+  /// The provider that priced it, "" for GICs, bonds and assets valued by hand.
+  /// Absent from older engines.
+  let quoteSource: String?
+  /// How old the quote was when the snapshot was built. Absent from older engines.
+  let quoteAgeSeconds: Double?
 }
 
 struct DesktopTransaction: Decodable, Identifiable {
@@ -678,6 +805,11 @@ struct AutomationReport: Decodable {
   let errors: [String]
   /// Symbols or FX rates the provider couldn't quote; not a failure.
   let quoteErrors: [String]
+  /// Quotes served from the offline cache, and when the oldest was fetched (a local ISO time).
+  /// Absent from older engines.
+  let staleCount: Int?
+  let staleSince: String?
+  var staleSinceDate: Date? { staleSince.flatMap(BridgeDate.parse) }
 }
 
 struct ImportPreview: Decodable, Equatable {

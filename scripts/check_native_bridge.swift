@@ -34,6 +34,43 @@ struct NativeBridgeCheck {
           .utf8))
     precondition(settings.defaultAccount == "tfsa" && settings.defaultAccountId == 3 && settings.privacy)
     precondition(settings.menubarSymbol == "XEQT.TO" && settings.configPath == "/tmp/config.toml")
+    // Quote providers (issues #23, #49): additive fields, so an engine without them still decodes.
+    precondition(settings.quoteProvider == nil && settings.quoteProviderKeySet == nil)
+    precondition(settings.quoteProvidersAvailable == nil)
+    if let providers = payload.providers {
+      precondition(providers.filter(\.primary).count == 1, "Expected exactly one primary provider")
+    }
+    let withProvider = try decoder.decode(
+      SettingsInfo.self,
+      from: Data(
+        #"{"base_currency":"CAD","privacy":false,"default_account":"","default_account_id":null,"menubar_display":"day_pct","menubar_symbol":"","config_path":null,"quote_provider":"fictional","quote_provider_key_set":true,"quote_providers_available":[{"name":"fictional","label":"Fictional Quotes","signup_url":"https://example.com/signup"},{"name":"plain","label":"Plain","signup_url":"http://example.com"}]}"#
+          .utf8))
+    precondition(withProvider.quoteProvider == "fictional" && withProvider.quoteProviderKeySet == true)
+    let options = withProvider.quoteProvidersAvailable ?? []
+    precondition(options.map(\.label) == ["Fictional Quotes", "Plain"])
+    precondition(options[0].signup?.host == "example.com" && options[1].signup == nil)  // https links only
+    let providers = try decoder.decode(
+      [QuoteProvider].self,
+      from: Data(
+        #"[{"name":"primary","label":"Primary Quotes","role":"primary","configured":true,"ok":false,"last_attempt":"2026-11-05T14:02:11","last_success":"2026-11-05T09:30:00.123456","last_error":"HTTP 429","quotes":0},{"name":"fictional","label":"Fictional Quotes","role":"fallback","configured":true,"ok":null,"last_attempt":null,"last_success":null,"last_error":null,"quotes":12},{"name":"bare"}]"#
+          .utf8))
+    precondition(providers.map(\.health) == [.failing, .notTried, .notTried])
+    precondition(providers[0].primary && !providers[1].primary && providers[0].lastError == "HTTP 429")
+    precondition(providers[0].lastAttemptDate != nil && providers[0].lastSuccessDate != nil)
+    precondition(providers[1].quotes == 12 && providers[2].label == "bare" && providers[2].quotes == 0)
+    precondition(BridgeDate.parse("2026-11-05T14:02:11+00:00") != nil && BridgeDate.parse("soon") == nil)
+    let automation = try decoder.decode(
+      AutomationReport.self,
+      from: Data(
+        #"{"last_run":"","stale":true,"snapshot_date":null,"backup":null,"fired":[],"errors":[],"quote_errors":[],"stale_count":2,"stale_since":"2026-11-05T09:30:00"}"#
+          .utf8))
+    precondition(automation.staleCount == 2 && automation.staleSinceDate != nil)
+    let position = try decoder.decode(
+      DesktopPosition.self,
+      from: Data(
+        #"{"id":"1:FAKE","account_id":1,"account":"TFSA","symbol":"FAKE","name":"Fictional Co","asset_class":"equity","quantity":1,"price":10,"currency":"CAD","value":10,"book":9,"gain":1,"gain_pct":11.1,"day_change_pct":null,"weight":100,"stale":true,"quote_source":"fictional","quote_age_seconds":5400.0}"#
+          .utf8))
+    precondition(position.quoteSource == "fictional" && position.quoteAgeSeconds == 5400)
     let ledger = try decoder.decode(
       StorageInfo.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[4])))
     let backups = ledger.backups ?? []
@@ -267,7 +304,7 @@ struct NativeBridgeCheck {
     // Other commands keep the request ID right after the command, as before.
     precondition(TransactionSaveRequest(arguments: ["deposit", "--", "1"], id: "R").arguments == ["deposit", "--request-id", "R", "--", "1"])
     print(
-      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, activity values, import result, broker import preview and profiles, privacy formatting, number entry, editable numbers and dates, transaction save recovery, transaction form commands, assets, allocation targets and rebalancing, asset and targets form commands"
+      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, quote providers, activity values, import result, broker import preview and profiles, privacy formatting, number entry, editable numbers and dates, transaction save recovery, transaction form commands, assets, allocation targets and rebalancing, asset and targets form commands"
     )
   }
 }

@@ -159,6 +159,17 @@ class PortfolioView:
         return self.fx.stale or any(q.stale for q in self.quotes.values())
 
     @property
+    def stale_quotes(self) -> list[Quote]:
+        """Holding quotes served from the offline cache (FX staleness is in `fx.stale`)."""
+        return [q for q in self.quotes.values() if q.stale]
+
+    @property
+    def stale_since(self) -> float | None:
+        """When the oldest cached holding price was fetched (epoch seconds), if any is stale."""
+        times = [q.fetched_at for q in self.stale_quotes if q.fetched_at]
+        return min(times) if times else None
+
+    @property
     def market_state(self) -> str:
         """Most 'open' state among exchange-traded (non-crypto) holdings."""
         states = {

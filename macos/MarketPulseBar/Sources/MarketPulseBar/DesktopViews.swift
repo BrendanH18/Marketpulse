@@ -658,6 +658,24 @@ private struct HoldingsWorkspace: View {
     .sorted { draft.sortByValue ? ($0.value ?? 0) > ($1.value ?? 0) : $0.symbol < $1.symbol }
   }
   private func asset(_ symbol: String) -> DesktopAsset? { payload.assets?.first { $0.symbol == symbol } }
+
+  /// The price's tooltip and spoken detail: how old a cached price is, and which provider
+  /// served it when that isn't the primary one. nil for a fresh price from the primary.
+  private func quoteNote(_ p: DesktopPosition) -> String? {
+    var parts: [String] = []
+    if p.stale {
+      parts.append(
+        p.quoteAgeSeconds.map { "Cached price from \(BridgeDate.relative(Date(timeIntervalSinceNow: -$0)))" }
+          ?? "Cached price from the offline cache")
+    }
+    // Without a provider list there's no telling which is primary, so say nothing.
+    if let source = p.quoteSource, !source.isEmpty, let primary = payload.primaryProvider, source != primary {
+      let fallback = payload.providers?.first { $0.name == source }?.role == "fallback"
+      parts.append("Price from \(payload.providerLabel(source))\(fallback ? ", the fallback provider" : "")")
+    }
+    return parts.isEmpty ? nil : parts.joined(separator: ". ")
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack {
@@ -693,8 +711,13 @@ private struct HoldingsWorkspace: View {
           ).monospacedDigit()
         }.width(80)
         TableColumn("Price") { p in
-          Text("\(Format.price(p.price)) \(p.currency)\(p.stale ? " · cached" : "")")
+          let shown = "\(Format.price(p.price)) \(p.currency)"
+          let note = quoteNote(p)
+          Text("\(shown)\(p.stale ? " · cached" : "")")
             .modifier(RowTint(Studio.muted)).monospacedDigit()
+            .help(note ?? "")
+            // Spoken in words, so a cached price never depends on the muted tint or the dot.
+            .accessibilityLabel(note.map { "\(shown). \($0)" } ?? shown)
         }.width(125)
         TableColumn("Value (\(payload.status.base))") { p in
           Text(Format.money(p.value, payload.status.base, privacy: payload.status.privacy))
@@ -1468,6 +1491,7 @@ private struct AutomationWorkspace: View {
             }.disabled(!model.canEdit)
           }
         }
+        QuoteProvidersPanel(model: model)
         BackupsPanel(model: model)
         Surface("Preferences") {
           automationRow(
@@ -1533,6 +1557,105 @@ private struct AutomationWorkspace: View {
           horizontal: false, vertical: true)
       }
       Spacer()
+    }
+  }
+}
+
+/// Where quotes come from and how the last refresh went, plus how old any cached prices are.
+private struct QuoteProvidersPanel: View {
+  @ObservedObject var model: StatusModel
+
+  var body: some View {
+    let payload = model.desktop
+    let providers = payload?.providers ?? []
+    Surface("Quote providers", trailing: "PRICES AND EXCHANGE RATES") {
+      if providers.isEmpty {
+        Text(
+          payload?.demo == true
+            ? "The demo uses fictional prices, so no quote provider is contacted."
+            : "Provider status appears here after the next refresh."
+        ).font(.system(size: 11)).foregroundStyle(Studio.muted)
+      }
+      ForEach(providers) { row($0) }
+      if let automation = payload?.automation, let count = automation.staleCount, count > 0 {
+        Label(staleText(count, since: automation.staleSinceDate), systemImage: "wifi.exclamationmark")
+          .font(.system(size: 11)).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
+      } else if payload?.automation.stale == true {  // only an exchange rate or watchlist price is cached
+        Label("Some prices or exchange rates are from the offline cache.", systemImage: "wifi.exclamationmark")
+          .font(.system(size: 11)).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
+      }
+      if payload?.settings?.quoteProvidersAvailable?.isEmpty == false
+        && !providers.contains(where: { !$0.primary })
+      {
+        HStack {
+          Text("No fallback provider is set up. Add one in Settings to keep prices current when the primary can't be reached.")
+            .font(.system(size: 11)).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+          Spacer()
+          Button("Set Up…") { model.showSettingsWindow(tab: 0) }.disabled(model.demo)
+        }
+      }
+    }
+  }
+
+  private func staleText(_ count: Int, since: Date?) -> String {
+    let what = count == 1 ? "1 price is from the offline cache" : "\(count) prices are from the offline cache"
+    guard let since else { return what + "." }
+    let when = BridgeDate.relative(since)
+    return count == 1 ? "\(what); it's from \(when)." : "\(what); the oldest is from \(when)."
+  }
+
+  private func row(_ p: QuoteProvider) -> some View {
+    HStack(alignment: .top, spacing: 14) {
+      Image(systemName: symbol(p.health)).foregroundStyle(color(p.health)).frame(width: 24)
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 6) {
+        HStack(spacing: 8) {
+          Text(p.label).font(.system(size: 13, weight: .medium))
+          Text(p.primary ? "Primary" : "Fallback").font(.system(size: 10, weight: .medium))
+            .foregroundStyle(Studio.muted).padding(.horizontal, 6).padding(.vertical, 2)
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Studio.line))
+        }
+        Text(detail(p)).font(.system(size: 11)).foregroundStyle(Studio.muted)
+          .fixedSize(horizontal: false, vertical: true)
+        if let error = p.lastError, !error.isEmpty, p.health != .ok {
+          Text(error).font(.system(size: 11)).foregroundStyle(Studio.red).textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      Spacer()
+      // The word, not just the colour, carries the status.
+      Text(p.health.label).font(.system(size: 11, weight: .medium)).foregroundStyle(color(p.health))
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(spoken(p))
+  }
+
+  private func detail(_ p: QuoteProvider) -> String {
+    let success = p.lastSuccessDate.map { "Last success \(BridgeDate.relative($0))" }
+      ?? (p.health == .notTried || p.health == .notConfigured ? "Not used yet" : "No successful refresh yet")
+    let served = p.quotes == 1 ? "1 quote in the last refresh" : "\(p.quotes) quotes in the last refresh"
+    return "\(success) · \(served)"
+  }
+
+  private func spoken(_ p: QuoteProvider) -> String {
+    var parts = ["\(p.label), \(p.primary ? "primary" : "fallback") provider: \(p.health.label)", detail(p)]
+    if let error = p.lastError, !error.isEmpty, p.health != .ok { parts.append("Last error: \(error)") }
+    return parts.joined(separator: ". ")
+  }
+
+  private func symbol(_ health: QuoteProvider.Health) -> String {
+    switch health {
+    case .ok: return "checkmark.circle.fill"
+    case .failing: return "exclamationmark.triangle.fill"
+    case .notTried, .notConfigured: return "circle.dashed"
+    }
+  }
+
+  private func color(_ health: QuoteProvider.Health) -> Color {
+    switch health {
+    case .ok: return Studio.mint
+    case .failing: return Studio.red
+    case .notTried, .notConfigured: return Studio.muted
     }
   }
 }

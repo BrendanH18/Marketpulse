@@ -45,9 +45,14 @@ def run_cycle(tracker: Tracker, *, fresh: bool = False, notify: bool = True) -> 
     quote_errors = [f"{s}: {e}" for s, e in {**view.errors, **watch_errors, **alert_errors}.items()]
     backups = tracker.store.backups()
     latest = tracker.store.latest_snapshot()
+    stale = [q for q in quotes.values() if q.stale]
+    oldest = min((q.fetched_at for q in stale if q.fetched_at), default=None)
     report = {
         "last_run": datetime.now().isoformat(timespec="seconds"),
         "stale": view.stale or any(q.stale for q in [*watch.values(), *quotes.values()]),
+        # How many prices came from the offline cache, and when the oldest of them was fetched.
+        "stale_count": len(stale),
+        "stale_since": datetime.fromtimestamp(oldest).isoformat(timespec="seconds") if oldest else None,
         "snapshot_date": latest.date if latest and latest.currency == view.base else None,
         "backup": backups[0].name if backups else None,
         "fired": [a.describe() for a in fired],

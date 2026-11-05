@@ -399,7 +399,7 @@ final class StatusModel: ObservableObject {
     guard !demo && !saving else { return .unknown("Another save is in progress.") }
     saving = true
     defer { saving = false }
-    let result = await request.submit(using: CLI.run)
+    let result = await request.submit { try await CLI.run($0) }
     switch result {
     case .recorded, .recovered:
       errorMessage = nil
@@ -413,15 +413,16 @@ final class StatusModel: ObservableObject {
   }
 
   /// Runs a write command, then reloads. `afterWrite` runs as soon as the command succeeds,
-  /// before the reload; `success` builds the confirmation from the command's output.
+  /// before the reload; `success` builds the confirmation from the command's output. `input`
+  /// goes to the command's stdin, for secrets that mustn't appear in its arguments.
   private func perform(
-    _ args: [String], afterWrite: () -> Void = {}, success: (Data) -> String
+    _ args: [String], input: Data? = nil, afterWrite: () -> Void = {}, success: (Data) -> String
   ) async -> Bool {
     guard !demo && !saving else { return false }
     saving = true
     defer { saving = false }
     do {
-      let output = try await CLI.run(args)
+      let output = try await CLI.run(args, input: input)
       afterWrite()
       message = success(output)
       await reload()
@@ -472,6 +473,29 @@ final class StatusModel: ObservableObject {
       let saved = await perform(
         ["accounts", "edit", "--unarchive"] + account.revisionArguments + ["--", String(account.id)],
         success: "\(account.name) is back in your portfolio")
+      settingsError = saved ? nil : errorMessage
+    }
+  }
+
+  /// Saves the fallback quote provider's API key with `marketpulse provider key`. The key goes
+  /// to stdin, never into the arguments, and is never logged or shown; the confirmation is fixed
+  /// text rather than the command's output. Returns whether it was saved.
+  func saveQuoteProviderKey(provider: String, key: String) async -> Bool {
+    let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !demo && !saving, !provider.isEmpty, !key.isEmpty else { return false }
+    let label = desktop?.providerLabel(provider) ?? provider
+    let saved = await perform(["provider", "key", "--", provider], input: Data(key.utf8)) { _ in
+      "\(label) key saved. It's used only when the primary provider can't be reached."
+    }
+    settingsError = saved ? nil : errorMessage
+    return saved
+  }
+
+  /// Removes the fallback provider and its key (`marketpulse provider clear`).
+  func clearQuoteProviderKey() {
+    guard !demo && !saving else { return }
+    Task {
+      let saved = await perform(["provider", "clear"], success: "Fallback quote provider removed")
       settingsError = saved ? nil : errorMessage
     }
   }
