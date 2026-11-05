@@ -36,10 +36,9 @@ A cached price is **stale**. It shows with ◌ and its age, for example "◌ off
 cached prices, oldest 3 h old" in `marketpulse summary`, or a "Cached price from 3 hours
 ago" tooltip in the Mac app's Holdings. A stale price is exactly what it says: a past
 price that may be hours or days old. Don't make trading or rebalancing decisions on it.
-While any price is stale:
 
-- Alerts don't fire.
-- No performance snapshot is recorded for that day, so returns and drawdown aren't
+- Alerts don't fire from a stale price. Alerts on symbols with fresh prices still do.
+- While any holding's price or exchange rate is stale, no performance snapshot is recorded for that day, so returns and drawdown aren't
   computed from old prices.
 - Positions with no price at all, cached or fresh, are listed as excluded and left out of
   totals rather than counted at zero.

@@ -1580,6 +1580,9 @@ private struct QuoteProvidersPanel: View {
       if let automation = payload?.automation, let count = automation.staleCount, count > 0 {
         Label(staleText(count, since: automation.staleSinceDate), systemImage: "wifi.exclamationmark")
           .font(.system(size: 11)).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
+      } else if payload?.automation.stale == true {  // only an exchange rate or watchlist price is cached
+        Label("Some prices or exchange rates are from the offline cache.", systemImage: "wifi.exclamationmark")
+          .font(.system(size: 11)).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
       }
       if payload?.settings?.quoteProvidersAvailable?.isEmpty == false
         && !providers.contains(where: { !$0.primary })

@@ -85,9 +85,9 @@ class Transport(Protocol):
 class CurlTransport:
     """curl_cffi session per thread, Chrome TLS fingerprint, retry with backoff.
 
-    `service` names the provider in error messages. `headers` go with every request
-    (a fallback provider's key travels in a header, never in the URL, so it can't
-    surface in a curl error message)."""
+    `service` names the provider in error messages. `headers` go with every request.
+    Errors aren't scrubbed here: a provider whose key is in the URL (Alpha Vantage)
+    must scrub it from every `MarketError` it passes on."""
 
     def __init__(
         self,

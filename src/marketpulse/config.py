@@ -94,9 +94,9 @@ class Config:
         private = bool(self.quote_api_key) or (path.exists() and path.stat().st_mode & 0o077 == 0)
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600 if private else 0o644)
         with os.fdopen(fd, "w") as fh:
+            if private:  # before writing: O_CREAT's mode doesn't apply to a leftover temp file
+                os.fchmod(fh.fileno(), 0o600)
             fh.write("\n".join(lines) + "\n")
-        if private:
-            os.chmod(tmp, 0o600)  # O_CREAT's mode doesn't apply to a leftover temp file
         os.replace(tmp, path)
         return path
 
