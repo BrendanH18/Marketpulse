@@ -111,6 +111,15 @@ def test_desktop_bridge_reports_settings_the_app_edits(tracker, monkeypatch, tmp
         "menubar_display": "day_pct",
         "menubar_symbol": "",
         "config_path": str(config),
+        "quote_provider": "",
+        "quote_provider_key_set": False,
+        "quote_providers_available": [
+            {
+                "name": "alphavantage",
+                "label": "Alpha Vantage",
+                "signup_url": "https://www.alphavantage.co/support/#api-key",
+            }
+        ],
     }
     tfsa = tracker.store.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA))
     tracker.config.base_currency = "usd"

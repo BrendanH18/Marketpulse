@@ -142,6 +142,7 @@ private struct GeneralSettings: View {
       }
       // A save reloads the portfolio, and setConfig ignores changes made until it finishes.
       .disabled(model.desktop?.settings == nil || model.saving)
+      MarketDataSection(model: model)
       Section("Terminal") {
         Picker("Open the terminal app in", selection: $model.terminal) {
           ForEach(TerminalLauncher.choices, id: \.self) { Text($0 == "iterm" ? "iTerm" : $0.capitalized).tag($0) }
@@ -168,6 +169,93 @@ private struct GeneralSettings: View {
     guard !symbol.isEmpty && symbol != current else { return }
     model.setConfig("menubar_symbol", symbol)
   }
+}
+
+/// The optional fallback quote provider and its API key. The key goes to the CLI on stdin and is
+/// never shown again: the engine reports only whether one is saved.
+private struct MarketDataSection: View {
+  @ObservedObject var model: StatusModel
+  @StateObject private var draft = MarketDataDraft()
+
+  var body: some View {
+    let settings = model.desktop?.settings
+    let available = settings?.quoteProvidersAvailable ?? []
+    let saved = settings?.quoteProvider ?? ""
+    let keySet = settings?.quoteProviderKeySet ?? false
+    let chosen = available.first { $0.name == draft.provider }
+    Section {
+      if settings?.quoteProvidersAvailable == nil {
+        Text(
+          settings == nil
+            ? "Available after the next refresh."
+            : "This version of the MarketPulse engine doesn't support a fallback quote provider."
+        ).foregroundStyle(.secondary)
+      } else {
+        Picker("Fallback provider", selection: $draft.provider) {
+          Text("None").tag("")
+          ForEach(available) { Text($0.label).tag($0.name) }
+          // A provider saved by a newer engine, or one no longer offered, still shows by name.
+          if !saved.isEmpty && !available.contains(where: { $0.name == saved }) {
+            Text(model.desktop?.providerLabel(saved) ?? saved).tag(saved)
+          }
+        }
+        if !draft.provider.isEmpty {
+          if draft.provider == saved && keySet {
+            LabeledContent("API key") {
+              Label("Key saved", systemImage: "checkmark.circle").foregroundStyle(Studio.mint)
+            }
+          }
+          LabeledContent(draft.provider == saved && keySet ? "Replace key" : "API key") {
+            HStack {
+              SecureField("API key", text: $draft.key, prompt: Text("Paste your key"))
+                .labelsHidden().onSubmit(save)
+                .accessibilityLabel("\(chosen?.label ?? draft.provider) API key")
+              Button("Save", action: save).disabled(trimmedKey.isEmpty)
+            }
+          }
+          if let chosen, let url = chosen.signup {
+            Link("Get a \(chosen.label) key", destination: url)
+          }
+        }
+        if !saved.isEmpty || keySet {
+          HStack {
+            Spacer()
+            Button("Remove key") {
+              draft.key = ""
+              model.clearQuoteProviderKey()
+            }
+            .accessibilityLabel("Remove the \(model.desktop?.providerLabel(saved) ?? "fallback provider") key")
+          }
+        }
+      }
+    } header: {
+      Text("Market data")
+    } footer: {
+      Text("Optional. Used only when Yahoo can't be reached. Your key stays in your config file on this Mac.")
+    }
+    .disabled(settings == nil || model.saving)
+    .onAppear { draft.provider = saved }
+    // After a save or removal, show what the engine now has.
+    .onChange(of: saved) { _, value in draft.provider = value }
+  }
+
+  private var trimmedKey: String { draft.key.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+  private func save() {
+    let provider = draft.provider
+    guard !provider.isEmpty, !trimmedKey.isEmpty, !model.saving else { return }
+    let key = draft.key
+    Task {
+      if await model.saveQuoteProviderKey(provider: provider, key: key) { draft.key = "" }
+    }
+  }
+}
+
+private final class MarketDataDraft: ObservableObject {
+  /// The provider being set up: the saved one until the user picks another.
+  @Published var provider = ""
+  /// Typed into the SecureField; cleared once saved. Never written anywhere else.
+  @Published var key = ""
 }
 
 private struct AppearanceSettings: View {

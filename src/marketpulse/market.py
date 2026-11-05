@@ -4,10 +4,15 @@ Yahoo rejects non-browser TLS fingerprints (plain httpx/curl get HTTP 429),
 so requests go through curl_cffi with Chrome impersonation. Quotes use the
 batch `spark` endpoint (20 symbols per call, includes intraday closes for
 sparklines); history, dividends and search use `chart` and `search`.
+
+When Yahoo can't be reached, quotes come from an optional fallback provider
+(`providers.py`, enabled by a key the user supplies), then from the offline
+cache marked stale. History, dividends and search are Yahoo only.
 """
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Iterable
@@ -27,6 +32,13 @@ SPARK_URL = "https://query1.finance.yahoo.com/v7/finance/spark"
 SEARCH_URL = "https://query2.finance.yahoo.com/v1/finance/search"
 SPARK_LIMIT = 20
 QUOTE_TTL = 15.0
+PRIMARY = "yahoo"
+PRIMARY_LABEL = "Yahoo Finance"
+# A cached price younger than this is good enough while Yahoo is down: the fallback's free
+# tier has few calls a day, so it's saved for prices that are missing or getting old.
+FALLBACK_AFTER = 3600.0
+STATUS_META = "quote_provider_status"
+FALLBACK_META = "quote_fallback_last_attempt"
 
 PERIOD_INTERVALS = {
     "1d": "5m",
@@ -70,12 +82,26 @@ class Transport(Protocol):
 
 
 class CurlTransport:
-    """curl_cffi session per thread, Chrome TLS fingerprint, retry with backoff."""
+    """curl_cffi session per thread, Chrome TLS fingerprint, retry with backoff.
 
-    def __init__(self, timeout: float = 10.0, attempts: int = 3, backoff: float = 0.4):
+    `service` names the provider in error messages. `headers` go with every request
+    (a fallback provider's key travels in a header, never in the URL, so it can't
+    surface in a curl error message)."""
+
+    def __init__(
+        self,
+        timeout: float = 10.0,
+        attempts: int = 3,
+        backoff: float = 0.4,
+        *,
+        service: str = "Yahoo",
+        headers: dict[str, str] | None = None,
+    ):
         self.timeout = timeout
         self.attempts = attempts
         self.backoff = backoff
+        self.service = service
+        self.headers = dict(headers or {})
         self._local = threading.local()
 
     def _session(self):
@@ -90,7 +116,7 @@ class CurlTransport:
         last: Exception = MarketError("no attempts made")
         for attempt in range(self.attempts):
             try:
-                resp = self._session().get(url, params=params)
+                resp = self._session().get(url, params=params, headers=self.headers or None)
             except Exception as e:  # curl errors: DNS, timeouts, resets
                 last = MarketError(f"network error: {e}")
             else:
@@ -98,15 +124,15 @@ class CurlTransport:
                     try:
                         return resp.json()
                     except ValueError:
-                        last = MarketError("invalid response from Yahoo")
+                        last = MarketError(f"invalid response from {self.service}")
                 elif resp.status_code in (429, 500, 502, 503, 504):
-                    last = MarketError(f"Yahoo returned HTTP {resp.status_code}")
+                    last = MarketError(f"{self.service} returned HTTP {resp.status_code}")
                 else:
                     # 400/404 carry a JSON error body describing the problem
                     try:
                         return resp.json()
                     except ValueError:
-                        raise MarketError(f"Yahoo returned HTTP {resp.status_code}") from None
+                        raise MarketError(f"{self.service} returned HTTP {resp.status_code}") from None
             if attempt < self.attempts - 1:
                 time.sleep(self.backoff * (2**attempt))
         raise last
@@ -172,13 +198,160 @@ def _yahoo_error(payload: dict, root: str) -> str | None:
     return None
 
 
+class QuoteProvider(Protocol):
+    """A fallback source of latest quotes (see `providers.py`)."""
+
+    name: str
+    label: str
+    batch_limit: int  # most symbols to ask for in one attempt
+    min_interval: float  # seconds between attempts, across processes
+    daily_limit: int  # symbols per local day
+
+    def quotes(self, symbols: list[str]) -> tuple[dict[str, Quote], dict[str, str]]:
+        """Quotes it found, and why the others are missing. Raises `MarketError` when the
+        provider can't be reached or refuses the request (bad key, rate limit)."""
+        ...
+
+
+@dataclass
+class ProviderStatus:
+    """How a quote provider fared on its latest attempt. Times are local ISO seconds."""
+
+    name: str
+    label: str
+    role: str  # primary | fallback
+    configured: bool = True
+    ok: bool | None = None  # None: not tried yet
+    last_attempt: str | None = None
+    last_success: str | None = None
+    last_error: str | None = None
+    quotes: int = 0  # served on the latest attempt
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
 class MarketData:
-    def __init__(self, transport: Transport | None = None, store: Store | None = None):
+    def __init__(
+        self,
+        transport: Transport | None = None,
+        store: Store | None = None,
+        fallback: QuoteProvider | None = None,
+    ):
         self.transport = transport or CurlTransport()
         self.store = store
+        self.fallback = fallback
         self._lock = threading.Lock()
         self._quote_cache: dict[str, tuple[Quote, float]] = {}
         self._history_cache: dict[tuple[str, str], tuple[list[Bar], float]] = {}
+        self._fallback_attempt = 0.0  # epoch seconds, when no store keeps it
+
+    # ── provider status ───────────────────────────────────────────────────────
+
+    def _saved_status(self) -> dict[str, dict]:
+        raw = self.store.get_meta(STATUS_META) if self.store is not None else None
+        try:
+            saved = json.loads(raw) if raw else {}
+        except ValueError:
+            return {}
+        return saved if isinstance(saved, dict) else {}
+
+    def provider_status(self) -> list[ProviderStatus]:
+        """Yahoo, then the fallback when one is configured, with each one's latest attempt
+        (kept in the database, so a one-shot CLI run reports what the last refresh saw)."""
+        saved = self._saved_status()
+        rows = [(PRIMARY, PRIMARY_LABEL, "primary")]
+        if self.fallback is not None:
+            rows.append((self.fallback.name, self.fallback.label, "fallback"))
+        out = []
+        for name, label, role in rows:
+            status = ProviderStatus(name, label, role)
+            entry = saved.get(name)
+            if isinstance(entry, dict):
+                for key in ("ok", "last_attempt", "last_success", "last_error", "quotes"):
+                    if key in entry:
+                        setattr(status, key, entry[key])
+            out.append(status)
+        return out
+
+    def _record(self, name: str, *, error: str | None, served: int) -> None:
+        if self.store is None:
+            return
+        now = _now_iso()
+        with self._lock:
+            saved = self._saved_status()
+            prior = saved.get(name)
+            entry: dict[str, Any] = prior if isinstance(prior, dict) else {}
+            entry.update(ok=error is None, last_attempt=now, last_error=error, quotes=served)
+            if error is None:
+                entry["last_success"] = now
+            saved[name] = entry
+            self.store.set_meta(STATUS_META, json.dumps(saved))
+
+    def _fallback_budget(self, wanted: int) -> int:
+        """How many symbols the fallback may be asked for now (0 = wait), within its
+        interval and daily limit. Shared by every process through the database."""
+        assert self.fallback is not None
+        now = time.time()
+        today = date.today().isoformat()
+        with self._lock:
+            state: dict[str, Any] = {"last": self._fallback_attempt}
+            if self.store is not None:
+                try:
+                    saved = json.loads(self.store.get_meta(FALLBACK_META) or "{}")
+                    if isinstance(saved, dict):
+                        state.update(saved, last=max(float(saved.get("last") or 0), self._fallback_attempt))
+                except (TypeError, ValueError):
+                    pass
+            used = int(state.get("used") or 0) if state.get("day") == today else 0
+            left = self.fallback.daily_limit - used
+            if now - float(state["last"] or 0) < self.fallback.min_interval or left <= 0:
+                return 0
+            n = min(wanted, self.fallback.batch_limit, left)
+            self._fallback_attempt = now
+            if self.store is not None:
+                self.store.set_meta(FALLBACK_META, json.dumps({"last": now, "day": today, "used": used + n}))
+            return n
+
+    def _from_fallback(self, symbols: list[str], cached: dict[str, Quote]) -> dict[str, Quote]:
+        """Quotes from the fallback for symbols Yahoo couldn't supply.
+
+        Free tiers allow a few calls an hour, so it's asked only for symbols with no cached
+        price or one older than FALLBACK_AFTER, those it knows nothing about first, then the
+        oldest. A fallback price replaces a cached one only if it's for a later trading time
+        (a free tier's price may be the previous close, older than Yahoo's last intraday quote).
+        """
+        if self.fallback is None:
+            return {}
+        cutoff = time.time() - FALLBACK_AFTER
+        wanted = sorted(
+            (s for s in symbols if s not in cached or cached[s].fetched_at < cutoff),
+            key=lambda s: cached[s].fetched_at if s in cached else -1.0,
+        )
+        n = self._fallback_budget(len(wanted)) if wanted else 0
+        if not n:
+            return {}
+        try:
+            got, _ = self.fallback.quotes(wanted[:n])
+        except MarketError as e:
+            self._record(self.fallback.name, error=str(e), served=0)
+            return {}
+        out = {}
+        for sym, q in got.items():
+            old = cached.get(sym)
+            if sym not in wanted[:n]:
+                continue
+            if old and old.market_time and q.market_time and old.market_time >= q.market_time:
+                continue  # e.g. a previous close, when Yahoo's cached quote is from later
+            q.source = self.fallback.name
+            if old:  # a fallback knows less about a listing than Yahoo did
+                q.name = q.name if q.name and q.name != sym else old.name
+                q.exchange = q.exchange or old.exchange
+                q.instrument_type = q.instrument_type or old.instrument_type
+            out[sym] = q
+        self._record(self.fallback.name, error=None, served=len(out))
+        return out
 
     def clear_cache(self) -> None:
         with self._lock:
@@ -234,7 +407,9 @@ class MarketData:
 
         fresh: dict[str, Quote] = {}
         offline: list[str] = []
+        failure: str | None = None
         for chunk, (got, err) in zip(chunks, results, strict=True):
+            failure = failure or err
             for sym in chunk:
                 if sym in got:
                     fresh[sym] = got[sym]
@@ -243,6 +418,13 @@ class MarketData:
                     offline.append(sym)
                 else:
                     errors[sym] = "symbol not found"
+        self._record(PRIMARY, error=failure, served=len(fresh))
+        cached = self.store.cached_quotes(offline) if self.store is not None and offline else {}
+        # Yahoo couldn't be reached for these: ask the fallback before the offline cache.
+        for sym, q in self._from_fallback(offline, cached).items():
+            fresh[sym] = q
+            errors.pop(sym, None)
+            offline.remove(sym)
         out.update(fresh)
         if fresh:
             expiry = time.monotonic() + QUOTE_TTL
@@ -252,9 +434,9 @@ class MarketData:
         if self.store is not None:
             if fresh:
                 self.store.cache_quotes(list(fresh.values()))
-            if offline:
-                for sym, q in self.store.cached_quotes(offline).items():
-                    out[sym] = q
+            for sym in offline:
+                if sym in cached:
+                    out[sym] = cached[sym]
                     errors.pop(sym, None)
         return out, errors
 

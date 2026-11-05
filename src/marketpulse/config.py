@@ -45,6 +45,10 @@ class Config:
     menubar_symbol: str = ""
     # Terminal used to open the TUI from the menu bar: auto | ghostty | iterm | terminal | kitty | wezterm
     terminal: str = "auto"
+    # Fallback quote provider used when Yahoo can't be reached ("" = none), and the user's own
+    # key for it. Set the key with `marketpulse provider key`; it is never printed or exported.
+    quote_provider: str = ""
+    quote_api_key: str = ""
 
     @classmethod
     def load(cls, path: Path | None = None) -> Config:
@@ -85,9 +89,23 @@ class Config:
         for key, value in asdict(self).items():
             lines.append(f"{key} = {_toml_value(value)}")
         tmp = path.with_suffix(".toml.tmp")
-        tmp.write_text("\n".join(lines) + "\n")
+        # Owner-only once it holds an API key (and from then on: a removed key leaves no trace
+        # worth exposing, and loosening permissions the user may have set isn't ours to do).
+        private = bool(self.quote_api_key) or (path.exists() and path.stat().st_mode & 0o077 == 0)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600 if private else 0o644)
+        with os.fdopen(fd, "w") as fh:
+            fh.write("\n".join(lines) + "\n")
+        if private:
+            os.chmod(tmp, 0o600)  # O_CREAT's mode doesn't apply to a leftover temp file
         os.replace(tmp, path)
         return path
+
+    def redacted(self) -> dict:
+        """Every setting, with the API key replaced: for display, logs and bug reports."""
+        data = asdict(self)
+        if data.get("quote_api_key"):
+            data["quote_api_key"] = "(set)"
+        return data
 
 
 def _toml_value(value) -> str:

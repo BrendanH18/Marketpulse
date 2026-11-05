@@ -46,7 +46,9 @@ enum CLI {
 
     static var path: String { resolved.path }
 
-    static func run(_ args: [String]) async throws -> Data {
+    /// `input`, when given, is written to the command's stdin, which is then closed. Use it for
+    /// secrets such as API keys: arguments are visible to every user in `ps`, stdin isn't.
+    static func run(_ args: [String], input: Data? = nil) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
@@ -73,6 +75,8 @@ enum CLI {
                 let stderr = Pipe()
                 process.standardOutput = stdout
                 process.standardError = stderr
+                let stdin = input.map { _ in Pipe() }
+                if let stdin { process.standardInput = stdin }
                 var errData = Data()
                 let errGroup = DispatchGroup()
                 errGroup.enter()
@@ -85,6 +89,15 @@ enum CLI {
                 } catch {
                     continuation.resume(throwing: CLIError.launch(error.localizedDescription))
                     return
+                }
+                if let stdin, let input {
+                    let writer = stdin.fileHandleForWriting
+                    // A command that exits without reading must not kill the app with SIGPIPE.
+                    _ = fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1)
+                    DispatchQueue.global().async {
+                        try? writer.write(contentsOf: input)
+                        try? writer.close()
+                    }
                 }
                 let watchdog = DispatchSource.makeTimerSource(queue: .global())
                 watchdog.schedule(deadline: .now() + 120)

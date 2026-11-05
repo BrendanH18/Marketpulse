@@ -7,6 +7,7 @@ active Omarchy palette, so everything re-themes automatically.
 from __future__ import annotations
 
 import calendar
+import time
 from collections.abc import Mapping, Sequence
 
 from rich import box
@@ -25,8 +26,9 @@ from .analytics import (
     period_return,
 )
 from .ledger import RoomStatus
-from .market import SearchResult
+from .market import PRIMARY, SearchResult
 from .models import Account, Bar, Quote, Transaction, TxnType
+from .providers import provider_label
 from .tax import DENIED_REGISTERED, Disposition, TaxReport
 from .themes import OMARCHY_PALETTES, Palette, palette_from_colors, pretty_name
 from .valuation import Breakdown, PortfolioView, PositionView
@@ -46,6 +48,18 @@ TXN_STYLES = {
     TxnType.VALUATION: "muted",
 }
 DASH = "—"
+
+
+def stale_note(view: PortfolioView, now: float | None = None) -> str:
+    """Why a view is marked stale, e.g. "offline — 2 cached prices, oldest 3 h old"."""
+    stale = view.stale_quotes
+    since = view.stale_since
+    if not stale:
+        return "offline — showing a cached exchange rate"
+    count = f"{len(stale)} cached price{'s' if len(stale) != 1 else ''}"
+    if since is None:
+        return f"offline — {count}"
+    return f"offline — {count}, oldest {fmt.age((time.time() if now is None else now) - since)} old"
 
 
 def mix(fg: str, bg: str, amount: float) -> str:
@@ -171,7 +185,9 @@ def quote_card(q: Quote) -> RenderableType:
     price.append("  ")
     price.append_text(change_text(q.change, q.change_pct))
     if q.stale:
-        price.append("   ◌ offline cache", style="warn")
+        price.append(f"   ◌ offline cache · {fmt.age(q.age())} old", style="warn")
+    elif q.source != PRIMARY:
+        price.append(f"   via {provider_label(q.source)}", style="muted")
     grid = Table.grid(padding=(0, 3))
     for _ in range(4):
         grid.add_column()
@@ -284,7 +300,7 @@ def summary(view: PortfolioView, perf: Performance | None = None, *, privacy: bo
     head.append_text(change_text(view.day_change, view.day_change_pct, privacy=privacy))
     head.append(" today", style="muted")
     if view.stale:
-        head.append("   ◌ offline — showing cached prices", style="warn")
+        head.append(f"   ◌ {stale_note(view)}", style="warn")
 
     tiles: list[tuple[str, Text]] = [
         ("Invested", Text(fmt.money(view.invested, view.base, privacy=privacy))),

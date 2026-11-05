@@ -277,6 +277,19 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     "gain" or "loss" spoken. Accessibility Inspector's audit (Xcode › Open Developer Tool)
     reports no errors on any workspace.
 
+27. **Quote providers and stale prices.** **Automation › Quote providers** lists Yahoo
+    Finance as Primary, with a status word (OK or Failing, not only a colour), when it
+    last succeeded, and how many quotes it served. In **Settings › General › Market data**,
+    pick Alpha Vantage, enter a made-up key such as `QAFICTIONAL1`, and save: the field
+    clears and says "Key saved", and Automation lists Alpha Vantage as Fallback, "Not
+    tried". `ps -ax | grep provider` while saving never shows the key, and
+    `marketpulse config` (with the QA app's environment) shows `quote_api_key` as `(set)`.
+    Turn off Wi-Fi and refresh: Yahoo shows Failing with its error, and Holdings shows a
+    stale marker whose tooltip gives the price's age. Once a cached price is more than an
+    hour old, Alpha Vantage is tried (with the made-up key it may answer or refuse; either
+    way the key never appears in the error). Turn Wi-Fi back on, refresh, then **Remove
+    key**: the fallback row disappears.
+
 Quit the QA app with ⌘Q when done.
 
 ## Tool limits and workarounds

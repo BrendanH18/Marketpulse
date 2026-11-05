@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- An optional fallback quote provider for when Yahoo can't be reached
+  ([#49](https://github.com/BrendanH18/Marketpulse/issues/49)): Alpha Vantage, whose free
+  tier covers the TSX, with a key you get yourself. Set it with `marketpulse provider key
+  alphavantage` (the key is read from a prompt or standard input) or in the Mac app's
+  **Settings › General › Market data**. Check it with `provider test` and `provider status`,
+  and remove it with `provider clear`. It's used only for prices that are missing or more than
+  an hour old, within its free limits (5 symbols per 15 minutes, 25 a day). Its free prices
+  are end-of-day closes and never replace a newer cached price. The key never appears in
+  `config`, `doctor`, errors, exports or the desktop bridge, and the config file becomes
+  owner-only once it holds one.
+- Clearer stale prices ([#23](https://github.com/BrendanH18/Marketpulse/issues/23)):
+  `summary` and the TUI say how many prices are cached and how old the oldest is, and
+  `quote` shows a cached price's age or the provider that supplied it. The Mac app's
+  **Automation › Quote providers** panel shows each provider's status and the stale count,
+  and a stale Holdings price's tooltip gives its age.
+  [Market data and stale prices](docs/data.md#market-data-and-stale-prices) explains
+  what stale means and the fallback order.
+- Desktop bridge (still version 1, fields added): `providers`, `automation.stale_count` and
+  `stale_since`, each position's `quote_source` and `quote_age_seconds`, and the provider
+  fields in `settings`.
+
+### Fixed
+
+- `marketpulse doctor` said "Yahoo reachable" even when Yahoo couldn't be reached and
+  prices came from the offline cache. It now reports the failure, and the fallback
+  provider's status.
+
 ## [2.2.0] - 2026-11-03
 
 The first release with the standalone Mac app (App 1.0 for macOS): `MarketPulse.app`

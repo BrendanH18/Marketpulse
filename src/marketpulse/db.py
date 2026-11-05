@@ -7,7 +7,7 @@ import sqlite3
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -27,6 +27,8 @@ from .models import (
     guess_currency,
     parse_date,
 )
+
+_QUOTE_FIELDS = {f.name for f in fields(Quote)}
 
 # ── Schema & migrations ───────────────────────────────────────────────────────
 #
@@ -925,7 +927,9 @@ class Store:
         for r in self._query(
             f"SELECT data FROM quote_cache WHERE symbol IN ({marks})", tuple(s.upper() for s in symbols)
         ):
-            q = Quote(**json.loads(r["data"]))
+            data = json.loads(r["data"])
+            # Ignore fields a newer MarketPulse wrote, so a downgrade keeps its offline cache.
+            q = Quote(**{k: v for k, v in data.items() if k in _QUOTE_FIELDS})
             q.stale = True
             out[q.symbol] = q
         return out
