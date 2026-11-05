@@ -237,6 +237,13 @@ private struct MarketDataSection: View {
     .onAppear { draft.provider = saved }
     // After a save or removal, show what the engine now has.
     .onChange(of: saved) { _, value in draft.provider = value }
+    // Choosing None turns the saved fallback off, as Remove key does.
+    .onChange(of: draft.provider) { _, value in
+      if value.isEmpty && !saved.isEmpty {
+        draft.key = ""
+        model.clearQuoteProviderKey()
+      }
+    }
   }
 
   private var trimmedKey: String { draft.key.trimmingCharacters(in: .whitespacesAndNewlines) }

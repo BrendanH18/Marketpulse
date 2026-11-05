@@ -17,6 +17,7 @@ import threading
 import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any, Protocol
@@ -279,7 +280,7 @@ class MarketData:
         if self.store is None:
             return
         now = _now_iso()
-        with self._lock:
+        with self._lock, self.store.atomic():
             saved = self._saved_status()
             prior = saved.get(name)
             entry: dict[str, Any] = prior if isinstance(prior, dict) else {}
@@ -295,7 +296,8 @@ class MarketData:
         assert self.fallback is not None
         now = time.time()
         today = date.today().isoformat()
-        with self._lock:
+        # BEGIN IMMEDIATE: another process can't read the same budget before this one spends it.
+        with self._lock, self.store.atomic() if self.store is not None else nullcontext():
             state: dict[str, Any] = {"last": self._fallback_attempt}
             if self.store is not None:
                 try:

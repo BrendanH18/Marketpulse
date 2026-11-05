@@ -156,3 +156,30 @@ def test_age_text(seconds, text):
     from marketpulse import fmt
 
     assert fmt.age(seconds) == text
+
+
+def test_two_processes_cannot_both_spend_the_budget(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from marketpulse.db import Store
+
+    path = tmp_path / "shared.db"
+    stores = [Store(path), Store(path)]  # separate connections, as two processes have
+    barrier = Barrier(2)
+
+    def grab(store):
+        md = MarketData(store=store, fallback=StubProvider())
+        barrier.wait()
+        return md._fallback_budget(5)
+
+    try:
+        for _ in range(20):
+            stores[0].set_meta(FALLBACK_META, "{}")
+            with ThreadPoolExecutor(2) as pool:
+                grants = sorted(pool.map(grab, stores))
+            assert grants == [0, StubProvider.batch_limit]
+            assert json.loads(stores[0].get_meta(FALLBACK_META))["used"] == StubProvider.batch_limit
+    finally:
+        for s in stores:
+            s.close()
