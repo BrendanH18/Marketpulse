@@ -251,6 +251,11 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
             str(bad_preview),
             str(backup_labels),
             str(alerts),
+            # Foundation reads these: the expectations are English, whatever this Mac's region.
+            "-AppleLanguages",
+            "(en)",
+            "-AppleLocale",
+            "en_US",
         ],
         check=True,
     )

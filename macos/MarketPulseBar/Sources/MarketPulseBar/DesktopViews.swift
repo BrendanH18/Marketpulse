@@ -899,7 +899,8 @@ private struct ActivityWorkspace: View {
     payload.activity.filter {
       (accountFilter == 0 || $0.accountId == accountFilter)
         && (search.isEmpty
-          || "\($0.symbol) \($0.type) \($0.note)".localizedCaseInsensitiveContains(search))
+          || "\($0.symbol) \($0.type) \(TransactionEntry.label($0.type)) \($0.note)"
+            .localizedCaseInsensitiveContains(search))
     }
   }
   var body: some View {
