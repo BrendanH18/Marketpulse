@@ -118,7 +118,7 @@ struct PopoverView: View {
         VStack(alignment: .leading, spacing: 12) {
             TopBar(model: model, palette: p)
             if let status = model.status {
-                Dashboard(status: status, palette: p)
+                Dashboard(status: status, palette: p, alerts: model.desktop?.alerts ?? [])
             } else if let error = model.errorMessage {
                 Card(title: String(localized: "can't reach marketpulse"), palette: p) {
                     Text(error).foregroundStyle(p.down).fixedSize(horizontal: false, vertical: true)
@@ -193,6 +193,13 @@ struct MarketDot: View {
 struct Dashboard: View {
     let status: StatusPayload
     let palette: Palette
+    /// The portfolio window's alerts, which carry what `status --json` words in English.
+    var alerts: [DesktopAlert] = []
+
+    /// An alert as the user's language words it, else as the engine sent it.
+    private func summary(_ alert: AlertRow) -> String {
+        alerts.first { $0.symbol == alert.symbol && $0.description == alert.summary }?.localizedDescription ?? alert.summary
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -267,7 +274,7 @@ struct Dashboard: View {
                         HStack {
                             Image(systemName: alert.triggered ? "bell.badge.fill" : "bell").foregroundStyle(alert.triggered ? palette.accent : palette.muted)
                                 .accessibilityLabel(alert.triggered ? String(localized: "Triggered") : String(localized: "Watching"))
-                            Text(alert.summary)
+                            Text(summary(alert))
                             Spacer()
                         }
                     }

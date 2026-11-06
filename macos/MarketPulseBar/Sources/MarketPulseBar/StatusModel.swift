@@ -147,9 +147,38 @@ final class StatusModel: ObservableObject {
 
   var palette: Palette { Palette(status?.theme) }
   var menuTitle: String {
-    let title = status?.title ?? (errorMessage == nil ? "MarketPulse" : "MarketPulse ⚠︎")
+    let title = localizedTitle ?? status?.title ?? (errorMessage == nil ? "MarketPulse" : "MarketPulse ⚠︎")
     // Fictional numbers in the menu bar must never pass for the user's own.
     return demo ? String(localized: "Demo \(title)") : title
+  }
+
+  /// The engine formats the title in English ("▲ +5.25%"). Where numbers read differently
+  /// (5,25 %), rebuild the numeric displays from the payload; a symbol's quote, a masked
+  /// title, and English keep the engine's.
+  private var localizedTitle: String? {
+    guard let s = status, !s.privacy, Locale.current.decimalSeparator != ".",
+      let display = desktop?.settings?.menubarDisplay
+    else { return nil }
+    switch display {
+    case "day_pct":
+      return "\(Format.arrow(s.dayChange)) \(Format.pct(s.dayChangePct))"
+    case "day_change":
+      return "\(Format.arrow(s.dayChange)) \(Format.money(s.dayChange, s.base, privacy: false, decimals: 0, sign: true))"
+    case "net_worth":
+      return s.netWorth.map { value in
+        // "412,5 k $": a compact number where the locale puts an amount (currency
+        // notation needs macOS 15).
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = s.base
+        f.maximumFractionDigits = 0
+        let compact = abs(value).formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
+        let one = f.string(from: 1) ?? "1"
+        return (value < 0 ? "-" : "") + one.replacingOccurrences(of: "1", with: compact)
+      }
+    default:
+      return nil
+    }
   }
 
   func schedule() {
