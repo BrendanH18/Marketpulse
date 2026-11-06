@@ -53,6 +53,7 @@ CALLS = {
     "ControlGroup",
     "ProgressView",
     "Gauge",
+    "TableColumn",
     "LocalizedStringKey",
     "LocalizedStringResource",
 }
