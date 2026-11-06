@@ -200,7 +200,7 @@ def test_provider_status_and_test(cli, monkeypatch, av):
     assert "Yahoo Finance" in out and "not tried" in out and "No fallback provider" in out
     assert cli("provider", "test").exit_code == 1
     cli("provider", "key", "alphavantage", input=KEY)
-    monkeypatch.setattr("marketpulse.cli.make_fallback", lambda config: AlphaVantage(config.quote_api_key, av))
+    monkeypatch.setattr("marketpulse.cli.provider.make_fallback", lambda config: AlphaVantage(config.quote_api_key, av))
     ok = cli("provider", "test", "XEQT.TO")
     assert ok.exit_code == 0 and "45.40" in ok.output and KEY not in ok.output
     av.refusal = {"Information": f"apikey {KEY} over the daily limit"}
