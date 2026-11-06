@@ -817,7 +817,7 @@ struct ImportSheet: View {
           ForEach(issues) { issue in
             GridRow {
               Text("\(issue.line)").monospacedDigit()
-              Text(issue.field.isEmpty ? "—" : issue.field)
+              Text(issue.field.isEmpty ? "—" : issue.localizedField)
               // Values come from the file and may be amounts; privacy mode hides them.
               Text(issue.value.isEmpty ? "—" : privacy ? Format.mask : issue.value)
                 .lineLimit(1).truncationMode(.middle).frame(maxWidth: 110, alignment: .leading)

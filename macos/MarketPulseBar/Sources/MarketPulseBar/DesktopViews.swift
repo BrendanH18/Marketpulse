@@ -913,7 +913,7 @@ private struct ActivityWorkspace: View {
       }.padding(.horizontal, 30)
       Table(rows, selection: $draft.selection) {
         TableColumn("Date") { t in Text(shownDay(t.date)) }.width(100)
-        TableColumn("Type") { t in Text(TransactionEntry.label(t.type)).modifier(RowTint(Studio.mint)) }.width(90)
+        TableColumn("Type") { t in Text(TransactionEntry.label(t.type)).modifier(RowTint(Studio.mint)) }.width(115)
         TableColumn("Symbol", value: \.symbol).width(85)
         TableColumn("Account") { t in
           Text(
@@ -1073,7 +1073,9 @@ private struct AccountsWorkspace: View {
               Button(room == nil ? String(localized: "Set…") : String(localized: "Update…")) { setRoom(type) }
                 .disabled(!canEdit).controlSize(.small)
                 .accessibilityLabel(
-                  room == nil ? String(localized: "Set \(type) room") : String(localized: "Update \(type) room"))
+                  room == nil
+                    ? String(localized: "Set \(DesktopAccount.typeLabel(type)) room")
+                    : String(localized: "Update \(DesktopAccount.typeLabel(type)) room"))
             }
           }
           // Room entered in the terminal for other types (e.g. RESP) is shown, not edited here.

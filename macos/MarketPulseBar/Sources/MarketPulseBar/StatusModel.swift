@@ -152,12 +152,13 @@ final class StatusModel: ObservableObject {
     return demo ? String(localized: "Demo \(title)") : title
   }
 
-  /// The engine formats the title in English ("▲ +5.25%"). Where numbers read differently
-  /// (5,25 %), rebuild the numeric displays from the payload; a symbol's quote, a masked
-  /// title, and English keep the engine's.
+  /// The engine formats the title in English ("▲ +5.25%"). In another language, rebuild the
+  /// numeric displays from the payload (5,25 %). A symbol's quote, a masked title, English, and
+  /// a status that didn't come with the current snapshot (whose display setting may be stale)
+  /// keep the engine's.
   private var localizedTitle: String? {
-    guard let s = status, !s.privacy, Locale.current.decimalSeparator != ".",
-      let display = desktop?.settings?.menubarDisplay
+    guard !Loc.english, let s = status, !s.privacy, let desktop, desktop.status.generatedAt == s.generatedAt,
+      let display = desktop.settings?.menubarDisplay
     else { return nil }
     switch display {
     case "day_pct":

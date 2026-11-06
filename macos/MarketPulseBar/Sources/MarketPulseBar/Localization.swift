@@ -13,4 +13,9 @@ enum Loc {
     Bundle.main.localizedString(forKey: text, value: text, table: "Backend")
   }
 
+  /// The app is showing English, the language the engine words its messages in. Text rebuilt
+  /// from the engine's values is only used otherwise, so English reads exactly as the engine
+  /// (and `status --json`) has it.
+  static var english: Bool { Bundle.main.preferredLocalizations.first.map { $0.hasPrefix("en") } ?? true }
+
 }

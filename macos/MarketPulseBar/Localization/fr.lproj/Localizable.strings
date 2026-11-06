@@ -481,7 +481,7 @@
 "CSV import" = "Importation CSV";
 "Broker format" = "Format du courtier";
 "Default account for rows without one" = "Compte des lignes sans compte";
-"Use accounts named in the CSV" = "Utiliser les comptes nommés dans le CSV";
+"Use accounts named in the CSV" = "Comptes nommés dans le CSV";
 "Preview import" = "Aperçu de l’importation";
 "Detected format: %@" = "Format détecté : %@";
 "Read as: %@" = "Lu comme : %@";
@@ -670,6 +670,8 @@
 
 
 /* ==== DesktopModels.swift, Localization.swift ==== */
+"Split ratio" = "Ratio de fractionnement";
+"Target account" = "Compte de destination";
 /* Save recovery (TransactionSaveRequest) */
 "%@\nCouldn't confirm whether this transaction was saved. Retry save to check the same request safely." = "%@\nImpossible de confirmer si cette opération a été enregistrée. Réessayez l’enregistrement pour vérifier la même demande sans risque.";
 

@@ -988,6 +988,23 @@ struct ImportRowIssue: Decodable, Identifiable, Equatable {
   let line: Int
   /// The import field at fault (date, type, symbol, quantity, …); empty when no single one is.
   let field: String
+  /// `field` as the import sheet's columns name it, in the user's language.
+  var localizedField: String {
+    switch field {
+    case "date": return String(localized: "Date")
+    case "account": return String(localized: "Account")
+    case "type": return String(localized: "Type")
+    case "symbol": return String(localized: "Symbol")
+    case "quantity": return String(localized: "Quantity")
+    case "price": return String(localized: "Price")
+    case "amount": return String(localized: "Amount")
+    case "fees": return String(localized: "Fees")
+    case "ratio": return String(localized: "Split ratio")
+    case "target_account": return String(localized: "Target account")
+    case "currency": return String(localized: "Currency")
+    default: return field
+    }
+  }
   let value: String
   /// English, as `marketpulse import` shows it.
   let reason: String
@@ -1176,7 +1193,8 @@ enum EngineMessage {
 
   /// A threshold in percent (5 for 5%) as the engine writes it (`:g`), in the user's format.
   static func percent(_ value: Double, _ locale: Locale) -> String {
-    (value / 100).formatted(.percent.locale(locale).precision(.fractionLength(0...4)))
+    // Up to six significant digits, like the engine's `{:g}`, so a threshold isn't rounded away.
+    (value / 100).formatted(.percent.locale(locale).precision(.significantDigits(1...6)))
   }
 
   /// A ledger or tax report issue (`LedgerIssue.code`).
@@ -1213,7 +1231,8 @@ enum EngineMessage {
   /// Why an import skipped a row (`RowIssue.code`).
   static func importReason(_ code: String, _ args: [String: MessageArg], locale: Locale = .current) -> String? {
     let value = args["value"]?.text
-    let type = args["type"]?.text
+    // A transaction type by the name the app shows it; English keeps the engine's (DIVIDEND).
+    let type = args["type"]?.text.map { Loc.english ? $0 : TransactionEntry.label($0) }
     let account = args["account"]?.text
     switch code {
     case "unknown_type":

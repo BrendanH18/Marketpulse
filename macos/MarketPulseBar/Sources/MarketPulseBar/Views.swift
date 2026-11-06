@@ -196,9 +196,10 @@ struct Dashboard: View {
     /// The portfolio window's alerts, which carry what `status --json` words in English.
     var alerts: [DesktopAlert] = []
 
-    /// An alert as the user's language words it, else as the engine sent it.
+    /// An alert as the user's language words it; in English, as the engine sent it.
     private func summary(_ alert: AlertRow) -> String {
-        alerts.first { $0.symbol == alert.symbol && $0.description == alert.summary }?.localizedDescription ?? alert.summary
+        if Loc.english { return alert.summary }
+        return alerts.first { $0.symbol == alert.symbol && $0.description == alert.summary }?.localizedDescription ?? alert.summary
     }
 
     var body: some View {
