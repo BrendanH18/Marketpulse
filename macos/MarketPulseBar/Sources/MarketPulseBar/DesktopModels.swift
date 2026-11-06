@@ -315,6 +315,9 @@ struct DesktopPayload: Decodable {
   let ledgerRevision: String?
   let warnings: [String]
 
+  /// `warnings` in the user's language. (Stub: the engine's codes replace it.)
+  var localizedWarnings: [String] { warnings }
+
   /// Nobody has used this ledger yet, so the app offers its welcome. Older engines don't
   /// report archived accounts, so fall back to what the window can see.
   var ledgerEmpty: Bool { storage?.empty ?? (accounts.isEmpty && activity.isEmpty) }
@@ -782,6 +785,8 @@ struct TaxIssue: Decodable, Identifiable, Equatable {
   var id: String { date + message }
   let date: String
   let message: String
+  /// `message` in the user's language. (Stub: the engine's codes replace it.)
+  var localizedMessage: String { message }
 }
 
 struct DesktopAlert: Decodable, Identifiable {
@@ -793,6 +798,8 @@ struct DesktopAlert: Decodable, Identifiable {
   let active: Bool
   let triggeredAt: String
   let description: String
+  /// `description` in the user's language. (Stub: built from the condition instead.)
+  var localizedDescription: String { description }
 }
 
 struct AutomationReport: Decodable {
@@ -848,6 +855,8 @@ struct ImportRowIssue: Decodable, Identifiable, Equatable {
   let field: String
   let value: String
   let reason: String
+  /// `reason` in the user's language. (Stub: the engine's codes replace it.)
+  var localizedReason: String { reason }
 }
 
 struct ImportDuplicate: Decodable, Identifiable, Equatable {
