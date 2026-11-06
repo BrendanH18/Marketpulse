@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   quality:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-gitrunner
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,10 +41,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
+        os: [namespace-profile-gitrunner]
         python: ["3.11", "3.12", "3.13", "3.14"]
         include:
-          - os: macos-15
+          - os: namespace-profile-macos
             python: "3.14"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,7 +60,7 @@ jobs:
 
   coverage:
     name: Coverage gate (financial core)
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-gitrunner
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,13 +77,15 @@ jobs:
         run: uv run --locked python scripts/check_coverage.py
 
   package:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-gitrunner
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
       - name: Build source distribution and wheel
         run: uv build --no-sources
       - name: Verify installed package
@@ -95,14 +97,54 @@ jobs:
           .package-smoke/bin/mp --version
           .package-smoke/bin/python -c 'from importlib.metadata import version; from marketpulse import __version__; assert version("marketpulse") == __version__'
 
+  changes:
+    # Pull requests build the Mac app only when they touch something it builds or checks.
+    # Pushes to main, manual runs, and the release workflow (workflow_call) always build it.
+    if: github.event_name == 'pull_request'
+    runs-on: namespace-profile-gitrunner
+    timeout-minutes: 5
+    outputs:
+      menubar: ${{ steps.filter.outputs.menubar }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2 # the PR's merge commit and its base, to diff against
+      - name: Check whether the Mac app is affected
+        id: filter
+        run: |
+          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
+          cat "$RUNNER_TEMP/changed.txt"
+          # The Swift sources, the scripts the job runs, the Python package the app bundles (the
+          # bridge check loads nearly all of it through the CLI; only the terminal UI in tui/ is
+          # unused), the fixtures the bridge check reads, the bundled backend's dependencies, and
+          # this workflow.
+          app_paths='^(macos/'
+          app_paths+='|scripts/(build_app\.py|check_native_bridge\.)'
+          app_paths+='|src/marketpulse/'
+          app_paths+='|tests/fixtures/'
+          app_paths+='|pyproject\.toml|uv\.lock'
+          app_paths+='|\.github/workflows/ci\.yml)'
+          if grep -E "$app_paths" "$RUNNER_TEMP/changed.txt" | grep -qvE '^src/marketpulse/tui/'; then
+            echo "menubar=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "menubar=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No Mac app paths changed; skipping the menubar job."
+          fi
+
   menubar:
-    runs-on: macos-15
+    needs: changes
+    # `changes` runs only on pull requests; !cancelled() keeps its skip from skipping this job.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.menubar == 'true') }}
+    runs-on: namespace-profile-macos
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
       - name: Install backend for native bridge checks
         run: uv sync --locked --dev --python 3.11
       - name: Build menu bar companion

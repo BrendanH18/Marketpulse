@@ -94,8 +94,14 @@ throwaway copy of the app on a fictional ledger
 the bundle or how the app finds its backend). AI agents should read
 [AGENTS.md](AGENTS.md); the app's direction is in the [App 1.0 plan](docs/app-plan.md).
 
-CI runs lint, formatting, type checks, Python tests on Linux and macOS, Python
-distribution builds with an installed-wheel smoke check, and the Swift build.
+CI runs on [Namespace](https://namespace.so) runners: lint, formatting, type checks,
+Python tests on Linux and macOS, Python distribution builds with an installed-wheel smoke
+check, and the Swift build. On a pull request, the Mac app job (Swift build, bridge check,
+standalone app build) runs only when the PR touches the app's sources, the scripts it runs,
+the Python package (anything outside the terminal UI in `tui/`), test fixtures, dependencies or the CI
+workflow; the path list is in the `changes` job of `.github/workflows/ci.yml`. Pushes to
+`main` and releases always run it. The **Audit** workflow runs `shellcheck` on
+`scripts/install.sh` and `uv audit` on `uv.lock` for every pull request and weekly.
 Dependency changes should include the updated `uv.lock`; use `uv lock` and
 verify `uv sync --locked --dev` succeeds.
 Dependabot is configured to propose monthly updates to Python dependencies and
@@ -258,7 +264,8 @@ commit is on `main` and CI is green.
    (`scripts/release.py package`).
    `scripts/release.py verify` opens every artifact, checks that the app and the
    bundled backend both report the tag's version, the architecture, and the
-   signature, and runs each app: arm64 on `macos-15`, x86_64 on `macos-15-intel`.
+   signature, and runs each app: arm64 on a Namespace macOS runner, x86_64 on GitHub's `macos-15-intel`
+   (Namespace has no Intel Macs).
    Only then does it create a **draft** release whose notes are that version's
    CHANGELOG section plus download and checksum instructions.
 
