@@ -152,13 +152,16 @@ final class StatusModel: ObservableObject {
     return demo ? String(localized: "Demo \(title)") : title
   }
 
+  /// `status` is the current snapshot's, not a `status --json` fallback beside an older one.
+  private var statusFromSnapshot = false
+
   /// The engine formats the title in English ("▲ +5.25%"). In another language, rebuild the
   /// numeric displays from the payload (5,25 %). A symbol's quote, a masked title, English, and
   /// a status that didn't come with the current snapshot (whose display setting may be stale)
   /// keep the engine's.
   private var localizedTitle: String? {
-    guard !Loc.english, let s = status, !s.privacy, let desktop, desktop.status.generatedAt == s.generatedAt,
-      let display = desktop.settings?.menubarDisplay
+    guard !Loc.english, statusFromSnapshot, let s = status, !s.privacy,
+      let display = desktop?.settings?.menubarDisplay
     else { return nil }
     switch display {
     case "day_pct":
@@ -230,6 +233,7 @@ final class StatusModel: ObservableObject {
       guard generation == reloadGeneration else { return }
       desktop = payload
       status = payload.status
+      statusFromSnapshot = true
       taxKey = Self.ledgerKey(payload)
       errorMessage = nil
       lastUpdated = Date()
@@ -260,6 +264,7 @@ final class StatusModel: ObservableObject {
         StatusPayload.self, from: try await CLI.run(["status", "--json"]))
       guard generation == reloadGeneration else { return }
       status = fallback
+      statusFromSnapshot = false
       // The window keeps its last payload; it must still honour the current privacy setting.
       applyPrivacy(fallback.privacy)
       lastUpdated = Date()
@@ -411,6 +416,7 @@ final class StatusModel: ObservableObject {
     // Clear first, so neither portfolio is ever shown under the other's label.
     desktop = nil
     status = nil
+    statusFromSnapshot = false
     errorMessage = nil
     message = nil
     lastUpdated = nil

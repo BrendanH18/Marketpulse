@@ -916,6 +916,7 @@ struct DesktopAlert: Decodable, Identifiable {
   var localizedDescription: String { localizedDescription() }
 
   func localizedDescription(locale: Locale = .current) -> String {
+    if Loc.english { return description }  // the engine's wording, exactly
     let price = threshold.formatted(.number.locale(locale).precision(.fractionLength(2)))
     let percent = EngineMessage.percent(threshold, locale)
     switch condition {
@@ -990,6 +991,7 @@ struct ImportRowIssue: Decodable, Identifiable, Equatable {
   let field: String
   /// `field` as the import sheet's columns name it, in the user's language.
   var localizedField: String {
+    if Loc.english { return field }  // the engine's name, as `marketpulse import` shows it
     switch field {
     case "date": return String(localized: "Date")
     case "account": return String(localized: "Account")
