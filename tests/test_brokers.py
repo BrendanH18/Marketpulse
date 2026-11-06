@@ -172,6 +172,8 @@ def test_a_wealthsimple_dividend_for_an_unknown_listing_is_reported(store):
             "symbol",
             "VFV.TO",
             "can't tell whether this is VFV.TO or VFV: the account holds neither; record it by hand",
+            "ambiguous_listing_neither",
+            {"symbols": "VFV.TO VFV"},
         )
     ]
     both = (
@@ -182,6 +184,7 @@ def test_a_wealthsimple_dividend_for_an_unknown_listing_is_reported(store):
     )
     result = import_transactions(store, io.StringIO(both), default_account=acct)
     assert result.added == 2 and "holds both" in result.issues[0].reason
+    assert (result.issues[0].code, result.issues[0].args) == ("ambiguous_listing_both", {"symbols": "XEQT.TO XEQT"})
 
 
 def test_wealthsimple_statement(store):
@@ -248,12 +251,19 @@ def test_generic_import_reports_the_field_and_value_of_each_bad_row(store):
     result = import_transactions(store, io.StringIO(text), default_account=acct)
     assert result.added == 1
     assert result.issues == [
-        RowIssue(3, "price", "2x", "expected a number like 1234.56"),
-        RowIssue(4, "date", "2024-13-01", "Invalid date '2024-13-01' — use YYYY-MM-DD."),
-        RowIssue(5, "type", "Mystery", "unrecognized type 'Mystery'"),
-        RowIssue(6, "quantity", "0", "Quantity must be positive."),
-        RowIssue(7, "symbol", "", "DIVIDEND needs a symbol."),
-        RowIssue(8, "fees", "lots", "expected a number like 1234.56"),
+        RowIssue(3, "price", "2x", "expected a number like 1234.56", "not_a_number", {"value": "2x"}),
+        RowIssue(
+            4,
+            "date",
+            "2024-13-01",
+            "Invalid date '2024-13-01' — use YYYY-MM-DD.",
+            "invalid_date",
+            {"value": "2024-13-01"},
+        ),
+        RowIssue(5, "type", "Mystery", "unrecognized type 'Mystery'", "unknown_type", {"value": "Mystery"}),
+        RowIssue(6, "quantity", "0", "Quantity must be positive.", "quantity_not_positive"),
+        RowIssue(7, "symbol", "", "DIVIDEND needs a symbol.", "needs_symbol", {"type": "DIVIDEND"}),
+        RowIssue(8, "fees", "lots", "expected a number like 1234.56", "not_a_number", {"value": "lots"}),
     ]
     assert result.skipped == [(i.line, i.reason) for i in result.issues]
     again = import_transactions(store, io.StringIO(text), default_account=acct)

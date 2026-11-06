@@ -22,7 +22,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
-from .models import TxnType
+from .models import CodedError, MessageArgs, TxnType
 
 Fields = dict[str, str]
 
@@ -42,11 +42,14 @@ _ALIASES = {
 }
 
 
-class RowError(ValueError):
-    """A row the importer can't use; `field` is the canonical field at fault, if any."""
+class RowError(CodedError):
+    """A row the importer can't use; `field` is the canonical field at fault, if any. `code` and
+    `details` let the Mac app word the reason in the user's language (see CodedError)."""
 
-    def __init__(self, reason: str, field: str = "", value: str = "") -> None:
-        super().__init__(reason)
+    def __init__(
+        self, reason: str, field: str = "", value: str = "", code: str = "", details: MessageArgs | None = None
+    ) -> None:
+        super().__init__(reason, code, details)
         self.reason = reason
         self.field = field
         self.value = value
@@ -99,7 +102,7 @@ def parse_number(raw: str | None, field: str = "") -> float | None:
     try:
         v = float(s.strip("()"))
     except ValueError:
-        raise RowError("expected a number like 1234.56", field, raw) from None
+        raise RowError("expected a number like 1234.56", field, raw, "not_a_number", {"value": raw}) from None
     return -v if neg else v
 
 
@@ -122,7 +125,13 @@ def _check_direction(txn_type: TxnType, amount: float | None, raw: str) -> None:
     if want is None or not amount or (amount > 0) == (want > 0):
         return
     sign = "negative" if amount < 0 else "positive"
-    raise RowError(f"{sign} amount on a {txn_type.value} (a reversal or correction?); record it by hand", "amount", raw)
+    raise RowError(
+        f"{sign} amount on a {txn_type.value} (a reversal or correction?); record it by hand",
+        "amount",
+        raw,
+        f"{sign}_amount",
+        {"type": txn_type.value},
+    )
 
 
 # ── Questrade ────────────────────────────────────────────────────────────────
@@ -150,6 +159,14 @@ _QUESTRADE_ACTIVITY: dict[str, TxnType | str] = {
 _QUESTRADE_TRADES = {"buy": TxnType.BUY, "sell": TxnType.SELL}
 
 
+def skip_reasons() -> list[str]:
+    """Every fixed reason a named profile gives for a row it doesn't import (code "not_imported");
+    the Mac app translates them as fixed text (desktop.BACKEND_STRINGS)."""
+    tables: list[Mapping[str, TxnType | str]] = [_QUESTRADE_ACTIVITY, _WEALTHSIMPLE_CODES]
+    reasons = (v for table in tables for v in table.values() if not isinstance(v, TxnType) and v != _TRADE)
+    return list(dict.fromkeys(reasons))
+
+
 def _questrade_account(row: Mapping[str, str]) -> str:
     kind = _cell(row, "account type") or "account"
     number = re.sub(r"\D", "", _cell(row, "account #"))
@@ -161,17 +178,29 @@ def _convert_questrade(row: Mapping[str, str]) -> Fields:
     activity = _cell(row, "activity type")
     mapped = _QUESTRADE_ACTIVITY.get(activity.lower())
     if mapped is None:
-        raise RowError(f"Questrade activity type '{activity}' isn't supported", "type", activity)
+        raise RowError(
+            f"Questrade activity type '{activity}' isn't supported",
+            "type",
+            activity,
+            "questrade_unsupported_activity",
+            {"value": activity},
+        )
     action = _cell(row, "action")
     # TxnType is a str too, so test for it before treating a string as a skip reason.
     if isinstance(mapped, TxnType):
         txn_type = mapped
     elif mapped == _TRADE:
         if action.lower() not in _QUESTRADE_TRADES:
-            raise RowError(f"Questrade trade action '{action}' isn't a buy or sell", "type", action)
+            raise RowError(
+                f"Questrade trade action '{action}' isn't a buy or sell",
+                "type",
+                action,
+                "questrade_unsupported_action",
+                {"value": action},
+            )
         txn_type = _QUESTRADE_TRADES[action.lower()]
     else:
-        raise RowError(mapped, "type", activity)
+        raise RowError(mapped, "type", activity, "not_imported", {"value": activity})
     raw_amount = _cell(row, "net amount")
     _check_direction(txn_type, parse_number(raw_amount, "amount"), raw_amount)
     return {
@@ -236,9 +265,15 @@ def _convert_wealthsimple(row: Mapping[str, str]) -> Fields:
     code = _cell(row, "transaction")
     mapped = _WEALTHSIMPLE_CODES.get(code.upper())
     if mapped is None:
-        raise RowError(f"Wealthsimple transaction code '{code}' isn't supported", "type", code)
+        raise RowError(
+            f"Wealthsimple transaction code '{code}' isn't supported",
+            "type",
+            code,
+            "wealthsimple_unsupported_code",
+            {"value": code},
+        )
     if not isinstance(mapped, TxnType):
-        raise RowError(mapped, "type", code)
+        raise RowError(mapped, "type", code, "not_imported", {"value": code})
     description = _cell(row, "description")
     currency = _cell(row, "currency")
     raw_amount = _cell(row, "amount")
@@ -253,7 +288,9 @@ def _convert_wealthsimple(row: Mapping[str, str]) -> Fields:
     if mapped.needs_symbol:
         symbols = _wealthsimple_symbols(description, currency)
         if not symbols:
-            raise RowError("couldn't read the symbol from the description", "symbol", description)
+            raise RowError(
+                "couldn't read the symbol from the description", "symbol", description, "no_symbol_in_description"
+            )
         fields["symbol"] = symbols[0]
         if not mapped.uses_quantity and len(symbols) > 1:
             # A trade's FX rate shows a converted US purchase; a dividend paid in CAD doesn't
@@ -262,7 +299,12 @@ def _convert_wealthsimple(row: Mapping[str, str]) -> Fields:
     if mapped.uses_quantity:
         m = _WS_SHARES.search(description)
         if not m:
-            raise RowError("couldn't read the share count from the description", "quantity", description)
+            raise RowError(
+                "couldn't read the share count from the description",
+                "quantity",
+                description,
+                "no_shares_in_description",
+            )
         fields["quantity"] = m.group(1)
     return fields
 

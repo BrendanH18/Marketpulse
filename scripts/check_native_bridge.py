@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,16 +13,18 @@ from marketpulse.brokers import PROFILE_NAMES
 from marketpulse.config import Config
 from marketpulse.db import Store
 from marketpulse.desktop import (
+    BACKUP_REASON_LABELS,
     DemoMarket,
     activity_row,
     archived_accounts,
     demo_snapshot,
     demo_tax,
+    snapshot,
     storage_info,
     tax_report,
     write_tax_csv,
 )
-from marketpulse.models import Account, AccountType, AssetClass, Transaction, TxnType
+from marketpulse.models import Account, AccountType, Alert, AssetClass, Transaction, TxnType
 from marketpulse.services import Tracker
 
 root = Path(__file__).resolve().parents[1]
@@ -130,11 +133,97 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     export = Path(tmp) / "tax-export.json"
     export.write_text(json.dumps(write_tax_csv(offline, Path(tmp) / "gains.csv", 2025), allow_nan=False))
     ledger.close()
+    # Every coded warning and tax issue, on a fictional ledger: the app's English must match the engine's.
+    (Path(tmp) / "coded").mkdir()
+    coded = Store(Path(tmp) / "coded" / "marketpulse.db")
+    cash = coded.add_account(Account(name="Fictional Cash", track_cash=True))
+    tfsa = coded.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA))
+    gone = coded.add_account(Account(name="Fictional Old", track_cash=True))
+
+    def add(account: Account, kind: TxnType, day: str, symbol: str = "", qty: float = 0, **kw: object) -> None:
+        coded.add_transaction(
+            Transaction(
+                account_id=account.saved_id, type=kind, date=day, symbol=symbol, quantity=qty, currency="CAD", **kw
+            )  # type: ignore[arg-type]
+        )
+
+    add(cash, TxnType.BUY, "2025-01-02", "XEQT.TO", 1234.5, price=30)
+    add(cash, TxnType.SELL, "2025-01-03", "XEQT.TO", 2000, price=31)
+    add(cash, TxnType.SPLIT, "2025-01-04", "VFV.TO", ratio=2)
+    add(cash, TxnType.TRANSFER, "2025-01-05", "ZAG.TO", 1, target_account_id=tfsa.saved_id)
+    add(cash, TxnType.BUY, "2025-01-06", "VCN.TO", 2, price=40)
+    add(cash, TxnType.TRANSFER, "2025-01-07", "VCN.TO", 3, target_account_id=tfsa.saved_id)
+    add(tfsa, TxnType.BUY, "2025-01-08", "AAPL", 1, price=100)
+    add(tfsa, TxnType.TRANSFER, "2025-01-09", "AAPL", 1, target_account_id=cash.saved_id)
+    add(cash, TxnType.BUY, "2025-01-10", "NOPRICE", 1, price=10)
+    coded.add_transaction(
+        Transaction(account_id=cash.saved_id, type=TxnType.DEPOSIT, date="2025-01-11", amount=50, currency="EUR")
+    )
+    add(gone, TxnType.BUY, "2025-01-12", "GONE", 1, price=5)
+    coded.add_transaction(
+        Transaction(account_id=gone.saved_id, type=TxnType.DEPOSIT, date="2025-01-13", amount=5, currency="EUR")
+    )
+    gone.archived = True
+    coded.update_account(gone)
+    coded_tracker = Tracker(coded, DemoMarket(store=coded), Config())
+    coded_snapshot = Path(tmp) / "coded-snapshot.json"
+    coded_snapshot.write_text(json.dumps(snapshot(coded_tracker), allow_nan=False))
+    coded_tax = Path(tmp) / "coded-tax.json"
+    coded_tax.write_text(json.dumps(tax_report(coded_tracker), allow_nan=False))
+    coded.close()
+    # A generic CSV with a row for each import reason the engine codes.
+    bad_rows = Path(tmp) / "bad-rows.csv"
+    bad_rows.write_text(
+        "date,type,symbol,quantity,price,amount,fees,account\n"
+        "2025-01-02,BUY,AAPL,1,2x,,,Fictional Cash\n"
+        "2025-13-01,BUY,AAPL,1,10,,,Fictional Cash\n"
+        "03-04-2025,BUY,AAPL,1,10,,,Fictional Cash\n"
+        "2025-01-02,Mystery,AAPL,1,10,,,Fictional Cash\n"
+        "2025-01-02,BUY,AAPL,0,10,,,Fictional Cash\n"
+        "2025-01-02,DIVIDEND,,,,5,,Fictional Cash\n"
+        "2025-01-02,DIVIDEND,AAPL,,,,,Fictional Cash\n"
+        "2025-01-02,BUY,AAPL,1,10,,,Old Fictional\n"
+        "2999-01-02,BUY,AAPL,1,10,,,Fictional Cash\n"
+        "2025-01-02,SPLIT,AAPL,,,,,Fictional Cash\n"
+        "2025-01-02,BUY,AAPL,1,10,,,Fictional Cash\n"
+    )
+    import_env = {**env, "MARKETPULSE_DATA": str(Path(tmp) / "bad-rows-data")}
+    for args in (["accounts", "add", "Fictional Cash"], ["accounts", "add", "Old Fictional"]):
+        subprocess.run(cli + args, env=import_env, capture_output=True, check=True)
+    subprocess.run(
+        cli + ["accounts", "edit", "--archive", "--", "Old Fictional"], env=import_env, capture_output=True, check=True
+    )
+    bad_preview = Path(tmp) / "bad-rows.json"
+    bad_preview.write_bytes(
+        subprocess.run(
+            cli + ["desktop", "import", "--dry-run", "--", str(bad_rows)],
+            env=import_env,
+            capture_output=True,
+            check=True,
+        ).stdout
+    )
+    backup_labels = Path(tmp) / "backup-labels.json"
+    backup_labels.write_text(json.dumps(BACKUP_REASON_LABELS))
+    alerts = Path(tmp) / "alerts.json"
+    alerts.write_text(
+        json.dumps(
+            [
+                {**asdict(a), "description": a.describe()}
+                for a in [
+                    Alert("XEQT.TO", "above", 1234.5, id=1),
+                    Alert("XEQT.TO", "below", 30, id=2),
+                    Alert("AAPL", "up_pct", 2.5, id=3),
+                    Alert("AAPL", "down_pct", 5, id=4),
+                ]
+            ]
+        )
+    )
     subprocess.run(
         [
             "swiftc",
             str(sources / "Models.swift"),
             str(sources / "DesktopModels.swift"),
+            str(sources / "Localization.swift"),
             str(root / "scripts/check_native_bridge.swift"),
             "-o",
             str(binary),
@@ -157,6 +246,11 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
             str(profiles),
             str(root / "tests/fixtures/asset_forms.json"),
             str(asset_classes),
+            str(coded_snapshot),
+            str(coded_tax),
+            str(bad_preview),
+            str(backup_labels),
+            str(alerts),
         ],
         check=True,
     )

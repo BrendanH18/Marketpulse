@@ -303,8 +303,68 @@ struct NativeBridgeCheck {
     }
     // Other commands keep the request ID right after the command, as before.
     precondition(TransactionSaveRequest(arguments: ["deposit", "--", "1"], id: "R").arguments == ["deposit", "--request-id", "R", "--", "1"])
+    // Engine messages by code (issue #46): in English they read exactly as the engine's text.
+    let enUS = Locale(identifier: "en_US")
+    precondition(payload.warningItems?.isEmpty == true)
+    let olderEngine = try decoder.decode(
+      TaxIssue.self, from: Data(#"{"date":"2025-01-02","message":"Something new"}"#.utf8))
+    precondition(olderEngine.code == nil && olderEngine.localizedMessage == "Something new")
+    let unknownCode = try decoder.decode(
+      DesktopWarning.self, from: Data(#"{"code":"from_the_future","args":{"x":1},"text":"Later"}"#.utf8))
+    precondition(unknownCode.localized(locale: enUS) == "Later")
+    let coded = try decoder.decode(
+      DesktopPayload.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[14])))
+    let items = coded.warningItems ?? []
+    precondition(items.map(\.text) == coded.warnings && items.allSatisfy { !$0.code.isEmpty })
+    let expectedCodes: Set = [
+      "sell_exceeds_held", "split_nothing_held", "transfer_nothing_held", "transfer_exceeds_held",
+      "excluded_unpriced", "excluded_unconverted_cash", "excluded_archived_holding", "excluded_archived_cash",
+      "archived_account_value",
+    ]
+    precondition(Set(items.map(\.code)) == expectedCodes, "Warning codes: \(items.map(\.code))")
+    let worded = coded.localizedWarnings(locale: enUS)
+    for (got, want) in zip(worded, coded.warnings) { precondition(got == want, "\(got) != \(want)") }
+    precondition(worded.contains("2025-01-03: Sell of 2,000.0000 XEQT.TO exceeds 1,234.5000 held"))
+    precondition(
+      coded.localizedWarnings(locale: Locale(identifier: "fr_CA")).contains {
+        $0.contains("2\u{202F}000,0000") || $0.contains("2\u{A0}000,0000")
+      }, "Quantities use the locale's format")
+    let codedTax = try decoder.decode(
+      TaxPayload.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[15])))
+    precondition(
+      Set(codedTax.issues.compactMap(\.code)) == ["transfer_to_registered_unpriced", "transfer_from_registered_unpriced"])
+    precondition(codedTax.issues.allSatisfy { $0.localizedMessage(locale: enUS) == $0.message })
+    precondition(codedTax.localizedNotes == codedTax.notes)
+    let withCodedIssue = TaxExportResult(exported: 1, issues: [codedTax.issues[0]])
+    precondition(
+      withCodedIssue.message(year: 2025, file: "g.csv", locale: enUS)
+        == "Saved 1 sale from 2025 to g.csv. 1 issue may leave sales out of it: \(codedTax.issues[0].date) \(codedTax.issues[0].message)")
+    let badRows = try decoder.decode(
+      ImportPreview.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[16])))
+    let rowIssues = badRows.issues ?? []
+    precondition(rowIssues.count == 10, "Expected 10 skipped rows, got \(rowIssues.map(\.reason))")
+    precondition(rowIssues.allSatisfy { $0.code?.isEmpty == false }, "Uncoded: \(rowIssues.filter { $0.code?.isEmpty != false }.map(\.reason))")
+    for issue in rowIssues + issues {
+      precondition(issue.localizedReason(locale: enUS) == issue.reason, "\(issue.localizedReason(locale: enUS)) != \(issue.reason)")
+    }
+    precondition(issues.contains { $0.code == "not_imported" } && issues.contains { $0.code == "negative_amount" })
+    precondition(broker.localizedProfileLabel == "Questrade" && ImportProfile.all.map(\.label).last == "Generic CSV")
+    let labels = try JSONDecoder().decode(
+      [String: String].self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[17])))
+    precondition(BackupInfo.reasonLabels == labels, "Backup reason labels differ from desktop.BACKUP_REASON_LABELS")
+    let alerts = try decoder.decode(
+      [DesktopAlert].self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[18])))
+    precondition(alerts.count == 4)
+    for alert in alerts {
+      precondition(alert.localizedDescription(locale: enUS) == alert.description, alert.localizedDescription(locale: enUS))
+    }
+    precondition(AssetClassOption.all.map(\.localizedLabel) == AssetClassOption.all.map(\.label))
+    precondition(TransactionEntry.title("BUY") == "Buy" && TransactionEntry.title("ROC") == "Return of capital")
+    precondition(DesktopAccount.typeLabel("NONREG") == "Non-registered" && DesktopAccount.typeLabel("TFSA") == "TFSA")
+    precondition(BackupInfo.reasonLabels["pre-v"] == "Before an upgrade")
+
     print(
-      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, quote providers, activity values, import result, broker import preview and profiles, privacy formatting, number entry, editable numbers and dates, transaction save recovery, transaction form commands, assets, allocation targets and rebalancing, asset and targets form commands"
+      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, quote providers, activity values, import result, broker import preview and profiles, privacy formatting, number entry, editable numbers and dates, transaction save recovery, transaction form commands, assets, allocation targets and rebalancing, asset and targets form commands, engine messages by code"
     )
   }
 }

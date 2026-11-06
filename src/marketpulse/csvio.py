@@ -9,6 +9,7 @@ with the line, the field and a reason rather than guessed.
 from __future__ import annotations
 
 import csv
+import dataclasses
 import hashlib
 import io
 import json
@@ -25,7 +26,7 @@ from typing import TYPE_CHECKING, TextIO
 from . import brokers
 from .analytics import disposition_note
 from .brokers import RowError, map_headers, parse_number
-from .models import Account, AccountType, Transaction, TxnType, guess_currency, parse_date
+from .models import Account, AccountType, CodedError, MessageArgs, Transaction, TxnType, guess_currency, parse_date
 
 if TYPE_CHECKING:
     from .analytics import TaxYear
@@ -69,7 +70,11 @@ class RowIssue:
     line: int
     field: str
     value: str
-    reason: str
+    reason: str  # English, as the CLI shows it
+    # For the Mac app: a stable code naming the reason and the values that fill it in, so it
+    # can word it in the user's language. "" when the reason has no code (shown as is).
+    code: str = ""
+    args: MessageArgs = dataclasses.field(default_factory=dict)  # `field` above shadows the function
 
 
 @dataclass
@@ -105,6 +110,11 @@ _VALIDATION_FIELDS = [
     ("transfer", "target_account"),
     ("date", "date"),
 ]
+
+
+def _coded(e: ValueError) -> tuple[str, MessageArgs]:
+    """The code and values of a wrapped error, ("", {}) for one without (shown in English)."""
+    return (e.code, e.details) if isinstance(e, CodedError) else ("", {})
 
 
 def _validation_field(message: str) -> str:
@@ -390,20 +400,34 @@ def _import(
 
         txn_type = parse_type(get("type"))
         if txn_type is None:
-            raise RowError(f"unrecognized type '{get('type')}'", "type", get("type"))
+            raise RowError(
+                f"unrecognized type '{get('type')}'", "type", get("type"), "unknown_type", {"value": get("type")}
+            )
         raw_date = get("date")
         try:
             when = parse_date(raw_date[:10] if re.match(r"\d{4}", raw_date) else raw_date)
         except ValueError as e:
-            raise RowError(str(e), "date", raw_date) from None
+            raise RowError(str(e), "date", raw_date, *_coded(e)) from None
         acct = resolve_account(get("account"))
         if acct is None or acct.id is None:
-            raise RowError(
-                f"unknown account '{get('account')}'" if get("account") else "no account", "account", get("account")
-            )
+            if get("account"):
+                raise RowError(
+                    f"unknown account '{get('account')}'",
+                    "account",
+                    get("account"),
+                    "unknown_account",
+                    {"account": get("account")},
+                )
+            raise RowError("no account", "account", "", "no_account")
         # Archived accounts are closed to new entries; their rows would vanish from view.
         if acct.archived:
-            raise RowError(f"account '{acct.name}' is archived", "account", get("account"))
+            raise RowError(
+                f"account '{acct.name}' is archived",
+                "account",
+                get("account"),
+                "archived_account",
+                {"account": acct.name},
+            )
         symbol = get("symbol").upper()
         qty, price, cash, fees = (magnitude(fields, f) for f in ("quantity", "price", "amount", "fees"))
         ratio = parse_number(get("ratio"), "ratio") or 0.0
@@ -423,13 +447,21 @@ def _import(
                     f"can't tell whether this is {listed}: the account holds {found}; record it by hand",
                     "symbol",
                     get("symbol"),
+                    f"ambiguous_listing_{found}",
+                    {"symbols": " ".join(choices)},
                 )
             symbol = matches[0]
         # Only transfers have a destination; other rows never create one.
         target_name = get("target_account") if txn_type is TxnType.TRANSFER else ""
         target = resolve_account(target_name) if target_name else None
         if target is not None and target.archived:
-            raise RowError(f"account '{target.name}' is archived", "target_account", target_name)
+            raise RowError(
+                f"account '{target.name}' is archived",
+                "target_account",
+                target_name,
+                "archived_account",
+                {"account": target.name},
+            )
         txn = Transaction(
             account_id=acct.id,
             type=txn_type,
@@ -447,12 +479,18 @@ def _import(
         try:
             txn.validate()
             if txn_type.uses_amount and txn.amount <= 0:
-                raise RowError(f"{txn_type.value} row has no amount", "amount", get("amount"))
+                raise RowError(
+                    f"{txn_type.value} row has no amount",
+                    "amount",
+                    get("amount"),
+                    "no_amount",
+                    {"type": txn_type.value},
+                )
         except RowError:
             raise
         except ValueError as e:
             name = _validation_field(str(e))
-            raise RowError(str(e), name, get(name) if name else "") from None
+            raise RowError(str(e), name, get(name) if name else "", *_coded(e)) from None
         return txn, acct
 
     for line_no, row in enumerate(reader, start=2):
@@ -460,7 +498,7 @@ def _import(
             txn, acct = build(fields_of(row))
         except RowError as e:
             result.skipped.append((line_no, e.reason))
-            result.issues.append(RowIssue(line_no, e.field, e.value, e.reason))
+            result.issues.append(RowIssue(line_no, e.field, e.value, e.reason, e.code, e.details))
             continue
         k = key(txn)
         if existing[k] > 0:

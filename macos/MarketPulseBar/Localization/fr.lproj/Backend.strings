@@ -2,3 +2,49 @@
    disposition tags, asset classes, backup reasons). The app looks these up with
    `Loc.backend(_:)`; text missing here shows in English. Parameterized messages use codes
    instead (see desktop.py and Localization.swift). */
+
+/* Tax notes (desktop.TAX_NOTES) */
+"Estimates only, not tax advice. Check these figures against your T5008, T3 and T5 slips before you file." = "Estimations seulement, pas des conseils fiscaux. Vérifiez ces montants avec vos feuillets T5008, T3 et T5 avant de produire votre déclaration.";
+"Purchases by a spouse or a corporation you control can also make a loss superficial; MarketPulse can't see those." = "Les achats de votre conjoint ou d’une société que vous contrôlez peuvent aussi rendre une perte apparente; MarketPulse ne les voit pas.";
+
+/* Disposition tags (analytics.DISPOSITION_NOTES) */
+"FX missing" = "Taux de change manquant";
+"→ registered, loss denied" = "→ enregistré, perte refusée";
+"superficial" = "perte apparente";
+"superficial (window open)" = "perte apparente (période ouverte)";
+"ROC > ACB" = "RC > PBR";
+"→ registered" = "→ enregistré";
+
+/* Asset classes (AssetClass.label) */
+"Equity" = "Actions";
+"ETF" = "FNB";
+"Fund" = "Fonds";
+"Crypto" = "Crypto";
+"Fixed Income" = "Revenu fixe";
+"Cash" = "Espèces";
+"Real Estate" = "Immobilier";
+"Commodity" = "Marchandises";
+"Alternative" = "Placements alternatifs";
+"Other" = "Autre";
+
+/* Backup reasons (desktop.BACKUP_REASON_LABELS, BackupInfo.reasonLabel) */
+"Daily backup" = "Sauvegarde quotidienne";
+"Before an import" = "Avant une importation";
+"Backed up by you" = "Sauvegardé par vous";
+"Before a restore" = "Avant une restauration";
+"Before an upgrade" = "Avant une mise à niveau";
+
+/* Import profiles (profile_label); brokers' names aren't translated */
+"Questrade" = "Questrade";
+"Wealthsimple" = "Wealthsimple";
+"Generic CSV" = "CSV générique";
+
+/* Broker rows the importer skips (brokers.skip_reasons, code "not_imported") */
+"transfers between institutions aren't imported; record them as a deposit or buys" = "les transferts entre institutions ne sont pas importés; inscrivez-les comme un dépôt ou des achats";
+"currency conversions aren't imported; MarketPulse tracks each currency's cash separately" = "les conversions de devises ne sont pas importées; MarketPulse suit les espèces de chaque devise séparément";
+"corporate actions aren't imported; record splits or mergers by hand" = "les opérations sur titres ne sont pas importées; saisissez les fractionnements ou les fusions manuellement";
+"Questrade lists this as 'Other'; record it by hand if it matters" = "Questrade classe ceci sous « Other »; saisissez-le manuellement au besoin";
+"non-resident withholding tax isn't imported; record it as a fee by hand" = "la retenue d’impôt des non-résidents n’est pas importée; saisissez-la manuellement comme des frais";
+"transfers between institutions aren't imported; record them as a withdrawal or sells" = "les transferts entre institutions ne sont pas importés; inscrivez-les comme un retrait ou des ventes";
+"securities lending doesn't change your holdings" = "le prêt de titres ne change pas vos avoirs";
+"stock distributions aren't imported; record a split or buy by hand" = "les distributions d’actions ne sont pas importées; saisissez manuellement un fractionnement ou un achat";

@@ -675,6 +675,122 @@
 
 
 /* ==== DesktopModels.swift, Localization.swift ==== */
+/* Save recovery (TransactionSaveRequest) */
+"%@\nCouldn't confirm whether this transaction was saved. Retry save to check the same request safely." = "%@\nImpossible de confirmer si cette opération a été enregistrée. Réessayez l’enregistrement pour vérifier la même demande sans risque.";
+
+/* Transaction types (TransactionEntry.label, .title) */
+"Buy" = "Achat";
+"Sell" = "Vente";
+"Deposit" = "Dépôt";
+"Withdrawal" = "Retrait";
+"Dividend" = "Dividende";
+"Interest" = "Intérêts";
+"Fee" = "Frais";
+"DRIP" = "Réinvest.";
+"Transfer" = "Transfert";
+"Split" = "Fractionnement";
+"ROC" = "Remb. cap.";
+"Valuation" = "Évaluation";
+"Reinvested dividend (DRIP)" = "Réinvestissement des dividendes";
+"Transfer in kind" = "Transfert en nature";
+"Stock split" = "Fractionnement d’actions";
+"Return of capital" = "Remboursement de capital";
+
+/* Compounding (AssetEntry.compoundingLabel) */
+"annual" = "annuel";
+"semiannual" = "semestriel";
+"quarterly" = "trimestriel";
+"monthly" = "mensuel";
+"simple" = "simple";
+
+/* Quote providers (QuoteProvider.Health), BridgeDate */
+"OK" = "OK";
+"Failing" = "En échec";
+"Not tried" = "Pas encore essayé";
+"No key" = "Aucune clé";
+"just now" = "à l’instant";
+
+/* Account types (DesktopAccount.typeLabel) */
+"TFSA" = "CELI";
+"RRSP" = "REER";
+"FHSA" = "CELIAPP";
+"RESP" = "REEE";
+"LIRA" = "CRI";
+"RRIF" = "FERR";
+"Non-registered" = "Non enregistré";
+"Margin" = "Marge";
+"Crypto" = "Crypto";
+"Cash" = "Espèces";
+"Other" = "Autre";
+
+/* Assets (DesktopAsset.summary) */
+"%@ %@ · matures %@" = "%@ %@ · échéance le %@";
+"Valued by you · %@" = "Évalué par vous · %@";
+
+/* Tax (TaxDisposition, TaxExportResult.message) */
+"Archived account" = "Compte archivé";
+"Return of capital above ACB" = "Remboursement de capital supérieur au PBR";
+"Moved to a registered account" = "Transféré dans un compte enregistré";
+"Sale" = "Vente";
+"Saved 1 sale from %@ to %@" = "1 vente de %@ enregistrée dans %@";
+"Saved %lld sales from %@ to %@" = "%lld ventes de %@ enregistrées dans %@";
+"Saved 1 sale from %@ to %@. 1 issue may leave sales out of it: %@ %@" = "1 vente de %@ enregistrée dans %@. Un problème pourrait en exclure des ventes : %@ %@";
+"Saved %lld sales from %@ to %@. 1 issue may leave sales out of it: %@ %@" = "%lld ventes de %@ enregistrées dans %@. Un problème pourrait en exclure des ventes : %@ %@";
+"Saved 1 sale from %@ to %@. %lld issues, listed under Needs attention, may leave sales out of it." = "1 vente de %@ enregistrée dans %@. %lld problèmes, listés sous « À vérifier », pourraient en exclure des ventes.";
+"Saved %lld sales from %@ to %@. %lld issues, listed under Needs attention, may leave sales out of it." = "%lld ventes de %@ enregistrées dans %@. %lld problèmes, listés sous « À vérifier », pourraient en exclure des ventes.";
+
+/* Alerts (DesktopAlert.localizedDescription) */
+"%@ up %@ today" = "%@ en hausse de %@ aujourd’hui";
+"%@ down %@ today" = "%@ en baisse de %@ aujourd’hui";
+
+/* Import (ImportProfile), number entry (NumberInput.hint) */
+"Auto-detect" = "Détection automatique";
+"Enter a number, like %@." = "Entrez un nombre, par exemple %@.";
+"Reads as %@" = "Lu comme %@";
+
+/* Snapshot warnings (DesktopWarning): a dated ledger issue, then the codes */
+"%@: %@" = "%@ : %@";
+"Excluded from totals: %@" = "Exclu des totaux : %@";
+"Excluded from totals: %@ in archived %@" = "Exclu des totaux : %@ dans le compte archivé %@";
+"Excluded from totals: %@ cash (%@, archived)" = "Exclu des totaux : espèces de %@ (%@, archivé)";
+"Excluded from totals: %@ cash (%@)" = "Exclu des totaux : espèces de %@ (%@)";
+"Archived account %@ still holds investments or cash. They're left out of your totals, and daily snapshots are paused. Move or sell them, or unarchive the account." = "Le compte archivé %@ détient encore des placements ou des espèces. Ils sont exclus de vos totaux, et les instantanés quotidiens sont suspendus. Transférez-les ou vendez-les, ou désarchivez le compte.";
+
+/* Ledger and tax issues (EngineMessage.issue) */
+"Sell of %@ %@ exceeds %@ held" = "La vente de %@ %@ dépasse les %@ détenus";
+"Transfer of %@ %@ exceeds %@ held" = "Le transfert de %@ %@ dépasse les %@ détenus";
+"Split of %@ with nothing held" = "Fractionnement de %@ sans titres détenus";
+"Transfer of %@ with nothing held" = "Transfert de %@ sans titres détenus";
+"Transfer of %@ into a registered account is a deemed sale at market value — add the price per unit to the transfer to include it in the tax report" = "Le transfert de %@ dans un compte enregistré est une disposition réputée à la juste valeur marchande — ajoutez le prix unitaire au transfert pour l’inclure dans le rapport fiscal";
+"Transfer of %@ out of a registered account enters your cost base at market value — add the price per unit to the transfer" = "Le transfert de %@ hors d’un compte enregistré entre dans votre PBR à la juste valeur marchande — ajoutez le prix unitaire au transfert";
+
+/* Import reasons (EngineMessage.importReason) */
+"unrecognized type '%@'" = "type « %@ » non reconnu";
+"Invalid date '%@' — use YYYY-MM-DD." = "Date « %@ » non valide — utilisez AAAA-MM-JJ.";
+"Ambiguous date '%@' — use YYYY-MM-DD." = "Date « %@ » ambiguë — utilisez AAAA-MM-JJ.";
+"unknown account '%@'" = "compte « %@ » inconnu";
+"no account" = "aucun compte";
+"account '%@' is archived" = "le compte « %@ » est archivé";
+"can't tell whether this is %@ or %@: the account holds both; record it by hand" = "impossible de savoir s’il s’agit de %@ ou de %@ : le compte détient les deux; saisissez l’opération manuellement";
+"can't tell whether this is %@ or %@: the account holds neither; record it by hand" = "impossible de savoir s’il s’agit de %@ ou de %@ : le compte ne détient ni l’un ni l’autre; saisissez l’opération manuellement";
+"%@ row has no amount" = "ligne %@ sans montant";
+"%@ needs a symbol." = "%@ exige un symbole.";
+"negative amount on a %@ (a reversal or correction?); record it by hand" = "montant négatif sur une opération %@ (annulation ou correction?); saisissez-la manuellement";
+"positive amount on a %@ (a reversal or correction?); record it by hand" = "montant positif sur une opération %@ (annulation ou correction?); saisissez-la manuellement";
+"Transaction numbers must be finite." = "Les nombres de l’opération doivent être finis.";
+"Quantity must be positive." = "La quantité doit être positive.";
+"Price cannot be negative." = "Le prix ne peut pas être négatif.";
+"Amount cannot be negative." = "Le montant ne peut pas être négatif.";
+"Fees cannot be negative." = "Les frais ne peuvent pas être négatifs.";
+"Split ratio must be positive (e.g. 2 for a 2-for-1)." = "Le ratio de fractionnement doit être positif (p. ex. 2 pour un fractionnement 2 pour 1).";
+"Transfer needs a different target account." = "Le transfert exige un compte de destination différent.";
+"Date cannot be in the future." = "La date ne peut pas être dans le futur.";
+"expected a number like 1234.56" = "nombre attendu, comme 1234.56";
+"Questrade activity type '%@' isn't supported" = "type d’activité Questrade « %@ » non pris en charge";
+"Questrade trade action '%@' isn't a buy or sell" = "l’action Questrade « %@ » n’est ni un achat ni une vente";
+"Wealthsimple transaction code '%@' isn't supported" = "code d’opération Wealthsimple « %@ » non pris en charge";
+"couldn't read the symbol from the description" = "impossible de lire le symbole dans la description";
+"couldn't read the share count from the description" = "impossible de lire le nombre d’actions dans la description";
 
 
 /* ==== end ==== */

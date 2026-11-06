@@ -29,7 +29,10 @@ struct TransactionSaveRequest {
         // A failed/malformed receipt check is an unknown outcome, never permission to create a new request.
       }
       return .unknown(
-        "\(failure)\nCouldn't confirm whether this transaction was saved. Retry save to check the same request safely."
+        String(
+          localized:
+            "\(failure)\nCouldn't confirm whether this transaction was saved. Retry save to check the same request safely."
+        )
       )
     }
   }
@@ -55,16 +58,34 @@ struct TransactionEntry {
   ]
   /// The ones it can also edit; the others can be deleted and recorded again.
   static let editableTypes = ["BUY", "SELL", "DEPOSIT", "WITHDRAWAL", "DIVIDEND", "INTEREST", "FEE"]
-  /// For lists and confirmations, where space is short.
+  /// For lists and confirmations, where space is short. Display only: commands and
+  /// comparisons use the type itself.
   static func label(_ type: String) -> String {
-    ["DRIP": "DRIP", "ROC": "ROC"][type] ?? type.capitalized
+    switch type {
+    case "BUY": return String(localized: "Buy")
+    case "SELL": return String(localized: "Sell")
+    case "DEPOSIT": return String(localized: "Deposit")
+    case "WITHDRAWAL": return String(localized: "Withdrawal")
+    case "DIVIDEND": return String(localized: "Dividend")
+    case "INTEREST": return String(localized: "Interest")
+    case "FEE": return String(localized: "Fee")
+    case "DRIP": return String(localized: "DRIP")
+    case "TRANSFER": return String(localized: "Transfer")
+    case "SPLIT": return String(localized: "Split")
+    case "ROC": return String(localized: "ROC")
+    case "VALUATION": return String(localized: "Valuation")
+    default: return type.capitalized
+    }
   }
   /// For the form's type picker.
   static func title(_ type: String) -> String {
-    [
-      "DRIP": "Reinvested dividend (DRIP)", "TRANSFER": "Transfer in kind", "SPLIT": "Stock split",
-      "ROC": "Return of capital",
-    ][type] ?? type.capitalized
+    switch type {
+    case "DRIP": return String(localized: "Reinvested dividend (DRIP)")
+    case "TRANSFER": return String(localized: "Transfer in kind")
+    case "SPLIT": return String(localized: "Stock split")
+    case "ROC": return String(localized: "Return of capital")
+    default: return label(type)
+    }
   }
 
   var type = "BUY"
@@ -166,6 +187,17 @@ struct AssetEntry {
   static let kinds = ["FIXED", "MANUAL", "VALUE"]
   /// As `marketpulse asset fixed --compounding` accepts them.
   static let compoundings = ["annual", "semiannual", "quarterly", "monthly", "simple"]
+  /// A compounding as the app shows it; the CLI gets the value itself.
+  static func compoundingLabel(_ compounding: String) -> String {
+    switch compounding {
+    case "annual": return String(localized: "annual")
+    case "semiannual": return String(localized: "semiannual")
+    case "quarterly": return String(localized: "quarterly")
+    case "monthly": return String(localized: "monthly")
+    case "simple": return String(localized: "simple")
+    default: return compounding
+    }
+  }
   /// `asset fixed`, `asset manual`, `asset value`: the request ID goes after both words.
   static let commandWords = 2
 
@@ -232,7 +264,11 @@ struct AssetEntry {
 struct AssetClassOption: Identifiable, Equatable {
   var id: String { key }
   let key: String
+  /// The engine's English label (`AssetClass.label`), which positions report as their class:
+  /// compare with this one, and show `localizedLabel`.
   let label: String
+  /// `label` in the user's language.
+  var localizedLabel: String { Loc.backend(label) }
   /// Python's `AssetClass`, in its order; scripts/check_native_bridge.py checks they match.
   static let all = [
     AssetClassOption(key: "equity", label: "Equity"),
@@ -315,8 +351,16 @@ struct DesktopPayload: Decodable {
   let ledgerRevision: String?
   let warnings: [String]
 
-  /// `warnings` in the user's language. (Stub: the engine's codes replace it.)
-  var localizedWarnings: [String] { warnings }
+  /// `warnings` with a code for each, in the same order. Absent from older engines.
+  let warningItems: [DesktopWarning]?
+
+  /// `warnings` in the user's language: worded from each one's code, else the English.
+  var localizedWarnings: [String] { localizedWarnings() }
+
+  func localizedWarnings(locale: Locale = .current) -> [String] {
+    guard let items = warningItems, items.count == warnings.count else { return warnings }
+    return items.map { $0.localized(locale: locale) }
+  }
 
   /// Nobody has used this ledger yet, so the app offers its welcome. Older engines don't
   /// report archived accounts, so fall back to what the window can see.
@@ -359,10 +403,10 @@ struct QuoteProvider: Decodable, Identifiable {
     case ok, failing, notTried, notConfigured
     var label: String {
       switch self {
-      case .ok: return "OK"
-      case .failing: return "Failing"
-      case .notTried: return "Not tried"
-      case .notConfigured: return "No key"
+      case .ok: return String(localized: "OK")
+      case .failing: return String(localized: "Failing")
+      case .notTried: return String(localized: "Not tried")
+      case .notConfigured: return String(localized: "No key")
       }
     }
   }
@@ -431,7 +475,7 @@ enum BridgeDate {
   /// "5 minutes ago", for labels VoiceOver reads too.
   static func relative(_ date: Date, now: Date = .now) -> String {
     // A refresh moments ago (or a clock a little ahead) reads as "now", never "in 2 seconds".
-    if abs(date.timeIntervalSince(now)) < 60 { return "just now" }
+    if abs(date.timeIntervalSince(now)) < 60 { return String(localized: "just now") }
     return min(date, now).formatted(.relative(presentation: .named, unitsStyle: .wide))
   }
 }
@@ -493,15 +537,20 @@ struct BackupInfo: Decodable, Identifiable, Equatable {
 
   var when: String { date?.formatted(date: .abbreviated, time: .shortened) ?? name }
 
+  /// How the app names each reason, in English; `desktop.BACKUP_REASON_LABELS` matches it
+  /// (scripts/check_native_bridge.py checks), so Backend.strings translates them. "pre-v"
+  /// stands for every schema upgrade (pre-v2, pre-v3, …).
+  static let reasonLabels = [
+    "daily": "Daily backup",
+    "import": "Before an import",
+    "manual": "Backed up by you",
+    "pre-restore": "Before a restore",
+    "pre-v": "Before an upgrade",
+  ]
+
   var reasonLabel: String {
-    switch reason {
-    case "daily": return "Daily backup"
-    case "import": return "Before an import"
-    case "manual": return "Backed up by you"
-    case "pre-restore": return "Before a restore"
-    case let r where r.hasPrefix("pre-v"): return "Before an upgrade"
-    default: return reason
-    }
+    let key = reason.hasPrefix("pre-v") ? "pre-v" : reason
+    return BackupInfo.reasonLabels[key].map(Loc.backend) ?? reason
   }
 }
 
@@ -510,6 +559,24 @@ struct DesktopAccount: Decodable, Identifiable {
   static let types = [
     "TFSA", "RRSP", "FHSA", "RESP", "LIRA", "RRIF", "NONREG", "MARGIN", "CRYPTO", "CASH", "OTHER",
   ]
+  /// An account type as the app shows it (CELI, REER… in French). Display only: the CLI and
+  /// comparisons use the type itself.
+  static func typeLabel(_ type: String) -> String {
+    switch type {
+    case "TFSA": return String(localized: "TFSA")
+    case "RRSP": return String(localized: "RRSP")
+    case "FHSA": return String(localized: "FHSA")
+    case "RESP": return String(localized: "RESP")
+    case "LIRA": return String(localized: "LIRA")
+    case "RRIF": return String(localized: "RRIF")
+    case "NONREG": return String(localized: "Non-registered")
+    case "MARGIN": return String(localized: "Margin")
+    case "CRYPTO": return String(localized: "Crypto")
+    case "CASH": return String(localized: "Cash")
+    case "OTHER": return String(localized: "Other")
+    default: return type
+    }
+  }
   let id: Int
   let name: String
   let type: String
@@ -557,6 +624,8 @@ struct DesktopPosition: Decodable, Identifiable {
   let quoteSource: String?
   /// How old the quote was when the snapshot was built. Absent from older engines.
   let quoteAgeSeconds: Double?
+  /// `assetClass` (the engine's English label) in the user's language.
+  var localizedAssetClass: String { Loc.backend(assetClass) }
 }
 
 struct DesktopTransaction: Decodable, Identifiable {
@@ -591,6 +660,8 @@ struct AllocationBucket: Decodable, Identifiable {
   let label: String
   let value: Double
   let weight: Double
+  /// `label` (the engine's English asset class) in the user's language.
+  var localizedLabel: String { Loc.backend(label) }
 }
 
 struct AllocationTarget: Decodable, Identifiable {
@@ -615,6 +686,8 @@ struct RebalanceRow: Decodable, Identifiable {
   let drift: Double
   /// Base currency to buy (+) or sell (−) to reach the target. A suggestion only.
   let delta: Double
+  /// `label` (the engine's English asset class) in the user's language.
+  var localizedLabel: String { Loc.backend(label) }
 }
 
 /// A symbol's saved details (`marketpulse asset list`).
@@ -638,13 +711,18 @@ struct DesktopAsset: Decodable, Identifiable {
 
   var fixedIncome: Bool { kind == "fixed_income" }
   var manual: Bool { kind == "manual" }
+  /// `assetClassLabel` (the engine's English asset class) in the user's language.
+  var localizedAssetClassLabel: String? { assetClassLabel.map(Loc.backend) }
   /// Shown under the asset's name in Holdings.
-  var summary: String? {
+  var summary: String? { summary() }
+
+  func summary(locale: Locale = .current) -> String? {
     if fixedIncome {
-      let rate = self.rate.formatted(.number.precision(.fractionLength(0...3)))
-      return "\(rate)% \(compounding) · matures \(maturityDate)"
+      let rate = (self.rate / 100).formatted(.percent.locale(locale).precision(.fractionLength(0...3)))
+      let compounding = AssetEntry.compoundingLabel(self.compounding)
+      return String(localized: "\(rate) \(compounding) · matures \(maturityDate)")
     }
-    if manual, let valuedOn { return "Valued by you · \(valuedOn)" }
+    if manual, let valuedOn { return String(localized: "Valued by you · \(valuedOn)") }
     return nil
   }
 }
@@ -684,6 +762,8 @@ struct TaxPayload: Decodable {
   let room: [ContributionRoom]
   /// The "not tax advice" notes the workspace must show.
   let notes: [String]
+  /// `notes` in the user's language.
+  var localizedNotes: [String] { notes.map(Loc.backend) }
 }
 
 /// One calendar year. Totals leave out rows missing an FX rate (`missingFx` counts them).
@@ -754,14 +834,16 @@ struct TaxDisposition: Decodable, Identifiable {
   let note: String
   let transactionId: Int?
 
-  var accountLabel: String { account ?? "Archived account" }
+  var accountLabel: String { account ?? String(localized: "Archived account") }
   var kindLabel: String {
     switch kind {
-    case "roc": return "Return of capital above ACB"
-    case "deemed": return "Moved to a registered account"
-    default: return "Sale"
+    case "roc": return String(localized: "Return of capital above ACB")
+    case "deemed": return String(localized: "Moved to a registered account")
+    default: return String(localized: "Sale")
     }
   }
+  /// `note` (a fixed English tag) in the user's language; empty for an ordinary sale.
+  var localizedNote: String { note.isEmpty ? "" : Loc.backend(note) }
 }
 
 /// `marketpulse desktop tax-csv`: what the export itself wrote, and the issues that may have
@@ -771,12 +853,31 @@ struct TaxExportResult: Decodable {
   let issues: [TaxIssue]
 
   /// The confirmation: what was saved, and any issue that may have left a sale out.
-  func message(year: Int, file: String) -> String {
-    let saved = "Saved \(exported == 1 ? "1 sale" : "\(exported) sales") from \(year) to \(file)"
+  func message(year: Int, file: String, locale: Locale = .current) -> String {
+    let one = exported == 1
+    let year = String(year)  // a year, never "2,025"
     switch issues.count {
-    case 0: return saved
-    case 1: return saved + ". 1 issue may leave sales out of it: \(issues[0].date) \(issues[0].message)"
-    case let n: return saved + ". \(n) issues, listed under Needs attention, may leave sales out of it."
+    case 0:
+      return one
+        ? String(localized: "Saved 1 sale from \(year) to \(file)")
+        : String(localized: "Saved \(exported) sales from \(year) to \(file)")
+    case 1:
+      let date = issues[0].date
+      let issue = issues[0].localizedMessage(locale: locale)
+      return one
+        ? String(localized: "Saved 1 sale from \(year) to \(file). 1 issue may leave sales out of it: \(date) \(issue)")
+        : String(
+          localized:
+            "Saved \(exported) sales from \(year) to \(file). 1 issue may leave sales out of it: \(date) \(issue)")
+    case let n:
+      return one
+        ? String(
+          localized:
+            "Saved 1 sale from \(year) to \(file). \(n) issues, listed under Needs attention, may leave sales out of it.")
+        : String(
+          localized:
+            "Saved \(exported) sales from \(year) to \(file). \(n) issues, listed under Needs attention, may leave sales out of it."
+        )
     }
   }
 }
@@ -784,9 +885,18 @@ struct TaxExportResult: Decodable {
 struct TaxIssue: Decodable, Identifiable, Equatable {
   var id: String { date + message }
   let date: String
+  /// English, as `marketpulse tax` shows it.
   let message: String
-  /// `message` in the user's language. (Stub: the engine's codes replace it.)
-  var localizedMessage: String { message }
+  /// Names the message, and the values that fill it in (see `EngineMessage`). Absent from
+  /// older engines; "" for a message without a code.
+  let code: String?
+  let args: [String: MessageArg]?
+  /// `message` in the user's language: worded from its code, else the English.
+  var localizedMessage: String { localizedMessage() }
+
+  func localizedMessage(locale: Locale = .current) -> String {
+    EngineMessage.issue(code ?? "", args ?? [:], locale: locale) ?? message
+  }
 }
 
 struct DesktopAlert: Decodable, Identifiable {
@@ -798,8 +908,21 @@ struct DesktopAlert: Decodable, Identifiable {
   let active: Bool
   let triggeredAt: String
   let description: String
-  /// `description` in the user's language. (Stub: built from the condition instead.)
-  var localizedDescription: String { description }
+  /// `description` in the user's language, built from the condition as `models.Alert.describe`
+  /// builds it; the engine's English for a condition the app doesn't know.
+  var localizedDescription: String { localizedDescription() }
+
+  func localizedDescription(locale: Locale = .current) -> String {
+    let price = threshold.formatted(.number.locale(locale).precision(.fractionLength(2)))
+    let percent = EngineMessage.percent(threshold, locale)
+    switch condition {
+    case "above": return "\(symbol) ≥ \(price)"
+    case "below": return "\(symbol) ≤ \(price)"
+    case "up_pct": return String(localized: "\(symbol) up \(percent) today")
+    case "down_pct": return String(localized: "\(symbol) down \(percent) today")
+    default: return description
+    }
+  }
 }
 
 struct AutomationReport: Decodable {
@@ -834,17 +957,26 @@ struct ImportPreview: Decodable, Equatable {
   /// One per skipped line, with the field at fault; `skipped` has the same lines.
   let issues: [ImportRowIssue]?
   let duplicateRows: [ImportDuplicate]?
+  /// `profileLabel` (the engine's English) in the user's language.
+  var localizedProfileLabel: String? { profileLabel.map(Loc.backend) }
 }
 
 /// Broker export formats the importer reads; `marketpulse import --profile` takes the ids.
 struct ImportProfile: Identifiable {
   let id: String
-  let label: String
+  /// In the user's language. Brokers' names aren't translated.
+  var label: String {
+    switch id {
+    case "auto": return String(localized: "Auto-detect")
+    case "generic": return Loc.backend("Generic CSV")  // the engine's `profile_label` for it
+    case "questrade": return "Questrade"
+    case "wealthsimple": return "Wealthsimple"
+    default: return id
+    }
+  }
   static let all = [
-    ImportProfile(id: "auto", label: "Auto-detect"),
-    ImportProfile(id: "questrade", label: "Questrade"),
-    ImportProfile(id: "wealthsimple", label: "Wealthsimple"),
-    ImportProfile(id: "generic", label: "Generic CSV"),
+    ImportProfile(id: "auto"), ImportProfile(id: "questrade"), ImportProfile(id: "wealthsimple"),
+    ImportProfile(id: "generic"),
   ]
 }
 
@@ -854,9 +986,20 @@ struct ImportRowIssue: Decodable, Identifiable, Equatable {
   /// The import field at fault (date, type, symbol, quantity, …); empty when no single one is.
   let field: String
   let value: String
+  /// English, as `marketpulse import` shows it.
   let reason: String
-  /// `reason` in the user's language. (Stub: the engine's codes replace it.)
-  var localizedReason: String { reason }
+  /// Names the reason, and the values that fill it in (see `EngineMessage`). Absent from
+  /// older engines; "" for a reason without a code.
+  let code: String?
+  let args: [String: MessageArg]?
+  /// `reason` in the user's language: worded from its code, else the English.
+  var localizedReason: String { localizedReason() }
+
+  func localizedReason(locale: Locale = .current) -> String {
+    // A broker activity the importer skips: its reason is fixed text, so Backend.strings has it.
+    if code == "not_imported" { return Loc.backend(reason) }
+    return EngineMessage.importReason(code ?? "", args ?? [:], locale: locale) ?? reason
+  }
 }
 
 struct ImportDuplicate: Decodable, Identifiable, Equatable {
@@ -908,10 +1051,12 @@ enum NumberInput {
     let text = raw.trimmingCharacters(in: .whitespaces)
     guard !text.isEmpty else { return nil }
     guard let value = parse(text, locale: locale) else {
-      return "Enter a number, like \(12.5.formatted(.number.locale(locale)))."
+      let example = 12.5.formatted(.number.locale(locale))
+      return String(localized: "Enter a number, like \(example).")
     }
     if Double(text) == value { return nil }
-    return "Reads as \(value.formatted(.number.locale(locale).precision(.fractionLength(0...8))))"
+    let reading = value.formatted(.number.locale(locale).precision(.fractionLength(0...8)))
+    return String(localized: "Reads as \(reading)")
   }
 
   static func cli(_ raw: String, locale: Locale = .current) -> String {
@@ -942,4 +1087,186 @@ enum LedgerDate {
   static func string(_ date: Date) -> String { formatter("yyyy-MM-dd").string(from: date) }
   /// Noon on that day: midnight doesn't exist on some daylight-saving days.
   static func date(_ string: String) -> Date? { formatter("yyyy-MM-dd HH:mm").date(from: string + " 12:00") }
+}
+
+/// A value filling in an engine message: text (a symbol, an account) or a number (a quantity).
+enum MessageArg: Decodable, Equatable {
+  case text(String)
+  case number(Double)
+
+  init(from decoder: Decoder) throws {
+    let c = try decoder.singleValueContainer()
+    if let text = try? c.decode(String.self) {
+      self = .text(text)
+    } else {
+      self = .number(try c.decode(Double.self))
+    }
+  }
+
+  var text: String? {
+    if case .text(let value) = self { return value }
+    return nil
+  }
+  var number: Double? {
+    if case .number(let value) = self { return value }
+    return nil
+  }
+}
+
+/// One of the snapshot's `warnings`, with the code the app words it from.
+struct DesktopWarning: Decodable, Equatable {
+  /// "" for a warning without a code: the app shows `text`.
+  let code: String
+  let args: [String: MessageArg]
+  /// English, exactly as in `warnings`.
+  let text: String
+
+  private enum CodingKeys: String, CodingKey { case code, args, text }
+
+  init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    text = try c.decode(String.self, forKey: .text)
+    code = try c.decodeIfPresent(String.self, forKey: .code) ?? ""
+    args = try c.decodeIfPresent([String: MessageArg].self, forKey: .args) ?? [:]
+  }
+
+  /// In the user's language: worded from the code, else the English.
+  func localized(locale: Locale = .current) -> String {
+    func value(_ key: String) -> String? { args[key]?.text }
+    switch code {
+    case "excluded_unpriced":
+      guard let symbol = value("symbol") else { return text }
+      return String(localized: "Excluded from totals: \(symbol)")
+    case "excluded_archived_holding":
+      guard let symbol = value("symbol"), let account = value("account") else { return text }
+      return String(localized: "Excluded from totals: \(symbol) in archived \(account)")
+    case "excluded_archived_cash":
+      guard let account = value("account"), let currency = value("currency") else { return text }
+      return String(localized: "Excluded from totals: \(account) cash (\(currency), archived)")
+    case "excluded_unconverted_cash":
+      guard let account = value("account"), let currency = value("currency") else { return text }
+      return String(localized: "Excluded from totals: \(account) cash (\(currency))")
+    case "archived_account_value":
+      guard let account = value("account") else { return text }
+      return String(
+        localized:
+          "Archived account \(account) still holds investments or cash. They're left out of your totals, and daily snapshots are paused. Move or sell them, or unarchive the account."
+      )
+    default:
+      // A ledger issue, dated as `warnings` dates it.
+      guard let date = value("date"), let message = EngineMessage.issue(code, args, locale: locale) else {
+        return text
+      }
+      return String(localized: "\(date): \(message)")
+    }
+  }
+}
+
+/// The engine's coded messages in the user's language. Each English template mirrors the
+/// engine's text exactly (scripts/check_native_bridge.py checks), so an English app shows what
+/// the CLI does. A code the app doesn't know, or a missing value, gives nil: show the English.
+enum EngineMessage {
+  /// A quantity as the engine writes it (`:,.4f`), in the user's format.
+  static func quantity(_ value: Double, _ locale: Locale) -> String {
+    value.formatted(.number.locale(locale).precision(.fractionLength(4)))
+  }
+
+  /// A threshold in percent (5 for 5%) as the engine writes it (`:g`), in the user's format.
+  static func percent(_ value: Double, _ locale: Locale) -> String {
+    (value / 100).formatted(.percent.locale(locale).precision(.fractionLength(0...4)))
+  }
+
+  /// A ledger or tax report issue (`LedgerIssue.code`).
+  static func issue(_ code: String, _ args: [String: MessageArg], locale: Locale = .current) -> String? {
+    guard let symbol = args["symbol"]?.text else { return nil }
+    let quantity = args["quantity"]?.number.map { self.quantity($0, locale) }
+    let held = args["held"]?.number.map { self.quantity($0, locale) }
+    switch code {
+    case "sell_exceeds_held":
+      guard let quantity, let held else { return nil }
+      return String(localized: "Sell of \(quantity) \(symbol) exceeds \(held) held")
+    case "transfer_exceeds_held":
+      guard let quantity, let held else { return nil }
+      return String(localized: "Transfer of \(quantity) \(symbol) exceeds \(held) held")
+    case "split_nothing_held":
+      return String(localized: "Split of \(symbol) with nothing held")
+    case "transfer_nothing_held":
+      return String(localized: "Transfer of \(symbol) with nothing held")
+    case "transfer_to_registered_unpriced":
+      return String(
+        localized:
+          "Transfer of \(symbol) into a registered account is a deemed sale at market value — add the price per unit to the transfer to include it in the tax report"
+      )
+    case "transfer_from_registered_unpriced":
+      return String(
+        localized:
+          "Transfer of \(symbol) out of a registered account enters your cost base at market value — add the price per unit to the transfer"
+      )
+    default:
+      return nil
+    }
+  }
+
+  /// Why an import skipped a row (`RowIssue.code`).
+  static func importReason(_ code: String, _ args: [String: MessageArg], locale: Locale = .current) -> String? {
+    let value = args["value"]?.text
+    let type = args["type"]?.text
+    let account = args["account"]?.text
+    switch code {
+    case "unknown_type":
+      return value.map { String(localized: "unrecognized type '\($0)'") }
+    case "invalid_date":
+      return value.map { String(localized: "Invalid date '\($0)' — use YYYY-MM-DD.") }
+    case "ambiguous_date":
+      return value.map { String(localized: "Ambiguous date '\($0)' — use YYYY-MM-DD.") }
+    case "unknown_account":
+      return account.map { String(localized: "unknown account '\($0)'") }
+    case "no_account":
+      return String(localized: "no account")
+    case "archived_account":
+      return account.map { String(localized: "account '\($0)' is archived") }
+    case "ambiguous_listing_both":
+      guard let (first, second) = pair(args["symbols"]) else { return nil }
+      return String(localized: "can't tell whether this is \(first) or \(second): the account holds both; record it by hand")
+    case "ambiguous_listing_neither":
+      guard let (first, second) = pair(args["symbols"]) else { return nil }
+      return String(
+        localized: "can't tell whether this is \(first) or \(second): the account holds neither; record it by hand")
+    case "no_amount":
+      return type.map { String(localized: "\($0) row has no amount") }
+    case "needs_symbol":
+      return type.map { String(localized: "\($0) needs a symbol.") }
+    case "negative_amount":
+      return type.map { String(localized: "negative amount on a \($0) (a reversal or correction?); record it by hand") }
+    case "positive_amount":
+      return type.map { String(localized: "positive amount on a \($0) (a reversal or correction?); record it by hand") }
+    case "not_finite": return String(localized: "Transaction numbers must be finite.")
+    case "quantity_not_positive": return String(localized: "Quantity must be positive.")
+    case "price_negative": return String(localized: "Price cannot be negative.")
+    case "amount_negative": return String(localized: "Amount cannot be negative.")
+    case "fees_negative": return String(localized: "Fees cannot be negative.")
+    case "ratio_not_positive": return String(localized: "Split ratio must be positive (e.g. 2 for a 2-for-1).")
+    case "transfer_needs_target": return String(localized: "Transfer needs a different target account.")
+    case "future_date": return String(localized: "Date cannot be in the future.")
+    case "not_a_number": return String(localized: "expected a number like 1234.56")
+    case "questrade_unsupported_activity":
+      return value.map { String(localized: "Questrade activity type '\($0)' isn't supported") }
+    case "questrade_unsupported_action":
+      return value.map { String(localized: "Questrade trade action '\($0)' isn't a buy or sell") }
+    case "wealthsimple_unsupported_code":
+      return value.map { String(localized: "Wealthsimple transaction code '\($0)' isn't supported") }
+    case "no_symbol_in_description":
+      return String(localized: "couldn't read the symbol from the description")
+    case "no_shares_in_description":
+      return String(localized: "couldn't read the share count from the description")
+    default:
+      return nil
+    }
+  }
+
+  /// Two listings sent as "A B".
+  private static func pair(_ arg: MessageArg?) -> (String, String)? {
+    let symbols = (arg?.text ?? "").split(separator: " ").map(String.init)
+    return symbols.count == 2 ? (symbols[0], symbols[1]) : nil
+  }
 }

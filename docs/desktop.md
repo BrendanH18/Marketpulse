@@ -351,3 +351,12 @@ For integration checks, `marketpulse desktop snapshot --demo` emits the same
 versioned JSON used by the app, and `marketpulse desktop tax --demo` the Tax
 workspace's report. This bridge includes raw financial amounts even
 when privacy mode is enabled, just like the existing `status --json` API.
+
+Messages the engine words in English also carry a stable code and the values that fill them
+in, so the app can show them in the user's language: the snapshot's `warning_items`
+(`{code, args, text}`, in the same order and with the same text as `warnings`), and `code`
+and `args` on tax report `issues` and import preview `issues`. A code of `""` has no
+translation and the app shows the English. Fixed text the bridge sends, such as tax notes,
+disposition tags, asset classes and broker skip reasons, is listed in
+`desktop.BACKEND_STRINGS` and translated in `fr.lproj/Backend.strings`. The CLI's output
+and the English text in the bridge don't change.

@@ -14,15 +14,18 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from . import __version__
-from .analytics import disposition_note, income_by_month, rebalance
+from .analytics import DISPOSITION_NOTES, disposition_note, income_by_month, rebalance
 from .automation import run_cycle
+from .brokers import PROFILES, skip_reasons
 from .config import Config, config_path
 from .db import Snapshot, Store
+from .ledger import LedgerIssue
 from .market import MarketData, MarketError
 from .models import Account, AccountType, Asset, AssetClass, AssetKind, Quote, Transaction, TxnType
 from .providers import PROVIDERS
 from .services import Tracker
 from .tax import Disposition
+from .valuation import PortfolioView
 
 
 def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
@@ -46,6 +49,7 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         if t.type is TxnType.BUY and t.date > valued.get(t.symbol, ""):
             valued[t.symbol] = t.date
     valued.update({symbol: day for symbol, (day, _) in state.valuations.items()})
+    warnings = warning_items(state.issues, view)
     return {
         "version": 1,
         "demo": False,
@@ -105,12 +109,32 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         "storage": storage_info(tracker.store),
         "settings": settings_info(tracker),
         "ledger_revision": ledger_revision(tracker, generation),
-        "warnings": [
-            *[f"{i.date}: {i.message}" for i in state.issues],
-            *[f"Excluded from totals: {s}" for s in view.excluded],
-            *[archived_warning(name) for name in view.archived_with_value],
-        ],
+        # English text, as before; `warning_items` has the same warnings with codes for the app.
+        "warnings": [w["text"] for w in warnings],
+        "warning_items": warnings,
     }
+
+
+def warning_items(issues: list[LedgerIssue], view: PortfolioView) -> list[dict]:
+    """What the app lists under Needs attention, each as {code, args, text}: `text` is the
+    English the `warnings` list has always carried, and `code` and `args` let the app word it in
+    the user's language. A code of "" has no translation; the app shows `text`."""
+    return [
+        *[{"code": i.code, "args": {**i.args, "date": i.date}, "text": f"{i.date}: {i.message}"} for i in issues],
+        *[
+            {"code": f"excluded_{code}", "args": args, "text": f"Excluded from totals: {text}"}
+            for text, (code, args) in zip(view.excluded, view.excluded_items, strict=True)
+        ],
+        *[
+            {"code": "archived_account_value", "args": {"account": name}, "text": archived_warning(name)}
+            for name in view.archived_with_value
+        ],
+    ]
+
+
+def issue_row(issue: LedgerIssue) -> dict:
+    """A tax report issue: English `message`, and `code` and `args` for the app's translation."""
+    return {"date": issue.date, "message": issue.message, "code": issue.code, "args": issue.args}
 
 
 def asset_row(a: Asset, valued: dict[str, str]) -> dict:
@@ -154,7 +178,7 @@ def write_tax_csv(tracker: Tracker, path: Path, year: int | None = None) -> dict
             n = export_capital_gains(years, tracker.store.account_map(), tracker.base, f, year=year)
     except OSError as e:
         raise ValueError(f"Couldn't write {path}: {e.strerror or e}") from e
-    return {"exported": n, "issues": [{"date": i.date, "message": i.message} for i in report.issues]}
+    return {"exported": n, "issues": [issue_row(i) for i in report.issues]}
 
 
 def archived_accounts(accounts: dict[int, Account], generation: str = "") -> list[dict]:
@@ -223,6 +247,31 @@ TAX_NOTES = [
     "Estimates only, not tax advice. Check these figures against your T5008, T3 and T5 slips before you file.",
     "Purchases by a spouse or a corporation you control can also make a loss superficial; MarketPulse can't see those.",
 ]
+
+# How the app names each backup reason (`BackupInfo.reasonLabel`); a reason starting "pre-v"
+# is a schema upgrade. scripts/check_native_bridge.py checks the app uses these.
+BACKUP_REASON_LABELS = {
+    "daily": "Daily backup",
+    "import": "Before an import",
+    "manual": "Backed up by you",
+    "pre-restore": "Before a restore",
+    "pre-v": "Before an upgrade",
+}
+
+# Every fixed English string the bridge sends that the app shows, which it translates with
+# `Loc.backend` from fr.lproj/Backend.strings (tests/test_localization.py checks they're all
+# there). Messages with values in them are sent with a code instead: `warning_items`, tax
+# `issues` and import `issues`.
+BACKEND_STRINGS: tuple[str, ...] = (
+    *TAX_NOTES,
+    *DISPOSITION_NOTES,
+    *(c.label for c in AssetClass),
+    *BACKUP_REASON_LABELS.values(),
+    # The broker profile that read an import (`profile_label`).
+    *(p.label for p in PROFILES),
+    # Why an import skipped a row a broker's export lists (code "not_imported").
+    *skip_reasons(),
+)
 
 
 def tax_report(tracker: Tracker) -> dict:
@@ -306,7 +355,7 @@ def tax_report(tracker: Tracker) -> dict:
             }
             for y in years
         ],
-        "issues": [{"date": i.date, "message": i.message} for i in report.issues],
+        "issues": [issue_row(i) for i in report.issues],
         "room": [asdict(r) for r, _ in tracker.room()],
         "notes": TAX_NOTES,
     }

@@ -321,6 +321,8 @@ def _transfer(
                     txn.date,
                     f"Transfer of {txn.symbol} into a registered account is a deemed sale at market value — "
                     "add the price per unit to the transfer to include it in the tax report",
+                    "transfer_to_registered_unpriced",
+                    {"symbol": txn.symbol},
                 )
             )
             return
@@ -349,6 +351,8 @@ def _transfer(
                     txn.date,
                     f"Transfer of {txn.symbol} out of a registered account enters your cost base at market value — "
                     "add the price per unit to the transfer",
+                    "transfer_from_registered_unpriced",
+                    {"symbol": txn.symbol},
                 )
             )
         # Unpriced: still add the units (so later sales aren't flagged as

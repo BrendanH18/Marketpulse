@@ -20,6 +20,19 @@ from enum import StrEnum
 # Tolerance for float share arithmetic (fractional shares accumulate error)
 EPSILON = 1e-9
 
+# Values that fill in a message the app shows in the user's language.
+MessageArgs = dict[str, str | float]
+
+
+class CodedError(ValueError):
+    """A ValueError the Mac app can show in the user's language: `code` names the message and
+    `details` fills it in. `str()` is the English message, exactly as before; the CLI shows that."""
+
+    def __init__(self, message: str, code: str = "", details: MessageArgs | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.details: MessageArgs = details or {}
+
 
 # ── Enumerations ──────────────────────────────────────────────────────────────
 
@@ -181,13 +194,13 @@ def parse_date(raw: str | date | None) -> str:
             elif b > 12 >= a or a == b:
                 month, day = a, b
             else:
-                raise ValueError(f"Ambiguous date '{raw}' — use YYYY-MM-DD.")
+                raise CodedError(f"Ambiguous date '{raw}' — use YYYY-MM-DD.", "ambiguous_date", {"value": raw})
             return date(year, month, day).isoformat()
         return datetime.fromisoformat(s).date().isoformat()
-    except ValueError as e:
-        if "Ambiguous" in str(e):
-            raise
-        raise ValueError(f"Invalid date '{raw}' — use YYYY-MM-DD.") from None
+    except CodedError:
+        raise
+    except ValueError:
+        raise CodedError(f"Invalid date '{raw}' — use YYYY-MM-DD.", "invalid_date", {"value": raw}) from None
 
 
 def parse_symbols(raw: str) -> list[str]:
@@ -330,23 +343,23 @@ class Transaction:
     def validate(self) -> None:
         t = self.type
         if not all(math.isfinite(v) for v in (self.quantity, self.price, self.amount, self.fees, self.ratio)):
-            raise ValueError("Transaction numbers must be finite.")
+            raise CodedError("Transaction numbers must be finite.", "not_finite")
         if t.needs_symbol and not self.symbol:
-            raise ValueError(f"{t} needs a symbol.")
+            raise CodedError(f"{t} needs a symbol.", "needs_symbol", {"type": t.value})
         if t.uses_quantity and self.quantity <= 0:
-            raise ValueError("Quantity must be positive.")
+            raise CodedError("Quantity must be positive.", "quantity_not_positive")
         if t in {TxnType.BUY, TxnType.SELL, TxnType.DRIP, TxnType.VALUATION} and self.price < 0:
-            raise ValueError("Price cannot be negative.")
+            raise CodedError("Price cannot be negative.", "price_negative")
         if t.uses_amount and self.amount < 0:
-            raise ValueError("Amount cannot be negative.")
+            raise CodedError("Amount cannot be negative.", "amount_negative")
         if self.fees < 0:
-            raise ValueError("Fees cannot be negative.")
+            raise CodedError("Fees cannot be negative.", "fees_negative")
         if t is TxnType.SPLIT and self.ratio <= 0:
-            raise ValueError("Split ratio must be positive (e.g. 2 for a 2-for-1).")
+            raise CodedError("Split ratio must be positive (e.g. 2 for a 2-for-1).", "ratio_not_positive")
         if t is TxnType.TRANSFER and (self.target_account_id is None or self.target_account_id == self.account_id):
-            raise ValueError("Transfer needs a different target account.")
+            raise CodedError("Transfer needs a different target account.", "transfer_needs_target")
         if parse_date(self.date) > today():
-            raise ValueError("Date cannot be in the future.")
+            raise CodedError("Date cannot be in the future.", "future_date")
 
 
 @dataclass
