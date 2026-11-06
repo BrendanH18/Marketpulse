@@ -118,7 +118,8 @@ The Swift app consumes the CLI's JSON status output.
 | `services.py` | Tracker facade used by the interfaces |
 | `render.py`, `charts.py`, `fmt.py` | Shared rendering and formatting |
 | `themes.py`, `themes_data.py` | Theme resolution and bundled palettes |
-| `cli.py`, `tui/` | Click commands, Textual workspaces, and forms |
+| `cli/` | Click commands, one module per area (accounts, recording, data, native app bridge…) |
+| `tui/` | Textual workspaces and forms |
 | `macos/MarketPulseBar/` | SwiftUI menu bar application |
 
 ## Guidelines for changes
