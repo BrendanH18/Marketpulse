@@ -547,7 +547,7 @@ private struct OverviewWorkspace: View {
                       payload.allocation.firstIndex(where: { $0.id == b.id })! % Studio.colors.count
                     ]
                   )
-                  .accessibilityLabel(Loc.backend(b.label))
+                  .accessibilityLabel(b.localizedLabel)
                   .accessibilityValue(shownPercent(b.weight))
                 }.frame(width: 150, height: 150)
                   .accessibilityLabel("Allocation chart, \(payload.positions.count) positions")
@@ -562,7 +562,7 @@ private struct OverviewWorkspace: View {
                     HStack {
                       Circle().fill(Studio.colors[i % Studio.colors.count]).frame(
                         width: 6, height: 6)
-                      Text(Loc.backend(bucket.label)).font(.system(size: 11))
+                      Text(bucket.localizedLabel).font(.system(size: 11))
                       Spacer()
                       Text(shownPercent(bucket.weight)).font(.system(size: 11))
                         .monospacedDigit().foregroundStyle(Studio.muted)
@@ -587,7 +587,8 @@ private struct OverviewWorkspace: View {
                   Text(account.name).font(.system(size: 12, weight: .medium))
                   Text(
                     account.institution.isEmpty
-                      ? account.type : "\(account.type) · \(account.institution)"
+                      ? DesktopAccount.typeLabel(account.type)
+                      : "\(DesktopAccount.typeLabel(account.type)) · \(account.institution)"
                   ).font(.system(size: 10)).foregroundStyle(Studio.muted)
                 }
                 Spacer()
@@ -858,7 +859,7 @@ private struct AllocationWorkspace: View {
       Divider().overlay(Studio.line).gridCellUnsizedAxes(.horizontal)
       ForEach(rows) { row in
         GridRow {
-          Text(Loc.backend(row.label)).fontWeight(.medium)
+          Text(row.localizedLabel).fontWeight(.medium)
           Text(percent(row.weight)).monospacedDigit()
           Text(row.target > 0 ? percent(row.target) : "—").monospacedDigit().foregroundStyle(Studio.muted)
           Text(drift(row.drift)).monospacedDigit()
@@ -1025,7 +1026,7 @@ private struct AccountsWorkspace: View {
           Button("Add account", systemImage: "plus", action: add).disabled(!canEdit)
         }
         ForEach(payload.accounts) { a in
-          Surface(a.name, trailing: a.type) {
+          Surface(a.name, trailing: DesktopAccount.typeLabel(a.type)) {
             HStack {
               VStack(alignment: .leading, spacing: 8) {
                 Text(a.institution.isEmpty ? String(localized: "Personal account") : a.institution).foregroundStyle(
@@ -1055,7 +1056,7 @@ private struct AccountsWorkspace: View {
             let room = payload.room.first { $0.accountType == type }
             HStack {
               VStack(alignment: .leading, spacing: 4) {
-                Text(type)
+                Text(DesktopAccount.typeLabel(type))
                 Text(
                   room.map {
                     let start = Format.money($0.startingRoom, "CAD", privacy: privacy)
@@ -1078,7 +1079,7 @@ private struct AccountsWorkspace: View {
           // Room entered in the terminal for other types (e.g. RESP) is shown, not edited here.
           ForEach(payload.room.filter { !ContributionRoom.types.contains($0.accountType) }) { r in
             HStack {
-              Text(r.accountType)
+              Text(DesktopAccount.typeLabel(r.accountType))
               Spacer()
               Text(Format.money(r.remaining, "CAD", privacy: privacy)).foregroundStyle(Studio.trend(r.remaining))
                 .monospacedDigit()
@@ -1301,8 +1302,8 @@ private struct TaxWorkspace: View {
     }
     roomSurface(tax)
     VStack(alignment: .leading, spacing: 6) {
-      ForEach(tax.notes, id: \.self) { note in
-        Label(Loc.backend(note), systemImage: "info.circle")
+      ForEach(tax.localizedNotes, id: \.self) { note in
+        Label(note, systemImage: "info.circle")
       }
     }.font(.system(size: 11)).foregroundStyle(Studio.muted).frame(maxWidth: .infinity, alignment: .leading)
       .fixedSize(horizontal: false, vertical: true)
@@ -1480,7 +1481,7 @@ private struct TaxWorkspace: View {
           String(localized: "\(r.currency) at \($0.formatted(.number.grouping(.never).precision(.fractionLength(4))))")
         } ?? String(localized: "\(r.currency), no exchange rate"))
     }
-    if !r.note.isEmpty && r.complete { parts.append(Loc.backend(r.note)) }
+    if !r.note.isEmpty && r.complete { parts.append(r.localizedNote) }
     return parts.joined(separator: " · ")
   }
 
@@ -1518,7 +1519,7 @@ private struct TaxWorkspace: View {
       ForEach(tax.room) { r in
         HStack(alignment: .top) {
           VStack(alignment: .leading, spacing: 4) {
-            Text(r.accountType).font(.system(size: 13, weight: .medium))
+            Text(DesktopAccount.typeLabel(r.accountType)).font(.system(size: 13, weight: .medium))
             Text(roomWorking(r)).font(.system(size: 11)).foregroundStyle(Studio.muted)
               .fixedSize(horizontal: false, vertical: true)
           }

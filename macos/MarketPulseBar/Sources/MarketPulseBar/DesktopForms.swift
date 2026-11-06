@@ -234,7 +234,7 @@ struct AccountSheet: View {
       Form {
         TextField("Account name", text: $draft.name, prompt: Text("My TFSA"))
         Picker("Type", selection: $draft.type) {
-          ForEach(DesktopAccount.types, id: \.self) { Text(AccountTypeName.label($0)).tag($0) }
+          ForEach(DesktopAccount.types, id: \.self) { Text(DesktopAccount.typeLabel($0)).tag($0) }
         }
         if let editing, draft.type != editing.type {
           caution(
@@ -340,7 +340,7 @@ struct RoomSheet: View {
     ) {
       Form {
         Picker("Account type", selection: $draft.type) {
-          ForEach(ContributionRoom.types, id: \.self) { Text(AccountTypeName.label($0)).tag($0) }
+          ForEach(ContributionRoom.types, id: \.self) { Text(DesktopAccount.typeLabel($0)).tag($0) }
         }
         Picker("Room on January 1 of", selection: $draft.year) {
           ForEach(years, id: \.self) { Text(String($0)).tag($0) }
@@ -559,7 +559,7 @@ struct AssetSheet: View {
           } else {
             NumberField(title: String(localized: "Value"), text: $draft.value)
             Picker("Asset class", selection: $draft.assetClass) {
-              ForEach(AssetClassOption.all) { Text($0.label).tag($0.key) }
+              ForEach(AssetClassOption.all) { Text($0.localizedLabel).tag($0.key) }
             }
             DatePicker("Acquired on", selection: $draft.date, in: ...Date.now, displayedComponents: .date)
           }
@@ -639,7 +639,7 @@ struct AssetClassSheet: View {
     if let saved = model.desktop?.assets?.first(where: { $0.symbol == symbol })?.assetClass { return saved }
     // Holdings carries the engine's English label; the options' labels may be translated.
     guard let label = model.desktop?.positions.first(where: { $0.symbol == symbol })?.assetClass else { return nil }
-    return AssetClassOption.all.first { $0.label == label || $0.label == Loc.backend(label) }?.key
+    return AssetClassOption.all.first { $0.label == label }?.key
   }
   var body: some View {
     SheetLayout(
@@ -649,7 +649,7 @@ struct AssetClassSheet: View {
     ) {
       Form {
         Picker("Asset class", selection: $draft.key) {
-          ForEach(AssetClassOption.all) { Text($0.label).tag($0.key) }
+          ForEach(AssetClassOption.all) { Text($0.localizedLabel).tag($0.key) }
         }
       }.formStyle(.grouped).disabled(model.saving)
         .onAppear {
@@ -662,7 +662,7 @@ struct AssetClassSheet: View {
         Spacer()
         if model.saving { ProgressView().controlSize(.small) }
         Button("Save") {
-          let label = AssetClassOption.all.first(where: { $0.key == draft.key })?.label ?? draft.key
+          let label = AssetClassOption.all.first(where: { $0.key == draft.key })?.localizedLabel ?? draft.key
           Task {
             let success = String(localized: "\(symbol) counts as \(label)")
             if await model.perform(["asset", "classify", "--", symbol, draft.key], success: success) {
@@ -698,10 +698,10 @@ struct TargetsSheet: View {
       Form {
         ForEach(AssetClassOption.all) { option in
           LabeledContent {
-            TextField("Target for \(option.label) (%)", text: binding(option.key), prompt: Text("None"))
+            TextField("Target for \(option.localizedLabel) (%)", text: binding(option.key), prompt: Text("None"))
               .labelsHidden().multilineTextAlignment(.trailing).frame(width: 90)
           } label: {
-            Text(option.label)
+            Text(option.localizedLabel)
             Text(model.status?.privacy == true ? "" : now(option.key))
           }
         }
@@ -751,7 +751,7 @@ struct ImportSheet: View {
       Button("Preview import") { Task { await model.previewImport() } }.disabled(model.saving)
         .keyboardShortcut(model.importPreview == nil ? .defaultAction : nil)
       if let preview = model.importPreview {
-        if let label = preview.profileLabel.map(Loc.backend) {
+        if let label = preview.localizedProfileLabel {
           (model.importProfile == "auto" ? Text("Detected format: \(label)") : Text("Read as: \(label)"))
             .font(.callout).foregroundStyle(.secondary)
         }
@@ -965,27 +965,6 @@ private struct SheetLayout<Content: View>: View {
       content
     }.padding(28).frame(width: 520).fixedSize(horizontal: false, vertical: true)
       .interactiveDismissDisabled(model.saving)
-  }
-}
-
-/// The name shown for a `DesktopAccount.types` value. The value itself is what the CLI takes
-/// and the engine sends, so it's only ever translated for display.
-enum AccountTypeName {
-  static func label(_ type: String) -> String {
-    switch type {
-    case "TFSA": return String(localized: "TFSA")
-    case "RRSP": return String(localized: "RRSP")
-    case "FHSA": return String(localized: "FHSA")
-    case "RESP": return String(localized: "RESP")
-    case "LIRA": return String(localized: "LIRA")
-    case "RRIF": return String(localized: "RRIF")
-    case "NONREG": return String(localized: "NONREG")
-    case "MARGIN": return String(localized: "MARGIN")
-    case "CRYPTO": return String(localized: "CRYPTO")
-    case "CASH": return String(localized: "CASH")
-    case "OTHER": return String(localized: "OTHER")
-    default: return type
-    }
   }
 }
 

@@ -347,11 +347,6 @@
 "RESP" = "REEE";
 "LIRA" = "CRI";
 "RRIF" = "FERR";
-"NONREG" = "Non enregistré";
-"MARGIN" = "Marge";
-"CRYPTO" = "Crypto";
-"CASH" = "Espèces";
-"OTHER" = "Autre";
 
 /* Transaction sheet */
 "Edit transaction" = "Modifier l’opération";
@@ -569,7 +564,7 @@
 "System follows your Mac's Light or Dark setting. The menu bar panel keeps the colours of your MarketPulse terminal theme." = "Système suit le réglage Clair ou Sombre de votre Mac. Le panneau de la barre des menus garde les couleurs de votre thème de terminal MarketPulse.";
 "Each account keeps its own currency. Totals and charts are converted to this one." = "Chaque compte garde sa propre devise. Les totaux et graphiques sont convertis dans celle-ci.";
 "Default account" = "Compte par défaut";
-"“%@” doesn't match an active account." = "« %@ » ne correspond à aucun compte actif.";
+"“%@” doesn't match an active account." = "« %@ » ne correspond à aucun compte actif.";
 "Chosen first when you record a transaction." = "Choisi d’office quand vous inscrivez une opération.";
 "Privacy mode shows percentages but hides dollar amounts, here and in the menu bar." = "Le mode confidentialité affiche les pourcentages mais masque les montants en dollars, ici et dans la barre des menus.";
 "Settings file" = "Fichier de réglages";

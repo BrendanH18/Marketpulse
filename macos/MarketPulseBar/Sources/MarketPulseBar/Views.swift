@@ -225,7 +225,7 @@ struct Dashboard: View {
                     ForEach(status.accounts) { account in
                         HStack {
                             Text(account.name).lineLimit(1)
-                            Text(account.type).foregroundStyle(palette.muted).font(.system(size: 10, design: .monospaced))
+                            Text(DesktopAccount.typeLabel(account.type)).foregroundStyle(palette.muted).font(.system(size: 10, design: .monospaced))
                             Spacer()
                             Text(Format.money(account.value, status.base, privacy: status.privacy, decimals: 0)).monospacedDigit()
                             Text(Format.pct(account.dayChangePct)).foregroundStyle(palette.trend(account.dayChangePct)).frame(width: 64, alignment: .trailing).monospacedDigit()

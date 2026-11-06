@@ -686,8 +686,11 @@ struct RebalanceRow: Decodable, Identifiable {
   let drift: Double
   /// Base currency to buy (+) or sell (−) to reach the target. A suggestion only.
   let delta: Double
-  /// `label` (the engine's English asset class) in the user's language.
-  var localizedLabel: String { Loc.backend(label) }
+  /// `label` (the engine's English asset class) in the user's language. Found by `bucket`,
+  /// since the engine titles a target class it holds nothing of from its key ("Etf").
+  var localizedLabel: String {
+    AssetClassOption.all.first { $0.key == bucket }?.localizedLabel ?? Loc.backend(label)
+  }
 }
 
 /// A symbol's saved details (`marketpulse asset list`).

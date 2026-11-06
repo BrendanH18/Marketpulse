@@ -385,7 +385,7 @@ private struct DataSettings: View {
                 Button("Unarchive") { model.unarchiveAccount(account) }.disabled(!model.canEdit)
               } label: {
                 Text(account.name)
-                Text(AccountTypeName.label(account.type))
+                Text(DesktopAccount.typeLabel(account.type))
               }
             }
           }
