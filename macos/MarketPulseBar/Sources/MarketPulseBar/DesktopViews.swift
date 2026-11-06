@@ -1614,7 +1614,7 @@ private struct AutomationWorkspace: View {
             String(localized: "Backend"),
             model.desktop?.backend.map { "MarketPulse \($0.version) · Python \($0.python)" }
               ?? String(localized: "Version unavailable until the first refresh"))
-          aboutRow(String(localized: "Runs"), CLI.resolved.source.rawValue)
+          aboutRow(String(localized: "Runs"), CLI.resolved.source.label)
           Text(CLI.path).font(.system(size: 11, design: .monospaced)).foregroundStyle(Studio.muted)
             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }

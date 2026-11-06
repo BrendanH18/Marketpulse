@@ -62,7 +62,7 @@ struct WorkspaceCommands: View {
 
     var body: some View {
         ForEach(Array(Workspace.allCases.enumerated()), id: \.element) { index, workspace in
-            Button(Self.title(workspace)) { model.showWorkspace(workspace) }
+            Button(workspace.title) { model.showWorkspace(workspace) }
                 .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
         }
         Divider()
@@ -70,21 +70,6 @@ struct WorkspaceCommands: View {
             model.togglePrivacy()
         }
         .keyboardShortcut("h", modifiers: [.command, .shift]).disabled(!model.canEdit)
-    }
-
-    /// The menu item's name; `rawValue` is the workspace's English identifier.
-    static func title(_ workspace: Workspace) -> String {
-        switch workspace {
-        case .overview: String(localized: "Overview")
-        case .holdings: String(localized: "Holdings")
-        case .allocation: String(localized: "Allocation")
-        case .activity: String(localized: "Activity")
-        case .accounts: String(localized: "Accounts")
-        case .watchlist: String(localized: "Watchlist")
-        case .income: String(localized: "Income")
-        case .tax: String(localized: "Tax")
-        case .automation: String(localized: "Automation")
-        }
     }
 }
 
