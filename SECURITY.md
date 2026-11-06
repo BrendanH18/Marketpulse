@@ -30,7 +30,8 @@ The signature shows that the app hasn't changed since it was built, not who buil
 Trust comes from how releases are produced instead:
 
 - **Built only by CI, from a tag.** Pushing a `v*` tag runs the
-  [release workflow](.github/workflows/release.yml) on GitHub-hosted runners. It
+  [release workflow](.github/workflows/release.yml) on Namespace runners (the
+  Intel app's final check runs on a GitHub-hosted Intel Mac, which Namespace lacks). It
   refuses a tag that doesn't match the package version, runs the full CI checks,
   builds the wheel, sdist, and the arm64 and x86_64 apps from the tagged commit, and
   writes `SHA256SUMS`. Release builds don't use caches from other builds, and the
