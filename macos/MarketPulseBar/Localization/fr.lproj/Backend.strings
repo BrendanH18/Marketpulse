@@ -1,0 +1,4 @@
+/* French for fixed English text the engine sends over the desktop bridge (tax notes,
+   disposition tags, asset classes, backup reasons). The app looks these up with
+   `Loc.backend(_:)`; text missing here shows in English. Parameterized messages use codes
+   instead (see desktop.py and Localization.swift). */

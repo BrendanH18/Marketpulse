@@ -1,0 +1,18 @@
+/* French (Canada) strings for MarketPulse. Keys are the English text exactly as the Swift
+   source writes it, with each interpolation as a format specifier: %@ for text, dates and
+   views, %lld for whole numbers, %lf for decimals. See CONTRIBUTING.md › Translating the app.
+   `uv run --locked python scripts/check_localization.py` checks this file against the source. */
+
+/* ==== DesktopViews.swift ==== */
+
+
+/* ==== DesktopForms.swift, SettingsWindow.swift ==== */
+
+
+/* ==== Views.swift, StatusModel.swift, PortfolioWindowController.swift, Studio.swift, Accessibility.swift, Models.swift, Services.swift, UpdateCheck.swift ==== */
+
+
+/* ==== DesktopModels.swift, Localization.swift ==== */
+
+
+/* ==== end ==== */
