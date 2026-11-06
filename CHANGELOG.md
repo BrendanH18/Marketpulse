@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The Mac app is available in French (Canada)
+  ([#46](https://github.com/BrendanH18/Marketpulse/issues/46)). The desktop bridge adds
+  stable codes for the engine's messages so the app can word them in French: `warning_items`
+  next to the snapshot's `warnings`, and `code` and `args` on tax report and import preview
+  `issues`. These are additive; the bridge stays at version 1, `status --json` is unchanged,
+  and the CLI and the English text in the bridge read exactly as before.
 - An optional fallback quote provider for when Yahoo can't be reached
   ([#49](https://github.com/BrendanH18/Marketpulse/issues/49)): Alpha Vantage, whose free
   tier covers the TSX, with a key you get yourself. Set it with `marketpulse provider key

@@ -11,7 +11,7 @@ enum CLIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .failed(let message): return message.trimmingCharacters(in: .whitespacesAndNewlines)
-        case .launch(let message): return "Couldn't run marketpulse: \(message)"
+        case .launch(let message): return String(localized: "Couldn't run marketpulse: \(message)")
         }
     }
 }
@@ -27,6 +27,16 @@ enum CLI {
         case bundled = "Bundled with the app"
         case installer = "Installed CLI"
         case path = "marketpulse on PATH"
+
+        /// What Settings › About shows. `rawValue` stays English.
+        var label: String {
+            switch self {
+            case .override: String(localized: "MARKETPULSE_CLI override")
+            case .bundled: String(localized: "Bundled with the app")
+            case .installer: String(localized: "Installed CLI")
+            case .path: String(localized: "marketpulse on PATH")
+            }
+        }
     }
 
     static var resolved: (path: String, source: Source) {
@@ -118,7 +128,11 @@ enum CLI {
                     continuation.resume(returning: data)
                 } else {
                     let stderrText = String(data: errData, encoding: .utf8) ?? ""
-                    let message = stderrText.isEmpty ? "MarketPulse exited with status \(process.terminationStatus). If a refresh timed out, try again." : stderrText
+                    let status = Int(process.terminationStatus)
+                    let message =
+                        stderrText.isEmpty
+                        ? String(localized: "MarketPulse exited with status \(status). If a refresh timed out, try again.")
+                        : stderrText
                     continuation.resume(throwing: CLIError.failed(message))
                 }
             }

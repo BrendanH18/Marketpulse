@@ -139,6 +139,73 @@ The Swift app consumes the CLI's JSON status output.
 - Update user docs for changed commands or behavior. Avoid unrelated rewrites
   in a focused fix.
 
+## Translating the app
+
+The Mac app is in English and French (Canada). The CLI and TUI are English only.
+
+**Where the strings live.** `macos/MarketPulseBar/Localization/<lang>.lproj/` holds two
+tables. When the app is assembled, they're copied into `Contents/Resources`, so they load
+from `Bundle.main`. Don't use SwiftPM resources (`Bundle.module`): an app that can't find its
+resource bundle crashes at launch.
+
+- `Localizable.strings`: the app's own text. Each key is the English text exactly as the
+  Swift source writes it.
+- `Backend.strings`: fixed English text the engine sends over the bridge, such as tax notes,
+  disposition tags and asset classes. The app looks these up with `Loc.backend(_:)`, and
+  `desktop.BACKEND_STRINGS` lists them.
+
+English is the development language. `en.lproj` stays empty, and the source text is the
+English.
+
+**Writing a string in Swift**
+
+- SwiftUI localizes literals by itself. `Text("Net worth")`, `Button("Save")`,
+  `.help("…")`, `.accessibilityLabel("…")`, `Toggle("…")` and the like need only an entry
+  in each table.
+- A `String` that you build and pass along is shown as-is. Localize it where it's written,
+  with `String(localized: "Net worth")`. That covers model properties, helpers that return
+  `String`, and the arguments of the app's own views that take `String`. A ternary of
+  literals, `Text(flag ? "A" : "B")`, resolves to `String`, so localize each branch.
+- Write one key per sentence. Don't stitch translated fragments together; word order
+  differs between languages. Use interpolation: `String(localized: "\(count) cached prices")`.
+- In the key, an interpolation becomes a format specifier: `%@` for text, dates and views,
+  `%lld` for `Int`, and `%lf` for `Double`. A literal `%` in a string that also interpolates
+  becomes `%%`. Without an interpolation it stays `%`.
+- Format numbers, money and dates with the user's locale: `Format.money`, `.formatted()`, or
+  `String(format:locale:)` with `.current`. Don't use a bare `String(format:)`.
+- Never localize text the app sends to the CLI, compares with engine values (`"BUY"`,
+  `"TFSA"`), or stores as an identifier. Translate only the label you display for it.
+
+**Checking.** Run `uv run --locked python scripts/check_localization.py` (the test suite runs
+it too). It finds the literals the source passes to localizing calls and checks four things:
+
+- every one has an entry in each translation;
+- each translation keeps its key's format specifiers;
+- no key is translated twice with different text;
+- no translation is empty.
+
+It can't see a string that reaches the screen without a lookup, such as a `String`
+variable given to `Text`. To catch those, open the QA app with the system language set to
+French (QA item 28), or launch it with `-AppleLanguages "(fr)"`. Add
+`-NSShowNonLocalizedStrings YES` to see looked-up keys that are missing from the table; they
+show in capitals.
+
+**French style (fr-CA)**
+
+- Use the Canadian terms: CELI (TFSA), REER (RRSP), CELIAPP (FHSA), FERR (RRIF), compte non
+  enregistré (taxable), PBR (prix de base rajusté, ACB), perte apparente (superficial loss),
+  gain en capital, droits de cotisation (contribution room), opération (transaction),
+  placement, titre, portefeuille, rendement, valeur nette.
+- Use sentence case. Put a non-breaking space (U+00A0) before `:` and inside « ». There's no
+  space before `?`, `!` or `;`.
+- Keep translations short. French usually runs about 20% longer, and some labels sit in
+  fixed-width columns.
+- Don't translate MarketPulse, ticker symbols, currency codes, keyboard shortcuts, or
+  commands shown for the terminal.
+
+To add a language, create `<lang>.lproj/` with both tables. The app picks it up through
+`CFBundleLocalizations`, which `menubar.localizations()` builds from the folders.
+
 ## Pull requests
 
 Use a descriptive title and explain the problem, resulting behavior, and checks

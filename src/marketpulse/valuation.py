@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from .ledger import Holding, LedgerState
-from .models import Account, Asset, AssetClass, AssetKind, FxRates, Quote
+from .models import Account, Asset, AssetClass, AssetKind, FxRates, MessageArgs, Quote
 
 
 @dataclass
@@ -123,6 +123,8 @@ class PortfolioView:
     income_ytd: float = 0.0
     fees_total: float = 0.0
     excluded: list[str] = field(default_factory=list)
+    # `excluded` for the Mac app, in the same order: a code naming each entry and its values.
+    excluded_items: list[tuple[str, MessageArgs]] = field(default_factory=list)
     # Archived accounts that still hold something; kept out of the totals above.
     archived_with_value: list[str] = field(default_factory=list)
     archived_value: float = 0.0  # what they hold, in base currency (priced parts only)
@@ -130,6 +132,11 @@ class PortfolioView:
     by_class: list[Breakdown] = field(default_factory=list)
     by_currency: list[Breakdown] = field(default_factory=list)
     as_of: datetime = field(default_factory=datetime.now)
+
+    def exclude(self, text: str, code: str, **args: str) -> None:
+        """Leave something out of the totals, saying what (`text`, English) and why (`code`)."""
+        self.excluded.append(text)
+        self.excluded_items.append((code, dict(args)))
 
     @property
     def value_for_returns(self) -> float:
@@ -278,7 +285,9 @@ def build_view(
         if hidden:
             # Out of totals but in returns; a value we can't price must not count as zero there.
             if position.value_base is None:
-                view.excluded.append(f"{h.symbol} in archived {acct.name}")
+                view.exclude(
+                    f"{h.symbol} in archived {acct.name}", "archived_holding", symbol=h.symbol, account=acct.name
+                )
             else:
                 view.archived_value += position.value_base
         else:
@@ -298,7 +307,7 @@ def build_view(
 
     for p in view.positions:
         if not p.priced:
-            view.excluded.append(p.symbol)
+            view.exclude(p.symbol, "unpriced", symbol=p.symbol)
             continue
         value, book, day = p.value_base or 0.0, p.book_base or 0.0, p.day_change_base or 0.0
         view.net_worth += value
@@ -317,12 +326,17 @@ def build_view(
             if round(amount, 2):
                 archived_with_value.add(cash_acct.name)
                 if amount_base is None:
-                    view.excluded.append(f"{cash_acct.name} cash ({ccy}, archived)")
+                    view.exclude(
+                        f"{cash_acct.name} cash ({ccy}, archived)",
+                        "archived_cash",
+                        account=cash_acct.name,
+                        currency=ccy,
+                    )
             view.archived_value += amount_base or 0.0
             continue
         view.cash.append(CashView(cash_acct, ccy, amount, amount_base))
         if amount_base is None:
-            view.excluded.append(f"{cash_acct.name} cash ({ccy})")
+            view.exclude(f"{cash_acct.name} cash ({ccy})", "unconverted_cash", account=cash_acct.name, currency=ccy)
             continue
         view.net_worth += amount_base
         view.cash_total += amount_base

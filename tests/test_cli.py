@@ -800,7 +800,15 @@ def test_desktop_import_reports_profile_issues_and_duplicates(cli, store):
     cli("accounts", "add", "WS TFSA", "-t", "TFSA")
     first = json.loads(cli("desktop", "import", "--profile", "wealthsimple", "--", str(WEALTHSIMPLE)).output)
     assert (first["profile"], first["profile_label"], first["added"]) == ("wealthsimple", "Wealthsimple", 7)
-    assert first["issues"][0] == {"line": 6, "field": "type", "value": "NRT", "reason": first["skipped"][0][1]}
+    assert first["issues"][0] == {
+        "line": 6,
+        "field": "type",
+        "value": "NRT",
+        "reason": first["skipped"][0][1],
+        # The app translates the reason by its code; the English stays as it was.
+        "code": "not_imported",
+        "args": {"value": "NRT"},
+    }
     again = json.loads(cli("desktop", "import", "--dry-run", "--", str(WEALTHSIMPLE)).output)
     assert again["duplicates"] == 7
     assert again["duplicate_rows"][0] == {"line": 2, "summary": "2025-01-02 DEPOSIT 5,000.00 CAD · WS TFSA"}

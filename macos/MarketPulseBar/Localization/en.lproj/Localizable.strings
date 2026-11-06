@@ -1,0 +1,3 @@
+/* English is the development language: the Swift source holds the English text and is
+   its own key, so this table stays empty. It exists so macOS lists English as a
+   localization and picks it for English (and any other unsupported) system language. */

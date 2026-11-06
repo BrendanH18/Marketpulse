@@ -62,12 +62,14 @@ struct WorkspaceCommands: View {
 
     var body: some View {
         ForEach(Array(Workspace.allCases.enumerated()), id: \.element) { index, workspace in
-            Button(workspace.rawValue) { model.showWorkspace(workspace) }
+            Button(workspace.title) { model.showWorkspace(workspace) }
                 .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
         }
         Divider()
-        Button((model.status?.privacy ?? false) ? "Show Amounts" : "Hide Amounts") { model.togglePrivacy() }
-            .keyboardShortcut("h", modifiers: [.command, .shift]).disabled(!model.canEdit)
+        Button((model.status?.privacy ?? false) ? String(localized: "Show Amounts") : String(localized: "Hide Amounts")) {
+            model.togglePrivacy()
+        }
+        .keyboardShortcut("h", modifiers: [.command, .shift]).disabled(!model.canEdit)
     }
 }
 
@@ -116,9 +118,9 @@ struct PopoverView: View {
         VStack(alignment: .leading, spacing: 12) {
             TopBar(model: model, palette: p)
             if let status = model.status {
-                Dashboard(status: status, palette: p)
+                Dashboard(status: status, palette: p, alerts: model.desktop?.alerts ?? [])
             } else if let error = model.errorMessage {
-                Card(title: "can't reach marketpulse", palette: p) {
+                Card(title: String(localized: "can't reach marketpulse"), palette: p) {
                     Text(error).foregroundStyle(p.down).fixedSize(horizontal: false, vertical: true)
                     Text("Run `marketpulse menubar install` again from a terminal.").foregroundStyle(p.muted)
                 }
@@ -153,7 +155,7 @@ struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("MARKETPULSE").font(.system(size: 10, weight: .bold, design: .monospaced)).tracking(2).foregroundStyle(palette.accent)
+            Text(verbatim: "MARKETPULSE").font(.system(size: 10, weight: .bold, design: .monospaced)).tracking(2).foregroundStyle(palette.accent)
             if model.demo {
                 Text("DEMO · FICTIONAL").font(.system(size: 10, design: .monospaced)).foregroundStyle(palette.muted)
             }
@@ -176,10 +178,10 @@ struct MarketDot: View {
 
     var body: some View {
         let (label, color): (String, Color) = switch state {
-        case "REGULAR": ("open", palette.up)
-        case "PRE": ("pre", palette.accent)
-        case "POST": ("after hours", palette.accent)
-        default: ("closed", palette.muted)
+        case "REGULAR": (String(localized: "open"), palette.up)
+        case "PRE": (String(localized: "pre"), palette.accent)
+        case "POST": (String(localized: "after hours"), palette.accent)
+        default: (String(localized: "closed"), palette.muted)
         }
         HStack(spacing: 4) {
             Circle().fill(color).frame(width: 6, height: 6).accessibilityHidden(true)
@@ -191,6 +193,14 @@ struct MarketDot: View {
 struct Dashboard: View {
     let status: StatusPayload
     let palette: Palette
+    /// The portfolio window's alerts, which carry what `status --json` words in English.
+    var alerts: [DesktopAlert] = []
+
+    /// An alert as the user's language words it; in English, as the engine sent it.
+    private func summary(_ alert: AlertRow) -> String {
+        if Loc.english { return alert.summary }
+        return alerts.first { $0.symbol == alert.symbol && $0.description == alert.summary }?.localizedDescription ?? alert.summary
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -214,16 +224,16 @@ struct Dashboard: View {
             }
 
             HStack(spacing: 10) {
-                Stat(label: "UNREALIZED", value: status.privacy ? Format.pct(status.unrealizedPct) : Format.money(status.unrealized, status.base, privacy: false, decimals: 0, sign: true), color: palette.trend(status.unrealized), palette: palette)
-                Stat(label: "INCOME YTD", value: Format.money(status.incomeYtd, status.base, privacy: status.privacy, decimals: 0), color: palette.up, palette: palette)
+                Stat(label: String(localized: "UNREALIZED"), value: status.privacy ? Format.pct(status.unrealizedPct) : Format.money(status.unrealized, status.base, privacy: false, decimals: 0, sign: true), color: palette.trend(status.unrealized), palette: palette)
+                Stat(label: String(localized: "INCOME YTD"), value: Format.money(status.incomeYtd, status.base, privacy: status.privacy, decimals: 0), color: palette.up, palette: palette)
             }
 
             if !status.accounts.isEmpty {
-                Card(title: "accounts", palette: palette) {
+                Card(title: String(localized: "accounts"), palette: palette) {
                     ForEach(status.accounts) { account in
                         HStack {
                             Text(account.name).lineLimit(1)
-                            Text(account.type).foregroundStyle(palette.muted).font(.system(size: 10, design: .monospaced))
+                            Text(DesktopAccount.typeLabel(account.type)).foregroundStyle(palette.muted).font(.system(size: 10, design: .monospaced))
                             Spacer()
                             Text(Format.money(account.value, status.base, privacy: status.privacy, decimals: 0)).monospacedDigit()
                             Text(Format.pct(account.dayChangePct)).foregroundStyle(palette.trend(account.dayChangePct)).frame(width: 64, alignment: .trailing).monospacedDigit()
@@ -233,7 +243,7 @@ struct Dashboard: View {
             }
 
             if !status.movers.isEmpty {
-                Card(title: "movers", palette: palette) {
+                Card(title: String(localized: "movers"), palette: palette) {
                     ForEach(status.movers) { mover in
                         HStack {
                             Text(mover.symbol).fontWeight(.semibold)
@@ -246,7 +256,7 @@ struct Dashboard: View {
             }
 
             if !status.watchlist.isEmpty {
-                Card(title: "watchlist", palette: palette) {
+                Card(title: String(localized: "watchlist"), palette: palette) {
                     ForEach(status.watchlist.prefix(8)) { row in
                         HStack(spacing: 8) {
                             Text(row.symbol).fontWeight(.semibold).frame(width: 72, alignment: .leading).lineLimit(1)
@@ -260,12 +270,12 @@ struct Dashboard: View {
             }
 
             if !status.alerts.isEmpty {
-                Card(title: "alerts", palette: palette) {
+                Card(title: String(localized: "alerts"), palette: palette) {
                     ForEach(status.alerts) { alert in
                         HStack {
                             Image(systemName: alert.triggered ? "bell.badge.fill" : "bell").foregroundStyle(alert.triggered ? palette.accent : palette.muted)
-                                .accessibilityLabel(alert.triggered ? "Triggered" : "Watching")
-                            Text(alert.summary)
+                                .accessibilityLabel(alert.triggered ? String(localized: "Triggered") : String(localized: "Watching"))
+                            Text(summary(alert))
                             Spacer()
                         }
                     }
@@ -354,18 +364,22 @@ struct ActionBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            BarButton(symbol: "macwindow", label: "Portfolio", hint: nil, name: "Open portfolio", palette: palette) {
+            BarButton(
+                symbol: "macwindow", label: String(localized: "Portfolio"), hint: nil,
+                name: String(localized: "Open portfolio"), palette: palette
+            ) {
                 model.showPortfolio()
             }
-            BarButton(symbol: "terminal", label: nil, hint: nil, name: "Open terminal", palette: palette) { model.openTUI() }
-            BarButton(symbol: "arrow.clockwise", label: nil, hint: nil, name: "Refresh", palette: palette) { model.refresh() }
+            BarButton(symbol: "terminal", label: nil, hint: nil, name: String(localized: "Open terminal"), palette: palette) { model.openTUI() }
+            BarButton(symbol: "arrow.clockwise", label: nil, hint: nil, name: String(localized: "Refresh"), palette: palette) { model.refresh() }
             BarButton(
                 symbol: (model.status?.privacy ?? false) ? "eye.slash" : "eye", label: nil, hint: nil,
-                name: (model.status?.privacy ?? false) ? "Show amounts" : "Hide amounts", palette: palette
+                name: (model.status?.privacy ?? false) ? String(localized: "Show amounts") : String(localized: "Hide amounts"),
+                palette: palette
             ) { model.togglePrivacy() }
-            BarButton(symbol: "gearshape", label: nil, hint: nil, name: "Settings", palette: palette) { model.showSettingsWindow() }
+            BarButton(symbol: "gearshape", label: nil, hint: nil, name: String(localized: "Settings"), palette: palette) { model.showSettingsWindow() }
             Spacer()
-            BarButton(symbol: "power", label: nil, hint: nil, name: "Quit MarketPulse", palette: palette) {
+            BarButton(symbol: "power", label: nil, hint: nil, name: String(localized: "Quit MarketPulse"), palette: palette) {
                 NSApplication.shared.terminate(nil)
             }
         }

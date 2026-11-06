@@ -44,7 +44,14 @@ enum AppAppearance: String, CaseIterable, Identifiable {
   case system, light, dark
   static let key = "appearance"
   var id: String { rawValue }
-  var label: String { rawValue.capitalized }
+  /// Shown in Settings; `rawValue` is what's stored.
+  var label: String {
+    switch self {
+    case .system: String(localized: "System")
+    case .light: String(localized: "Light")
+    case .dark: String(localized: "Dark")
+    }
+  }
 
   static var saved: AppAppearance {
     UserDefaults.standard.string(forKey: key).flatMap(AppAppearance.init) ?? .system

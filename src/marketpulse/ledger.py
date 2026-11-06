@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from .models import EPSILON, Account, Transaction, TxnType, guess_currency
+from .models import EPSILON, Account, MessageArgs, Transaction, TxnType, guess_currency
 
 
 @dataclass
@@ -69,7 +69,11 @@ class CashFlow:
 class LedgerIssue:
     txn_id: int | None
     date: str
-    message: str
+    message: str  # English, as the CLI shows it
+    # For the Mac app, which words the message in the user's language: a stable code naming
+    # it, and the values that fill it in. "" for a message without one.
+    code: str = ""
+    args: MessageArgs = field(default_factory=dict)
 
 
 @dataclass
@@ -179,7 +183,13 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
         held = h.quantity if h else 0.0
         if txn.quantity > held + EPSILON:
             state.issues.append(
-                LedgerIssue(txn.id, txn.date, f"Sell of {txn.quantity:,.4f} {txn.symbol} exceeds {held:,.4f} held")
+                LedgerIssue(
+                    txn.id,
+                    txn.date,
+                    f"Sell of {txn.quantity:,.4f} {txn.symbol} exceeds {held:,.4f} held",
+                    "sell_exceeds_held",
+                    {"symbol": txn.symbol, "quantity": txn.quantity, "held": held},
+                )
             )
         if h is None or held <= EPSILON:
             # Nothing to sell. (Also covers a sub-EPSILON "sell" of a
@@ -201,7 +211,15 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
         h = state.holdings.get((acct, txn.symbol))
         if h is None or h.quantity <= EPSILON:
             # Most likely the wrong account or date: flag it rather than drop it silently.
-            state.issues.append(LedgerIssue(txn.id, txn.date, f"Split of {txn.symbol} with nothing held"))
+            state.issues.append(
+                LedgerIssue(
+                    txn.id,
+                    txn.date,
+                    f"Split of {txn.symbol} with nothing held",
+                    "split_nothing_held",
+                    {"symbol": txn.symbol},
+                )
+            )
             return
         h.quantity *= txn.ratio
 
@@ -219,13 +237,25 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
     elif t is TxnType.TRANSFER:
         h = state.holdings.get((acct, txn.symbol))
         if h is None or h.quantity <= EPSILON or txn.target_account_id is None:
-            state.issues.append(LedgerIssue(txn.id, txn.date, f"Transfer of {txn.symbol} with nothing held"))
+            state.issues.append(
+                LedgerIssue(
+                    txn.id,
+                    txn.date,
+                    f"Transfer of {txn.symbol} with nothing held",
+                    "transfer_nothing_held",
+                    {"symbol": txn.symbol},
+                )
+            )
             return
         if txn.quantity > h.quantity + EPSILON:
             # Like a sale, only what's held moves; flag it so the shortfall isn't silent.
             state.issues.append(
                 LedgerIssue(
-                    txn.id, txn.date, f"Transfer of {txn.quantity:,.4f} {txn.symbol} exceeds {h.quantity:,.4f} held"
+                    txn.id,
+                    txn.date,
+                    f"Transfer of {txn.quantity:,.4f} {txn.symbol} exceeds {h.quantity:,.4f} held",
+                    "transfer_exceeds_held",
+                    {"symbol": txn.symbol, "quantity": txn.quantity, "held": h.quantity},
                 )
             )
         qty = min(txn.quantity, h.quantity)

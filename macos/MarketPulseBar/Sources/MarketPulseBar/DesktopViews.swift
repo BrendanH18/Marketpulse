@@ -13,6 +13,20 @@ enum Workspace: String, CaseIterable, Identifiable {
   case tax = "Tax"
   case automation = "Automation"
   var id: String { rawValue }
+  /// The name shown in the sidebar, header and menus. `rawValue` stays English: it's an identifier.
+  var title: String {
+    switch self {
+    case .overview: return String(localized: "Overview")
+    case .holdings: return String(localized: "Holdings")
+    case .allocation: return String(localized: "Allocation")
+    case .activity: return String(localized: "Activity")
+    case .accounts: return String(localized: "Accounts")
+    case .watchlist: return String(localized: "Watchlist")
+    case .income: return String(localized: "Income")
+    case .tax: return String(localized: "Tax")
+    case .automation: return String(localized: "Automation")
+    }
+  }
   var icon: String {
     switch self {
     case .overview: return "square.grid.2x2"
@@ -28,15 +42,15 @@ enum Workspace: String, CaseIterable, Identifiable {
   }
   var subtitle: String {
     switch self {
-    case .overview: return "A little perspective on your portfolio."
-    case .holdings: return "Every position, in one place."
-    case .allocation: return "Your mix, against the one you're aiming for."
-    case .activity: return "The ledger behind your portfolio."
-    case .accounts: return "Your accounts. Your bigger picture."
-    case .watchlist: return "Keep an eye on what comes next."
-    case .income: return "Distributions and interest you've recorded."
-    case .tax: return "Capital gains, superficial losses, and contribution room."
-    case .automation: return "The small routines that keep things up to date."
+    case .overview: return String(localized: "A little perspective on your portfolio.")
+    case .holdings: return String(localized: "Every position, in one place.")
+    case .allocation: return String(localized: "Your mix, against the one you're aiming for.")
+    case .activity: return String(localized: "The ledger behind your portfolio.")
+    case .accounts: return String(localized: "Your accounts. Your bigger picture.")
+    case .watchlist: return String(localized: "Keep an eye on what comes next.")
+    case .income: return String(localized: "Distributions and interest you've recorded.")
+    case .tax: return String(localized: "Capital gains, superficial losses, and contribution room.")
+    case .automation: return String(localized: "The small routines that keep things up to date.")
     }
   }
 }
@@ -90,7 +104,7 @@ struct PortfolioWindow: View {
         if let payload = model.desktop {
           if payload.demo {
             notice(
-              "Demo portfolio · Fictional data · Read-only", icon: "sparkles", color: Studio.mint
+              String(localized: "Demo portfolio · Fictional data · Read-only"), icon: "sparkles", color: Studio.mint
             ).overlay(alignment: .trailing) {
               if !model.demoOnly {
                 Button("Leave demo") { model.leaveDemo() }.controlSize(.small).disabled(model.saving)
@@ -100,12 +114,12 @@ struct PortfolioWindow: View {
           }
           if payload.status.stale {
             notice(
-              "Cached quotes are in use. Values may be out of date.", icon: "wifi.exclamationmark",
+              String(localized: "Cached quotes are in use. Values may be out of date."), icon: "wifi.exclamationmark",
               color: Studio.warn)
           }
           if !payload.warnings.isEmpty {
             notice(
-              payload.warnings.joined(separator: " · "), icon: "exclamationmark.circle",
+              payload.localizedWarnings.joined(separator: " · "), icon: "exclamationmark.circle",
               color: Studio.warn)
           }
           workspace(payload)
@@ -137,7 +151,8 @@ struct PortfolioWindow: View {
           Image(systemName: (model.status?.privacy ?? false) ? "eye.slash" : "eye")
         }
         .help("Toggle privacy mode")
-        .accessibilityLabel((model.status?.privacy ?? false) ? "Show amounts" : "Hide amounts")
+        .accessibilityLabel(
+          (model.status?.privacy ?? false) ? String(localized: "Show amounts") : String(localized: "Hide amounts"))
         .disabled(!model.canEdit)
         Button {
           model.refresh()
@@ -229,7 +244,7 @@ struct PortfolioWindow: View {
       HStack(spacing: 10) {
         Image(systemName: "waveform.path.ecg").font(.system(size: 24)).foregroundStyle(Studio.mint)
         VStack(alignment: .leading, spacing: 2) {
-          Text("MarketPulse").font(.system(size: 17, weight: .semibold))
+          Text(verbatim: "MarketPulse").font(.system(size: 17, weight: .semibold))
           Text("YOUR PERSONAL LEDGER").font(.system(size: 8, weight: .medium)).tracking(1.4)
             .foregroundStyle(Studio.muted)
         }
@@ -239,7 +254,7 @@ struct PortfolioWindow: View {
         Studio.muted
       ).padding(.leading, 22)
       List(Workspace.allCases, selection: $draft.section) { item in
-        Label(item.rawValue, systemImage: item.icon).padding(.vertical, 7).tag(item)
+        Label(item.title, systemImage: item.icon).padding(.vertical, 7).tag(item)
       }.listStyle(.sidebar).scrollContentBackground(.hidden)
       Spacer()
       VStack(alignment: .leading, spacing: 14) {
@@ -268,9 +283,9 @@ struct PortfolioWindow: View {
   private var header: some View {
     HStack(alignment: .center) {
       VStack(alignment: .leading, spacing: 7) {
-        Text("PORTFOLIO / \((draft.section ?? .overview).rawValue.uppercased())")
+        Text("PORTFOLIO / \((draft.section ?? .overview).title.localizedUppercase)")
           .font(.system(size: 9, weight: .medium)).tracking(1.8).foregroundStyle(Studio.muted)
-        Text((draft.section ?? .overview).rawValue).font(.system(size: 28, weight: .semibold))
+        Text((draft.section ?? .overview).title).font(.system(size: 28, weight: .semibold))
         Text((draft.section ?? .overview).subtitle).font(.system(size: 12)).foregroundStyle(
           Studio.muted)
       }
@@ -279,7 +294,8 @@ struct PortfolioWindow: View {
         HStack {
           Image(systemName: "magnifyingglass").foregroundStyle(Studio.muted)
           TextField(
-            "Search \((draft.section ?? .holdings).rawValue.lowercased())", text: $draft.search
+            draft.section == .activity ? String(localized: "Search activity") : String(localized: "Search holdings"),
+            text: $draft.search
           ).textFieldStyle(.plain)
         }.padding(10).frame(width: 210).background(
           Studio.panel, in: RoundedRectangle(cornerRadius: 8))
@@ -340,7 +356,10 @@ struct PortfolioWindow: View {
         .accessibilityHidden(true)
       Text(
         model.loading
-          ? "Refreshing portfolio…" : model.saving ? "Saving…" : model.demo ? "Demo portfolio" : "Local ledger")
+          ? String(localized: "Refreshing portfolio…")
+          : model.saving
+            ? String(localized: "Saving…")
+            : model.demo ? String(localized: "Demo portfolio") : String(localized: "Local ledger"))
       if let date = model.lastUpdated {
         Text("· Updated \(date.formatted(date: .omitted, time: .shortened))")
       }
@@ -392,7 +411,7 @@ private struct Metric: View {
   var color: Color = Studio.text
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text(title.uppercased()).font(.system(size: 9, weight: .medium)).tracking(1.3)
+      Text(title.localizedUppercase).font(.system(size: 9, weight: .medium)).tracking(1.3)
         .foregroundStyle(Studio.muted)
       Text(value).font(.system(size: 25, weight: .medium)).monospacedDigit().foregroundStyle(color)
       Text(detail).font(.system(size: 10)).foregroundStyle(Studio.muted)
@@ -433,20 +452,22 @@ private struct OverviewWorkspace: View {
         }
         HStack(spacing: 14) {
           Metric(
-            title: "Net worth", value: Format.money(s.netWorth, s.base, privacy: s.privacy),
-            detail: "Across \(payload.accounts.count) accounts")
+            title: String(localized: "Net worth"), value: Format.money(s.netWorth, s.base, privacy: s.privacy),
+            detail: payload.accounts.count == 1
+              ? String(localized: "Across 1 account") : String(localized: "Across \(payload.accounts.count) accounts"))
           Metric(
-            title: "Today's change",
+            title: String(localized: "Today's change"),
             value: Format.money(s.dayChange, s.base, privacy: s.privacy, sign: true),
-            detail: Format.pct(s.dayChangePct) + " today", color: Studio.trend(s.dayChange))
+            detail: String(localized: "\(Format.pct(s.dayChangePct)) today"), color: Studio.trend(s.dayChange))
           Metric(
-            title: "Unrealized gain",
+            title: String(localized: "Unrealized gain"),
             value: Format.money(s.unrealized, s.base, privacy: s.privacy, sign: true),
-            detail: Format.pct(s.unrealizedPct) + " on cost", color: Studio.trend(s.unrealized))
+            detail: String(localized: "\(Format.pct(s.unrealizedPct)) on cost"), color: Studio.trend(s.unrealized))
         }.accessibilityElement(children: .contain)
-        Surface("Portfolio value", trailing: "\(s.base) · DAILY SNAPSHOTS") {
+        Surface(String(localized: "Portfolio value"), trailing: String(localized: "\(s.base) · DAILY SNAPSHOTS")) {
           HStack {
-            Text(s.privacy ? "Values hidden" : "The bigger picture").font(.system(size: 12))
+            Text(s.privacy ? String(localized: "Values hidden") : String(localized: "The bigger picture")).font(
+              .system(size: 12))
               .foregroundStyle(Studio.muted)
             Spacer()
             Picker("History range", selection: $draft.period) {
@@ -508,12 +529,12 @@ private struct OverviewWorkspace: View {
           }
         }
         HStack(alignment: .top, spacing: 20) {
-          Surface("Allocation", trailing: "BY ASSET CLASS") {
+          Surface(String(localized: "Allocation"), trailing: String(localized: "BY ASSET CLASS")) {
             if s.privacy || payload.allocation.isEmpty {
               Text(
                 s.privacy
-                  ? "Allocation values hidden"
-                  : "Your allocation will appear after your first transaction."
+                  ? String(localized: "Allocation values hidden")
+                  : String(localized: "Your allocation will appear after your first transaction.")
               ).foregroundStyle(Studio.muted).frame(height: 180)
             } else {
               HStack(spacing: 20) {
@@ -526,8 +547,8 @@ private struct OverviewWorkspace: View {
                       payload.allocation.firstIndex(where: { $0.id == b.id })! % Studio.colors.count
                     ]
                   )
-                  .accessibilityLabel(b.label)
-                  .accessibilityValue(String(format: "%.1f%%", b.weight))
+                  .accessibilityLabel(b.localizedLabel)
+                  .accessibilityValue(shownPercent(b.weight))
                 }.frame(width: 150, height: 150)
                   .accessibilityLabel("Allocation chart, \(payload.positions.count) positions")
                   .chartBackground { _ in
@@ -541,9 +562,9 @@ private struct OverviewWorkspace: View {
                     HStack {
                       Circle().fill(Studio.colors[i % Studio.colors.count]).frame(
                         width: 6, height: 6)
-                      Text(bucket.label).font(.system(size: 11))
+                      Text(bucket.localizedLabel).font(.system(size: 11))
                       Spacer()
-                      Text(String(format: "%.1f%%", bucket.weight)).font(.system(size: 11))
+                      Text(shownPercent(bucket.weight)).font(.system(size: 11))
                         .monospacedDigit().foregroundStyle(Studio.muted)
                     }.accessibilityElement(children: .combine)
                   }
@@ -551,7 +572,7 @@ private struct OverviewWorkspace: View {
               }.padding(.vertical, 10)
             }
           }
-          Surface("Your accounts", trailing: "\(payload.accounts.count) TOTAL") {
+          Surface(String(localized: "Your accounts"), trailing: String(localized: "\(payload.accounts.count) TOTAL")) {
             if payload.accounts.isEmpty {
               Button("Add your first account", action: newAccount).disabled(!canEdit)
             }
@@ -566,7 +587,8 @@ private struct OverviewWorkspace: View {
                   Text(account.name).font(.system(size: 12, weight: .medium))
                   Text(
                     account.institution.isEmpty
-                      ? account.type : "\(account.type) · \(account.institution)"
+                      ? DesktopAccount.typeLabel(account.type)
+                      : "\(DesktopAccount.typeLabel(account.type)) · \(account.institution)"
                   ).font(.system(size: 10)).foregroundStyle(Studio.muted)
                 }
                 Spacer()
@@ -577,7 +599,7 @@ private struct OverviewWorkspace: View {
             }
           }
         }
-        Surface("Recent activity", trailing: "YOUR RECORDED TRANSACTIONS") {
+        Surface(String(localized: "Recent activity"), trailing: String(localized: "YOUR RECORDED TRANSACTIONS")) {
           if payload.activity.isEmpty {
             Button("Record a transaction", action: newTransaction).disabled(
               !canEdit || payload.accounts.isEmpty)
@@ -592,7 +614,7 @@ private struct OverviewWorkspace: View {
               Text(accountName(t.accountId, payload)).font(.system(size: 11)).foregroundStyle(
                 Studio.muted)
               Spacer()
-              Text(t.date).font(.system(size: 10)).foregroundStyle(Studio.muted)
+              Text(shownDay(t.date)).font(.system(size: 10)).foregroundStyle(Studio.muted)
               Text(activityAmount(t, privacy: s.privacy)).font(.system(size: 12))
                 .monospacedDigit().foregroundStyle(activityColor(t))
                 .frame(width: 120, alignment: .trailing)
@@ -609,12 +631,25 @@ private struct OverviewWorkspace: View {
 private func chartDate(_ raw: String) -> Date {
   ISO8601DateFormatter().date(from: raw + "T12:00:00Z") ?? .now
 }
+/// A ledger day ("2026-11-05") in the user's date format, or as sent when it doesn't parse.
+private func shownDay(_ raw: String) -> String {
+  let parser = DateFormatter()
+  parser.locale = Locale(identifier: "en_US_POSIX")
+  parser.calendar = Calendar(identifier: .gregorian)
+  parser.dateFormat = "yyyy-MM-dd"
+  guard let date = parser.date(from: raw) else { return raw }
+  return date.formatted(date: .numeric, time: .omitted)
+}
+/// A percentage given out of 100 ("12.5"), in the user's format: "12.5%", "12,5 %".
+private func shownPercent(_ value: Double) -> String {
+  (value / 100).formatted(.percent.precision(.fractionLength(1)))
+}
 private func monthLabel(_ raw: String) -> String {
   guard let date = ISO8601DateFormatter().date(from: raw + "-15T12:00:00Z") else { return raw }
   return date.formatted(.dateTime.month(.abbreviated).year(.twoDigits))
 }
 private func accountName(_ id: Int, _ payload: DesktopPayload) -> String {
-  payload.accounts.first { $0.id == id }?.name ?? "Account #\(id)"
+  payload.accounts.first { $0.id == id }?.name ?? String(localized: "Account #\(id)")
 }
 /// Signed from the account's point of view: + money in, − money out. Splits show their ratio,
 /// and share-only entries (DRIP, transfers) carry no sign.
@@ -622,7 +657,8 @@ private func activityAmount(_ t: DesktopTransaction, privacy: Bool) -> String {
   if t.type == "SPLIT" { return t.ratio > 0 ? "×\(t.ratio.formatted())" : "—" }
   // Without a market price a transfer has no value to show, only what moved.
   if t.type == "TRANSFER" && t.price == 0 {
-    return privacy ? "\(Format.mask) units" : "\(t.quantity.formatted(.number.precision(.fractionLength(0...4)))) units"
+    let quantity = privacy ? Format.mask : t.quantity.formatted(.number.precision(.fractionLength(0...4)))
+    return String(localized: "\(quantity) units")
   }
   return Format.money(t.signedValue, t.currency, privacy: privacy, sign: t.direction != 0)
 }
@@ -665,13 +701,17 @@ private struct HoldingsWorkspace: View {
     var parts: [String] = []
     if p.stale {
       parts.append(
-        p.quoteAgeSeconds.map { "Cached price from \(BridgeDate.relative(Date(timeIntervalSinceNow: -$0)))" }
-          ?? "Cached price from the offline cache")
+        p.quoteAgeSeconds.map {
+          String(localized: "Cached price from \(BridgeDate.relative(Date(timeIntervalSinceNow: -$0)))")
+        } ?? String(localized: "Cached price from the offline cache"))
     }
     // Without a provider list there's no telling which is primary, so say nothing.
     if let source = p.quoteSource, !source.isEmpty, let primary = payload.primaryProvider, source != primary {
       let fallback = payload.providers?.first { $0.name == source }?.role == "fallback"
-      parts.append("Price from \(payload.providerLabel(source))\(fallback ? ", the fallback provider" : "")")
+      let label = payload.providerLabel(source)
+      parts.append(
+        fallback
+          ? String(localized: "Price from \(label), the fallback provider") : String(localized: "Price from \(label)"))
     }
     return parts.isEmpty ? nil : parts.joined(separator: ". ")
   }
@@ -688,7 +728,7 @@ private struct HoldingsWorkspace: View {
           Label("Add asset", systemImage: "plus")
         }.fixedSize().disabled(!canEdit || payload.accounts.isEmpty || payload.assets == nil)
           .help("Add something the market can't price: a GIC or bond valued by its interest, or an asset you value yourself.")
-        Button(draft.sortByValue ? "Sort: value ↓" : "Sort: symbol A–Z") {
+        Button(draft.sortByValue ? String(localized: "Sort: value ↓") : String(localized: "Sort: symbol A–Z")) {
           draft.sortByValue.toggle()
         }.buttonStyle(.bordered)
         Text("\(rows.count) positions").foregroundStyle(Studio.muted)
@@ -713,7 +753,7 @@ private struct HoldingsWorkspace: View {
         TableColumn("Price") { p in
           let shown = "\(Format.price(p.price)) \(p.currency)"
           let note = quoteNote(p)
-          Text("\(shown)\(p.stale ? " · cached" : "")")
+          Text(p.stale ? String(localized: "\(shown) · cached") : shown)
             .modifier(RowTint(Studio.muted)).monospacedDigit()
             .help(note ?? "")
             // Spoken in words, so a cached price never depends on the muted tint or the dot.
@@ -780,7 +820,9 @@ private struct AllocationWorkspace: View {
               .disabled(!canEdit)
           }
         } else {
-          Surface("Against your targets", trailing: "BY ASSET CLASS · \(s.base)") {
+          Surface(
+            String(localized: "Against your targets"), trailing: String(localized: "BY ASSET CLASS · \(s.base)")
+          ) {
             HStack {
               Text("Allocated: \(percent(payload.targets?.map(\.weight).reduce(0, +) ?? 0))")
                 .font(.system(size: 12)).foregroundStyle(Studio.muted)
@@ -808,16 +850,16 @@ private struct AllocationWorkspace: View {
   private var targetsGrid: some View {
     Grid(alignment: .trailing, horizontalSpacing: 18, verticalSpacing: 12) {
       GridRow {
-        heading("Class").gridColumnAlignment(.leading)
-        heading("Now")
-        heading("Target")
-        heading("Drift")
-        heading("To reach the target")
+        heading(String(localized: "Class")).gridColumnAlignment(.leading)
+        heading(String(localized: "Now"))
+        heading(String(localized: "Target"))
+        heading(String(localized: "Drift"))
+        heading(String(localized: "To reach the target"))
       }
       Divider().overlay(Studio.line).gridCellUnsizedAxes(.horizontal)
       ForEach(rows) { row in
         GridRow {
-          Text(row.label).fontWeight(.medium)
+          Text(row.localizedLabel).fontWeight(.medium)
           Text(percent(row.weight)).monospacedDigit()
           Text(row.target > 0 ? percent(row.target) : "—").monospacedDigit().foregroundStyle(Studio.muted)
           Text(drift(row.drift)).monospacedDigit()
@@ -830,18 +872,19 @@ private struct AllocationWorkspace: View {
   private func heading(_ text: String) -> some View {
     Text(text).font(.system(size: 10, weight: .medium)).foregroundStyle(Studio.muted)
   }
-  private func percent(_ value: Double) -> String {
-    value.formatted(.number.precision(.fractionLength(1))) + "%"
-  }
+  private func percent(_ value: Double) -> String { shownPercent(value) }
+  /// Percentage points, signed: "+2.5 pts".
   private func drift(_ value: Double) -> String {
-    (value > 0 ? "+" : "") + value.formatted(.number.precision(.fractionLength(1))) + " pts"
+    let points = value.formatted(
+      .number.precision(.fractionLength(1)).sign(strategy: .always(includingZero: false)))
+    return String(localized: "\(points) pts")
   }
   /// The amount to buy or sell, or nothing once it's within a rounding error.
   private func suggestion(_ row: RebalanceRow) -> String {
     if s.privacy { return Format.mask }
-    if abs(row.delta) < 1 { return "On target" }
+    if abs(row.delta) < 1 { return String(localized: "On target") }
     let amount = Format.money(abs(row.delta), s.base, privacy: false, decimals: 0)
-    return row.delta > 0 ? "Add \(amount)" : "Reduce by \(amount)"
+    return row.delta > 0 ? String(localized: "Add \(amount)") : String(localized: "Reduce by \(amount)")
   }
 }
 
@@ -856,7 +899,8 @@ private struct ActivityWorkspace: View {
     payload.activity.filter {
       (accountFilter == 0 || $0.accountId == accountFilter)
         && (search.isEmpty
-          || "\($0.symbol) \($0.type) \($0.note)".localizedCaseInsensitiveContains(search))
+          || "\($0.symbol) \($0.type) \(TransactionEntry.label($0.type)) \($0.note)"
+            .localizedCaseInsensitiveContains(search))
     }
   }
   var body: some View {
@@ -869,8 +913,8 @@ private struct ActivityWorkspace: View {
           .foregroundStyle(Studio.muted)
       }.padding(.horizontal, 30)
       Table(rows, selection: $draft.selection) {
-        TableColumn("Date", value: \.date).width(100)
-        TableColumn("Type") { t in Text(TransactionEntry.label(t.type)).modifier(RowTint(Studio.mint)) }.width(90)
+        TableColumn("Date") { t in Text(shownDay(t.date)) }.width(100)
+        TableColumn("Type") { t in Text(TransactionEntry.label(t.type)).modifier(RowTint(Studio.mint)) }.width(115)
         TableColumn("Symbol", value: \.symbol).width(85)
         TableColumn("Account") { t in
           Text(
@@ -910,7 +954,7 @@ private struct ActivityWorkspace: View {
         Task {
           await model.perform(
             ["txn", "delete", "--yes"] + t.revisionArguments + ["--", String(t.id)],
-            success: "Transaction deleted")
+            success: String(localized: "Transaction deleted"))
         }
       }
       Button("Cancel", role: .cancel) {}
@@ -930,7 +974,7 @@ private struct ActivityWorkspace: View {
   }
   private func describe(_ t: DesktopTransaction) -> String {
     [
-      t.date, [TransactionEntry.label(t.type), t.symbol].filter { !$0.isEmpty }.joined(separator: " "),
+      shownDay(t.date), [TransactionEntry.label(t.type), t.symbol].filter { !$0.isEmpty }.joined(separator: " "),
       activityAmount(t, privacy: payload.status.privacy), accountName(t.accountId, payload),
     ].joined(separator: " · ")
   }
@@ -974,21 +1018,24 @@ private struct AccountsWorkspace: View {
         HStack {
           Text("\(payload.accounts.count) active accounts").foregroundStyle(Studio.muted)
           if let archived = payload.archivedAccounts?.count, archived > 0 {
-            Button(archived == 1 ? "1 archived" : "\(archived) archived", action: showArchived)
+            Button(
+              archived == 1 ? String(localized: "1 archived") : String(localized: "\(archived) archived"),
+              action: showArchived)
               .buttonStyle(.link).help("Archived accounts are listed in Settings › Data, to unarchive them")
           }
           Spacer()
           Button("Add account", systemImage: "plus", action: add).disabled(!canEdit)
         }
         ForEach(payload.accounts) { a in
-          Surface(a.name, trailing: a.type) {
+          Surface(a.name, trailing: DesktopAccount.typeLabel(a.type)) {
             HStack {
               VStack(alignment: .leading, spacing: 8) {
-                Text(a.institution.isEmpty ? "Personal account" : a.institution).foregroundStyle(
+                Text(a.institution.isEmpty ? String(localized: "Personal account") : a.institution).foregroundStyle(
                   Studio.muted)
                 Text(
-                  (a.trackCash ? "Holdings and cash are tracked" : "Holdings are tracked; cash is excluded")
-                    + " · \(a.currency)"
+                  a.trackCash
+                    ? String(localized: "Holdings and cash are tracked · \(a.currency)")
+                    : String(localized: "Holdings are tracked; cash is excluded · \(a.currency)")
                 ).font(.system(size: 11)).foregroundStyle(Studio.muted)
                 Button("Edit account…") { edit(a) }.disabled(!canEdit).controlSize(.small)
                   .accessibilityLabel("Edit \(a.name)")
@@ -1005,16 +1052,17 @@ private struct AccountsWorkspace: View {
             Button("Edit Account…") { edit(a) }.disabled(!canEdit)
           }
         }
-        Surface("Contribution room", trailing: "IN CAD · FROM THE ROOM YOU ENTERED") {
+        Surface(String(localized: "Contribution room"), trailing: String(localized: "IN CAD · FROM THE ROOM YOU ENTERED")) {
           ForEach(roomTypes, id: \.self) { type in
             let room = payload.room.first { $0.accountType == type }
             HStack {
               VStack(alignment: .leading, spacing: 4) {
-                Text(type)
+                Text(DesktopAccount.typeLabel(type))
                 Text(
                   room.map {
-                    "From \(Format.money($0.startingRoom, "CAD", privacy: privacy)) on January 1, \(String($0.asOfYear))"
-                  } ?? "Not set yet"
+                    let start = Format.money($0.startingRoom, "CAD", privacy: privacy)
+                    return String(localized: "From \(start) on January 1, \(String($0.asOfYear))")
+                  } ?? String(localized: "Not set yet")
                 ).font(.system(size: 11)).foregroundStyle(Studio.muted)
               }
               Spacer()
@@ -1023,14 +1071,18 @@ private struct AccountsWorkspace: View {
                   Studio.trend(room.remaining)
                 ).monospacedDigit()
               }
-              Button(room == nil ? "Set…" : "Update…") { setRoom(type) }.disabled(!canEdit)
-                .controlSize(.small).accessibilityLabel(room == nil ? "Set \(type) room" : "Update \(type) room")
+              Button(room == nil ? String(localized: "Set…") : String(localized: "Update…")) { setRoom(type) }
+                .disabled(!canEdit).controlSize(.small)
+                .accessibilityLabel(
+                  room == nil
+                    ? String(localized: "Set \(DesktopAccount.typeLabel(type)) room")
+                    : String(localized: "Update \(DesktopAccount.typeLabel(type)) room"))
             }
           }
           // Room entered in the terminal for other types (e.g. RESP) is shown, not edited here.
           ForEach(payload.room.filter { !ContributionRoom.types.contains($0.accountType) }) { r in
             HStack {
-              Text(r.accountType)
+              Text(DesktopAccount.typeLabel(r.accountType))
               Spacer()
               Text(Format.money(r.remaining, "CAD", privacy: privacy)).foregroundStyle(Studio.trend(r.remaining))
                 .monospacedDigit()
@@ -1060,7 +1112,7 @@ private struct WatchlistWorkspace: View {
             Task {
               if await model.perform(
                 ["watch", "add", "--", s.trimmingCharacters(in: .whitespaces).uppercased()],
-                success: "Added to watchlist")
+                success: String(localized: "Added to watchlist"))
               {
                 draft.symbol = ""
               }
@@ -1084,7 +1136,7 @@ private struct WatchlistWorkspace: View {
               Button {
                 Task {
                   await model.perform(
-                    ["watch", "rm", "--", q.symbol], success: "Removed from watchlist")
+                    ["watch", "rm", "--", q.symbol], success: String(localized: "Removed from watchlist"))
                 }
               } label: {
                 Image(systemName: "minus.circle")
@@ -1099,7 +1151,7 @@ private struct WatchlistWorkspace: View {
             description: Text(
               "Add a symbol to start your watchlist. Quote failures appear in Automation."))
         }
-        Surface("Price alerts", trailing: "CHECKED ON EACH REFRESH") {
+        Surface(String(localized: "Price alerts"), trailing: String(localized: "CHECKED ON EACH REFRESH")) {
           if model.desktop?.alerts.isEmpty ?? true {
             Text(
               "Create an alert to get notified when a price or daily change meets your threshold."
@@ -1111,23 +1163,27 @@ private struct WatchlistWorkspace: View {
                 Studio.mint
               ).accessibilityHidden(true)
               VStack(alignment: .leading, spacing: 4) {
-                Text(a.description)
+                Text(a.localizedDescription)
                 if !a.note.isEmpty {
                   Text(a.note).font(.system(size: 11)).foregroundStyle(Studio.muted)
                 }
               }
               Spacer()
-              Text(!a.active ? "Disabled" : a.triggeredAt.isEmpty ? "Watching" : "Triggered").font(
+              Text(
+                !a.active
+                  ? String(localized: "Disabled")
+                  : a.triggeredAt.isEmpty ? String(localized: "Watching") : String(localized: "Triggered")
+              ).font(
                 .system(size: 11)
               ).foregroundStyle(Studio.muted)
               Button {
                 Task {
-                  await model.perform(["alerts", "rm", String(a.id)], success: "Alert removed")
+                  await model.perform(["alerts", "rm", String(a.id)], success: String(localized: "Alert removed"))
                 }
               } label: {
                 Image(systemName: "trash")
               }.buttonStyle(.plain).disabled(!model.canEdit).help("Delete alert")
-                .accessibilityLabel("Delete alert: \(a.description)")
+                .accessibilityLabel("Delete alert: \(a.localizedDescription)")
             }
           }
         }
@@ -1142,11 +1198,13 @@ private struct IncomeWorkspace: View {
     ScrollView {
       VStack(spacing: 20) {
         Metric(
-          title: "Income this year",
+          title: String(localized: "Income this year"),
           value: Format.money(
             payload.status.incomeYtd, payload.status.base, privacy: payload.status.privacy),
-          detail: "Recorded dividends, reinvestments, and interest")
-        Surface("Monthly income", trailing: "LAST 12 MONTHS · \(payload.status.base)") {
+          detail: String(localized: "Recorded dividends, reinvestments, and interest"))
+        Surface(
+          String(localized: "Monthly income"), trailing: String(localized: "LAST 12 MONTHS · \(payload.status.base)")
+        ) {
           if payload.status.privacy {
             ContentUnavailableView("Income hidden", systemImage: "eye.slash").frame(height: 230)
           } else {
@@ -1219,8 +1277,8 @@ private struct TaxWorkspace: View {
           .disabled(model.demo || model.desktop == nil)
           .help(
             model.demo
-              ? "Export is available for your own portfolio."
-              : "Save \(String(year.year))'s sales as a spreadsheet for your accountant")
+              ? String(localized: "Export is available for your own portfolio.")
+              : String(localized: "Save \(String(year.year))'s sales as a spreadsheet for your accountant"))
       }
     }.font(.system(size: 11))
     if let year {
@@ -1235,11 +1293,11 @@ private struct TaxWorkspace: View {
       }.frame(minHeight: 220)
     }
     if !tax.issues.isEmpty {
-      Surface("Needs attention", trailing: "MAY CHANGE THESE FIGURES") {
+      Surface(String(localized: "Needs attention"), trailing: String(localized: "MAY CHANGE THESE FIGURES")) {
         ForEach(tax.issues) { issue in
           HStack(alignment: .top) {
-            Text(issue.date).foregroundStyle(Studio.muted).frame(width: 90, alignment: .leading)
-            Text(issue.message).foregroundStyle(Studio.warn).textSelection(.enabled)
+            Text(shownDay(issue.date)).foregroundStyle(Studio.muted).frame(width: 90, alignment: .leading)
+            Text(issue.localizedMessage).foregroundStyle(Studio.warn).textSelection(.enabled)
               .fixedSize(horizontal: false, vertical: true)
           }.font(.system(size: 12))
         }
@@ -1247,7 +1305,7 @@ private struct TaxWorkspace: View {
     }
     roomSurface(tax)
     VStack(alignment: .leading, spacing: 6) {
-      ForEach(tax.notes, id: \.self) { note in
+      ForEach(tax.localizedNotes, id: \.self) { note in
         Label(note, systemImage: "info.circle")
       }
     }.font(.system(size: 11)).foregroundStyle(Studio.muted).frame(maxWidth: .infinity, alignment: .leading)
@@ -1257,33 +1315,42 @@ private struct TaxWorkspace: View {
   @ViewBuilder private func yearReport(_ year: TaxYearReport, _ tax: TaxPayload) -> some View {
     let base = tax.baseCurrency
     HStack(spacing: 14) {
+      let proceeds = Format.money(year.proceeds, base, privacy: privacy, decimals: 0)
+      let cost = Format.money(year.acb, base, privacy: privacy, decimals: 0)
       Metric(
-        title: "Net capital gain",
+        title: String(localized: "Net capital gain"),
         value: Format.money(year.netGain, base, privacy: privacy, sign: true),
-        detail:
-          "Proceeds \(Format.money(year.proceeds, base, privacy: privacy, decimals: 0)) · Cost \(Format.money(year.acb, base, privacy: privacy, decimals: 0))",
+        detail: String(localized: "Proceeds \(proceeds) · Cost \(cost)"),
         color: Studio.trend(year.netGain))
       Metric(
-        title: "Taxable capital gain",
+        title: String(localized: "Taxable capital gain"),
         value: Format.money(year.taxable, base, privacy: privacy),
         detail: year.netGain < 0
-          ? "A net loss isn't taxable; it can be carried to other years"
-          : "\(percent(year.inclusionRate)) of the net gain is included")
+          ? String(localized: "A net loss isn't taxable; it can be carried to other years")
+          : String(localized: "\(percent(year.inclusionRate)) of the net gain is included"))
       Metric(
-        title: "Denied losses",
+        title: String(localized: "Denied losses"),
         value: Format.money(year.denied, base, privacy: privacy),
-        detail: year.denied > 0 ? "Don't reduce this year's gains" : "None this year",
+        detail: year.denied > 0 ? String(localized: "Don't reduce this year's gains") : String(localized: "None this year"),
         color: year.denied > 0 ? Studio.warn : Studio.text)
     }.accessibilityElement(children: .contain)
     if year.missingFx > 0 {
       Label(
         year.missingFx == 1
-          ? "1 sale is missing an exchange rate, so it's left out of these totals. Recalculate when you're online."
-          : "\(year.missingFx) sales are missing an exchange rate, so they're left out of these totals. Recalculate when you're online.",
+          ? String(
+            localized:
+              "1 sale is missing an exchange rate, so it's left out of these totals. Recalculate when you're online.")
+          : String(
+            localized:
+              "\(year.missingFx) sales are missing an exchange rate, so they're left out of these totals. Recalculate when you're online."
+          ),
         systemImage: "exclamationmark.triangle"
       ).font(.system(size: 11)).foregroundStyle(Studio.warn).frame(maxWidth: .infinity, alignment: .leading)
     }
-    Surface("Realized gains by security", trailing: "\(String(year.year)) · \(base) · POOLED COST BASE") {
+    Surface(
+      String(localized: "Realized gains by security"),
+      trailing: String(localized: "\(String(year.year)) · \(base) · POOLED COST BASE")
+    ) {
       securityHeader
       ForEach(year.securities) { security in
         DisclosureGroup(
@@ -1306,7 +1373,7 @@ private struct TaxWorkspace: View {
     }
     let denied = year.rows.filter { ($0.denied ?? 0) > 0 }
     if !denied.isEmpty {
-      Surface("Denied losses", trailing: "WHY A LOSS DOESN'T COUNT") {
+      Surface(String(localized: "Denied losses"), trailing: String(localized: "WHY A LOSS DOESN'T COUNT")) {
         ForEach(denied) { row in
           HStack(alignment: .top, spacing: 12) {
             Image(systemName: "exclamationmark.circle").foregroundStyle(Studio.warn).accessibilityHidden(true)
@@ -1356,19 +1423,18 @@ private struct TaxWorkspace: View {
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(
         [
-          s.symbol, s.dispositions == 1 ? "1 sale" : "\(s.dispositions) sales",
-          s.missingFx > 0 ? "missing an exchange rate" : nil,
-          "proceeds \(Format.money(s.proceeds, base, privacy: privacy))",
-          "cost base \(Format.money(s.acb, base, privacy: privacy))",
-          s.denied > 0 ? "denied \(Format.money(s.denied, base, privacy: privacy))" : nil,
-          "\(s.netGain < 0 ? "loss" : "gain") \(Format.money(s.netGain, base, privacy: privacy, sign: true))",
+          s.symbol, s.dispositions == 1 ? String(localized: "1 sale") : String(localized: "\(s.dispositions) sales"),
+          s.missingFx > 0 ? String(localized: "missing an exchange rate") : nil,
+          spokenProceeds(s.proceeds, base), spokenCost(s.acb, base),
+          s.denied > 0 ? spokenDenied(s.denied, base) : nil,
+          spokenGain(s.netGain, base),
         ].compactMap { $0 }.joined(separator: ", "))
   }
 
   private func dispositionRow(_ r: TaxDisposition, _ base: String) -> some View {
     HStack(alignment: .firstTextBaseline) {
       VStack(alignment: .leading, spacing: 3) {
-        Text("\(r.date) · \(r.accountLabel)").font(.system(size: 11, weight: .medium))
+        Text("\(shownDay(r.date)) · \(r.accountLabel)").font(.system(size: 11, weight: .medium))
         Text(detail(r)).font(.system(size: 10)).foregroundStyle(Studio.muted)
       }.frame(maxWidth: .infinity, alignment: .leading)
       Text(Format.money(r.proceeds, base, privacy: privacy)).frame(width: 115, alignment: .trailing)
@@ -1383,50 +1449,80 @@ private struct TaxWorkspace: View {
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(
         [
-          "\(r.date), \(r.accountLabel)", detail(r),
-          "proceeds \(Format.money(r.proceeds, base, privacy: privacy))",
-          "cost base \(Format.money(r.acb, base, privacy: privacy))",
-          (r.denied ?? 0) > 0 ? "denied \(Format.money(r.denied, base, privacy: privacy))" : nil,
-          "\((r.allowedGain ?? 0) < 0 ? "loss" : "gain") \(Format.money(r.allowedGain, base, privacy: privacy, sign: true))",
+          "\(shownDay(r.date)), \(r.accountLabel)", detail(r),
+          spokenProceeds(r.proceeds, base), spokenCost(r.acb, base),
+          (r.denied ?? 0) > 0 ? spokenDenied(r.denied, base) : nil,
+          spokenGain(r.allowedGain, base),
         ].compactMap { $0 }.joined(separator: ", "))
+  }
+
+  // What VoiceOver reads for each amount in a security or sale row.
+  private func spokenProceeds(_ v: Double?, _ base: String) -> String {
+    String(localized: "proceeds \(Format.money(v, base, privacy: privacy))")
+  }
+  private func spokenCost(_ v: Double?, _ base: String) -> String {
+    String(localized: "cost base \(Format.money(v, base, privacy: privacy))")
+  }
+  private func spokenDenied(_ v: Double?, _ base: String) -> String {
+    String(localized: "denied \(Format.money(v, base, privacy: privacy))")
+  }
+  private func spokenGain(_ v: Double?, _ base: String) -> String {
+    let amount = Format.money(v, base, privacy: privacy, sign: true)
+    return (v ?? 0) < 0 ? String(localized: "loss \(amount)") : String(localized: "gain \(amount)")
   }
 
   /// Units, trading currency and rate, and any note: "20 units · USD at 1.3604 · superficial".
   private func detail(_ r: TaxDisposition) -> String {
     var parts: [String] = [r.kindLabel]
-    if r.quantity > 0 { parts.append(privacy ? "\(Format.mask) units" : "\(units(r.quantity)) units") }
-    if r.currency != model.tax?.baseCurrency {
-      parts.append(r.fx.map { "\(r.currency) at \(String(format: "%.4f", $0))" } ?? "\(r.currency), no exchange rate")
+    if r.quantity > 0 {
+      let quantity = privacy ? Format.mask : units(r.quantity)
+      parts.append(String(localized: "\(quantity) units"))
     }
-    if !r.note.isEmpty && r.complete { parts.append(r.note) }
+    if r.currency != model.tax?.baseCurrency {
+      parts.append(
+        r.fx.map {
+          String(localized: "\(r.currency) at \($0.formatted(.number.grouping(.never).precision(.fractionLength(4))))")
+        } ?? String(localized: "\(r.currency), no exchange rate"))
+    }
+    if !r.note.isEmpty && r.complete { parts.append(r.localizedNote) }
     return parts.joined(separator: " · ")
   }
 
   private func explanation(_ r: TaxDisposition, _ base: String) -> String {
     let denied = Format.money(r.denied, base, privacy: privacy)
-    let account = r.archived ? "an archived account" : r.accountLabel
+    let account = r.archived ? String(localized: "an archived account") : r.accountLabel
+    let date = shownDay(r.date)
     if r.deniedReason == "registered" {
-      return
-        "\(r.date) · \(r.symbol): moved from \(account) into a registered account at a loss. The \(denied) loss is never allowed."
+      return String(
+        localized:
+          "\(date) · \(r.symbol): moved from \(account) into a registered account at a loss. The \(denied) loss is never allowed."
+      )
     }
     let loss = Format.money(r.gain.map { -$0 }, base, privacy: privacy)
-    let counts =
-      privacy
-      ? ""
-      : " You sold \(units(r.quantity)), bought \(units(r.acquiredInWindow)) within 30 days before or after, and held \(units(r.heldAfterWindow)) 30 days later."
-    let open = r.windowOpen ? " The 30 days aren't over yet, so this can still change." : ""
-    return "\(r.date) · \(r.symbol): \(denied) of a \(loss) loss is superficial.\(counts)\(open)"
+    // One sentence each, joined: the translations keep their own word order.
+    var sentences = [String(localized: "\(date) · \(r.symbol): \(denied) of a \(loss) loss is superficial.")]
+    if !privacy {
+      let sold = units(r.quantity)
+      let bought = units(r.acquiredInWindow)
+      let held = units(r.heldAfterWindow)
+      sentences.append(
+        String(
+          localized:
+            "You sold \(sold), bought \(bought) within 30 days before or after, and held \(held) 30 days later."))
+    }
+    if r.windowOpen { sentences.append(String(localized: "The 30 days aren't over yet, so this can still change.")) }
+    return sentences.joined(separator: " ")
   }
 
   @ViewBuilder private func roomSurface(_ tax: TaxPayload) -> some View {
-    Surface("Contribution room", trailing: "IN CAD · FROM THE ROOM YOU ENTERED") {
+    Surface(String(localized: "Contribution room"), trailing: String(localized: "IN CAD · FROM THE ROOM YOU ENTERED")) {
       if tax.room.isEmpty {
         Text("Enter your TFSA, RRSP, or FHSA room in Accounts to see what's left.").foregroundStyle(Studio.muted)
       }
       ForEach(tax.room) { r in
         HStack(alignment: .top) {
           VStack(alignment: .leading, spacing: 4) {
-            Text(r.accountType).font(.system(size: 13, weight: .medium))
+            Text(DesktopAccount.typeLabel(r.accountType)).font(.system(size: 13, weight: .medium))
             Text(roomWorking(r)).font(.system(size: 11)).foregroundStyle(Studio.muted)
               .fixedSize(horizontal: false, vertical: true)
           }
@@ -1442,15 +1538,18 @@ private struct TaxWorkspace: View {
     }
   }
 
-  /// "7,000.00 on January 1, 2025 + 7,000.00 new room − 2,000.00 contributed"
+  /// "7,000.00 on January 1, 2025 + 7,000.00 new room − 2,000.00 contributed": one term each.
   private func roomWorking(_ r: ContributionRoom) -> String {
     func money(_ v: Double) -> String { Format.money(v, "CAD", privacy: privacy) }
-    var text = "\(money(r.startingRoom)) on January 1, \(String(r.asOfYear))"
-    if let v = r.newLimits, v > 0 { text += " + \(money(v)) new room" }
-    if let v = r.withdrawalsAddedBack, v > 0 { text += " + \(money(v)) withdrawals added back" }
-    if let v = r.contributions, v > 0 { text += " − \(money(v)) contributed" }
-    if let v = r.forfeited, v > 0.005 { text += " − \(money(v)) above the FHSA limits" }
-    return text
+    let start = money(r.startingRoom)
+    var terms = [String(localized: "\(start) on January 1, \(String(r.asOfYear))")]
+    if let v = r.newLimits, v > 0 { terms.append(String(localized: "+ \(money(v)) new room")) }
+    if let v = r.withdrawalsAddedBack, v > 0 {
+      terms.append(String(localized: "+ \(money(v)) withdrawals added back"))
+    }
+    if let v = r.contributions, v > 0 { terms.append(String(localized: "− \(money(v)) contributed")) }
+    if let v = r.forfeited, v > 0.005 { terms.append(String(localized: "− \(money(v)) above the FHSA limits")) }
+    return terms.joined(separator: " ")
   }
 
   private func units(_ value: Double) -> String { NumberInput.editable(value) }
@@ -1468,35 +1567,44 @@ private struct AutomationWorkspace: View {
   var body: some View {
     ScrollView {
       VStack(spacing: 20) {
-        Surface("Your portfolio, kept current", trailing: "WHILE MARKETPULSE IS RUNNING") {
+        Surface(
+          String(localized: "Your portfolio, kept current"), trailing: String(localized: "WHILE MARKETPULSE IS RUNNING")
+        ) {
           automationRow(
-            "arrow.clockwise", "Quote refresh",
-            "Every \(model.refreshSeconds) seconds. Cached quotes remain available offline.")
+            "arrow.clockwise", String(localized: "Quote refresh"),
+            String(localized: "Every \(model.refreshSeconds) seconds. Cached quotes remain available offline."))
           automationRow(
-            "chart.xyaxis.line", "Daily snapshots",
-            "Fresh, complete valuations are saved automatically. Latest: \(model.desktop?.automation.snapshotDate ?? "No snapshot yet")."
+            "chart.xyaxis.line", String(localized: "Daily snapshots"),
+            String(localized: "Fresh, complete valuations are saved automatically. Latest: \(latestSnapshot)."))
+          automationRow(
+            "bell", String(localized: "Price alerts"),
+            String(
+              localized:
+                "Checked each refresh, including symbols outside your watchlist. Alerts re-arm when the condition clears."
+            )
           )
           automationRow(
-            "bell", "Price alerts",
-            "Checked each refresh, including symbols outside your watchlist. Alerts re-arm when the condition clears."
-          )
-          automationRow(
-            "externaldrive.badge.checkmark", "Daily safety backup",
+            "externaldrive.badge.checkmark", String(localized: "Daily safety backup"),
             model.desktop?.automation.backup
-              ?? "A backup is created once your ledger contains transactions.")
+              ?? String(localized: "A backup is created once your ledger contains transactions."))
           HStack {
             Button("Refresh now") { model.refresh() }.disabled(model.loading || model.saving)
             Button("Back up now") {
-              Task { await model.perform(["backup", "now"], success: "Safety backup created") }
+              Task {
+                await model.perform(["backup", "now"], success: String(localized: "Safety backup created"))
+              }
             }.disabled(!model.canEdit)
           }
         }
         QuoteProvidersPanel(model: model)
         BackupsPanel(model: model)
-        Surface("Preferences") {
+        Surface(String(localized: "Preferences")) {
           automationRow(
-            "gearshape", "Refresh interval, launch at login, and more",
-            "Change how often quotes refresh, whether MarketPulse opens when you log in, its appearance, and your portfolio's defaults in Settings."
+            "gearshape", String(localized: "Refresh interval, launch at login, and more"),
+            String(
+              localized:
+                "Change how often quotes refresh, whether MarketPulse opens when you log in, its appearance, and your portfolio's defaults in Settings."
+            )
           )
           Button("Open Settings…") { model.showSettingsWindow() }
           Text(
@@ -1504,32 +1612,32 @@ private struct AutomationWorkspace: View {
           ).font(.system(size: 11)).foregroundStyle(Studio.muted).fixedSize(
             horizontal: false, vertical: true)
         }
-        Surface("About MarketPulse") {
-          aboutRow("App", appVersion)
+        Surface(String(localized: "About MarketPulse")) {
+          aboutRow(String(localized: "App"), appVersion)
           aboutRow(
-            "Backend",
+            String(localized: "Backend"),
             model.desktop?.backend.map { "MarketPulse \($0.version) · Python \($0.python)" }
-              ?? "Version unavailable until the first refresh")
-          aboutRow("Runs", CLI.resolved.source.rawValue)
+              ?? String(localized: "Version unavailable until the first refresh"))
+          aboutRow(String(localized: "Runs"), CLI.resolved.source.label)
           Text(CLI.path).font(.system(size: 11, design: .monospaced)).foregroundStyle(Studio.muted)
             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
         if let errors = model.desktop?.automation.errors, !errors.isEmpty {
-          Surface("Needs attention") {
+          Surface(String(localized: "Needs attention")) {
             ForEach(errors, id: \.self) {
               Text($0).foregroundStyle(Studio.red).textSelection(.enabled)
             }
           }
         }
         if let errors = model.desktop?.automation.quoteErrors, !errors.isEmpty {
-          Surface("Quotes unavailable") {
+          Surface(String(localized: "Quotes unavailable")) {
             ForEach(errors, id: \.self) {
               Text($0).foregroundStyle(Studio.warn).textSelection(.enabled)
             }
           }
         }
-        if let warnings = model.desktop?.warnings, !warnings.isEmpty {
-          Surface("Ledger checks") {
+        if let warnings = model.desktop?.localizedWarnings, !warnings.isEmpty {
+          Surface(String(localized: "Ledger checks")) {
             ForEach(warnings, id: \.self) {
               Text($0).foregroundStyle(Studio.warn).textSelection(.enabled)
             }
@@ -1539,7 +1647,11 @@ private struct AutomationWorkspace: View {
     }
   }
   private var appVersion: String {
-    Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development build"
+    Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+      ?? String(localized: "Development build")
+  }
+  private var latestSnapshot: String {
+    model.desktop?.automation.snapshotDate.map(shownDay) ?? String(localized: "No snapshot yet")
   }
   private func aboutRow(_ title: String, _ value: String) -> some View {
     HStack {
@@ -1568,12 +1680,12 @@ private struct QuoteProvidersPanel: View {
   var body: some View {
     let payload = model.desktop
     let providers = payload?.providers ?? []
-    Surface("Quote providers", trailing: "PRICES AND EXCHANGE RATES") {
+    Surface(String(localized: "Quote providers"), trailing: String(localized: "PRICES AND EXCHANGE RATES")) {
       if providers.isEmpty {
         Text(
           payload?.demo == true
-            ? "The demo uses fictional prices, so no quote provider is contacted."
-            : "Provider status appears here after the next refresh."
+            ? String(localized: "The demo uses fictional prices, so no quote provider is contacted.")
+            : String(localized: "Provider status appears here after the next refresh.")
         ).font(.system(size: 11)).foregroundStyle(Studio.muted)
       }
       ForEach(providers) { row($0) }
@@ -1598,10 +1710,15 @@ private struct QuoteProvidersPanel: View {
   }
 
   private func staleText(_ count: Int, since: Date?) -> String {
-    let what = count == 1 ? "1 price is from the offline cache" : "\(count) prices are from the offline cache"
-    guard let since else { return what + "." }
+    guard let since else {
+      return count == 1
+        ? String(localized: "1 price is from the offline cache.")
+        : String(localized: "\(count) prices are from the offline cache.")
+    }
     let when = BridgeDate.relative(since)
-    return count == 1 ? "\(what); it's from \(when)." : "\(what); the oldest is from \(when)."
+    return count == 1
+      ? String(localized: "1 price is from the offline cache; it's from \(when).")
+      : String(localized: "\(count) prices are from the offline cache; the oldest is from \(when).")
   }
 
   private func row(_ p: QuoteProvider) -> some View {
@@ -1611,7 +1728,8 @@ private struct QuoteProvidersPanel: View {
       VStack(alignment: .leading, spacing: 6) {
         HStack(spacing: 8) {
           Text(p.label).font(.system(size: 13, weight: .medium))
-          Text(p.primary ? "Primary" : "Fallback").font(.system(size: 10, weight: .medium))
+          Text(p.primary ? String(localized: "Primary") : String(localized: "Fallback")).font(
+            .system(size: 10, weight: .medium))
             .foregroundStyle(Studio.muted).padding(.horizontal, 6).padding(.vertical, 2)
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(Studio.line))
         }
@@ -1631,15 +1749,27 @@ private struct QuoteProvidersPanel: View {
   }
 
   private func detail(_ p: QuoteProvider) -> String {
-    let success = p.lastSuccessDate.map { "Last success \(BridgeDate.relative($0))" }
-      ?? (p.health == .notTried || p.health == .notConfigured ? "Not used yet" : "No successful refresh yet")
-    let served = p.quotes == 1 ? "1 quote in the last refresh" : "\(p.quotes) quotes in the last refresh"
+    let success =
+      p.lastSuccessDate.map { String(localized: "Last success \(BridgeDate.relative($0))") }
+      ?? (p.health == .notTried || p.health == .notConfigured
+        ? String(localized: "Not used yet") : String(localized: "No successful refresh yet"))
+    let served =
+      p.quotes == 1
+      ? String(localized: "1 quote in the last refresh") : String(localized: "\(p.quotes) quotes in the last refresh")
     return "\(success) · \(served)"
   }
 
   private func spoken(_ p: QuoteProvider) -> String {
-    var parts = ["\(p.label), \(p.primary ? "primary" : "fallback") provider: \(p.health.label)", detail(p)]
-    if let error = p.lastError, !error.isEmpty, p.health != .ok { parts.append("Last error: \(error)") }
+    let health = p.health.label
+    var parts = [
+      p.primary
+        ? String(localized: "\(p.label), primary provider: \(health)")
+        : String(localized: "\(p.label), fallback provider: \(health)"),
+      detail(p),
+    ]
+    if let error = p.lastError, !error.isEmpty, p.health != .ok {
+      parts.append(String(localized: "Last error: \(error)"))
+    }
     return parts.joined(separator: ". ")
   }
 
@@ -1669,15 +1799,18 @@ private struct BackupsPanel: View {
   var body: some View {
     let backups = model.desktop?.storage?.backups ?? []
     let folder = model.desktop?.storage?.backupDir
-    Surface("Backups", trailing: "KEPT ON THIS MAC") {
+    Surface(String(localized: "Backups"), trailing: String(localized: "KEPT ON THIS MAC")) {
       if model.demo {
         Text("The demo has no backups. Your own portfolio's backups appear here.")
           .foregroundStyle(Studio.muted)
       } else if backups.isEmpty {
         Text(
           folder == nil
-            ? "Backups appear here after the next refresh."
-            : "No backups yet. One is made each day once your portfolio has transactions, and before every import."
+            ? String(localized: "Backups appear here after the next refresh.")
+            : String(
+              localized:
+                "No backups yet. One is made each day once your portfolio has transactions, and before every import."
+            )
         ).foregroundStyle(Studio.muted)
       }
       ForEach(draft.showAll ? backups : Array(backups.prefix(Self.collapsedCount))) { backup in
@@ -1703,7 +1836,9 @@ private struct BackupsPanel: View {
       }
       HStack {
         if backups.count > Self.collapsedCount {
-          Button(draft.showAll ? "Show fewer" : "Show all \(backups.count)") { draft.showAll.toggle() }
+          Button(draft.showAll ? String(localized: "Show fewer") : String(localized: "Show all \(backups.count)")) {
+            draft.showAll.toggle()
+          }
         }
         Button("Show in Finder") {
           if let folder { NSWorkspace.shared.open(URL(fileURLWithPath: folder)) }
@@ -1715,7 +1850,8 @@ private struct BackupsPanel: View {
         horizontal: false, vertical: true)
     }
     .confirmationDialog(
-      draft.pending.map { "Restore the backup from \($0.when)?" } ?? "Restore this backup?",
+      draft.pending.map { String(localized: "Restore the backup from \($0.when)?") }
+        ?? String(localized: "Restore this backup?"),
       isPresented: Binding(get: { draft.pending != nil }, set: { if !$0 { draft.pending = nil } }),
       presenting: draft.pending
     ) { backup in
@@ -1725,7 +1861,7 @@ private struct BackupsPanel: View {
       Button("Cancel", role: .cancel) {}
     } message: { backup in
       Text(
-        "Your portfolio will be replaced with this backup (\(backup.reasonLabel.lowercased())). Anything recorded after \(backup.when) will no longer appear. Your current portfolio is saved as a new backup first, so you can undo this."
+        "Your portfolio will be replaced with this backup (\(backup.reasonLabel.localizedLowercase)). Anything recorded after \(backup.when) will no longer appear. Your current portfolio is saved as a new backup first, so you can undo this."
       )
     }
   }

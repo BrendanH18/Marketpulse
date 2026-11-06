@@ -12,6 +12,16 @@ from pathlib import Path
 BUNDLE_ID = "dev.marketpulse.bar"
 APP_NAME = "MarketPulse Bar"
 PROJECT_DIR = Path(__file__).resolve().parents[2] / "macos" / "MarketPulseBar"
+# en.lproj, fr.lproj, ...: copied into Contents/Resources so the app's strings load from
+# Bundle.main. (SwiftPM's Bundle.module would look beside the .app or in the build folder,
+# and an app that can't find its resource bundle crashes at launch.)
+LOCALIZATION_DIR = PROJECT_DIR / "Localization"
+
+
+def localizations() -> list[str]:
+    """Languages the app ships, development language (English) first."""
+    found = sorted(p.stem for p in LOCALIZATION_DIR.glob("*.lproj") if p.is_dir())
+    return sorted(found, key=lambda lang: lang != "en")
 
 
 def app_path() -> Path:
@@ -45,6 +55,8 @@ def info_plist(name: str, bundle_id: str, version: str, *, menubar: bool) -> dic
         "CFBundleDisplayName": name,
         "CFBundleIdentifier": bundle_id,
         "CFBundleExecutable": "MarketPulseBar",
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleLocalizations": localizations(),
         "CFBundleIconFile": "AppIcon",
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": version,
@@ -56,7 +68,7 @@ def info_plist(name: str, bundle_id: str, version: str, *, menubar: bool) -> dic
 
 
 def assemble_app(app: Path, binary: Path, plist: dict) -> None:
-    """Lay out an unsigned bundle: executable, icon and Info.plist. Callers sign it."""
+    """Lay out an unsigned bundle: executable, icon, translations and Info.plist. Callers sign it."""
     macos = app / "Contents" / "MacOS"
     macos.mkdir(parents=True)
     (app / "Contents" / "Resources").mkdir()
@@ -65,6 +77,8 @@ def assemble_app(app: Path, binary: Path, plist: dict) -> None:
     icon = PROJECT_DIR / "AppIcon.icns"
     if icon.is_file():
         shutil.copy2(icon, app / "Contents" / "Resources" / "AppIcon.icns")
+    for lang in localizations():
+        shutil.copytree(LOCALIZATION_DIR / f"{lang}.lproj", app / "Contents" / "Resources" / f"{lang}.lproj")
     with open(app / "Contents" / "Info.plist", "wb") as f:
         plistlib.dump(plist, f)
 

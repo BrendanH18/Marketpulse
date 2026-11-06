@@ -147,9 +147,42 @@ final class StatusModel: ObservableObject {
 
   var palette: Palette { Palette(status?.theme) }
   var menuTitle: String {
-    let title = status?.title ?? (errorMessage == nil ? "MarketPulse" : "MarketPulse ⚠︎")
+    let title = localizedTitle ?? status?.title ?? (errorMessage == nil ? "MarketPulse" : "MarketPulse ⚠︎")
     // Fictional numbers in the menu bar must never pass for the user's own.
-    return demo ? "Demo \(title)" : title
+    return demo ? String(localized: "Demo \(title)") : title
+  }
+
+  /// `status` is the current snapshot's, not a `status --json` fallback beside an older one.
+  private var statusFromSnapshot = false
+
+  /// The engine formats the title in English ("▲ +5.25%"). In another language, rebuild the
+  /// numeric displays from the payload (5,25 %). A symbol's quote, a masked title, English, and
+  /// a status that didn't come with the current snapshot (whose display setting may be stale)
+  /// keep the engine's.
+  private var localizedTitle: String? {
+    guard !Loc.english, statusFromSnapshot, let s = status, !s.privacy,
+      let display = desktop?.settings?.menubarDisplay
+    else { return nil }
+    switch display {
+    case "day_pct":
+      return "\(Format.arrow(s.dayChange)) \(Format.pct(s.dayChangePct))"
+    case "day_change":
+      return "\(Format.arrow(s.dayChange)) \(Format.money(s.dayChange, s.base, privacy: false, decimals: 0, sign: true))"
+    case "net_worth":
+      return s.netWorth.map { value in
+        // "412,5 k $": a compact number where the locale puts an amount (currency
+        // notation needs macOS 15).
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = s.base
+        f.maximumFractionDigits = 0
+        let compact = abs(value).formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
+        let one = f.string(from: 1) ?? "1"
+        return (value < 0 ? "-" : "") + one.replacingOccurrences(of: "1", with: compact)
+      }
+    default:
+      return nil
+    }
   }
 
   func schedule() {
@@ -194,12 +227,13 @@ final class StatusModel: ObservableObject {
       let data = try await CLI.run(["desktop", "snapshot"] + (demo ? ["--demo"] : ["--fresh"]))
       let payload = try decoder.decode(DesktopPayload.self, from: data)
       guard payload.version == 1 else {
-        throw CLIError.failed("Unsupported desktop bridge version. Reinstall the app.")
+        throw CLIError.failed(String(localized: "Unsupported desktop bridge version. Reinstall the app."))
       }
       // An older refresh that finishes late must not overwrite data reloaded after an edit.
       guard generation == reloadGeneration else { return }
       desktop = payload
       status = payload.status
+      statusFromSnapshot = true
       taxKey = Self.ledgerKey(payload)
       errorMessage = nil
       lastUpdated = Date()
@@ -212,7 +246,8 @@ final class StatusModel: ObservableObject {
       }
       return
     } catch let error as DecodingError {
-      desktopError = "Unexpected portfolio data (\(error)). Update MarketPulse and reinstall the app."
+      let detail = String(describing: error)
+      desktopError = String(localized: "Unexpected portfolio data (\(detail)). Update MarketPulse and reinstall the app.")
     } catch {
       desktopError = error.localizedDescription
     }
@@ -229,10 +264,11 @@ final class StatusModel: ObservableObject {
         StatusPayload.self, from: try await CLI.run(["status", "--json"]))
       guard generation == reloadGeneration else { return }
       status = fallback
+      statusFromSnapshot = false
       // The window keeps its last payload; it must still honour the current privacy setting.
       applyPrivacy(fallback.privacy)
       lastUpdated = Date()
-      errorMessage = "The portfolio window couldn't refresh: \(desktopError)"
+      errorMessage = String(localized: "The portfolio window couldn't refresh: \(desktopError)")
     } catch {
       guard generation == reloadGeneration else { return }
       errorMessage = desktopError
@@ -285,7 +321,7 @@ final class StatusModel: ObservableObject {
       lastUpdateCheck = now
       UserDefaults.standard.set(now, forKey: Self.lastUpdateCheckKey)
       guard let latest else {
-        if manual { updateCheckResult = "Couldn't reach GitHub. Check your connection and try again later." }
+        if manual { updateCheckResult = String(localized: "Couldn't reach GitHub. Check your connection and try again later.") }
         return
       }
       let update = UpdateCheck.decide(current: UpdateCheck.currentVersion, latest: latest)
@@ -298,7 +334,9 @@ final class StatusModel: ObservableObject {
       if manual {
         // Asked for, so show it again even if its banner was closed.
         if update != nil { setDismissedUpdate(nil) }
-        updateCheckResult = update.map { "MarketPulse \($0.version) is available." } ?? "MarketPulse is up to date."
+        updateCheckResult =
+          update.map { String(localized: "MarketPulse \($0.version) is available.") }
+          ?? String(localized: "MarketPulse is up to date.")
       }
     }
   }
@@ -325,8 +363,10 @@ final class StatusModel: ObservableObject {
     }
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(command, forType: .string)
-    message =
-      "Install command for MarketPulse \(update.version) copied. Paste it into Terminal and press Return. Your portfolio isn't changed."
+    message = String(
+      localized:
+        "Install command for MarketPulse \(update.version) copied. Paste it into Terminal and press Return. Your portfolio isn't changed."
+    )
   }
 
   func dismissUpdate() { setDismissedUpdate(availableUpdate?.tag) }
@@ -376,6 +416,7 @@ final class StatusModel: ObservableObject {
     // Clear first, so neither portfolio is ever shown under the other's label.
     desktop = nil
     status = nil
+    statusFromSnapshot = false
     errorMessage = nil
     message = nil
     lastUpdated = nil
@@ -393,10 +434,10 @@ final class StatusModel: ObservableObject {
     await perform(args) { _ in success }
   }
 
-  func recordTransaction(_ request: TransactionSaveRequest, success: String = "Transaction recorded") async
+  func recordTransaction(_ request: TransactionSaveRequest, success: String = String(localized: "Transaction recorded")) async
     -> TransactionSaveResult
   {
-    guard !demo && !saving else { return .unknown("Another save is in progress.") }
+    guard !demo && !saving else { return .unknown(String(localized: "Another save is in progress.")) }
     saving = true
     defer { saving = false }
     let result = await request.submit { try await CLI.run($0) }
@@ -404,7 +445,7 @@ final class StatusModel: ObservableObject {
     case .recorded, .recovered:
       errorMessage = nil
       message = result == .recovered
-        ? "\(success). Its confirmation failed." : success
+        ? String(localized: "\(success). Its confirmation failed.") : success
       await reload()
     case .notRecorded(let error), .unknown(let error):
       errorMessage = error
@@ -446,8 +487,8 @@ final class StatusModel: ObservableObject {
     do {
       _ = try await CLI.run(["backup", "restore", "--yes", "--", path])
       errorMessage = nil
-      message =
-        "Restored the backup from \(backup.when). Your previous portfolio was saved as a backup first."
+      message = String(
+        localized: "Restored the backup from \(backup.when). Your previous portfolio was saved as a backup first.")
       await reload()
     } catch {
       errorMessage = error.localizedDescription
@@ -460,7 +501,7 @@ final class StatusModel: ObservableObject {
     guard !demo && !saving else { return }
     pendingConfig[key] = value
     Task {
-      let saved = await perform(["config", "set", key, "--", value], success: "Settings updated")
+      let saved = await perform(["config", "set", key, "--", value], success: String(localized: "Settings updated"))
       settingsError = saved ? nil : errorMessage
       pendingConfig[key] = nil
     }
@@ -472,7 +513,7 @@ final class StatusModel: ObservableObject {
     Task {
       let saved = await perform(
         ["accounts", "edit", "--unarchive"] + account.revisionArguments + ["--", String(account.id)],
-        success: "\(account.name) is back in your portfolio")
+        success: String(localized: "\(account.name) is back in your portfolio"))
       settingsError = saved ? nil : errorMessage
     }
   }
@@ -485,7 +526,7 @@ final class StatusModel: ObservableObject {
     guard !demo && !saving, !provider.isEmpty, !key.isEmpty else { return false }
     let label = desktop?.providerLabel(provider) ?? provider
     let saved = await perform(["provider", "key", "--", provider], input: Data(key.utf8)) { _ in
-      "\(label) key saved. It's used only when the primary provider can't be reached."
+      String(localized: "\(label) key saved. It's used only when the primary provider can't be reached.")
     }
     settingsError = saved ? nil : errorMessage
     return saved
@@ -495,7 +536,7 @@ final class StatusModel: ObservableObject {
   func clearQuoteProviderKey() {
     guard !demo && !saving else { return }
     Task {
-      let saved = await perform(["provider", "clear"], success: "Fallback quote provider removed")
+      let saved = await perform(["provider", "clear"], success: String(localized: "Fallback quote provider removed"))
       settingsError = saved ? nil : errorMessage
     }
   }
@@ -525,7 +566,7 @@ final class StatusModel: ObservableObject {
   func togglePrivacy() {
     if demo {
       // Demo is read-only, including configuration writes.
-      message = "Demo is read-only. Privacy mode is available in your real portfolio."
+      message = String(localized: "Demo is read-only. Privacy mode is available in your real portfolio.")
       return
     }
     let enable = !(status?.privacy ?? false)
@@ -534,7 +575,7 @@ final class StatusModel: ObservableObject {
       // cached amounts never stay on screen.
       await perform(
         ["config", "set", "privacy", enable ? "true" : "false"], afterWrite: { self.applyPrivacy(enable) }
-      ) { _ in "Settings updated" }
+      ) { _ in String(localized: "Settings updated") }
     }
   }
 
@@ -564,7 +605,8 @@ final class StatusModel: ObservableObject {
     do {
       try FileManager.default.copyItem(at: url, to: pinned)
     } catch {
-      errorMessage = "Couldn't read \(url.lastPathComponent): \(error.localizedDescription)"
+      let (file, reason) = (url.lastPathComponent, error.localizedDescription)
+      errorMessage = String(localized: "Couldn't read \(file): \(reason)")
       return
     }
     closeImport()
@@ -619,7 +661,7 @@ final class StatusModel: ObservableObject {
       let decoder = JSONDecoder()
       decoder.keyDecodingStrategy = .convertFromSnakeCase
       let added = (try? decoder.decode(ImportPreview.self, from: data))?.added ?? preview.added
-      return "Imported \(added) entries. A safety backup was created first."
+      return String(localized: "Imported \(added) entries. A safety backup was created first.")
     }
     // On failure the error stays on screen, and the stale preview must be redone.
     if imported { closeImport() } else { importPreview = nil }
@@ -674,7 +716,7 @@ final class StatusModel: ObservableObject {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let payload = try decoder.decode(TaxPayload.self, from: data)
         guard payload.version == 1 else {
-          throw CLIError.failed("Unsupported tax report version. Reinstall the app.")
+          throw CLIError.failed(String(localized: "Unsupported tax report version. Reinstall the app."))
         }
         guard generation == taxGeneration else { return }
         tax = payload
@@ -683,7 +725,7 @@ final class StatusModel: ObservableObject {
         guard generation == taxGeneration else { return }
         taxError =
           error is DecodingError
-          ? "Unexpected tax report (\(error)). Update MarketPulse and reinstall the app."
+          ? String(localized: "Unexpected tax report (\(String(describing: error))). Update MarketPulse and reinstall the app.")
           : error.localizedDescription
         // So the next change, or Try Again, loads it again.
         taxLoadedKey = nil
@@ -731,7 +773,7 @@ final class StatusModel: ObservableObject {
     panel.nameFieldStringValue = "marketpulse-ledger.csv"
     panel.allowedContentTypes = [.commaSeparatedText]
     guard panel.runModal() == .OK, let url = panel.url else { return }
-    Task { await perform(["export", url.path], success: "Ledger exported") }
+    Task { await perform(["export", url.path], success: String(localized: "Ledger exported")) }
   }
 
     func openTUI() {

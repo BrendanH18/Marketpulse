@@ -148,18 +148,29 @@ enum Format {
         f.currencyCode = currency
         f.maximumFractionDigits = decimals
         f.minimumFractionDigits = decimals
-        let body = f.string(from: NSNumber(value: abs(value))) ?? String(format: "%.2f", abs(value))
+        let body = f.string(from: NSNumber(value: abs(value))) ?? decimal("%.2f", abs(value))
         let prefix = value < 0 ? "-" : (sign && value > 0 ? "+" : "")
         return prefix + body
     }
 
+    /// "+5.25%" in English, "+5,25 %" in French: the locale's decimal separator and percent sign.
     static func pct(_ value: Double) -> String {
-        String(format: "%@%.2f%%", value > 0 ? "+" : "", value)
+        let f = NumberFormatter()
+        f.numberStyle = .percent
+        return f.positivePrefix + (value > 0 ? "+" : "") + decimal("%.2f", value) + f.positiveSuffix
     }
 
     static func price(_ value: Double?) -> String {
         guard let value else { return "—" }
-        return value >= 1 ? String(format: "%.2f", value) : String(format: "%.4f", value)
+        return decimal(value >= 1 ? "%.2f" : "%.4f", value)
+    }
+
+    /// printf's digits with the user's decimal separator. Not `String(format:locale:)`, which
+    /// also groups thousands and rounds differently: English output stays exactly as it was.
+    private static func decimal(_ format: String, _ value: Double) -> String {
+        let text = String(format: format, value)
+        let separator = Locale.current.decimalSeparator ?? "."
+        return separator == "." ? text : text.replacingOccurrences(of: ".", with: separator)
     }
 
     static func arrow(_ value: Double?) -> String {

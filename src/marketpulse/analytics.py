@@ -380,18 +380,30 @@ class SecurityGains:
         return len(self.rows) - len(self.counted)
 
 
+# Every tag `disposition_note` returns (the Mac app translates them as fixed text).
+DISPOSITION_NOTES = (
+    "FX missing",
+    "→ registered, loss denied",
+    "superficial",
+    "superficial (window open)",
+    "ROC > ACB",
+    "→ registered",
+)
+
+
 def disposition_note(r: Disposition) -> str:
     """Short tag explaining anything unusual about a disposition row ("" for an ordinary sale)."""
+    fx_missing, registered_denied, superficial, superficial_open, roc, registered = DISPOSITION_NOTES
     if not r.complete:
-        return "FX missing"
+        return fx_missing
     if r.denied_reason == DENIED_REGISTERED:
-        return "→ registered, loss denied"
+        return registered_denied
     if r.superficial:
-        return "superficial" + (" (window open)" if r.window_open else "")
+        return superficial_open if r.window_open else superficial
     if r.kind == "roc":
-        return "ROC > ACB"
+        return roc
     if r.kind == "deemed":
-        return "→ registered"
+        return registered
     return ""
 
 
