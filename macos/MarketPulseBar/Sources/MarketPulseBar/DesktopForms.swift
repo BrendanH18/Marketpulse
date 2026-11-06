@@ -28,18 +28,21 @@ struct TransactionSheet: View {
   }
   var body: some View {
     SheetLayout(
-      title: editing == nil ? "Record a transaction" : "Edit transaction",
+      title: editing == nil ? String(localized: "Record a transaction") : String(localized: "Edit transaction"),
       subtitle: editing == nil
-        ? "Add an entry to your local ledger. This doesn't place a trade."
-        : "Change this entry in your local ledger. Cost base and gains are worked out again.",
+        ? String(localized: "Add an entry to your local ledger. This doesn't place a trade.")
+        : String(localized: "Change this entry in your local ledger. Cost base and gains are worked out again."),
       model: model
     ) {
       Form {
         Picker("Type", selection: $draft.type) {
           ForEach(TransactionEntry.types, id: \.self) { Text(TransactionEntry.title($0)).tag($0) }
         }.disabled(editing != nil)
-          .help(editing == nil ? "" : "To change the type, delete this entry and record a new one.")
-        Picker(draft.type == "TRANSFER" ? "From account" : "Account", selection: $draft.account) {
+          .help(editing == nil ? "" : String(localized: "To change the type, delete this entry and record a new one."))
+        Picker(
+          draft.type == "TRANSFER" ? String(localized: "From account") : String(localized: "Account"),
+          selection: $draft.account
+        ) {
           Text("Choose account").tag("")
           ForEach(accounts) { Text($0.name).tag(String($0.id)) }
         }
@@ -51,17 +54,21 @@ struct TransactionSheet: View {
         }
         DatePicker("Date", selection: $draft.date, in: ...Date.now, displayedComponents: .date)
         if entry.needsSymbol {
-          TextField("Symbol", text: $draft.symbol, prompt: Text("XEQT.TO"))
+          TextField("Symbol", text: $draft.symbol, prompt: Text(verbatim: "XEQT.TO"))
           if let note = holdingNote { caption(note) }
         }
         fields
         if entry.usesCurrency {
           TextField(
-            draft.type == "TRANSFER" ? "Currency of the price" : "Transaction currency", text: $draft.currency,
+            draft.type == "TRANSFER"
+              ? String(localized: "Currency of the price") : String(localized: "Transaction currency"),
+            text: $draft.currency,
             prompt: Text("Automatic"))
           caption(
-            "Leave blank to use the symbol's listing currency (or the account's for cash entries). Enter one if the price is in another currency."
-          )
+            String(
+              localized:
+                "Leave blank to use the symbol's listing currency (or the account's for cash entries). Enter one if the price is in another currency."
+            ))
         }
         TextField("Note (optional)", text: $draft.note)
       }.formStyle(.grouped).disabled(model.saving || draft.request != nil)
@@ -93,11 +100,15 @@ struct TransactionSheet: View {
         Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving || draft.request != nil)
         Spacer()
         if model.saving { ProgressView().controlSize(.small) }
-        Button(editing != nil ? "Save changes" : draft.request == nil ? "Save transaction" : "Retry save") {
+        Button(
+          editing != nil
+            ? String(localized: "Save changes")
+            : draft.request == nil ? String(localized: "Save transaction") : String(localized: "Retry save")
+        ) {
           if let editing {
             // An edit sets the same values again when repeated, so it needs no save receipt.
             let args = entry.editArguments(id: editing.id, revision: editing.revisionArguments)
-            Task { if await model.perform(args, success: "Transaction updated") { dismiss() } }
+            Task { if await model.perform(args, success: String(localized: "Transaction updated")) { dismiss() } }
             return
           }
           let attempt = draft.request ?? TransactionSaveRequest(arguments: entry.arguments())
@@ -119,32 +130,43 @@ struct TransactionSheet: View {
   @ViewBuilder private var fields: some View {
     switch draft.type {
     case "BUY", "SELL":
-      NumberField(title: "Quantity", text: $draft.quantity)
-      NumberField(title: "Price per share", text: $draft.price)
-      NumberField(title: "Fees", text: $draft.fees)
+      NumberField(title: String(localized: "Quantity"), text: $draft.quantity)
+      NumberField(title: String(localized: "Price per share"), text: $draft.price)
+      NumberField(title: String(localized: "Fees"), text: $draft.fees)
     case "DRIP":
-      NumberField(title: "New shares", text: $draft.quantity)
-      NumberField(title: "Price per share", text: $draft.price)
-      caption("The reinvested dividend counts as income and adds to the cost base. No cash moves.")
+      NumberField(title: String(localized: "New shares"), text: $draft.quantity)
+      NumberField(title: String(localized: "Price per share"), text: $draft.price)
+      caption(String(localized: "The reinvested dividend counts as income and adds to the cost base. No cash moves."))
     case "TRANSFER":
-      NumberField(title: "Quantity", text: $draft.quantity)
-      NumberField(title: entry.priceRequired ? "Market price per share" : "Market price (optional)", text: $draft.price)
+      NumberField(title: String(localized: "Quantity"), text: $draft.quantity)
+      NumberField(
+        title: entry.priceRequired
+          ? String(localized: "Market price per share") : String(localized: "Market price (optional)"),
+        text: $draft.price)
       caption(
         entry.priceRequired
-          ? "Moving shares into a registered account counts as selling them at market value for tax (a loss is denied), and moving them out sets a new cost base at market value. Enter the price on the transfer date."
-          : "The shares move at their cost base. A price is only needed between a registered and a non-registered account."
+          ? String(
+            localized:
+              "Moving shares into a registered account counts as selling them at market value for tax (a loss is denied), and moving them out sets a new cost base at market value. Enter the price on the transfer date."
+          )
+          : String(
+            localized:
+              "The shares move at their cost base. A price is only needed between a registered and a non-registered account."
+          )
       )
     case "SPLIT":
-      NumberField(title: "New shares", text: $draft.splitNew)
-      NumberField(title: "For every old share(s)", text: $draft.splitOld)
+      NumberField(title: String(localized: "New shares"), text: $draft.splitNew)
+      NumberField(title: String(localized: "For every old share(s)"), text: $draft.splitOld)
       caption(splitNote)
     case "ROC":
-      NumberField(title: "Amount", text: $draft.amount)
+      NumberField(title: String(localized: "Amount"), text: $draft.amount)
       caption(
-        "Funds and ETFs report it in box 42 of the T3 slip. It lowers the cost base; once that reaches zero, the rest counts as a capital gain."
-      )
+        String(
+          localized:
+            "Funds and ETFs report it in box 42 of the T3 slip. It lowers the cost base; once that reaches zero, the rest counts as a capital gain."
+        ))
     default:
-      NumberField(title: "Amount", text: $draft.amount)
+      NumberField(title: String(localized: "Amount"), text: $draft.amount)
     }
   }
 
@@ -152,18 +174,36 @@ struct TransactionSheet: View {
   private var holdingNote: String? {
     guard ["TRANSFER", "SPLIT", "ROC"].contains(draft.type), !entry.symbolCode.isEmpty, !draft.account.isEmpty
     else { return nil }
-    let name = account(draft.account)?.name ?? "This account"
-    if let held { return "\(name) holds \(Self.quantity(held.quantity)) \(held.symbol) now." }
+    let symbol = entry.symbolCode
+    guard let name = account(draft.account)?.name else {
+      if let held {
+        return String(localized: "This account holds \(Self.quantity(held.quantity)) \(held.symbol) now.")
+      }
+      return draft.type == "ROC"
+        ? String(
+          localized:
+            "This account holds no \(symbol) now. A return of capital only lowers the cost of shares held on its date.")
+        : String(localized: "This account holds no \(symbol) now. An earlier date is checked against what it held then.")
+    }
+    if let held { return String(localized: "\(name) holds \(Self.quantity(held.quantity)) \(held.symbol) now.") }
     return draft.type == "ROC"
-      ? "\(name) holds no \(entry.symbolCode) now. A return of capital only lowers the cost of shares held on its date."
-      : "\(name) holds no \(entry.symbolCode) now. An earlier date is checked against what it held then."
+      ? String(
+        localized: "\(name) holds no \(symbol) now. A return of capital only lowers the cost of shares held on its date.")
+      : String(localized: "\(name) holds no \(symbol) now. An earlier date is checked against what it held then.")
   }
 
   private var splitNote: String {
-    let example = "For a 2-for-1 split, enter 2 and 1; for a 1-for-10 consolidation, 1 and 10."
-    guard let ratio = entry.ratio(), ratio != 1, let held else { return example + " The cost base doesn't change." }
-    return
-      "\(Self.quantity(held.quantity)) \(held.symbol) become \(Self.quantity(held.quantity * ratio)), at the same total cost base. \(example)"
+    guard let ratio = entry.ratio(), ratio != 1, let held else {
+      return String(
+        localized:
+          "For a 2-for-1 split, enter 2 and 1; for a 1-for-10 consolidation, 1 and 10. The cost base doesn't change.")
+    }
+    let before = Self.quantity(held.quantity)
+    let after = Self.quantity(held.quantity * ratio)
+    return String(
+      localized:
+        "\(before) \(held.symbol) become \(after), at the same total cost base. For a 2-for-1 split, enter 2 and 1; for a 1-for-10 consolidation, 1 and 10."
+    )
   }
 
   private static func quantity(_ value: Double) -> String {
@@ -185,27 +225,31 @@ struct AccountSheet: View {
   private var currency: String { CurrencyInput.normalize(draft.currency) }
   var body: some View {
     SheetLayout(
-      title: editing == nil ? "A home for your investments" : "Edit account",
+      title: editing == nil ? String(localized: "A home for your investments") : String(localized: "Edit account"),
       subtitle: editing == nil
-        ? "Create an account in your existing portfolio."
-        : "Change how this account is named and tracked. Its transactions stay as they are.",
+        ? String(localized: "Create an account in your existing portfolio.")
+        : String(localized: "Change how this account is named and tracked. Its transactions stay as they are."),
       model: model
     ) {
       Form {
         TextField("Account name", text: $draft.name, prompt: Text("My TFSA"))
         Picker("Type", selection: $draft.type) {
-          ForEach(DesktopAccount.types, id: \.self) { Text($0).tag($0) }
+          ForEach(DesktopAccount.types, id: \.self) { Text(AccountTypeName.label($0)).tag($0) }
         }
         if let editing, draft.type != editing.type {
           caution(
-            "The type decides whether gains in this account are taxable and which contribution room it counts against. Both are worked out again."
-          )
+            String(
+              localized:
+                "The type decides whether gains in this account are taxable and which contribution room it counts against. Both are worked out again."
+            ))
         }
         TextField("Currency", text: $draft.currency)
         if let editing, currency != editing.currency, hasActivity(editing) {
           caution(
-            "Entries saved without a currency of their own are read in the account's currency, so changing it can change what they're worth."
-          )
+            String(
+              localized:
+                "Entries saved without a currency of their own are read in the account's currency, so changing it can change what they're worth."
+            ))
         }
         TextField("Institution (optional)", text: $draft.institution)
         Toggle("Track cash balance", isOn: $draft.cash)
@@ -222,20 +266,21 @@ struct AccountSheet: View {
         }
         Spacer()
         if model.saving { ProgressView().controlSize(.small) }
-        Button(editing == nil ? "Create account" : "Save changes") {
-          Task { if await model.perform(arguments, success: editing == nil ? "Account created" : "Account updated") { dismiss() } }
+        Button(editing == nil ? String(localized: "Create account") : String(localized: "Save changes")) {
+          let success = editing == nil ? String(localized: "Account created") : String(localized: "Account updated")
+          Task { if await model.perform(arguments, success: success) { dismiss() } }
         }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
           .disabled(!model.canEdit || name.isEmpty || !CurrencyInput.isValid(currency))
       }
     }
     .confirmationDialog(
-      "Archive \(editing?.name ?? "this account")?", isPresented: $draft.confirmArchive, presenting: editing
+      "Archive \(editing?.name ?? "")?", isPresented: $draft.confirmArchive, presenting: editing
     ) { account in
       Button("Archive") {
         Task {
           if await model.perform(
             ["accounts", "edit", "--archive"] + account.revisionArguments + ["--", String(account.id)],
-            success: "Archived \(account.name). You can unarchive it in Settings › Data.")
+            success: String(localized: "Archived \(account.name). You can unarchive it in Settings › Data."))
           {
             dismiss()
           }
@@ -286,19 +331,21 @@ struct RoomSheet: View {
   }
   var body: some View {
     SheetLayout(
-      title: "Contribution room",
-      subtitle:
-        "Enter the room CRA reported for January 1 of a year. You'll find it in CRA My Account or on your notice of assessment.",
+      title: String(localized: "Contribution room"),
+      subtitle: String(
+        localized:
+          "Enter the room CRA reported for January 1 of a year. You'll find it in CRA My Account or on your notice of assessment."
+      ),
       model: model
     ) {
       Form {
         Picker("Account type", selection: $draft.type) {
-          ForEach(ContributionRoom.types, id: \.self) { Text($0).tag($0) }
+          ForEach(ContributionRoom.types, id: \.self) { Text(AccountTypeName.label($0)).tag($0) }
         }
         Picker("Room on January 1 of", selection: $draft.year) {
           ForEach(years, id: \.self) { Text(String($0)).tag($0) }
         }
-        NumberField(title: "Room in CAD", text: $draft.amount)
+        NumberField(title: String(localized: "Room in CAD"), text: $draft.amount)
         Text(explanation).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         if let saved {
           Text(
@@ -319,7 +366,7 @@ struct RoomSheet: View {
         if model.saving { ProgressView().controlSize(.small) }
         Button("Save room") {
           let args = ["accounts", "room", "--", draft.type, String(draft.year), NumberInput.cli(draft.amount)]
-          Task { if await model.perform(args, success: "\(draft.type) contribution room saved") { dismiss() } }
+          Task { if await model.perform(args, success: roomSaved) { dismiss() } }
         }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
           .disabled(!model.canEdit || NumberInput.parse(draft.amount) == nil)
       }
@@ -331,13 +378,32 @@ struct RoomSheet: View {
     switch draft.type {
     case "TFSA":
       return
-        "Each new year's limit is added for you, and withdrawals are added back the following January. Deposits to your TFSA accounts are subtracted. Enter a negative amount if you've over-contributed."
+        String(
+          localized:
+            "Each new year's limit is added for you, and withdrawals are added back the following January. Deposits to your TFSA accounts are subtracted. Enter a negative amount if you've over-contributed."
+        )
     case "FHSA":
       return
-        "Each year's $8,000 is added for you, with up to $8,000 of unused room carried forward and the $40,000 lifetime limit applied. Deposits to your FHSA accounts are subtracted."
+        String(
+          localized:
+            "Each year's $8,000 is added for you, with up to $8,000 of unused room carried forward and the $40,000 lifetime limit applied. Deposits to your FHSA accounts are subtracted."
+        )
     default:
       return
-        "RRSP room doesn't grow on its own here: enter the new figure from each year's notice of assessment. Deposits to your RRSP accounts are subtracted."
+        String(
+          localized:
+            "RRSP room doesn't grow on its own here: enter the new figure from each year's notice of assessment. Deposits to your RRSP accounts are subtracted."
+        )
+    }
+  }
+
+  /// One sentence per type, so each language can name the account its own way.
+  private var roomSaved: String {
+    switch draft.type {
+    case "TFSA": return String(localized: "TFSA contribution room saved")
+    case "FHSA": return String(localized: "FHSA contribution room saved")
+    case "RRSP": return String(localized: "RRSP contribution room saved")
+    default: return String(localized: "Contribution room saved")
     }
   }
 
@@ -359,11 +425,11 @@ struct AlertSheet: View {
   @Environment(\.dismiss) private var dismiss
   var body: some View {
     SheetLayout(
-      title: "Keep an eye on a price",
-      subtitle: "Alerts are checked while the app or automation runner is active.", model: model
+      title: String(localized: "Keep an eye on a price"),
+      subtitle: String(localized: "Alerts are checked while the app or automation runner is active."), model: model
     ) {
       Form {
-        TextField("Symbol", text: $draft.symbol, prompt: Text("XEQT.TO"))
+        TextField("Symbol", text: $draft.symbol, prompt: Text(verbatim: "XEQT.TO"))
         Picker("Condition", selection: $draft.condition) {
           Text("Price at or above").tag("above")
           Text("Price at or below").tag("below")
@@ -371,7 +437,8 @@ struct AlertSheet: View {
           Text("Daily decline (%)").tag("down_pct")
         }
         NumberField(
-          title: draft.condition.contains("pct") ? "Percentage" : "Price in listing currency",
+          title: draft.condition.contains("pct")
+            ? String(localized: "Percentage") : String(localized: "Price in listing currency"),
           text: $draft.threshold)
         TextField("Note (optional)", text: $draft.note)
       }.formStyle(.grouped)
@@ -385,7 +452,7 @@ struct AlertSheet: View {
                 "alerts", "add", "--note", draft.note, "--",
                 draft.symbol.trimmingCharacters(in: .whitespaces).uppercased(), draft.condition,
                 NumberInput.cli(draft.threshold),
-              ], success: "Price alert created")
+              ], success: String(localized: "Price alert created"))
             {
               dismiss()
             }
@@ -425,24 +492,30 @@ struct AssetSheet: View {
   }
   private var held: DesktopPosition? { model.desktop?.positions.first(where: { $0.symbol == symbol }) }
   private var valueTitle: String {
-    guard let held else { return "New value" }
-    return "New value (\(held.currency))"
+    guard let held else { return String(localized: "New value") }
+    return String(localized: "New value (\(held.currency))")
   }
   private var title: String {
     switch kind {
-    case "FIXED": return "Add a GIC or bond"
-    case "MANUAL": return "Add an asset you value yourself"
-    default: return "Record a valuation"
+    case "FIXED": return String(localized: "Add a GIC or bond")
+    case "MANUAL": return String(localized: "Add an asset you value yourself")
+    default: return String(localized: "Record a valuation")
     }
   }
   private var subtitle: String {
     switch kind {
     case "FIXED":
-      return "It's valued by the interest it earns, up to maturity. The principal is recorded as a purchase on the start date."
+      return String(
+        localized:
+          "It's valued by the interest it earns, up to maturity. The principal is recorded as a purchase on the start date."
+      )
     case "MANUAL":
-      return "Property, private shares, a pension, collectibles: anything the market can't price. Update its value whenever you like."
+      return String(
+        localized:
+          "Property, private shares, a pension, collectibles: anything the market can't price. Update its value whenever you like."
+      )
     default:
-      return "What \(symbol) is worth now. Its value in your portfolio uses the latest valuation."
+      return String(localized: "What \(symbol) is worth now. Its value in your portfolio uses the latest valuation.")
     }
   }
   var body: some View {
@@ -462,24 +535,29 @@ struct AssetSheet: View {
             Text("Choose account").tag("")
             ForEach(accounts) { Text($0.name).tag(String($0.id)) }
           }
-          TextField("Symbol", text: $draft.symbol, prompt: Text(kind == "FIXED" ? "GIC-2027" : "COTTAGE"))
+          TextField(
+            "Symbol", text: $draft.symbol, prompt: kind == "FIXED" ? Text("GIC-2027") : Text("COTTAGE"))
           if taken && draft.request == nil {
-            caution("\(entry.symbolCode) is already in your portfolio. Choose another symbol.")
+            caution(String(localized: "\(entry.symbolCode) is already in your portfolio. Choose another symbol."))
           } else {
-            caption("A short code of your own. It names the asset in Holdings and Activity.")
+            caption(String(localized: "A short code of your own. It names the asset in Holdings and Activity."))
           }
-          TextField("Name (optional)", text: $draft.name, prompt: Text(kind == "FIXED" ? "2-year GIC" : "Family cottage"))
+          TextField(
+            "Name (optional)", text: $draft.name,
+            prompt: kind == "FIXED" ? Text("2-year GIC") : Text("Family cottage"))
           if kind == "FIXED" {
-            NumberField(title: "Principal", text: $draft.value)
-            NumberField(title: "Annual rate (%)", text: $draft.rate)
+            NumberField(title: String(localized: "Principal"), text: $draft.value)
+            NumberField(title: String(localized: "Annual rate (%)"), text: $draft.rate)
             DatePicker("Start date", selection: $draft.date, in: ...Date.now, displayedComponents: .date)
             DatePicker("Matures on", selection: $draft.maturity, displayedComponents: .date)
-            if entry.maturity <= entry.date { caution("The maturity date must be after the start date.") }
+            if entry.maturity <= entry.date {
+              caution(String(localized: "The maturity date must be after the start date."))
+            }
             Picker("Compounding", selection: $draft.compounding) {
-              ForEach(AssetEntry.compoundings, id: \.self) { Text($0.capitalized).tag($0) }
+              ForEach(AssetEntry.compoundings, id: \.self) { Text(Self.compoundingLabel($0)).tag($0) }
             }
           } else {
-            NumberField(title: "Value", text: $draft.value)
+            NumberField(title: String(localized: "Value"), text: $draft.value)
             Picker("Asset class", selection: $draft.assetClass) {
               ForEach(AssetClassOption.all) { Text($0.label).tag($0.key) }
             }
@@ -503,12 +581,17 @@ struct AssetSheet: View {
         Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving || draft.request != nil)
         Spacer()
         if model.saving { ProgressView().controlSize(.small) }
-        Button(draft.request == nil ? (kind == "VALUE" ? "Save valuation" : "Add asset") : "Retry save") {
+        Button(
+          draft.request == nil
+            ? (kind == "VALUE" ? String(localized: "Save valuation") : String(localized: "Add asset"))
+            : String(localized: "Retry save")
+        ) {
           let attempt =
             draft.request
             ?? TransactionSaveRequest(arguments: entry.arguments(), commandWords: AssetEntry.commandWords)
           draft.request = attempt
-          let success = kind == "VALUE" ? "Valuation recorded" : "\(entry.symbolCode) added"
+          let success =
+            kind == "VALUE" ? String(localized: "Valuation recorded") : String(localized: "\(entry.symbolCode) added")
           Task {
             switch await model.recordTransaction(attempt, success: success) {
             case .recorded, .recovered: dismiss()
@@ -531,6 +614,18 @@ struct AssetSheet: View {
   private func caution(_ text: String) -> some View {
     Text(text).font(.caption).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
   }
+
+  /// The label for an `AssetEntry.compoundings` value (the value itself goes to the CLI).
+  private static func compoundingLabel(_ value: String) -> String {
+    switch value {
+    case "annual": return String(localized: "Annual")
+    case "semiannual": return String(localized: "Semiannual")
+    case "quarterly": return String(localized: "Quarterly")
+    case "monthly": return String(localized: "Monthly")
+    case "simple": return String(localized: "Simple")
+    default: return value.capitalized
+    }
+  }
 }
 
 /// The asset class a symbol counts toward in Allocation (`marketpulse asset classify`).
@@ -542,13 +637,14 @@ struct AssetClassSheet: View {
   /// The class shown in Holdings now: the saved one, or the one the listing reports.
   private var current: String? {
     if let saved = model.desktop?.assets?.first(where: { $0.symbol == symbol })?.assetClass { return saved }
-    let label = model.desktop?.positions.first(where: { $0.symbol == symbol })?.assetClass
-    return AssetClassOption.all.first { $0.label == label }?.key
+    // Holdings carries the engine's English label; the options' labels may be translated.
+    guard let label = model.desktop?.positions.first(where: { $0.symbol == symbol })?.assetClass else { return nil }
+    return AssetClassOption.all.first { $0.label == label || $0.label == Loc.backend(label) }?.key
   }
   var body: some View {
     SheetLayout(
-      title: "Change asset class",
-      subtitle: "Which class \(symbol) counts toward in Allocation and your targets, in every account.",
+      title: String(localized: "Change asset class"),
+      subtitle: String(localized: "Which class \(symbol) counts toward in Allocation and your targets, in every account."),
       model: model
     ) {
       Form {
@@ -568,7 +664,8 @@ struct AssetClassSheet: View {
         Button("Save") {
           let label = AssetClassOption.all.first(where: { $0.key == draft.key })?.label ?? draft.key
           Task {
-            if await model.perform(["asset", "classify", "--", symbol, draft.key], success: "\(symbol) counts as \(label)") {
+            let success = String(localized: "\(symbol) counts as \(label)")
+            if await model.perform(["asset", "classify", "--", symbol, draft.key], success: success) {
               dismiss()
             }
           }
@@ -587,15 +684,15 @@ struct TargetsSheet: View {
   private var entry: TargetsEntry { TargetsEntry(weights: draft.weights) }
   private func now(_ key: String) -> String {
     let weight = model.desktop?.allocation.first(where: { $0.key == key })?.weight ?? 0
-    return "Now " + weight.formatted(.number.precision(.fractionLength(1))) + "%"
+    return String(localized: "Now \((weight / 100).formatted(.percent.precision(.fractionLength(1))))")
   }
   private func binding(_ key: String) -> Binding<String> {
     Binding(get: { draft.weights[key] ?? "" }, set: { draft.weights[key] = $0 })
   }
   var body: some View {
     SheetLayout(
-      title: "Allocation targets",
-      subtitle: "The share of your portfolio you want in each asset class. Leave a class blank for none.",
+      title: String(localized: "Allocation targets"),
+      subtitle: String(localized: "The share of your portfolio you want in each asset class. Leave a class blank for none."),
       model: model
     ) {
       Form {
@@ -608,7 +705,7 @@ struct TargetsSheet: View {
             Text(model.status?.privacy == true ? "" : now(option.key))
           }
         }
-        LabeledContent("Total", value: entry.total().formatted(.number.precision(.fractionLength(0...2))) + "%")
+        LabeledContent("Total", value: (entry.total() / 100).formatted(.percent.precision(.fractionLength(0...2))))
         if !entry.isValid() {
           Text("Each target is a percentage from 0 to 100, and together they can't pass 100%.")
             .font(.caption).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
@@ -627,7 +724,8 @@ struct TargetsSheet: View {
         Spacer()
         if model.saving { ProgressView().controlSize(.small) }
         Button("Save targets") {
-          Task { if await model.perform(entry.arguments(), success: "Allocation targets saved") { dismiss() } }
+          let success = String(localized: "Allocation targets saved")
+          Task { if await model.perform(entry.arguments(), success: success) { dismiss() } }
         }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
           .disabled(!model.canEdit || !entry.isValid())
       }
@@ -639,8 +737,8 @@ struct ImportSheet: View {
   @ObservedObject var model: StatusModel
   var body: some View {
     SheetLayout(
-      title: "A clearer way to import",
-      subtitle: model.importName.isEmpty ? "CSV import" : model.importName, model: model
+      title: String(localized: "A clearer way to import"),
+      subtitle: model.importName.isEmpty ? String(localized: "CSV import") : model.importName, model: model
     ) {
       Picker("Broker format", selection: $model.importProfile) {
         ForEach(ImportProfile.all) { Text($0.label).tag($0.id) }
@@ -653,17 +751,17 @@ struct ImportSheet: View {
       Button("Preview import") { Task { await model.previewImport() } }.disabled(model.saving)
         .keyboardShortcut(model.importPreview == nil ? .defaultAction : nil)
       if let preview = model.importPreview {
-        if let label = preview.profileLabel {
-          Text(model.importProfile == "auto" ? "Detected format: \(label)" : "Read as: \(label)")
+        if let label = preview.profileLabel.map(Loc.backend) {
+          (model.importProfile == "auto" ? Text("Detected format: \(label)") : Text("Read as: \(label)"))
             .font(.callout).foregroundStyle(.secondary)
         }
         HStack(spacing: 24) {
-          previewCount("New entries", preview.added)
-          previewCount("Duplicates", preview.duplicates)
-          previewCount("Skipped", preview.skipped.count)
+          previewCount(String(localized: "New entries"), preview.added)
+          previewCount(String(localized: "Duplicates"), preview.duplicates)
+          previewCount(String(localized: "Skipped"), preview.skipped.count)
         }.padding(.vertical, 8)
         if !preview.accountsCreated.isEmpty {
-          Text("New accounts: \(preview.accountsCreated.joined(separator: ", "))").font(.callout)
+          Text("New accounts: \(preview.accountsCreated.formatted(.list(type: .and)))").font(.callout)
         }
         if let issues = preview.issues, !issues.isEmpty {
           skippedTable(issues)
@@ -723,7 +821,7 @@ struct ImportSheet: View {
               // Values come from the file and may be amounts; privacy mode hides them.
               Text(issue.value.isEmpty ? "—" : privacy ? Format.mask : issue.value)
                 .lineLimit(1).truncationMode(.middle).frame(maxWidth: 110, alignment: .leading)
-              Text(issue.reason).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
+              Text(issue.localizedReason).foregroundStyle(Studio.warn).fixedSize(horizontal: false, vertical: true)
             }
           }
         }.font(.caption).textSelection(.enabled)
@@ -735,7 +833,7 @@ struct ImportSheet: View {
     DisclosureGroup("Duplicates already in the ledger (\(duplicates.count))") {
       VStack(alignment: .leading, spacing: 4) {
         ForEach(duplicates.prefix(20)) { row in
-          Text(privacy ? "Line \(row.line)" : "Line \(row.line): \(row.summary)")
+          privacy ? Text("Line \(row.line)") : Text("Line \(row.line): \(row.summary)")
         }
         if duplicates.count > 20 {
           Text("…and \(duplicates.count - 20) more").foregroundStyle(.secondary)
@@ -746,7 +844,7 @@ struct ImportSheet: View {
 
   private func previewCount(_ title: String, _ count: Int) -> some View {
     VStack(alignment: .leading, spacing: 6) {
-      Text("\(count)").font(.title2).monospacedDigit()
+      Text(count.formatted()).font(.title2).monospacedDigit()
       Text(title).font(.caption).foregroundStyle(.secondary)
     }
   }
@@ -763,30 +861,35 @@ struct WelcomeSheet: View {
 
   var body: some View {
     SheetLayout(
-      title: "Welcome to MarketPulse",
-      subtitle:
-        "Track your TFSA, RRSP, FHSA, and non-registered accounts. MarketPulse works out your adjusted cost base as you go.",
+      title: String(localized: "Welcome to MarketPulse"),
+      subtitle: String(
+        localized:
+          "Track your TFSA, RRSP, FHSA, and non-registered accounts. MarketPulse works out your adjusted cost base as you go."
+      ),
       model: model
     ) {
       VStack(spacing: 10) {
         choice(
-          "Create your first account", icon: "building.columns",
-          detail: "Add an account, then record what you bought or deposited.", action: createAccount
+          String(localized: "Create your first account"), icon: "building.columns",
+          detail: String(localized: "Add an account, then record what you bought or deposited."), action: createAccount
         ).disabled(model.demoOnly)
         choice(
-          "Import a CSV", icon: "square.and.arrow.down",
-          detail: "Bring in transactions exported from your broker. You'll see a preview before anything is saved.",
+          String(localized: "Import a CSV"), icon: "square.and.arrow.down",
+          detail: String(
+            localized: "Bring in transactions exported from your broker. You'll see a preview before anything is saved."),
           action: importCSV
         ).disabled(model.demoOnly)
         if model.demo {
           choice(
-            "Leave the demo", icon: "arrow.uturn.backward",
-            detail: "Go back to your own portfolio.", action: { model.leaveDemo(); dismiss() }
+            String(localized: "Leave the demo"), icon: "arrow.uturn.backward",
+            detail: String(localized: "Go back to your own portfolio."), action: { model.leaveDemo(); dismiss() }
           ).disabled(model.demoOnly)
         } else {
           choice(
-            "Explore a demo portfolio", icon: "sparkles",
-            detail: "Look around with fictional investments. Nothing is saved, and you can leave the demo at any time.",
+            String(localized: "Explore a demo portfolio"), icon: "sparkles",
+            detail: String(
+              localized:
+                "Look around with fictional investments. Nothing is saved, and you can leave the demo at any time."),
             action: exploreDemo
           ).disabled(!model.canEnterDemo)
         }
@@ -816,7 +919,7 @@ struct WelcomeSheet: View {
 
   /// The ledger's folder, written the way Finder users think of it.
   private var folder: String {
-    guard let path = model.dataDir else { return "a MarketPulse folder in your home folder" }
+    guard let path = model.dataDir else { return String(localized: "a MarketPulse folder in your home folder") }
     let home = NSHomeDirectory()
     return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
   }
@@ -862,6 +965,27 @@ private struct SheetLayout<Content: View>: View {
       content
     }.padding(28).frame(width: 520).fixedSize(horizontal: false, vertical: true)
       .interactiveDismissDisabled(model.saving)
+  }
+}
+
+/// The name shown for a `DesktopAccount.types` value. The value itself is what the CLI takes
+/// and the engine sends, so it's only ever translated for display.
+enum AccountTypeName {
+  static func label(_ type: String) -> String {
+    switch type {
+    case "TFSA": return String(localized: "TFSA")
+    case "RRSP": return String(localized: "RRSP")
+    case "FHSA": return String(localized: "FHSA")
+    case "RESP": return String(localized: "RESP")
+    case "LIRA": return String(localized: "LIRA")
+    case "RRIF": return String(localized: "RRIF")
+    case "NONREG": return String(localized: "NONREG")
+    case "MARGIN": return String(localized: "MARGIN")
+    case "CRYPTO": return String(localized: "CRYPTO")
+    case "CASH": return String(localized: "CASH")
+    case "OTHER": return String(localized: "OTHER")
+    default: return type
+    }
   }
 }
 

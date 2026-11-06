@@ -13,10 +13,10 @@ final class SettingsWindowController: NSWindowController {
     let tabs = NSTabViewController()
     tabs.tabStyle = .toolbar
     let sections: [(String, String, AnyView)] = [
-      ("General", "gearshape", AnyView(GeneralSettings(model: model))),
-      ("Appearance", "circle.lefthalf.filled", AnyView(AppearanceSettings(model: model))),
-      ("Portfolio", "chart.pie", AnyView(PortfolioSettings(model: model))),
-      ("Data", "externaldrive", AnyView(DataSettings(model: model))),
+      (String(localized: "General"), "gearshape", AnyView(GeneralSettings(model: model))),
+      (String(localized: "Appearance"), "circle.lefthalf.filled", AnyView(AppearanceSettings(model: model))),
+      (String(localized: "Portfolio"), "chart.pie", AnyView(PortfolioSettings(model: model))),
+      (String(localized: "Data"), "externaldrive", AnyView(DataSettings(model: model))),
     ]
     for (label, icon, view) in sections {
       let host = NSHostingController(rootView: view)
@@ -78,8 +78,8 @@ private struct GeneralSettings: View {
   @ObservedObject var model: StatusModel
   private static let intervals = [30, 60, 120, 300]
   private static let displays = [
-    ("day_pct", "Day change %"), ("day_change", "Day change $"), ("net_worth", "Net worth"),
-    ("symbol", "A symbol's price"),
+    ("day_pct", String(localized: "Day change %")), ("day_change", String(localized: "Day change $")),
+    ("net_worth", String(localized: "Net worth")), ("symbol", String(localized: "A symbol's price")),
   ]
 
   var body: some View {
@@ -87,7 +87,7 @@ private struct GeneralSettings: View {
       Section {
         Picker("Refresh quotes every", selection: $model.refreshSeconds) {
           ForEach(Self.intervals, id: \.self) {
-            Text($0 < 60 ? "\($0) seconds" : $0 == 60 ? "1 minute" : "\($0 / 60) minutes").tag($0)
+            interval($0).tag($0)
           }
         }
         Toggle("Launch at login", isOn: Binding(get: { model.loginEnabled }, set: model.setLoginItem))
@@ -133,7 +133,7 @@ private struct GeneralSettings: View {
         if model.configValue("menubar_display", \.menubarDisplay) == "symbol" {
           LabeledContent("Symbol") {
             HStack {
-              TextField("Symbol", text: $model.symbolDraft, prompt: Text("XEQT.TO"))
+              TextField("Symbol", text: $model.symbolDraft, prompt: Text(verbatim: "XEQT.TO"))
                 .labelsHidden().onSubmit(saveSymbol)
               Button("Set", action: saveSymbol).disabled(symbol.isEmpty || symbol == current)
             }
@@ -156,11 +156,18 @@ private struct GeneralSettings: View {
     }
   }
 
+  /// One sentence per interval, so each language can word (and pluralize) its own.
+  private func interval(_ seconds: Int) -> Text {
+    if seconds < 60 { return Text("\(seconds) seconds") }
+    if seconds == 60 { return Text("1 minute") }
+    return Text("\(seconds / 60) minutes")
+  }
+
   private var updateStatus: String {
     if let result = model.updateCheckResult { return result }
-    guard model.checkForUpdates else { return "Off" }
-    return model.lastUpdateCheck.map { "Last checked \($0.formatted(.relative(presentation: .named)))" }
-      ?? "Not checked yet"
+    guard model.checkForUpdates else { return String(localized: "Off") }
+    guard let last = model.lastUpdateCheck else { return String(localized: "Not checked yet") }
+    return String(localized: "Last checked \(last.formatted(.relative(presentation: .named)))")
   }
 
   private var current: String { model.configValue("menubar_symbol", \.menubarSymbol) }
@@ -185,11 +192,13 @@ private struct MarketDataSection: View {
     let chosen = available.first { $0.name == draft.provider }
     Section {
       if settings?.quoteProvidersAvailable == nil {
-        Text(
-          settings == nil
-            ? "Available after the next refresh."
-            : "This version of the MarketPulse engine doesn't support a fallback quote provider."
-        ).foregroundStyle(.secondary)
+        Group {
+          if settings == nil {
+            Text("Available after the next refresh.")
+          } else {
+            Text("This version of the MarketPulse engine doesn't support a fallback quote provider.")
+          }
+        }.foregroundStyle(.secondary)
       } else {
         Picker("Fallback provider", selection: $draft.provider) {
           Text("None").tag("")
@@ -205,7 +214,9 @@ private struct MarketDataSection: View {
               Label("Key saved", systemImage: "checkmark.circle").foregroundStyle(Studio.mint)
             }
           }
-          LabeledContent(draft.provider == saved && keySet ? "Replace key" : "API key") {
+          LabeledContent(
+            draft.provider == saved && keySet ? String(localized: "Replace key") : String(localized: "API key")
+          ) {
             HStack {
               SecureField("API key", text: $draft.key, prompt: Text("Paste your key"))
                 .labelsHidden().onSubmit(save)
@@ -224,7 +235,7 @@ private struct MarketDataSection: View {
               draft.key = ""
               model.clearQuoteProviderKey()
             }
-            .accessibilityLabel("Remove the \(model.desktop?.providerLabel(saved) ?? "fallback provider") key")
+            .accessibilityLabel(removeKeyLabel(saved))
           }
         }
       }
@@ -244,6 +255,13 @@ private struct MarketDataSection: View {
         model.clearQuoteProviderKey()
       }
     }
+  }
+
+  private func removeKeyLabel(_ saved: String) -> String {
+    guard let name = model.desktop?.providerLabel(saved) else {
+      return String(localized: "Remove the fallback provider key")
+    }
+    return String(localized: "Remove the \(name) key")
   }
 
   private var trimmedKey: String { draft.key.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -344,13 +362,15 @@ private struct DataSettings: View {
     let storage = model.desktop?.storage
     SettingsPage(model: model, writes: false) {
       Section {
-        location("Portfolio", model.demo ? nil : model.dataDir)
-        location("Settings file", model.demo ? nil : model.desktop?.settings?.configPath)
+        location(String(localized: "Portfolio"), model.demo ? nil : model.dataDir)
+        location(String(localized: "Settings file"), model.demo ? nil : model.desktop?.settings?.configPath)
       } footer: {
         Text("Your portfolio stays on this Mac and is never uploaded. MarketPulse goes online only for prices, exchange rates and the update check.")
       }
       Section("Backups") {
-        LabeledContent("Backups kept", value: model.demo ? "None in the demo" : "\(storage?.backups?.count ?? 0)")
+        LabeledContent(
+          "Backups kept",
+          value: model.demo ? String(localized: "None in the demo") : (storage?.backups?.count ?? 0).formatted())
         if let latest = storage?.backups?.first {
           LabeledContent("Latest", value: "\(latest.when) · \(latest.reasonLabel)")
         }
@@ -365,7 +385,7 @@ private struct DataSettings: View {
                 Button("Unarchive") { model.unarchiveAccount(account) }.disabled(!model.canEdit)
               } label: {
                 Text(account.name)
-                Text(account.type)
+                Text(AccountTypeName.label(account.type))
               }
             }
           }
@@ -381,7 +401,7 @@ private struct DataSettings: View {
   private func location(_ title: String, _ path: String?) -> some View {
     LabeledContent(title) {
       HStack {
-        Text(path.map(abbreviate) ?? "Not available").foregroundStyle(.secondary).lineLimit(1)
+        Text(path.map(abbreviate) ?? String(localized: "Not available")).foregroundStyle(.secondary).lineLimit(1)
           .truncationMode(.middle).textSelection(.enabled).help(path ?? "")
         Button("Reveal in Finder") {
           if let path { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }

@@ -326,6 +326,281 @@
 
 
 /* ==== DesktopForms.swift, SettingsWindow.swift ==== */
+/* Shared form words */
+"Cancel" = "Annuler";
+"Save" = "Enregistrer";
+"Save changes" = "Enregistrer";
+"Retry save" = "Réessayer";
+"Type" = "Type";
+"Account" = "Compte";
+"Account type" = "Type de compte";
+"Choose account" = "Choisir un compte";
+"Date" = "Date";
+"Symbol" = "Symbole";
+"Currency" = "Devise";
+"Amount" = "Montant";
+"Value" = "Valeur";
+"Total" = "Total";
+"None" = "Aucun";
+"Note (optional)" = "Note (facultative)";
+"Name (optional)" = "Nom (facultatif)";
+"The save outcome is unknown. Retry the same entry before changing or closing it." = "On ignore si l'enregistrement a réussi. Réessayez la même écriture avant de la modifier ou de fermer.";
+
+/* Account types (the codes stay as the CLI takes them) */
+"TFSA" = "CELI";
+"RRSP" = "REER";
+"FHSA" = "CELIAPP";
+"RESP" = "REEE";
+"LIRA" = "CRI";
+"RRIF" = "FERR";
+"NONREG" = "Non enregistré";
+"MARGIN" = "Marge";
+"CRYPTO" = "Crypto";
+"CASH" = "Espèces";
+"OTHER" = "Autre";
+
+/* Transaction sheet */
+"Record a transaction" = "Inscrire une opération";
+"Edit transaction" = "Modifier l'opération";
+"Add an entry to your local ledger. This doesn't place a trade." = "Ajoutez une écriture à votre registre local. Aucun ordre n'est passé.";
+"Change this entry in your local ledger. Cost base and gains are worked out again." = "Modifiez cette écriture de votre registre local. Le PBR et les gains sont recalculés.";
+"To change the type, delete this entry and record a new one." = "Pour changer le type, supprimez cette écriture et inscrivez-en une nouvelle.";
+"From account" = "Du compte";
+"To account" = "Vers le compte";
+"Currency of the price" = "Devise du prix";
+"Transaction currency" = "Devise de l'opération";
+"Automatic" = "Automatique";
+"Leave blank to use the symbol's listing currency (or the account's for cash entries). Enter one if the price is in another currency." = "Laissez vide pour utiliser la devise de cotation du titre (ou celle du compte pour les écritures en espèces). Indiquez-en une si le prix est dans une autre devise.";
+"Save transaction" = "Enregistrer l'opération";
+"Transaction updated" = "Opération mise à jour";
+"Quantity" = "Quantité";
+"Price per share" = "Prix par action";
+"Fees" = "Frais";
+"New shares" = "Nouvelles actions";
+"The reinvested dividend counts as income and adds to the cost base. No cash moves." = "Le dividende réinvesti compte comme revenu et s'ajoute au PBR. Aucun mouvement d'espèces.";
+"Market price per share" = "Cours par action";
+"Market price (optional)" = "Cours (facultatif)";
+"Moving shares into a registered account counts as selling them at market value for tax (a loss is denied), and moving them out sets a new cost base at market value. Enter the price on the transfer date." = "Transférer des actions dans un compte enregistré équivaut, pour l'impôt, à les vendre à la valeur marchande (une perte est refusée), et les en sortir fixe un nouveau PBR à la valeur marchande. Entrez le cours à la date du transfert.";
+"The shares move at their cost base. A price is only needed between a registered and a non-registered account." = "Les actions sont transférées à leur PBR. Un cours n'est requis qu'entre un compte enregistré et un compte non enregistré.";
+"For every old share(s)" = "Pour ancienne(s) action(s)";
+"Funds and ETFs report it in box 42 of the T3 slip. It lowers the cost base; once that reaches zero, the rest counts as a capital gain." = "Les fonds et FNB le déclarent à la case 42 du feuillet T3. Il réduit le PBR; une fois celui-ci à zéro, le reste compte comme gain en capital.";
+"This account holds %@ %@ now." = "Ce compte détient maintenant %@ %@.";
+"This account holds no %@ now. A return of capital only lowers the cost of shares held on its date." = "Ce compte ne détient aucun %@ en ce moment. Un remboursement de capital ne réduit que le coût des titres détenus à sa date.";
+"This account holds no %@ now. An earlier date is checked against what it held then." = "Ce compte ne détient aucun %@ en ce moment. Une date antérieure est vérifiée selon ce qu'il détenait alors.";
+"%@ holds %@ %@ now." = "%@ détient maintenant %@ %@.";
+"%@ holds no %@ now. A return of capital only lowers the cost of shares held on its date." = "%@ ne détient aucun %@ en ce moment. Un remboursement de capital ne réduit que le coût des titres détenus à sa date.";
+"%@ holds no %@ now. An earlier date is checked against what it held then." = "%@ ne détient aucun %@ en ce moment. Une date antérieure est vérifiée selon ce qu'il détenait alors.";
+"For a 2-for-1 split, enter 2 and 1; for a 1-for-10 consolidation, 1 and 10. The cost base doesn't change." = "Pour un fractionnement de 2 pour 1, entrez 2 et 1; pour un regroupement de 1 pour 10, 1 et 10. Le PBR ne change pas.";
+"%@ %@ become %@, at the same total cost base. For a 2-for-1 split, enter 2 and 1; for a 1-for-10 consolidation, 1 and 10." = "%@ %@ deviennent %@, au même PBR total. Pour un fractionnement de 2 pour 1, entrez 2 et 1; pour un regroupement de 1 pour 10, 1 et 10.";
+
+/* Account sheet */
+"A home for your investments" = "Un lieu pour vos placements";
+"Edit account" = "Modifier le compte";
+"Create an account in your existing portfolio." = "Créez un compte dans votre portefeuille actuel.";
+"Change how this account is named and tracked. Its transactions stay as they are." = "Modifiez le nom et le suivi de ce compte. Ses opérations restent inchangées.";
+"Account name" = "Nom du compte";
+"My TFSA" = "Mon CELI";
+"The type decides whether gains in this account are taxable and which contribution room it counts against. Both are worked out again." = "Le type détermine si les gains de ce compte sont imposables et sur quels droits de cotisation il compte. Les deux sont recalculés.";
+"Entries saved without a currency of their own are read in the account's currency, so changing it can change what they're worth." = "Les écritures sans devise propre sont lues dans la devise du compte; la changer peut donc modifier leur valeur.";
+"Institution (optional)" = "Institution (facultatif)";
+"Track cash balance" = "Suivre le solde en espèces";
+"When enabled, record deposits and withdrawals so purchases and sales are reflected in cash. Otherwise, only holdings are included." = "Si activé, inscrivez les dépôts et retraits pour que les achats et ventes se reflètent dans les espèces. Sinon, seuls les avoirs sont inclus.";
+"Archive…" = "Archiver…";
+"Hide this account everywhere and leave it out of your totals" = "Masquer ce compte partout et l'exclure de vos totaux";
+"Create account" = "Créer le compte";
+"Account created" = "Compte créé";
+"Account updated" = "Compte mis à jour";
+"Archive %@?" = "Archiver %@?";
+"Archive" = "Archiver";
+"Archived %@. You can unarchive it in Settings › Data." = "%@ archivé. Vous pouvez le désarchiver dans Réglages › Données.";
+"It will be hidden everywhere in MarketPulse and left out of your totals. Its transactions are kept, and you can unarchive it in Settings › Data. While it still holds investments or cash, daily net-worth snapshots pause until you move or sell them, or unarchive it." = "Il sera masqué partout dans MarketPulse et exclu de vos totaux. Ses opérations sont conservées, et vous pourrez le désarchiver dans Réglages › Données. Tant qu'il détient des placements ou des espèces, les instantanés quotidiens de la valeur nette sont suspendus jusqu'à ce que vous les transfériez ou les vendiez, ou que vous le désarchiviez.";
+
+/* Contribution room sheet */
+"Contribution room" = "Droits de cotisation";
+"Enter the room CRA reported for January 1 of a year. You'll find it in CRA My Account or on your notice of assessment." = "Entrez les droits que l'ARC a indiqués au 1er janvier d'une année. Vous les trouverez dans Mon dossier de l'ARC ou sur votre avis de cotisation.";
+"Room on January 1 of" = "Droits au 1er janvier";
+"Room in CAD" = "Droits en CAD";
+"Replaces the room you entered before: %@ on January 1, %@." = "Remplace les droits entrés auparavant : %@ au 1er janvier %@.";
+"Save room" = "Enregistrer les droits";
+"TFSA contribution room saved" = "Droits de cotisation CELI enregistrés";
+"FHSA contribution room saved" = "Droits de cotisation CELIAPP enregistrés";
+"RRSP contribution room saved" = "Droits de cotisation REER enregistrés";
+"Contribution room saved" = "Droits de cotisation enregistrés";
+"Each new year's limit is added for you, and withdrawals are added back the following January. Deposits to your TFSA accounts are subtracted. Enter a negative amount if you've over-contributed." = "Le plafond de chaque nouvelle année est ajouté pour vous, et les retraits sont rajoutés en janvier suivant. Les dépôts dans vos comptes CELI sont soustraits. Entrez un montant négatif en cas de cotisation excédentaire.";
+"Each year's $8,000 is added for you, with up to $8,000 of unused room carried forward and the $40,000 lifetime limit applied. Deposits to your FHSA accounts are subtracted." = "Les 8 000 $ de chaque année sont ajoutés pour vous, avec un report d'au plus 8 000 $ de droits inutilisés et le plafond à vie de 40 000 $. Les dépôts dans vos comptes CELIAPP sont soustraits.";
+"RRSP room doesn't grow on its own here: enter the new figure from each year's notice of assessment. Deposits to your RRSP accounts are subtracted." = "Ici, les droits REER n'augmentent pas d'eux-mêmes : entrez le nouveau montant de chaque avis de cotisation. Les dépôts dans vos comptes REER sont soustraits.";
+
+/* Price alert sheet */
+"Keep an eye on a price" = "Surveiller un cours";
+"Alerts are checked while the app or automation runner is active." = "Les alertes sont vérifiées tant que l'app ou l'automatisation est active.";
+"Condition" = "Condition";
+"Price at or above" = "Cours égal ou supérieur à";
+"Price at or below" = "Cours égal ou inférieur à";
+"Daily gain (%)" = "Hausse du jour (%)";
+"Daily decline (%)" = "Baisse du jour (%)";
+"Percentage" = "Pourcentage";
+"Price in listing currency" = "Cours dans la devise de cotation";
+"Create alert" = "Créer l'alerte";
+"Price alert created" = "Alerte de cours créée";
+
+/* Asset sheets */
+"New value" = "Nouvelle valeur";
+"New value (%@)" = "Nouvelle valeur (%@)";
+"Add a GIC or bond" = "Ajouter un CPG ou une obligation";
+"Add an asset you value yourself" = "Ajouter un actif évalué par vous";
+"Record a valuation" = "Inscrire une évaluation";
+"It's valued by the interest it earns, up to maturity. The principal is recorded as a purchase on the start date." = "Sa valeur suit les intérêts qu'il rapporte jusqu'à l'échéance. Le capital est inscrit comme un achat à la date de début.";
+"Property, private shares, a pension, collectibles: anything the market can't price. Update its value whenever you like." = "Immobilier, actions privées, régime de retraite, objets de collection : tout ce que le marché ne peut évaluer. Mettez sa valeur à jour quand vous voulez.";
+"What %@ is worth now. Its value in your portfolio uses the latest valuation." = "Ce que vaut %@ aujourd'hui. Sa valeur dans votre portefeuille suit la dernière évaluation.";
+"Asset" = "Actif";
+"Current value" = "Valeur actuelle";
+"Valued on" = "Évalué le";
+"GIC-2027" = "CPG-2027";
+"COTTAGE" = "CHALET";
+"%@ is already in your portfolio. Choose another symbol." = "%@ est déjà dans votre portefeuille. Choisissez un autre symbole.";
+"A short code of your own. It names the asset in Holdings and Activity." = "Un code court de votre choix. Il désigne l'actif dans Avoirs et Activité.";
+"2-year GIC" = "CPG de 2 ans";
+"Family cottage" = "Chalet familial";
+"Principal" = "Capital";
+"Annual rate (%)" = "Taux annuel (%)";
+"Start date" = "Date de début";
+"Matures on" = "Échéance le";
+"The maturity date must be after the start date." = "L'échéance doit suivre la date de début.";
+"Compounding" = "Capitalisation";
+"Annual" = "Annuelle";
+"Semiannual" = "Semestrielle";
+"Quarterly" = "Trimestrielle";
+"Monthly" = "Mensuelle";
+"Simple" = "Simple";
+"Asset class" = "Catégorie d'actif";
+"Acquired on" = "Acquis le";
+"Account's currency" = "Devise du compte";
+"Save valuation" = "Enregistrer l'évaluation";
+"Add asset" = "Ajouter l'actif";
+"Valuation recorded" = "Évaluation inscrite";
+"%@ added" = "%@ ajouté";
+"Change asset class" = "Changer la catégorie d'actif";
+"Which class %@ counts toward in Allocation and your targets, in every account." = "La catégorie où %@ compte dans Répartition et vos cibles, dans tous les comptes.";
+"%@ counts as %@" = "%@ est classé comme %@";
+
+/* Allocation targets sheet */
+"Now %@" = "Actuel : %@";
+"Allocation targets" = "Cibles de répartition";
+"The share of your portfolio you want in each asset class. Leave a class blank for none." = "La part de votre portefeuille voulue dans chaque catégorie d'actif. Laissez vide pour aucune.";
+"Target for %@ (%%)" = "Cible pour %@ (%%)";
+"Each target is a percentage from 0 to 100, and together they can't pass 100%." = "Chaque cible est un pourcentage de 0 à 100, et leur total ne peut dépasser 100 %.";
+"Clear all" = "Tout effacer";
+"Save targets" = "Enregistrer les cibles";
+"Allocation targets saved" = "Cibles de répartition enregistrées";
+
+/* Import sheet */
+"A clearer way to import" = "Une importation plus claire";
+"CSV import" = "Importation CSV";
+"Broker format" = "Format du courtier";
+"Default account for rows without one" = "Compte des lignes sans compte";
+"Use accounts named in the CSV" = "Utiliser les comptes nommés dans le CSV";
+"Preview import" = "Aperçu de l'importation";
+"Detected format: %@" = "Format détecté : %@";
+"Read as: %@" = "Lu comme : %@";
+"New entries" = "Nouvelles";
+"Duplicates" = "Doublons";
+"Skipped" = "Ignorées";
+"New accounts: %@" = "Nouveaux comptes : %@";
+"Line %lld: %@" = "Ligne %lld : %@";
+"Only valid new rows will be imported. Skipped rows stay out of the ledger. A safety backup is taken before the import." = "Seules les nouvelles lignes valides seront importées. Les lignes ignorées restent hors du registre. Une sauvegarde de sécurité est faite avant l'importation.";
+"Preview reads your broker's export, checks for duplicates, and lists any rows it can't use, without changing the ledger." = "L'aperçu lit l'export de votre courtier, repère les doublons et liste les lignes inutilisables, sans modifier le registre.";
+"Import %lld entries" = "Importer %lld écritures";
+"Skipped lines" = "Lignes ignorées";
+"Line" = "Ligne";
+"Field" = "Champ";
+"Reason" = "Motif";
+"Duplicates already in the ledger (%lld)" = "Doublons déjà dans le registre (%lld)";
+"Line %lld" = "Ligne %lld";
+"…and %lld more" = "…et %lld de plus";
+
+/* Welcome sheet */
+"Welcome to MarketPulse" = "Bienvenue dans MarketPulse";
+"Track your TFSA, RRSP, FHSA, and non-registered accounts. MarketPulse works out your adjusted cost base as you go." = "Suivez vos comptes CELI, REER, CELIAPP et non enregistrés. MarketPulse calcule votre prix de base rajusté au fur et à mesure.";
+"Create your first account" = "Créer votre premier compte";
+"Add an account, then record what you bought or deposited." = "Ajoutez un compte, puis inscrivez vos achats ou dépôts.";
+"Import a CSV" = "Importer un CSV";
+"Bring in transactions exported from your broker. You'll see a preview before anything is saved." = "Importez les opérations exportées de votre courtier. Vous verrez un aperçu avant tout enregistrement.";
+"Leave the demo" = "Quitter la démo";
+"Go back to your own portfolio." = "Retournez à votre propre portefeuille.";
+"Explore a demo portfolio" = "Explorer un portefeuille de démo";
+"Look around with fictional investments. Nothing is saved, and you can leave the demo at any time." = "Découvrez l'app avec des placements fictifs. Rien n'est enregistré, et vous pouvez quitter la démo à tout moment.";
+"Show totals in" = "Afficher les totaux en";
+"Each account keeps its own currency. Totals are converted to this one." = "Chaque compte garde sa propre devise. Les totaux sont convertis dans celle-ci.";
+"Your portfolio stays on this Mac, in %@. It's never uploaded. MarketPulse goes online only to look up prices and exchange rates." = "Votre portefeuille reste sur ce Mac, dans %@. Il n'est jamais téléversé. MarketPulse ne va en ligne que pour obtenir les cours et les taux de change.";
+"a MarketPulse folder in your home folder" = "un dossier MarketPulse dans votre dossier de départ";
+"Not now" = "Plus tard";
+
+/* Settings window */
+"General" = "Général";
+"Appearance" = "Apparence";
+"Portfolio" = "Portefeuille";
+"Data" = "Données";
+"You're exploring the demo. Settings are read-only until you leave it." = "Vous explorez la démo. Les réglages sont en lecture seule jusqu'à ce que vous la quittiez.";
+"Day change %" = "Variation du jour (%)";
+"Day change $" = "Variation du jour ($)";
+"Net worth" = "Valeur nette";
+"A symbol's price" = "Cours d'un titre";
+"Refresh quotes every" = "Actualiser les cours aux";
+"%lld seconds" = "%lld secondes";
+"1 minute" = "1 minute";
+"%lld minutes" = "%lld minutes";
+"Launch at login" = "Ouvrir à la connexion";
+"Refreshes, daily snapshots, backups and alerts run while MarketPulse is open, even with the window closed." = "Les actualisations, instantanés quotidiens, sauvegardes et alertes s'exécutent tant que MarketPulse est ouvert, même fenêtre fermée.";
+"Check for updates automatically" = "Rechercher les mises à jour automatiquement";
+"Check Now" = "Vérifier maintenant";
+"MarketPulse %@ is available" = "MarketPulse %@ est disponible";
+"Release Notes" = "Notes de version";
+"Copy Install Command" = "Copier la commande d'installation";
+"Updates" = "Mises à jour";
+"Once a day, MarketPulse asks GitHub for the version number of its latest release. Nothing about you or your portfolio is sent, and updates are never installed for you: paste the install command into Terminal." = "Une fois par jour, MarketPulse demande à GitHub le numéro de sa dernière version. Rien sur vous ou votre portefeuille n'est envoyé, et les mises à jour ne sont jamais installées pour vous : collez la commande d'installation dans Terminal.";
+"This copy was built from a MarketPulse checkout. Update the checkout, then run marketpulse desktop install again." = "Cette copie a été compilée depuis un dépôt MarketPulse. Mettez le dépôt à jour, puis relancez marketpulse desktop install.";
+"Off" = "Désactivée";
+"Not checked yet" = "Pas encore vérifié";
+"Last checked %@" = "Dernière vérification : %@";
+"Menu bar" = "Barre des menus";
+"Show" = "Afficher";
+"Set" = "Définir";
+"Terminal" = "Terminal";
+"Open the terminal app in" = "Ouvrir l'app de terminal dans";
+"⌥⌘M opens the terminal app from anywhere" = "⌥⌘M ouvre l'app de terminal de partout";
+"Market data" = "Données de marché";
+"Available after the next refresh." = "Disponible après la prochaine actualisation.";
+"This version of the MarketPulse engine doesn't support a fallback quote provider." = "Cette version du moteur MarketPulse ne prend pas en charge de fournisseur de cours de secours.";
+"Fallback provider" = "Fournisseur de secours";
+"API key" = "Clé d'API";
+"Key saved" = "Clé enregistrée";
+"Replace key" = "Remplacer la clé";
+"Paste your key" = "Collez votre clé";
+"%@ API key" = "Clé d'API %@";
+"Get a %@ key" = "Obtenir une clé %@";
+"Remove key" = "Supprimer la clé";
+"Remove the %@ key" = "Supprimer la clé %@";
+"Remove the fallback provider key" = "Supprimer la clé du fournisseur de secours";
+"Optional. Used only when Yahoo can't be reached. Your key stays in your config file on this Mac." = "Facultatif. Utilisé seulement si Yahoo est injoignable. Votre clé reste dans votre fichier de configuration sur ce Mac.";
+"System follows your Mac's Light or Dark setting. The menu bar panel keeps the colours of your MarketPulse terminal theme." = "Système suit le réglage Clair ou Sombre de votre Mac. Le panneau de la barre des menus garde les couleurs de votre thème de terminal MarketPulse.";
+"Each account keeps its own currency. Totals and charts are converted to this one." = "Chaque compte garde sa propre devise. Les totaux et graphiques sont convertis dans celle-ci.";
+"Default account" = "Compte par défaut";
+"“%@” doesn't match an active account." = "« %@ » ne correspond à aucun compte actif.";
+"Chosen first when you record a transaction." = "Choisi d'office quand vous inscrivez une opération.";
+"Hide amounts" = "Masquer les montants";
+"Privacy mode shows percentages but hides dollar amounts, here and in the menu bar." = "Le mode confidentialité affiche les pourcentages mais masque les montants en dollars, ici et dans la barre des menus.";
+"Settings file" = "Fichier de réglages";
+"Your portfolio stays on this Mac and is never uploaded. MarketPulse goes online only for prices, exchange rates and the update check." = "Votre portefeuille reste sur ce Mac et n'est jamais téléversé. MarketPulse ne va en ligne que pour les cours, les taux de change et la vérification des mises à jour.";
+"Backups" = "Sauvegardes";
+"Backups kept" = "Sauvegardes conservées";
+"None in the demo" = "Aucune dans la démo";
+"Latest" = "Plus récente";
+"Show Backups…" = "Afficher les sauvegardes…";
+"Archived accounts (%lld)" = "Comptes archivés (%lld)";
+"Unarchive" = "Désarchiver";
+"Archived accounts are hidden everywhere else and left out of your totals. Their transactions are kept. Unarchive one to bring it back." = "Les comptes archivés sont masqués partout ailleurs et exclus de vos totaux. Leurs opérations sont conservées. Désarchivez-en un pour le rétablir.";
+"Not available" = "Non disponible";
+"Reveal in Finder" = "Afficher dans le Finder";
 
 
 /* ==== Views.swift, StatusModel.swift, PortfolioWindowController.swift, Studio.swift, Accessibility.swift, Models.swift, Services.swift, UpdateCheck.swift ==== */
