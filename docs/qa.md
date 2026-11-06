@@ -290,6 +290,16 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     way the key never appears in the error). Turn Wi-Fi back on, refresh, then **Remove
     key**: the fallback row disappears.
 
+28. **French.** Quit the QA app, then run `"$TMPDIR/marketpulse-qa/launch.sh" -AppleLanguages
+    '(fr)' -AppleLocale fr_CA` (or set the system language to Français). Walk through
+    items 2–11, 17–25 and 27. Every label, button, menu, tooltip, sheet, alert and
+    VoiceOver name reads in French, with no English left and no text truncated or
+    overlapping. Amounts read like `1 234,56 $`, percentages like `5,25 %`, and dates are
+    French. Account types show as CELI, REER, CELIAPP. A Tax note and an archived-account
+    warning read in French. Typing `12,5` in an amount field records 12.5. Then relaunch
+    with `-NSShowNonLocalizedStrings YES` added: no text appears in capitals (a capitalized
+    string is a key missing from the French table).
+
 Quit the QA app with ⌘Q when done.
 
 ## Tool limits and workarounds

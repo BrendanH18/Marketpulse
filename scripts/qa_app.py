@@ -209,9 +209,11 @@ def main() -> None:
     launch = out / "launch.sh"
     launch.write_text(
         "#!/bin/sh\n# Opens the QA app on the scratch ledger; run it again to send a Dock-style reopen event.\n"
+        "# Extra arguments go to the app, e.g. `launch.sh -AppleLanguages '(fr)'` (quit the app first).\n"
+        'if [ $# -gt 0 ]; then set -- --args "$@"; fi\n'
         f"exec open {cli}--env MARKETPULSE_DATA={shlex.quote(str(data))} "
         f"--env MARKETPULSE_CONFIG={shlex.quote(str(out / 'config.toml'))} "
-        f"--env MARKETPULSE_UPDATE_FEED={shlex.quote(str(out / 'update-feed.json'))} {shlex.quote(str(app))}\n",
+        f'--env MARKETPULSE_UPDATE_FEED={shlex.quote(str(out / "update-feed.json"))} {shlex.quote(str(app))} "$@"\n',
         encoding="utf-8",
     )
     launch.chmod(0o755)
