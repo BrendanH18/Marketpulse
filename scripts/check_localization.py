@@ -50,6 +50,7 @@ CALLS = {
     "Stepper",
     "DatePicker",
     "ContentUnavailableView",
+    "CommandMenu",
     "ControlGroup",
     "ProgressView",
     "Gauge",

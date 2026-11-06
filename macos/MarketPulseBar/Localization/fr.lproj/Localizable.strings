@@ -604,6 +604,109 @@
 
 
 /* ==== Views.swift, StatusModel.swift, PortfolioWindowController.swift, Studio.swift, Accessibility.swift, Models.swift, Services.swift, UpdateCheck.swift ==== */
+/* Views.swift */
+"Settings…" = "Réglages…";
+"Workspace" = "Espace de travail";
+"Open Portfolio" = "Ouvrir le portefeuille";
+"Import CSV…" = "Importer un CSV…";
+"Export ledger…" = "Exporter le registre…";
+"Show Amounts" = "Afficher les montants";
+"Hide Amounts" = "Masquer les montants";
+"Overview" = "Vue d’ensemble";
+"Holdings" = "Placements";
+"Allocation" = "Répartition";
+"Activity" = "Activité";
+"Accounts" = "Comptes";
+"Watchlist" = "Liste de surveillance";
+"Income" = "Revenus";
+"Tax" = "Impôt";
+"Automation" = "Automatisation";
+"Update Available: MarketPulse %@…" = "Mise à jour disponible : MarketPulse %@…";
+"Check for Updates…" = "Rechercher des mises à jour…";
+"Welcome to MarketPulse" = "Bienvenue dans MarketPulse";
+"Leave the Demo" = "Quitter la démo";
+"Explore a Demo Portfolio" = "Explorer un portefeuille de démonstration";
+"can't reach marketpulse" = "marketpulse inaccessible";
+"Run `marketpulse menubar install` again from a terminal." = "Relancez `marketpulse menubar install` dans un terminal.";
+"↓ MarketPulse %@ is available" = "↓ MarketPulse %@ disponible";
+"copy install command" = "copier la commande";
+"DEMO · FICTIONAL" = "DÉMO · FICTIF";
+"open" = "ouvert";
+"pre" = "préouverture";
+"after hours" = "après clôture";
+"closed" = "fermé";
+"NET WORTH" = "VALEUR NETTE";
+"today" = "aujourd’hui";
+"◌ offline" = "◌ hors ligne";
+"Offline, cached quotes" = "Hors ligne, cours en cache";
+"UNREALIZED" = "LATENT";
+"INCOME YTD" = "REVENU CUMUL.";
+"accounts" = "comptes";
+"movers" = "plus fortes variations";
+"watchlist" = "liste de surveillance";
+"alerts" = "alertes";
+"Triggered" = "Déclenchée";
+"Watching" = "Surveillée";
+"Net worth, last 30 days" = "Valeur nette, 30 derniers jours";
+"Portfolio" = "Portefeuille";
+"Open portfolio" = "Ouvrir le portefeuille";
+"Open terminal" = "Ouvrir le terminal";
+"Refresh" = "Actualiser";
+"Show amounts" = "Afficher les montants";
+"Hide amounts" = "Masquer les montants";
+"Settings" = "Réglages";
+"Quit MarketPulse" = "Quitter MarketPulse";
+
+/* StatusModel.swift */
+"Demo %@" = "Démo %@";
+"Unsupported desktop bridge version. Reinstall the app." = "Version du pont de bureau non prise en charge. Réinstallez l’application.";
+"Unexpected portfolio data (%@). Update MarketPulse and reinstall the app." = "Données de portefeuille inattendues (%@). Mettez MarketPulse à jour et réinstallez l’application.";
+"The portfolio window couldn't refresh: %@" = "La fenêtre du portefeuille n’a pas pu s’actualiser : %@";
+"Couldn't reach GitHub. Check your connection and try again later." = "Impossible de joindre GitHub. Vérifiez votre connexion et réessayez plus tard.";
+"MarketPulse %@ is available." = "MarketPulse %@ est disponible.";
+"MarketPulse is up to date." = "MarketPulse est à jour.";
+"Install command for MarketPulse %@ copied. Paste it into Terminal and press Return. Your portfolio isn't changed." = "Commande d’installation de MarketPulse %@ copiée. Collez-la dans Terminal et appuyez sur Retour. Votre portefeuille n’est pas modifié.";
+"Transaction recorded" = "Opération enregistrée";
+"Another save is in progress." = "Un autre enregistrement est en cours.";
+"%@. Its confirmation failed." = "%@. Sa confirmation a échoué.";
+"Restored the backup from %@. Your previous portfolio was saved as a backup first." = "Sauvegarde du %@ restaurée. Votre portefeuille précédent a d’abord été sauvegardé.";
+"Settings updated" = "Réglages mis à jour";
+"%@ is back in your portfolio" = "%@ est de retour dans votre portefeuille";
+"%@ key saved. It's used only when the primary provider can't be reached." = "Clé %@ enregistrée. Elle ne sert que si le fournisseur principal est inaccessible.";
+"Fallback quote provider removed" = "Fournisseur de cours de secours retiré";
+"Demo is read-only. Privacy mode is available in your real portfolio." = "La démo est en lecture seule. Le mode confidentialité est offert dans votre vrai portefeuille.";
+"Couldn't read %@: %@" = "Impossible de lire %@ : %@";
+"Imported %lld entries. A safety backup was created first." = "%lld opérations importées. Une sauvegarde de sécurité a d’abord été créée.";
+"Unsupported tax report version. Reinstall the app." = "Version du rapport fiscal non prise en charge. Réinstallez l’application.";
+"Unexpected tax report (%@). Update MarketPulse and reinstall the app." = "Rapport fiscal inattendu (%@). Mettez MarketPulse à jour et réinstallez l’application.";
+"Ledger exported" = "Registre exporté";
+
+/* Studio.swift */
+"System" = "Système";
+"Light" = "Clair";
+"Dark" = "Sombre";
+
+/* Services.swift */
+"Couldn't run marketpulse: %@" = "Impossible d’exécuter marketpulse : %@";
+"MARKETPULSE_CLI override" = "Remplacement MARKETPULSE_CLI";
+"Bundled with the app" = "Fourni avec l’application";
+"Installed CLI" = "CLI installé";
+"marketpulse on PATH" = "marketpulse dans le PATH";
+"MarketPulse exited with status %lld. If a refresh timed out, try again." = "MarketPulse s’est arrêté avec le code %lld. Si une actualisation a expiré, réessayez.";
+
+/* Accessibility.swift */
+"up %@" = "en hausse de %@";
+"down %@" = "en baisse de %@";
+"unchanged" = "inchangé";
+"up" = "en hausse";
+"down" = "en baisse";
+"Not enough history yet" = "Pas encore assez d’historique";
+"%@ to %@, %@" = "Du %@ au %@, %@";
+"%@ on %@ to %@ on %@, %@." = "De %@ le %@ à %@ le %@, %@.";
+"Low %@, high %@." = "Minimum %@, maximum %@.";
+"No income recorded in these months" = "Aucun revenu durant ces mois";
+"%@ over %lld months." = "%@ sur %lld mois.";
+"Highest: %@ in %@." = "Meilleur mois : %@ en %@.";
 
 
 /* ==== DesktopModels.swift, Localization.swift ==== */
