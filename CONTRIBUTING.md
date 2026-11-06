@@ -98,7 +98,7 @@ CI runs on [Namespace](https://namespace.so) runners: lint, formatting, type che
 Python tests on Linux and macOS, Python distribution builds with an installed-wheel smoke
 check, and the Swift build. On a pull request, the Mac app job (Swift build, bridge check,
 standalone app build) runs only when the PR touches the app's sources, the scripts it runs,
-the engine modules that shape the desktop bridge, test fixtures, dependencies or the CI
+the Python package (anything outside the terminal UI in `tui/`), test fixtures, dependencies or the CI
 workflow; the path list is in the `changes` job of `.github/workflows/ci.yml`. Pushes to
 `main` and releases always run it. The **Audit** workflow runs `shellcheck` on
 `scripts/install.sh` and `uv audit` on `uv.lock` for every pull request and weekly.

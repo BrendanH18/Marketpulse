@@ -115,17 +115,17 @@ jobs:
         run: |
           git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
           cat "$RUNNER_TEMP/changed.txt"
-          # The Swift sources, the scripts the job runs, the engine modules that shape the desktop
-          # bridge payload, the fixtures the bridge check reads, the bundled backend's dependencies,
-          # and this workflow.
+          # The Swift sources, the scripts the job runs, the Python package the app bundles (the
+          # bridge check loads nearly all of it through the CLI; only the terminal UI in tui/ is
+          # unused), the fixtures the bridge check reads, the bundled backend's dependencies, and
+          # this workflow.
           app_paths='^(macos/'
           app_paths+='|scripts/(build_app\.py|check_native_bridge\.)'
-          app_paths+='|src/marketpulse/(__init__|desktop|menubar|models|alerts|brokers)\.py'
-          app_paths+='|src/marketpulse/cli/native\.py'
+          app_paths+='|src/marketpulse/'
           app_paths+='|tests/fixtures/'
           app_paths+='|pyproject\.toml|uv\.lock'
           app_paths+='|\.github/workflows/ci\.yml)'
-          if grep -qE "$app_paths" "$RUNNER_TEMP/changed.txt"; then
+          if grep -E "$app_paths" "$RUNNER_TEMP/changed.txt" | grep -qvE '^src/marketpulse/tui/'; then
             echo "menubar=true" >> "$GITHUB_OUTPUT"
           else
             echo "menubar=false" >> "$GITHUB_OUTPUT"
