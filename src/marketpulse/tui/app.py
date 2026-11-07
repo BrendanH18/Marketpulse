@@ -2,126 +2,32 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
-from functools import partial
-from pathlib import Path
-
-from rich.console import Group, RenderableType
-from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme as RichTheme
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import ContentSwitcher, DataTable, Input, Static
 
-from .. import fmt, render
-from ..alerts import notify as desktop_notify
-from ..analytics import income_by_month, income_by_symbol
+from .. import render
 from ..config import Config
 from ..market import PERIODS, MarketError
-from ..models import AssetKind, Transaction, TxnType, parse_date, parse_symbols
+from ..models import AssetKind, Transaction
 from ..services import Tracker
 from ..themes import (
     OMARCHY_PALETTES,
     palette_from_colors,
-    pretty_name,
     resolve_palette,
     rich_styles,
     textual_theme,
     theme_names,
 )
-from ..valuation import PortfolioView, PositionView
-from .screens import (
-    AccountForm,
-    AlertForm,
-    AssetForm,
-    ConfirmScreen,
-    HelpScreen,
-    PromptScreen,
-    RoomForm,
-    SearchScreen,
-    TransactionForm,
-)
-from .widgets import WORKSPACES, Canvas, ChartView, Tile, TopBar, money_tile, pane, tile_content
-
-NW_RANGES = ["1m", "3m", "6m", "ytd", "1y", "all"]
-ALLOC_MODES = ["class", "account", "currency"]
-# Holdings table keeps Account, Symbol, Qty, Price, Day, Value, Gain, Gain %, Weight;
-# name and average cost live in the position pane.
-HOLDING_COLUMNS = (0, 1, 3, 5, 6, 7, 8, 9, 10)
-HINTS = {
-    "dashboard": "n new txn · / search · g grouping · , range- · . range+ · p privacy · t theme",
-    "holdings": "⏎ chart · b buy · s sell · D dividend · f account · A alert · w watch",
-    "watchlist": "⏎ chart · a add · x remove · J/K reorder · b buy · A alert",
-    "chart": "[/] period · c compare · C clear · ←/→ crosshair · b buy · w watch · A alert",
-    "activity": "n new · e edit · x delete · u undo · / filter · i import · E export",
-    "income": "D dividend · n new txn · r refresh",
-    "tax": "n new account · e edit · x delete · R room · G add GIC/asset · V value asset · ⏎ holdings",
-    "alerts": "n new alert · x delete · space pause/resume · ⏎ chart",
-}
-
-
-class PortfolioCommands(Provider):
-    """Command palette entries: every action, theme and known symbol."""
-
-    def _entries(self) -> list[tuple[str, str, object]]:
-        app: MarketPulseApp = self.app  # type: ignore[assignment]
-        entries = self._actions(app)
-        entries += [
-            (f"Go to {label}", f"Workspace {i}", partial(app.set_workspace, key))
-            for i, (key, label) in enumerate(WORKSPACES, 1)
-        ]
-        entries += [
-            (f"Theme: {pretty_name(n)}", "Omarchy theme", partial(setattr, app, "theme", n)) for n in theme_names()
-        ]
-        entries += [(f"Chart {s}", "Open chart", partial(app.open_chart, s)) for s in app.known_symbols()]
-        return entries
-
-    @staticmethod
-    def _actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:
-        """The fixed actions, shown before the user types anything."""
-        return [
-            ("Buy", "Record a buy", partial(app.action_trade, "BUY")),
-            ("Sell", "Record a sell", partial(app.action_trade, "SELL")),
-            ("Record dividend", "Cash dividend or distribution", partial(app.action_trade, "DIVIDEND")),
-            ("Record DRIP", "Reinvested dividend", partial(app.action_trade, "DRIP")),
-            ("Record deposit", "Money into an account", partial(app.action_trade, "DEPOSIT")),
-            ("Record withdrawal", "Money out of an account", partial(app.action_trade, "WITHDRAWAL")),
-            ("Record interest", "Interest income", partial(app.action_trade, "INTEREST")),
-            ("Record split", "Stock split", partial(app.action_trade, "SPLIT")),
-            ("Transfer in-kind", "Move shares between accounts", partial(app.action_trade, "TRANSFER")),
-            ("Record return of capital", "Reduces the ACB", partial(app.action_trade, "ROC")),
-            ("Record fee", "Account or management fee", partial(app.action_trade, "FEE")),
-            ("Record valuation", "Mark a manual asset at a price", partial(app.action_trade, "VALUATION")),
-            ("New account", "TFSA, RRSP, FHSA, non-registered…", app.action_new_account),
-            ("Add GIC or manual asset", "Fixed income, property, private holdings", app.action_add_asset),
-            ("Update manual asset value", "Mark a manual asset", app.action_value_asset),
-            ("Set contribution room", "TFSA / RRSP / FHSA", app.action_room),
-            ("New price alert", "Notify on price or % move", app.action_alert),
-            ("Add to watchlist", "Search and watch a symbol", app.action_watch_add),
-            ("Search symbol", "Open a chart", app.action_search),
-            ("Import CSV", "Broker or MarketPulse export", app.action_import_csv),
-            ("Export CSV", "Full ledger", app.action_export_csv),
-            ("Backfill net worth history", "Rebuild daily snapshots from your ledger", app.action_backfill),
-            ("Toggle privacy mode", "Hide amounts", app.action_privacy),
-            ("Refresh quotes", "Fetch fresh prices", app.action_refresh),
-            ("Undo last transaction", "Delete the most recent entry", app.action_undo),
-            ("Help", "Keyboard shortcuts", app.action_help),
-        ]
-
-    async def discover(self) -> Hits:
-        for name, help_text, callback in self._actions(self.app):  # type: ignore[arg-type]
-            yield DiscoveryHit(name, callback, help=help_text)  # type: ignore[arg-type]
-
-    async def search(self, query: str) -> Hits:
-        matcher = self.matcher(query)
-        for name, help_text, callback in self._entries():
-            score = matcher.match(name)
-            if score > 0:
-                yield Hit(score, matcher.highlight(name), callback, help=help_text)  # type: ignore[arg-type]
+from ..valuation import PortfolioView
+from . import actions, chart, records, workspaces
+from .commands import PortfolioCommands
+from .constants import HINTS, HOLDING_COLUMNS
+from .widgets import WORKSPACES, Canvas, ChartView, Tile, TopBar, pane
 
 
 class MarketPulseApp(App):
@@ -596,456 +502,46 @@ class MarketPulseApp(App):
         self.query_one(TopBar).refresh()
 
     def render_store_views(self) -> None:
-        self.render_activity()
-        self.render_accounts()
-        self.render_alerts()
-        self.render_tax()
+        workspaces.render_store_views(self)
 
     def render_market_views(self) -> None:
-        self._render_topbar_status()
-        self.render_dashboard()
-        self.render_holdings()
-        self.render_watchlist()
-        self.render_accounts()
-        self.render_alerts()
-        self.render_income()
-        self.render_position_detail()
-        self.render_watch_detail()
+        workspaces.render_market_views(self)
 
     def _render_topbar_status(self) -> None:
-        p, v = self.palette, self.view
-        t = Text()
-        if v is not None:
-            state = {"REGULAR": ("●", p.up), "PRE": ("◐", p.warn), "POST": ("◑", p.warn), "CLOSED": ("○", p.muted)}.get(
-                v.market_state
-            )
-            if state:
-                t.append(f"{state[0]} ", style=state[1])
-            t.append(fmt.money(v.net_worth, v.base, privacy=self.privacy, decimals=0), style=f"bold {p.bright}")
-            t.append(
-                f"  {fmt.arrow(v.day_change)} {fmt.pct(v.day_change_pct)}",
-                style=f"bold {self._trend_hex(v.day_change)}",
-            )
-            if v.stale:
-                t.append("  ◌ offline", style=p.warn)
-        if self.privacy:
-            t.append("  ◉ private", style=p.accent)
-        bar = self.query_one(TopBar)
-        bar.status = t
-        bar.refresh()
+        workspaces._render_topbar_status(self)
 
     def _snapshots(self) -> list:
-        today = date.today()
-        since = {
-            "1m": today - timedelta(days=31),
-            "3m": today - timedelta(days=92),
-            "6m": today - timedelta(days=183),
-            "ytd": date(today.year, 1, 1),
-            "1y": today - timedelta(days=366),
-            "all": None,
-        }[self.nw_range]
-        base = self.tracker.base
-        return [s for s in self.tracker.store.snapshots(since.isoformat() if since else None) if s.currency == base]
+        return workspaces._snapshots(self)
 
     def render_dashboard(self) -> None:
-        v, p, priv = self.view, self.palette, self.privacy
-        if v is None:
-            self.query_one("#nw-chart", Canvas).set_builder(lambda w, h: Text("Loading portfolio…", style="muted"))
-            return
-        strip = render.strip_text(self.strip)
-        strip.append("   ")
-        strip.append_text(render.market_state_text(v.market_state))
-        self.query_one("#strip", Static).update(strip)
-
-        sub = Text(f"invested {fmt.money(v.invested, v.base, privacy=priv, decimals=0)}", style="muted")
-        if v.stale:
-            sub.append(f"  ◌ {render.stale_note(v).removeprefix('offline — ')}", style="warn")
-        self.query_one("#tile-networth", Tile).set_builder(
-            money_tile(f"net worth · {v.base}", v.net_worth, v.base, sub, privacy=priv)
-        )
-
-        def tile(label: str, value: Text, sub_text: Text | None):
-            return lambda w, h: tile_content(label, value, sub_text, w)
-
-        today_value = Text(
-            f"{fmt.arrow(v.day_change)} {fmt.money(v.day_change, v.base, sign=True, privacy=priv)}",
-            style=f"bold {self._trend_hex(v.day_change)}",
-        )
-        self.query_one("#tile-today", Tile).set_builder(
-            tile("today", today_value, Text(fmt.pct(v.day_change_pct), style=self._trend_hex(v.day_change)))
-        )
-        unreal = Text(
-            fmt.money(v.unrealized, v.base, sign=True, privacy=priv), style=f"bold {self._trend_hex(v.unrealized)}"
-        )
-        self.query_one("#tile-unrealized", Tile).set_builder(
-            tile("unrealized", unreal, Text(fmt.pct(v.unrealized_pct), style=self._trend_hex(v.unrealized)))
-        )
-        income = Text(fmt.money(v.income_ytd, v.base, privacy=priv), style=f"bold {p.up if v.income_ytd else p.muted}")
-        realized = Text(f"realized {fmt.money(v.realized_ytd, v.base, sign=True, privacy=priv)}", style="muted")
-        self.query_one("#tile-income", Tile).set_builder(tile("income ytd", income, realized))
-        perf = self.perf
-        if perf is not None and perf.xirr_pct is not None:
-            ret = Text(f"{fmt.pct(perf.xirr_pct)}/yr", style=f"bold {self._trend_hex(perf.xirr_pct)}")
-            ret_sub = Text(f"twr {fmt.pct(perf.twr_pct)}", style="muted")
-        else:
-            ret = Text(fmt.pct(v.unrealized_pct), style=f"bold {self._trend_hex(v.unrealized)}")
-            ret_sub = Text("simple return", style="muted")
-        self.query_one("#tile-returns", Tile).set_builder(tile("returns", ret, ret_sub))
-
-        snaps = self._snapshots()
-        empty = not v.positions and not v.cash
-
-        def nw_chart(w: int, h: int) -> RenderableType:
-            if empty:
-                return Text.assemble(
-                    ("Welcome to MarketPulse.\n\n", "title"),
-                    ("n ", "accent"),
-                    ("record your first buy     ", "muted"),
-                    ("ctrl+p ", "accent"),
-                    ("new account, GIC or import CSV     ", "muted"),
-                    ("/ ", "accent"),
-                    ("search any symbol", "muted"),
-                )
-            if len(snaps) < 2:
-                return Text(
-                    "History builds daily. ctrl+p → “Backfill net worth history” rebuilds it now.", style="muted"
-                )
-            change = snaps[-1].net_worth - snaps[0].net_worth
-            pct = change / snaps[0].net_worth * 100 if snaps[0].net_worth else 0.0
-            head = Text(
-                f"{fmt.arrow(change)} {fmt.money(change, v.base, sign=True, privacy=priv)} ({fmt.pct(pct)})",
-                style=self._trend_hex(change),
-            )
-            return Group(head, render.net_worth_chart(snaps, p, width=w, height=max(h - 2, 3), privacy=priv))
-
-        self.query_one("#nw-chart", Canvas).set_builder(nw_chart)
-        self.query_one("#pane-nw").border_subtitle = "  ".join(f"▸{r}" if r == self.nw_range else r for r in NW_RANGES)
-
-        accounts = render.table("Account", "Type", ("Value", "right"), ("Today", "right"), "Weight", expand=True)
-        acct_types = {str(a.id): a.type.label for a in self.tracker.store.accounts(include_archived=True)}
-        for b in v.by_account:
-            accounts.add_row(
-                Text(b.label, style="bright"),
-                Text(acct_types.get(b.key, ""), style="muted"),
-                Text(fmt.money(b.value, v.base, privacy=priv)),
-                render.trend(fmt.pct(b.day_change_pct), b.day_change),
-                render.weight_cell(b.weight, 10),
-            )
-        self.query_one("#dash-accounts", Static).update(
-            accounts if v.by_account else Text("No accounts with holdings yet.", style="muted")
-        )
-
-        breakdown = {"class": v.by_class, "account": v.by_account, "currency": v.by_currency}[self.alloc_mode]
-        alloc = self.query_one("#alloc", Canvas)
-        alloc.styles.height = max(len(breakdown), 1) + 1  # bar + one legend row per bucket
-        alloc.set_builder(lambda w, h: render.allocation(breakdown, p, width=max(w - 1, 10), privacy=priv, base=v.base))
-        self.query_one("#pane-alloc").border_subtitle = f"g ▸ {self.alloc_mode}"
-
-        movers = Text()
-        for i, pos in enumerate(v.movers(6)):
-            if i:
-                movers.append("\n")
-            movers.append(f"{pos.symbol:<10}", style="bright")
-            q = pos.quote
-            if q and q.intraday:
-                from ..charts import sparkline
-
-                movers.append_text(sparkline(q.intraday, 12, self._trend_hex(q.change)))
-            movers.append(
-                f"  {fmt.arrow(pos.day_change_pct)} {fmt.pct(pos.day_change_pct):>8}",
-                style=self._trend_hex(pos.day_change_pct),
-            )
-        self.query_one("#movers", Static).update(
-            movers if movers.plain else Text("No market-priced holdings.", style="muted")
-        )
-
-        grid = Table.grid(padding=(0, 2), expand=True)
-        grid.add_column(ratio=1)
-        grid.add_column(justify="right")
-        if perf is not None:
-            rows = [
-                (
-                    "money-weighted",
-                    render.trend(f"{fmt.pct(perf.xirr_pct)}/yr" if perf.xirr_pct is not None else "—", perf.xirr_pct),
-                ),
-                ("time-weighted", render.trend(fmt.pct(perf.twr_pct), perf.twr_pct)),
-                (
-                    "max drawdown",
-                    Text(fmt.pct(perf.max_drawdown_pct), style="down" if perf.max_drawdown_pct else "muted"),
-                ),
-                ("volatility", Text(fmt.pct(perf.volatility_pct, sign=False), style="muted")),
-                (
-                    "total gain",
-                    render.trend(fmt.money(perf.total_gain, v.base, sign=True, privacy=priv), perf.total_gain),
-                ),
-            ]
-            for label, value in rows:
-                grid.add_row(Text(label, style="muted"), value)
-        self.query_one("#perf", Static).update(grid)
+        workspaces.render_dashboard(self)
 
     def render_holdings(self) -> None:
-        v = self.view
-        table = self.query_one("#holdings-table", DataTable)
-        if v is None:
-            return
-        selected = self._selected_key(table)
-        table.clear()
-        positions = [p for p in v.positions if self.account_filter is None or p.account.id == self.account_filter]
-        p = self.palette
-        for pos in sorted(positions, key=lambda x: (x.account.name, -(x.value_base or 0))):
-            cells = render.position_cells(pos, v.base, privacy=self.privacy)
-            direction = self.flash.get(pos.symbol)
-            if direction and pos.price is not None:
-                cells[5] = Text(cells[5].plain, style=f"bold {p.background} on {p.up if direction > 0 else p.down}")
-            row = self._justify([cells[i] for i in HOLDING_COLUMNS], range(2, 8))
-            table.add_row(*row, key=f"{pos.account.id}:{pos.symbol}")
-        for c in v.cash:
-            if self.account_filter is not None and c.account.id != self.account_filter:
-                continue
-            cash_value = fmt.money(c.amount, privacy=self.privacy) + (f" {c.currency}" if c.currency != v.base else "")
-            cells = [
-                Text(render.truncate(c.account.name, 12), style="muted"),
-                Text("CASH", style="info"),
-                Text(f"{c.currency} balance", style="muted"),
-                *(render.dash() for _ in range(4)),
-                Text(cash_value),
-                render.dash(),
-                render.dash(),
-                render.weight_cell((c.amount_base or 0) / v.net_worth * 100 if v.net_worth else 0),
-            ]
-            row = self._justify([cells[i] for i in HOLDING_COLUMNS], range(2, 8))
-            table.add_row(*row, key=f"cash:{c.account.id}:{c.currency}")
-        self._restore_cursor(table, selected)
-        scope = "all accounts"
-        if self.account_filter is not None:
-            acct = self.tracker.store.get_account(self.account_filter)
-            scope = acct.name if acct else scope
-        total = sum(x.value_base or 0 for x in positions)
-        if table.row_count == 0:
-            subtitle = "No holdings yet — b to buy" if self.account_filter is None else f"f ▸ {scope} · nothing held"
-        else:
-            money = fmt.money(total, v.base, privacy=self.privacy, decimals=0)
-            subtitle = f"f ▸ {scope} · {len(positions)} positions · {money}"
-            if v.excluded:
-                subtitle += f" · ⚠ {len(v.excluded)} excluded"
-        self.query_one("#pane-holdings").border_subtitle = subtitle
-        if self._detail_key is None and positions:
-            first = self._selected_key(table)
-            if first and not first.startswith("cash:"):
-                self._show_position(first)
+        workspaces.render_holdings(self)
 
     def render_watchlist(self) -> None:
-        table = self.query_one("#watch-table", DataTable)
-        selected = self._selected_key(table)
-        table.clear()
-        p = self.palette
-        for sym in self.watch_symbols:
-            q = self.watch_quotes.get(sym)
-            if q is None:
-                cells = render.missing_quote_cells(sym, self.watch_errors.get(sym, "loading…"))
-            else:
-                cells = render.quote_cells(q, spark_width=18)
-                direction = self.flash.get(sym)
-                if direction:
-                    cells[2] = Text(cells[2].plain, style=f"bold {p.background} on {p.up if direction > 0 else p.down}")
-            table.add_row(*self._justify(cells, range(2, 5)), key=sym)
-        self._restore_cursor(table, selected)
-        self.query_one("#pane-watch").border_subtitle = (
-            f"{len(self.watch_symbols)} symbols" if self.watch_symbols else "Empty — a to add a symbol"
-        )
-        if self._watch_key is None and self.watch_symbols:
-            self._show_watch(self.watch_symbols[0])
+        workspaces.render_watchlist(self)
 
     def render_activity(self) -> None:
-        table = self.query_one("#activity-table", DataTable)
-        selected = self._selected_key(table)
-        table.clear()
-        store = self.tracker.store
-        accounts = store.account_map()
-        needle = self.query_one("#activity-filter", Input).value.strip().lower()
-        txns = sorted(store.transactions(), key=lambda t: (t.date, t.id or 0), reverse=True)
-        shown = 0
-        for t in txns:
-            cells = render.activity_cells(t, accounts, privacy=self.privacy)
-            if needle and needle not in " ".join(c.plain.lower() for c in cells):
-                continue
-            table.add_row(*self._justify(cells, (0, 5, 6, 7, 8)), key=str(t.id))
-            shown += 1
-        self._restore_cursor(table, selected)
-        issues = store.ledger().issues
-        subtitle = f"{shown} of {len(txns)} transactions" if txns else "No transactions — n to add one"
-        if issues:
-            subtitle += f" · ⚠ {len(issues)} ledger issue(s)"
-        self.query_one("#pane-activity").border_subtitle = subtitle
+        workspaces.render_activity(self)
 
     def render_accounts(self) -> None:
-        table = self.query_one("#accounts-table", DataTable)
-        selected = self._selected_key(table)
-        table.clear()
-        values = {b.key: b for b in self.view.by_account} if self.view else {}
-        base = self.tracker.base
-        for a in self.tracker.store.accounts(include_archived=True):
-            b = values.get(str(a.id))
-            # Currency and cash tracking live in the edit form (e) to keep this pane narrow
-            cells = [
-                Text(str(a.id), style="muted"),
-                Text(a.name + (" (archived)" if a.archived else ""), style="bright"),
-                Text(a.type.label, style="accent" if a.type.registered else ""),
-                Text(fmt.money(b.value, base, privacy=self.privacy)) if b else render.dash(),
-                render.trend(fmt.pct(b.day_change_pct), b.day_change) if b else render.dash(),
-            ]
-            table.add_row(*self._justify(cells, (0, 3, 4)), key=str(a.id))
-        self._restore_cursor(table, selected)
+        workspaces.render_accounts(self)
 
     def render_alerts(self) -> None:
-        table = self.query_one("#alerts-table", DataTable)
-        selected = self._selected_key(table)
-        table.clear()
-        quotes = {**(self.view.quotes if self.view else {}), **self.watch_quotes}
-        alerts = self.tracker.store.alerts()
-        self.query_one("#pane-alerts").border_subtitle = (
-            f"{sum(a.active for a in alerts)} armed of {len(alerts)}" if alerts else "No alerts — A to add one"
-        )
-        for a in alerts:
-            q = quotes.get(a.symbol)
-            state = (
-                Text("● triggered", style="warn")
-                if a.triggered_at
-                else Text("armed" if a.active else "paused", style="muted" if a.active else "down")
-            )
-            last = render.trend(f"{fmt.price(q.price)} {fmt.pct(q.change_pct)}", q.change) if q else render.dash()
-            table.add_row(
-                Text(str(a.id), style="muted"),
-                Text(a.describe(), style="bright"),
-                state,
-                last,
-                Text(a.note, style="muted"),
-                key=str(a.id),
-            )
-        self._restore_cursor(table, selected)
+        workspaces.render_alerts(self)
 
     def render_position_detail(self) -> None:
-        key, v = self._detail_key, self.view
-        target = self.query_one("#holding-detail", Static)
-        if not key or v is None:
-            target.update(Text("Select a holding.", style="muted"))
-            return
-        acct_id, sym = key.split(":", 1)
-        pos: PositionView | None = next(
-            (x for x in v.positions if str(x.account.id) == acct_id and x.symbol == sym), None
-        )
-        if pos is None:
-            target.update(Text("Position closed.", style="muted"))
-            return
-        priv = self.privacy
-        width = max(target.size.width, 30)
-        head = Text()
-        head.append(pos.symbol, style="title")
-        head.append(f"  {pos.name}", style="bright")
-        parts: list[RenderableType] = [
-            head,
-            Text(
-                f"{pos.account.name} · {pos.asset_class.label} · {pos.kind.value.replace('_', ' ')} · {pos.currency}",
-                style="muted",
-            ),
-        ]
-        if pos.price is not None:
-            price = Text(fmt.price(pos.price), style="bright")
-            if pos.day_change_pct is not None and pos.kind is AssetKind.MARKET:
-                price.append(
-                    f"  {fmt.arrow(pos.day_change_pct)} {fmt.pct(pos.day_change_pct)} today",
-                    style=self._trend_hex(pos.day_change_pct),
-                )
-            parts += [Text(""), price]
-        grid = Table.grid(padding=(0, 2))
-        grid.add_column(style="muted")
-        grid.add_column(justify="right")
-        for label, value in (
-            ("Quantity", Text(fmt.MASK if priv else fmt.qty(pos.quantity))),
-            ("Average cost", Text(fmt.price(pos.avg_cost))),
-            ("Book value", Text(fmt.money(pos.book, privacy=priv))),
-            ("Market value", Text(fmt.money(pos.market_value, privacy=priv))),
-            (
-                "Gain",
-                render.trend(f"{fmt.money(pos.gain, sign=True, privacy=priv)} ({fmt.pct(pos.gain_pct)})", pos.gain),
-            ),
-            ("Today", render.trend(fmt.money(pos.day_change, sign=True, privacy=priv), pos.day_change)),
-            ("Weight", Text(fmt.pct(pos.weight, sign=False))),
-            ("Held since", Text(pos.first_date or "—")),
-        ):
-            grid.add_row(label, value)
-        parts += [Text(""), grid]
-        bars = self._detail_bars.get(sym)
-        if bars:
-            parts += [
-                Text(""),
-                Text("3 MONTHS", style="muted"),
-                render.price_chart(sym, bars, "3mo", self.palette, width=width, height=7),
-            ]
-        txns = [t for t in self.tracker.store.transactions(symbol=sym) if t.account_id == pos.account.id][-6:]
-        if txns:
-            lines = Text("\nRECENT\n", style="muted")
-            for t in reversed(txns):
-                lines.append(f"{t.date}  ", style="muted")
-                lines.append(f"{t.type.value:<9}", style=render.TXN_STYLES.get(t.type, ""))
-                detail = (
-                    f"{fmt.qty(t.quantity)} @ {fmt.price(t.price)}"
-                    if t.quantity
-                    else fmt.money(t.gross_value, privacy=priv)
-                )
-                lines.append(f" {detail}\n")
-            parts.append(lines)
-        target.update(Group(*parts))
+        workspaces.render_position_detail(self)
 
     def render_watch_detail(self) -> None:
-        target = self.query_one("#watch-detail", Static)
-        sym = self._watch_key
-        q = self.watch_quotes.get(sym) if sym else None
-        if q is None:
-            target.update(Text("Select a symbol.", style="muted"))
-            return
-        parts: list[RenderableType] = [render.quote_card(q)]
-        bars = self._detail_bars.get(q.symbol)
-        if bars:
-            parts += [
-                Text(""),
-                Text("3 MONTHS", style="muted"),
-                render.price_chart(q.symbol, bars, "3mo", self.palette, width=max(target.size.width, 30), height=8),
-            ]
-        held = [x for x in (self.view.positions if self.view else []) if x.symbol == q.symbol]
-        if held:
-            qty = sum(x.quantity for x in held)
-            parts.append(
-                Text(
-                    f"\nYou hold {fmt.MASK if self.privacy else fmt.qty(qty)} across {len(held)} account(s).",
-                    style="accent",
-                )
-            )
-        target.update(Group(*parts))
+        workspaces.render_watch_detail(self)
 
     def render_income(self) -> None:
-        v = self.view
-        if v is None:
-            return
-        state = self.tracker.store.ledger()
-        months = income_by_month(state, v.fx.convert)
-        sources = income_by_symbol(state, v.fx.convert, date.today().year)
-        body = render.income_group(months, sources, self._income_forecast, v, privacy=self.privacy)
-        if self._income_forecast is None:
-            body = Group(body, Text("\nForward estimate loads when you open this workspace.", style="muted"))
-        self.query_one("#income-view", Static).update(body)
+        workspaces.render_income(self)
 
     def render_tax(self) -> None:
-        target = self.query_one("#tax-view", Static)
-        if self._tax is None:
-            target.update(Text("Building tax report…", style="muted"))
-            return
-        years, report, rooms = self._tax
-        tr = self.tracker
-        body = render.tax_group(years, report, rooms, tr.store.account_map(), tr.base, privacy=self.privacy)
-        target.update(
-            Group(body, Text("\nEstimates only — confirm against broker slips (T5008/T3/T5).", style="muted"))
-        )
+        workspaces.render_tax(self)
 
     # ── lazy workers ──────────────────────────────────────────────────────────
 
@@ -1139,514 +635,127 @@ class MarketPulseApp(App):
     # ── chart ─────────────────────────────────────────────────────────────────
 
     def open_chart(self, symbol: str, *, compare: list[str] | None = None) -> None:
-        if not symbol:
-            return
-        self.chart_symbol = symbol.upper()
-        if compare is not None:
-            self.compare = compare
-        self.query_one("#chart-input", Input).value = " ".join(
-            [self.chart_symbol, self.chart_period, *(["vs", *self.compare] if self.compare else [])]
-        )
-        self.set_workspace("chart")
-        self.query_one(ChartView).set_message(f"Loading {self.chart_symbol} · {self.chart_period}…")
-        self.query_one(ChartView).focus()
-        self.load_chart()
+        chart.open_chart(self, symbol, compare=compare)
 
     @on(Input.Submitted, "#chart-input")
     def _chart_submitted(self, event: Input.Submitted) -> None:
-        tokens = event.value.replace(",", " ").split()
-        if not tokens:
-            return
-        symbol, rest = tokens[0], tokens[1:]
-        if rest and rest[0].lower() in PERIODS:
-            self.chart_period = rest.pop(0).lower()
-        if rest and rest[0].lower() == "vs":
-            rest = rest[1:]
-        self.open_chart(symbol, compare=parse_symbols(" ".join(rest)))
+        chart._chart_submitted(self, event)
 
     def load_chart(self) -> None:
-        self._load_chart(self.query_one(ChartView))
+        chart.load_chart(self)
 
     @work(thread=True, exclusive=True, group="chart")
     def _load_chart(self, view: ChartView) -> None:
-        sym, period, others = self.chart_symbol, self.chart_period, list(self.compare)
-        market = self.tracker.market
-        try:
-            bars = market.history(sym, period)
-            compare = {o: market.history(o, period) for o in others}
-            quotes, _ = market.quotes([sym])
-        except MarketError as e:
-            self.call_from_thread(view.set_message, str(e))
-            return
-        self.call_from_thread(self._chart_loaded, sym, period, bars, quotes.get(sym), compare)
+        chart._load_chart(self, view)
 
     def _chart_loaded(self, sym, period, bars, quote, compare) -> None:
-        if sym != self.chart_symbol or period != self.chart_period:
-            return
-        self.query_one(ChartView).set_data(sym, period, bars, quote, compare)
-        self.render_chart_info(quote)
+        chart._chart_loaded(self, sym, period, bars, quote, compare)
 
     def render_chart_info(self, quote=None) -> None:
-        p = self.palette
-        periods = Text()
-        for per in PERIODS:
-            if per == self.chart_period:
-                periods.append(f" {per} ", style=f"bold {p.background} on {p.accent}")
-            else:
-                periods.append(f" {per} ", style=p.muted)
-        self.query_one("#chart-periods", Static).update(periods)
-        info = Text()
-        if quote is not None:
-            info.append(f"{quote.symbol} ", style="title")
-            info.append(f"{quote.name}  ", style="bright")
-            info.append(f"{fmt.price(quote.price)} {quote.currency} ", style="bright")
-            info.append(f"{fmt.arrow(quote.change)} {fmt.pct(quote.change_pct)}", style=self._trend_hex(quote.change))
-        held = [x for x in (self.view.positions if self.view else []) if x.symbol == self.chart_symbol]
-        if held:
-            qty = sum(x.quantity for x in held)
-            gain = sum(x.gain or 0 for x in held)
-            info.append(f"   held {fmt.MASK if self.privacy else fmt.qty(qty)} · gain ", style="muted")
-            info.append(fmt.money(gain, sign=True, privacy=self.privacy), style=self._trend_hex(gain))
-        elif self.chart_symbol:
-            info.append("   not held · b buy · w watch", style="muted")
-        self.query_one("#chart-info", Static).update(info)
-        self.query_one("#pane-chart").border_title = f"chart · {self.chart_symbol}" + (
-            f" vs {', '.join(self.compare)}" if self.compare else ""
-        )
+        chart.render_chart_info(self, quote)
 
     def action_period(self, delta: int) -> None:
-        if self.workspace != "chart" or not self.chart_symbol:
-            return
-        self.chart_period = PERIODS[(PERIODS.index(self.chart_period) + delta) % len(PERIODS)]
-        self.open_chart(self.chart_symbol)
+        chart.action_period(self, delta)
 
     def action_compare(self) -> None:
-        if self.workspace != "chart" or not self.chart_symbol:
-            return
-
-        def done(value: str | None) -> None:
-            if value:
-                self.open_chart(self.chart_symbol, compare=list(dict.fromkeys([*self.compare, *parse_symbols(value)])))
-
-        self.push_screen(PromptScreen("Compare with", "QQQ XEQT.TO …", hint="Overlays each symbol as % change."), done)
+        chart.action_compare(self)
 
     def action_clear_compare(self) -> None:
-        if self.compare:
-            self.open_chart(self.chart_symbol, compare=[])
+        chart.action_clear_compare(self)
 
     # ── actions: records ──────────────────────────────────────────────────────
 
     def action_new(self) -> None:
-        ws = self.workspace
-        if ws == "tax":
-            self.action_new_account()
-        elif ws == "alerts":
-            self.action_alert()
-        else:
-            self.action_trade("BUY")
+        records.action_new(self)
 
     def action_add(self) -> None:
-        ws = self.workspace
-        if ws == "watchlist":
-            self.action_watch_add(prompt=True)
-        elif ws in ("tax", "alerts"):
-            self.action_new()
+        records.action_add(self)
 
     def action_trade(self, kind: str) -> None:
-        form = TransactionForm(
-            self.tracker,
-            kind=TxnType(kind),
-            symbol=self.context_symbol() if TxnType(kind).needs_symbol else "",
-            account_id=self.context_account(),
-            symbols=self.known_symbols(),
-        )
-        self.push_screen(form, self._txn_done)
+        records.action_trade(self, kind)
 
     def _txn_done(self, txn: Transaction | None, restore_id: str | None = None, revision: str | None = None) -> None:
-        if txn is not None:
-            self.save_txn(txn, restore_id, revision)
+        records._txn_done(self, txn, restore_id, revision)
 
     @work(thread=True, group="write")
     def save_txn(self, txn: Transaction, restore_id: str | None = None, revision: str | None = None) -> None:
-        tr = self.tracker
-        try:
-            if txn.id is not None:
-                tr.update_transaction(txn, restore_id=restore_id, revision=revision)
-                message = f"Updated transaction #{txn.id}"
-            else:
-                saved = tr.add_transaction(txn)
-                acct = tr.store.get_account(saved.account_id)
-                what = (
-                    f"{fmt.qty(saved.quantity)} {saved.symbol} @ {fmt.price(saved.price)}"
-                    if saved.quantity
-                    else f"{fmt.money(saved.gross_value)} {saved.symbol}".strip()
-                )
-                message = f"{saved.type.value.title()} {what} {saved.currency} → {acct.name if acct else ''}"
-        except (ValueError, MarketError) as e:
-            self.call_from_thread(self.notify, str(e), title="Not saved", severity="error")
-            return
-        self.call_from_thread(self.after_change, message)
+        records.save_txn(self, txn, restore_id, revision)
 
     def action_edit(self) -> None:
-        ws = self.workspace
-        if ws == "activity":
-            restore_id = self.tracker.store.restore_id
-            key = self._selected_key(self.query_one("#activity-table", DataTable))
-            txn = next((t for t in self.tracker.store.transactions() if str(t.id) == key), None)
-            if txn:
-                # Taken before the form opens: a change made elsewhere meanwhile refuses the save.
-                seen = txn.revision(restore_id)
-                self.push_screen(
-                    TransactionForm(self.tracker, txn=txn, symbols=self.known_symbols()),
-                    lambda edited: self._txn_done(edited, restore_id, seen),
-                )
-        elif ws == "tax":
-            key = self._selected_key(self.query_one("#accounts-table", DataTable))
-            acct = self.tracker.store.get_account(int(key)) if key else None
-            if acct:
-                self.push_screen(AccountForm(acct, self.tracker.base), self._account_done)
+        records.action_edit(self)
 
     def action_delete(self) -> None:
-        ws, store = self.workspace, self.tracker.store
-        if ws == "activity":
-            restore_id = store.restore_id
-            key = self._selected_key(self.query_one("#activity-table", DataTable))
-            txn = next((t for t in store.transactions() if str(t.id) == key), None)
-            if txn is None:
-                return
-            detail = " ".join(c.plain for c in render.activity_cells(txn, store.account_map())[1:8] if c.plain != "—")
-            seen = txn.revision(restore_id)
-
-            def done(yes: bool | None) -> None:
-                if yes and self._delete_txn(txn.saved_id, restore_id, seen):
-                    self.after_change(f"Deleted transaction #{txn.id}")
-
-            self.push_screen(ConfirmScreen(f"Delete transaction #{txn.id}?", detail), done)
-        elif ws == "watchlist":
-            sym = self.context_symbol()
-            if not sym:
-                return
-
-            def unwatch(yes: bool | None) -> None:
-                if yes:
-                    store.remove_watch([sym])
-                    self._watch_key = None
-                    self.watch_symbols = [s for s in self.watch_symbols if s != sym]
-                    self.render_watchlist()
-                    self.notify(f"Removed {sym} from watchlist")
-
-            self.push_screen(ConfirmScreen(f"Remove {sym} from the watchlist?"), unwatch)
-        elif ws == "alerts":
-            key = self._selected_key(self.query_one("#alerts-table", DataTable))
-            alert = next((a for a in store.alerts() if str(a.id) == key), None)
-            if alert is None:
-                return
-
-            def remove(yes: bool | None) -> None:
-                if yes:
-                    store.delete_alert(alert.saved_id)
-                    self.render_alerts()
-                    self.notify("Alert removed")
-
-            self.push_screen(ConfirmScreen(f"Delete alert #{alert.id}?", alert.describe()), remove)
-        elif ws == "tax":
-            key = self._selected_key(self.query_one("#accounts-table", DataTable))
-            acct = store.get_account(int(key)) if key else None
-            if acct is None:
-                return
-            count = len([t for t in store.transactions() if t.account_id == acct.id])
-
-            def confirmed(yes: bool | None) -> None:
-                if yes:
-                    store.delete_account(acct.saved_id)
-                    self.after_change(f"Deleted {acct.name}")
-
-            self.push_screen(
-                ConfirmScreen(
-                    f"Delete {acct.name}?", f"This removes {count} transaction(s). Archiving (e → edit) keeps history."
-                ),
-                confirmed,
-            )
+        records.action_delete(self)
 
     def action_undo(self) -> None:
-        store = self.tracker.store
-        restore_id = store.restore_id
-        txns = store.transactions()
-        if not txns:
-            self.notify("Nothing to undo.")
-            return
-        last = max(txns, key=lambda t: t.id or 0)
-        detail = " ".join(c.plain for c in render.activity_cells(last, store.account_map())[1:8] if c.plain != "—")
-
-        def done(yes: bool | None) -> None:
-            if yes and self._delete_txn(last.saved_id, restore_id, last.revision(restore_id)):
-                self.after_change(f"Undid transaction #{last.id}")
-
-        self.push_screen(ConfirmScreen("Undo the last transaction?", detail), done)
+        records.action_undo(self)
 
     def _delete_txn(self, txn_id: int, restore_id: str, revision: str) -> bool:
-        try:
-            self.tracker.delete_transaction(txn_id, restore_id=restore_id, revision=revision)
-        except ValueError as e:
-            self.notify(str(e), title="Not deleted", severity="error")
-            return False
-        return True
+        return records._delete_txn(self, txn_id, restore_id, revision)
 
     def action_new_account(self) -> None:
-        self.push_screen(AccountForm(None, self.tracker.base), self._account_done)
+        records.action_new_account(self)
 
     def _account_done(self, account) -> None:
-        if account is None:
-            return
-        store = self.tracker.store
-        try:
-            if account.id is None:
-                store.add_account(account)
-                message = f"Added account {account.name}"
-            else:
-                store.update_account(account)
-                message = f"Updated {account.name}"
-        except ValueError as e:
-            self.notify(str(e), severity="error")
-            return
-        self.after_change(message)
+        records._account_done(self, account)
 
     def action_add_asset(self) -> None:
-        accounts = self.tracker.store.accounts() or [self.tracker.store.ensure_default_account(self.tracker.base)]
-
-        def done(result) -> None:
-            if result is None:
-                return
-            asset, txn = result
-            existed = asset.symbol in self.tracker.store.assets()
-            self.tracker.store.upsert_asset(asset)
-            try:
-                self.tracker.add_transaction(txn)
-            except ValueError as e:
-                if not existed:
-                    self.tracker.store.delete_asset(asset.symbol)  # don't leave an asset row with no holding
-                self.notify(str(e), severity="error")
-                return
-            self.after_change(f"Added {asset.name}")
-
-        self.push_screen(AssetForm(accounts), done)
+        records.action_add_asset(self)
 
     def action_value_asset(self) -> None:
-        manual = [a.symbol for a in self.tracker.store.assets().values() if a.kind is AssetKind.MANUAL]
-        if not manual:
-            self.notify("No manual assets yet — ctrl+p → Add GIC or manual asset.")
-            return
-
-        def done(value: str | None) -> None:
-            if not value:
-                return
-            parts = value.split()
-            try:
-                sym, amount = parts[0].upper(), float(parts[1].replace(",", ""))
-                when = parse_date(parts[2] if len(parts) > 2 else None)
-                if amount <= 0:
-                    raise ValueError
-            except (IndexError, ValueError):
-                self.notify("Use: SYMBOL VALUE [DATE] (value must be positive)", severity="error")
-                return
-            if sym not in manual:
-                self.notify(f"{sym} is not a manual asset.", severity="error")
-                return
-            holders = [h for h in self.tracker.store.ledger().open_holdings() if h.symbol == sym]
-            if not holders:
-                self.notify(f"No holding of {sym}.", severity="error")
-                return
-            try:
-                self.tracker.add_transaction(
-                    Transaction(
-                        account_id=holders[0].account_id,
-                        type=TxnType.VALUATION,
-                        date=when,
-                        symbol=sym,
-                        price=amount,
-                        currency=holders[0].currency,
-                    )
-                )
-            except ValueError as e:
-                self.notify(str(e), severity="error")
-                return
-            self.after_change(f"{sym} valued at {fmt.money(amount)}")
-
-        self.push_screen(
-            PromptScreen(
-                "Update manual asset value",
-                "SYMBOL VALUE [DATE]",
-                manual[0] + " ",
-                hint=f"Manual assets: {', '.join(manual)}",
-            ),
-            done,
-        )
+        records.action_value_asset(self)
 
     def action_room(self) -> None:
-        def done(result) -> None:
-            if result:
-                self.tracker.store.set_room(*result)
-                self.after_change(f"{result[0]} room saved")
-
-        self.push_screen(RoomForm(), done)
+        records.action_room(self)
 
     def action_alert(self) -> None:
-        def done(alert) -> None:
-            if alert is not None:
-                self.tracker.store.add_alert(alert)
-                self.render_alerts()
-                self.notify(f"Alert set: {alert.describe()}")
-
-        self.push_screen(AlertForm(self.context_symbol()), done)
+        actions.action_alert(self)
 
     def action_toggle_alert(self) -> None:
-        if self.workspace != "alerts":
-            return
-        key = self._selected_key(self.query_one("#alerts-table", DataTable))
-        alert = next((a for a in self.tracker.store.alerts() if str(a.id) == key), None)
-        if alert:
-            alert.active = not alert.active
-            alert.triggered_at = ""
-            self.tracker.store.update_alert(alert)
-            self.render_alerts()
+        actions.action_toggle_alert(self)
 
     def action_watch_add(self, prompt: bool = False) -> None:
-        sym = "" if prompt else self.context_symbol()
-
-        def add(symbol: str | None) -> None:
-            if not symbol:
-                return
-            added = self.tracker.store.add_watch([symbol])
-            self.notify(f"Watching {symbol}" if added else f"{symbol} is already on the watchlist")
-            if added:
-                self.watch_symbols = self.tracker.store.watchlist()
-                self.render_watchlist()
-                self.load_data()
-
-        if sym:
-            add(sym)
-        else:
-            self.push_screen(SearchScreen(self.tracker, self.known_symbols(), "Add to watchlist"), add)
+        actions.action_watch_add(self, prompt)
 
     def action_move_watch(self, delta: int) -> None:
-        if self.workspace != "watchlist":
-            return
-        sym = self.context_symbol()
-        if sym:
-            self.tracker.store.move_watch(sym, delta)
-            self.watch_symbols = self.tracker.store.watchlist()
-            self.render_watchlist()
+        actions.action_move_watch(self, delta)
 
     def action_search(self) -> None:
-        if self.workspace == "activity":
-            self.query_one("#activity-filter", Input).focus()
-            return
-
-        def picked(symbol: str | None) -> None:
-            if symbol:  # None/empty when the search was cancelled
-                self.open_chart(symbol)
-
-        self.push_screen(SearchScreen(self.tracker, self.known_symbols(), "Open chart"), picked)
+        actions.action_search(self)
 
     def action_filter_account(self) -> None:
-        ids = [None, *(a.id for a in self.tracker.store.accounts())]
-        self.account_filter = (
-            ids[(ids.index(self.account_filter) + 1) % len(ids)] if self.account_filter in ids else None
-        )
-        self._detail_key = None
-        self.render_holdings()
-        if self.workspace != "holdings":
-            self.set_workspace("holdings")
+        actions.action_filter_account(self)
 
     def action_cycle_alloc(self) -> None:
-        self.alloc_mode = ALLOC_MODES[(ALLOC_MODES.index(self.alloc_mode) + 1) % len(ALLOC_MODES)]
-        self.render_dashboard()
+        actions.action_cycle_alloc(self)
 
     def action_nw_range(self, delta: int) -> None:
-        if self.workspace != "dashboard":
-            return
-        self.nw_range = NW_RANGES[max(0, min(len(NW_RANGES) - 1, NW_RANGES.index(self.nw_range) + delta))]
-        self.render_dashboard()
+        actions.action_nw_range(self, delta)
 
     # ── actions: data & app ───────────────────────────────────────────────────
 
     def action_import_csv(self) -> None:
-        def done(path: str | None) -> None:
-            if path:
-                self.import_csv(path)
-
-        self.push_screen(
-            PromptScreen(
-                "Import transactions from CSV",
-                "~/Downloads/activities.csv",
-                hint="Detects Questrade and Wealthsimple exports and common columns; duplicates are skipped.",
-            ),
-            done,
-        )
+        actions.action_import_csv(self)
 
     @work(thread=True, group="write")
     def import_csv(self, path: str) -> None:
-        from ..csvio import import_transactions
-
-        store = self.tracker.store
-        try:
-            result = import_transactions(
-                store, Path(path).expanduser(), default_account=next(iter(store.accounts()), None)
-            )
-        except (OSError, ValueError) as e:
-            self.call_from_thread(self.notify, str(e), title="Import failed", severity="error")
-            return
-        message = f"Imported {result.added} · {result.duplicates} duplicates · {len(result.skipped)} skipped"
-        if result.profile != "generic":
-            message = f"{result.profile_label}: {message}"
-        if result.backup is not None:
-            # Same safety net as the CLI: name the file that undoes this import.
-            message += f"\nbackup: {result.backup.name}"
-        self.call_from_thread(self.after_change, message)
+        actions.import_csv(self, path)
 
     def action_export_csv(self) -> None:
-        default = str(Path.home() / f"marketpulse-{date.today():%Y%m%d}.csv")
-
-        def done(path: str | None) -> None:
-            if not path:
-                return
-            from ..csvio import export_transactions
-
-            target = Path(path).expanduser()
-            try:
-                with target.open("w", newline="") as f:
-                    n = export_transactions(self.tracker.store, f)
-            except OSError as e:
-                self.notify(str(e), severity="error")
-                return
-            self.notify(f"Exported {n} transactions → {target}")
-
-        self.push_screen(PromptScreen("Export ledger to CSV", default, default), done)
+        actions.action_export_csv(self)
 
     @work(thread=True, exclusive=True, group="backfill")
     def action_backfill(self) -> None:
-        self.call_from_thread(self.notify, "Rebuilding history from your ledger…", title="Backfill")
-        try:
-            n = self.tracker.backfill()
-        except Exception as e:
-            self.call_from_thread(self.notify, str(e), title="Backfill failed", severity="error")
-            return
-        self.call_from_thread(self.after_change, f"Rebuilt {n:,} daily snapshots")
+        actions.action_backfill(self)
 
     def action_privacy(self) -> None:
-        self.config.privacy = not self.config.privacy
-        self.config.save()
-        self.refresh_all_views()
-        self.notify("Privacy mode on — amounts hidden" if self.privacy else "Privacy mode off")
+        actions.action_privacy(self)
 
     def action_next_theme(self) -> None:
-        names = theme_names()
-        current = self.theme if self.theme in names else names[0]
-        self.theme = names[(names.index(current) + 1) % len(names)]
-        self.notify(pretty_name(self.theme), title="Theme", timeout=2)
+        actions.action_next_theme(self)
 
     def action_help(self) -> None:
-        self.push_screen(HelpScreen())
+        actions.action_help(self)
 
     def notify_desktop(self, title: str, message: str) -> None:
-        desktop_notify(title, message)
+        actions.notify_desktop(self, title, message)
