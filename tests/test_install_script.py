@@ -19,6 +19,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "install.sh"
 VERSION = "9.8.7"
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="macOS installer requires a POSIX shell")
 
 
 # What install.sh picks: the native architecture, even from a Python running under Rosetta.

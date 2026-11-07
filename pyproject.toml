@@ -25,6 +25,7 @@ dependencies = [
     "curl-cffi>=0.7",
     "rich>=13.7",
     "textual>=8.2.7",
+    "tzdata>=2026.6 ; sys_platform == 'win32'",
 ]
 
 [project.urls]

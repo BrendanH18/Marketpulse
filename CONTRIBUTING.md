@@ -94,9 +94,13 @@ throwaway copy of the app on a fictional ledger
 the bundle or how the app finds its backend). AI agents should read
 [AGENTS.md](AGENTS.md); the app's direction is in the [App 1.0 plan](docs/app-plan.md).
 
-CI runs on [Namespace](https://namespace.so) runners: lint, formatting, type checks,
-Python tests on Linux and macOS, Python distribution builds with an installed-wheel smoke
-check, and the Swift build. On a pull request, the Mac app job (Swift build, bridge check,
+For the self-contained Windows x64 backend, see [Windows backend builds](docs/windows.md).
+It uses the same engine and desktop bridge; the Windows interface is separate work.
+
+CI runs on [Namespace](https://namespace.so) runners and GitHub-hosted Windows runners:
+lint, formatting, type checks, Python tests on Linux, macOS and Windows, Python distribution
+builds with an installed-wheel smoke check, the Swift build, and a standalone Windows
+backend build with a relocation smoke test. On a pull request, the Mac app job (Swift build, bridge check,
 standalone app build) runs only when the PR touches the app's sources, the scripts it runs,
 the Python package (anything outside the terminal UI in `tui/`), test fixtures, dependencies or the CI
 workflow; the path list is in the `changes` job of `.github/workflows/ci.yml`. Pushes to

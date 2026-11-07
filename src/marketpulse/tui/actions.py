@@ -144,7 +144,7 @@ def action_export_csv(app: MarketPulseApp) -> None:
 
         target = Path(path).expanduser()
         try:
-            with target.open("w", newline="") as f:
+            with target.open("w", newline="", encoding="utf-8") as f:
                 n = export_transactions(app.tracker.store, f)
         except OSError as e:
             app.notify(str(e), severity="error")

@@ -169,7 +169,8 @@ def test_provider_key_reads_stdin_and_never_prints_it(cli, tracker, tmp_path, mo
     assert result.exit_code == 0 and KEY not in result.output
     saved = Config.load(path)
     assert (saved.quote_provider, saved.quote_api_key) == ("alphavantage", KEY)
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    if os.name == "posix":  # Windows uses inherited ACLs, not POSIX permission bits.
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     shown = cli("config")
     assert KEY not in shown.output and "(set)" in shown.output
     # Not through `config set`, where it would sit in shell history and `ps`.
@@ -185,7 +186,8 @@ def test_provider_key_reads_stdin_and_never_prints_it(cli, tracker, tmp_path, mo
     assert cleared.exit_code == 0
     after = Config.load(path)
     assert (after.quote_provider, after.quote_api_key) == ("", "")
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600  # stays owner-only
+    if os.name == "posix":
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600  # stays owner-only
 
 
 def test_provider_key_rejects_bad_input(cli):

@@ -24,6 +24,7 @@ and TUI stay first-class for people who prefer them.
 | **Unsigned builds** (no Apple Developer ID, no Windows code signing) | Maintainer's choice to avoid the yearly cost. Install docs handle the OS prompts (below). |
 | Bundle the Python engine inside the app | Reuses the tested ledger, tax, and import code on both platforms. Users never install Python. |
 | Native interfaces talk to the engine only through the versioned desktop JSON bridge | One contract for macOS and Windows; each interface stays replaceable. |
+| Windows keeps `~/.marketpulse` data and `~/.config/marketpulse/config.toml` config | Preserves existing CLI installs without an AppData migration. Environment overrides still apply. See [Windows backend builds](windows.md). |
 | Local-first; no broker credentials, ever | Privacy is the product. Canada's open-banking framework has no firm date, and credential scraping is fragile. |
 | Mac first; Windows after the macOS 1.0 milestone | One interface stabilizes the feature set before a second one copies it. |
 

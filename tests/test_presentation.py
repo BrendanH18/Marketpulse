@@ -1,5 +1,7 @@
 """Charts, formatting, themes and config."""
 
+import os
+
 import pytest
 from rich.console import Console
 
@@ -125,10 +127,19 @@ def test_config_roundtrip_ignores_bad_values(tmp_path, capsys):
 def test_config_saves_any_text_as_valid_toml(tmp_path):
     # Text from the app (an account name, a symbol) may hold quotes, backslashes or control characters.
     path = tmp_path / "c.toml"
-    text = 'Fictional\nMargin \t"quoted" C:\\path \x00\x1f\x7f é'
+    text = 'Fictional\nMargin \t"quoted" C:\\path \x00\x1f\x7f é 東京'
     Config(default_account=text, menubar_symbol="XEQT.TO").save(path)
     loaded = Config.load(path)
     assert (loaded.default_account, loaded.menubar_symbol) == (text, "XEQT.TO")
+    assert "東京".encode() in path.read_bytes()
+
+
+def test_config_can_save_a_provider_key_without_posix_fchmod(tmp_path, monkeypatch):
+    monkeypatch.delattr(os, "fchmod", raising=False)
+    path = tmp_path / "c.toml"
+    cfg = Config(quote_provider="alphavantage", quote_api_key="FICTIONALKEY")
+    cfg.save(path)
+    assert Config.load(path) == cfg
 
 
 @pytest.mark.parametrize("value", [0.0, 0.5, 1.0])
