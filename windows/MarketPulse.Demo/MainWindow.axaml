@@ -1,0 +1,23 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="MarketPulse.Demo.MainWindow"
+        Title="MarketPulse — Windows demo" Icon="/Assets/app.ico"
+        Width="560" Height="400" MinWidth="460" MinHeight="360">
+  <Grid Margin="32" RowDefinitions="Auto,*,Auto">
+    <StackPanel Spacing="4">
+      <TextBlock Text="MarketPulse" FontSize="24" FontWeight="SemiBold" />
+      <TextBlock Text="Windows demo · fictional portfolio" Opacity="0.7" />
+    </StackPanel>
+    <StackPanel Grid.Row="1" VerticalAlignment="Center" Spacing="8">
+      <TextBlock Text="Net worth" FontSize="16" />
+      <TextBlock x:Name="NetWorth" Text="—" FontSize="44" FontWeight="SemiBold" />
+      <TextBlock x:Name="Status" Text="Loading fictional portfolio…" TextWrapping="Wrap" />
+    </StackPanel>
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="20">
+      <TextBlock Text="Close this window to keep the demo in the tray. Use the tray menu to exit."
+                 TextWrapping="Wrap" VerticalAlignment="Center" Opacity="0.7" />
+      <Button x:Name="RefreshButton" Grid.Column="1" Content="_Refresh demo"
+              Click="RefreshClicked" VerticalAlignment="Center" />
+    </Grid>
+  </Grid>
+</Window>

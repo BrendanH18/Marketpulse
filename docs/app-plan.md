@@ -25,6 +25,7 @@ and TUI stay first-class for people who prefer them.
 | Bundle the Python engine inside the app | Reuses the tested ledger, tax, and import code on both platforms. Users never install Python. |
 | Native interfaces talk to the engine only through the versioned desktop JSON bridge | One contract for macOS and Windows; each interface stays replaceable. |
 | Windows keeps `~/.marketpulse` data and `~/.config/marketpulse/config.toml` config | Preserves existing CLI installs without an AppData migration. Environment overrides still apply. See [Windows backend builds](windows.md). |
+| Windows interface uses Avalonia with C#/XAML | Maintainer-approved choice; built-in tray and UI Automation support with standard .NET tooling. See [ADR 0001](adr/0001-windows-app-stack.md). |
 | Local-first; no broker credentials, ever | Privacy is the product. Canada's open-banking framework has no firm date, and credential scraping is fragile. |
 | Mac first; Windows after the macOS 1.0 milestone | One interface stabilizes the feature set before a second one copies it. |
 
@@ -118,7 +119,7 @@ workspace, desktop bridge, review fixes, app icon) merges first.
 
 | Issue | What |
 | --- | --- |
-| [#50](https://github.com/BrendanH18/Marketpulse/issues/50) | Choose the Windows app stack (needs maintainer decision) |
+| [#50](https://github.com/BrendanH18/Marketpulse/issues/50) | Avalonia stack decision and window/tray spike ([ADR](adr/0001-windows-app-stack.md)) |
 | [#51](https://github.com/BrendanH18/Marketpulse/issues/51) | Bundle the backend on Windows (continues [#26](https://github.com/BrendanH18/Marketpulse/issues/26)) |
 | [#52](https://github.com/BrendanH18/Marketpulse/issues/52) | Windows app MVP |
 | [#53](https://github.com/BrendanH18/Marketpulse/issues/53) | Unsigned Windows installer and release job |
