@@ -4,8 +4,8 @@
 
 The Windows x64 backend is a self-contained Python engine for the future Windows
 app ([#51](https://github.com/BrendanH18/Marketpulse/issues/51)). It includes the
-CLI, TUI, and desktop JSON bridge. The native Windows interface (#50/#52) and
-installer/release packaging (#53) are separate work.
+CLI, TUI, and desktop JSON bridge. An Avalonia window/tray demo is described below;
+the full Windows interface (#52) and installer/release packaging (#53) are separate work.
 
 ## Build and verify
 
@@ -73,3 +73,73 @@ put user-entered positional values after `--` as with the Mac interface. Decode
 stdout as UTF-8. Isolated mode ignores user Python settings, `-B` avoids writing
 bytecode into the bundle, and `-X utf8` keeps JSON and CSV output consistent on
 Windows regardless of the system code page.
+
+## Windows UI demo
+
+The maintainer chose **Avalonia with C#/XAML** for the Windows interface.
+[ADR 0001](adr/0001-windows-app-stack.md) compares WinUI 3, Avalonia, Tauri, and
+Flutter and records the tradeoffs. `windows/MarketPulse.Demo` is a small
+fictional-data demo, not the full Windows app or an installer. It shows net worth
+from `desktop snapshot --demo`; every request overrides data/config locations
+with a new temporary directory that is removed afterwards. It never loads your
+portfolio and makes no quote or update requests.
+
+The window opens at launch. **Refresh demo** reloads the fictional portfolio.
+Closing the window hides it to the tray; **Open MarketPulse demo** opens it again.
+The tray menu can also refresh it or exit the process. Use **Exit** in the tray
+menu to quit. A missing backend,
+timeout, or incompatible/invalid snapshot shows an error instead of a zero balance.
+
+### Build and run on Windows x64
+
+Install .NET SDK **10.0.403** and uv. Avalonia **12.1.5** and its transitive
+dependencies are pinned in the project's NuGet lock. From the repository root
+in PowerShell:
+
+```powershell
+uv sync --locked --dev --python 3.14
+uv run --locked python scripts/build_windows_backend.py
+dotnet restore windows/MarketPulse.Demo/MarketPulse.Demo.csproj --locked-mode -r win-x64 -p:SelfContained=true
+dotnet publish windows/MarketPulse.Demo/MarketPulse.Demo.csproj -c Release -r win-x64 --self-contained true --no-restore -o dist/windows/demo
+Copy-Item -Recurse -Force dist/windows/x86_64/MarketPulse-backend dist/windows/demo/MarketPulse-backend
+```
+
+For a clean repeat build, remove only the previous generated `dist/windows/demo`
+output first, so `Copy-Item` does not nest a second backend inside the existing
+one. Keep the entire published folder together when relocating it. It includes
+the .NET runtime and Python backend, so the user needs neither installed.
+The CI artifact **marketpulse-windows-x64-demo** contains this folder; it is a
+development artifact rather than a signed or published release.
+
+Run the decoder/error-path checks against the real bundled interpreter, then the
+published executable's bridge check, then open the window:
+
+```powershell
+$python = (Resolve-Path dist/windows/demo/MarketPulse-backend/python/python.exe).Path
+dotnet run --project windows/MarketPulse.BridgeCheck -- "$python"
+$check = Start-Process -FilePath dist/windows/demo/MarketPulse.Demo.exe -ArgumentList "--check-bridge" -Wait -PassThru -NoNewWindow
+if ($check.ExitCode -ne 0) { throw "Bridge check failed." }
+& ./dist/windows/demo/MarketPulse.Demo.exe
+```
+
+The check mode runs before Avalonia starts and uses the same subprocess and
+decoder as the window. CI publishes on `windows-latest`, runs both checks, and
+uploads the complete demo and backend. Follow the [Windows demo QA checklist](qa.md#windows-demo)
+to verify the actual window, tray and accessibility; a build/bridge check does
+not verify those UI interactions.
+
+### Development on Linux or macOS
+
+Avalonia can build the Windows target from other development systems. To run the
+demo locally with an installed development backend, first run `uv sync --locked --dev`,
+then pass its interpreter explicitly (use the absolute path):
+
+```bash
+dotnet run --project windows/MarketPulse.Demo -- --python "$PWD/.venv/bin/python"
+dotnet run --project windows/MarketPulse.Demo -- --check-bridge --python "$PWD/.venv/bin/python"
+dotnet run --project windows/MarketPulse.BridgeCheck -- "$PWD/.venv/bin/python"
+```
+
+These commands still request only fictional data. Desktop/tray availability
+depends on the host, and Linux/macOS checks do not establish Windows UI behavior.
+The SwiftUI Mac app remains the supported Mac interface.

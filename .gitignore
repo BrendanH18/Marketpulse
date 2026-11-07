@@ -12,6 +12,8 @@ dist/
 *.egg-info/
 .DS_Store
 .swiftpm/
+**/bin/
+**/obj/
 .marketpulse/
 *.db
 *.db-wal

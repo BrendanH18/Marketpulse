@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An Avalonia Windows demo showing fictional net worth in a window with a system-tray
+  menu, plus a self-contained CI build and desktop bridge checks
+  ([#50](https://github.com/BrendanH18/Marketpulse/issues/50)). Avalonia with C#/XAML is
+  the chosen Windows UI stack; the full Windows workspace and installer remain separate work.
 - A self-contained Windows x64 backend build, with pinned Python and locked dependencies,
   plus Windows CI tests and a relocated-bundle smoke test
   ([#51](https://github.com/BrendanH18/Marketpulse/issues/51)). See

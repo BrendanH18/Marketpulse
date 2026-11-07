@@ -302,6 +302,26 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
 
 Quit the QA app with ⌘Q when done.
 
+## Windows demo
+
+The Avalonia spike in [the Windows guide](windows.md#windows-ui-demo) is separate
+from the Mac checklist and the future Windows MVP. Build it and run its bridge
+checks first. It only loads fictional data and sets temporary data/config paths
+for every backend request. Record PASS / FAIL / UNVERIFIED with observed evidence:
+
+| Item | Check |
+| --- | --- |
+| W1 Launch and value | Launch the demo on Windows 11. A single window shows “Fictional data”, net worth and CAD. The value matches the bundled `desktop snapshot --demo` output. |
+| W2 Refresh | Click **Refresh demo**. The window stays responsive and returns to its loaded state. |
+| W3 Tray and reopen | Close the window. Its tray icon remains; **Open MarketPulse demo** restores one window. Repeat after minimizing. The tray's **Refresh demo** also reloads the snapshot. |
+| W4 Exit | Choose **Exit** from the tray. The window and tray icon disappear and no demo process remains. Repeat while a snapshot is loading: Python also exits and its temporary data/config folder is removed. |
+| W5 Error | Launch with `--python` pointing at a nonexistent scratch path. An error appears instead of a balance; refresh remains available and the tray can exit. |
+| W6 Keyboard and Narrator | Reach the refresh control with Tab and activate with Space/Enter. Narrator announces the demo context, net worth/currency, refresh action and tray menu labels. Check Windows text scaling and light/dark system appearance for clipping and contrast. |
+| W7 Relocation | Copy the whole published folder to a scratch path with spaces. With no developer Python/.NET on PATH, the executable's `--check-bridge` succeeds and its window loads. |
+
+Linux/macOS visual checks are supplementary. Mark Windows items UNVERIFIED when
+Windows desktop access is unavailable; do not infer them from a passing CI build.
+
 ## Tool limits and workarounds
 
 Some computer-use tools only see the app's own window, not the Dock or the system
