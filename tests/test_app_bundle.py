@@ -39,6 +39,7 @@ def test_module_entry_point_is_the_cli():
     assert result.stdout.startswith("Usage: marketpulse ")
 
 
+@pytest.mark.skipif(os.name != "posix", reason="macOS bundle layout and POSIX symlinks")
 def test_strip_keeps_the_interpreter_and_stdlib(tmp_path, build_app):
     python = tmp_path / "python"
     for rel in [
@@ -74,6 +75,7 @@ def test_strip_keeps_the_interpreter_and_stdlib(tmp_path, build_app):
     assert (python / "lib/python3.14/site-packages").is_dir()  # emptied, then filled by the install step
 
 
+@pytest.mark.skipif(os.name != "posix", reason="macOS bundle uses POSIX symlinks")
 def test_is_macho(tmp_path, build_app):
     (tmp_path / "lib.so").write_bytes(b"\xcf\xfa\xed\xfe" + b"\0" * 12)
     (tmp_path / "script").write_text("#!/bin/sh\n")

@@ -38,7 +38,9 @@ def _applescript_string(s: str) -> str:
 
 
 def notify(title: str, message: str, subtitle: str = "") -> bool:
-    """Best-effort desktop notification (macOS Notification Center or notify-send)."""
+    """Best-effort macOS/Linux notification; Windows currently has no notification backend."""
+    if sys.platform == "win32":
+        return False
     try:
         if sys.platform == "darwin":
             script = f"display notification {_applescript_string(message)} with title {_applescript_string(title)}"

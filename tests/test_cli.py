@@ -181,6 +181,15 @@ def test_config_theme_alerts_export(cli):
     assert cli("export").output.startswith("date,account,type")
 
 
+def test_csv_export_uses_utf8_for_unicode_account_names(cli, tmp_path):
+    name = "Fictional é 東京"
+    assert cli("accounts", "add", name).exit_code == 0
+    assert cli("buy", "AAPL", "1", "100", "-a", name).exit_code == 0
+    path = tmp_path / "ledger.csv"
+    assert cli("export", str(path)).exit_code == 0
+    assert name.encode("utf-8") in path.read_bytes()
+
+
 def test_backup_commands(cli, store, tmp_path):
     assert "No backups yet" in cli("backup", "list").output
     assert "Backed up to" in cli("backup").output  # bare `backup` backs up now

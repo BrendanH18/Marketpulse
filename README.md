@@ -31,7 +31,7 @@ macOS app, a keyboard-first terminal interface, market data, and Canadian accoun
   and backups while the app runs, plus a scriptable automation worker.
 - **Scriptable commands:** CSV import and export, JSON status, backups, and
   integrations for Waybar, tmux, and macOS.
-- **Local storage:** one SQLite database, four direct runtime dependencies,
+- **Local storage:** one SQLite database, four direct runtime dependencies (plus timezone data on Windows),
   no MarketPulse account, and no application telemetry.
 
 MarketPulse records transactions you enter or import. It does not connect to

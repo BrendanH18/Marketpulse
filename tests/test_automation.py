@@ -5,10 +5,22 @@ from datetime import date
 import pytest
 from click.testing import CliRunner
 
+from marketpulse.alerts import notify
 from marketpulse.automation import run_cycle
 from marketpulse.cli import main
 from marketpulse.desktop import snapshot
 from marketpulse.models import Account, AccountType, Alert, Transaction, TxnType
+
+
+def test_windows_notifications_are_a_noop(monkeypatch):
+    monkeypatch.setattr("marketpulse.alerts.sys.platform", "win32")
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Windows notifications must not try to launch POSIX commands")
+
+    monkeypatch.setattr("marketpulse.alerts.shutil.which", unexpected)
+    monkeypatch.setattr("marketpulse.alerts.subprocess.run", unexpected)
+    assert notify("MarketPulse", "Fictional alert") is False
 
 
 def holding(store):

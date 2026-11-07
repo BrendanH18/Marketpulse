@@ -46,6 +46,8 @@ jobs:
         include:
           - os: namespace-profile-macos
             python: "3.14"
+          - os: windows-latest
+            python: "3.14"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,6 +59,27 @@ jobs:
         run: uv sync --locked --dev --python ${{ matrix.python }}
       - name: Test
         run: uv run --locked pytest -q
+
+  windows-backend:
+    name: Standalone Windows backend (x64)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+      - name: Install build dependencies
+        run: uv sync --locked --dev --python 3.14
+      - name: Build and smoke-test the relocated backend
+        run: uv run --locked python scripts/build_windows_backend.py --out "$env:RUNNER_TEMP/Windows backend"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: marketpulse-windows-x64-backend
+          path: ${{ runner.temp }}/Windows backend/
+          if-no-files-found: error
 
   coverage:
     name: Coverage gate (financial core)

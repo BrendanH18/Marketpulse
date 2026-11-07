@@ -115,7 +115,7 @@ def export_cmd(app: App, path: Path | None) -> None:
     if path is None:
         export_transactions(app.store, sys.stdout)
         return
-    with path.open("w", newline="") as f:
+    with path.open("w", newline="", encoding="utf-8") as f:
         n = export_transactions(app.store, f)
     app.ok(f"Exported {n} transactions to {path}")
 

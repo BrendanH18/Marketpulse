@@ -77,6 +77,27 @@ def test_privacy_and_theme_cycling_persist(tracker):
     assert theme != "tokyo-night" and tracker.config.theme == theme
 
 
+def test_csv_export_keeps_unicode_account_names(tracker, store, tmp_path):
+    name = "Fictional é 東京"
+    acct = store.add_account(Account(name=name))
+    store.add_transaction(Transaction(account_id=acct.saved_id, type=TxnType.DEPOSIT, amount=100))
+    target = tmp_path / "ledger.csv"
+
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await app.workers.wait_for_complete()
+            app.action_export_csv()
+            await pilot.pause()
+            assert isinstance(app.screen, PromptScreen)
+            app.screen.query_one("#p-input").value = str(target)
+            app.screen.action_save()
+            await pilot.pause()
+
+    run(scenario())
+    assert name.encode("utf-8") in target.read_bytes()
+
+
 def test_big_digits():
     assert big_width("$1,234") == len(big_text("$1,234", "x").plain.split("\n")[0])
     assert big_width("1,234 SEK") == len(big_text("1,234 SEK", "x").plain.split("\n")[0])

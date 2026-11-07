@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A self-contained Windows x64 backend build, with pinned Python and locked dependencies,
+  plus Windows CI tests and a relocated-bundle smoke test
+  ([#51](https://github.com/BrendanH18/Marketpulse/issues/51)). See
+  [Windows backend builds](docs/windows.md). Windows keeps the existing data/config paths;
+  desktop notifications are currently a no-op. The native Windows interface and installer
+  remain separate work.
 - The Mac app is available in French (Canada)
   ([#46](https://github.com/BrendanH18/Marketpulse/issues/46)). The desktop bridge adds
   stable codes for the engine's messages so the app can word them in French: `warning_items`
@@ -38,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Configuration and CSV file exports use UTF-8 explicitly, preserving non-ASCII
+  account names on Windows. Saving a provider key no longer calls Unix-only
+  permission APIs on Windows.
 - `marketpulse doctor` said "Yahoo reachable" even when Yahoo couldn't be reached and
   prices came from the offline cache. It now reports the failure, and the fallback
   provider's status.
