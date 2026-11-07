@@ -99,7 +99,7 @@ in PowerShell:
 ```powershell
 uv sync --locked --dev --python 3.14
 uv run --locked python scripts/build_windows_backend.py
-dotnet restore windows/MarketPulse.Demo/MarketPulse.Demo.csproj --locked-mode -r win-x64 -p:SelfContained=true
+dotnet restore windows/MarketPulse.Demo/MarketPulse.Demo.csproj --locked-mode -p:RuntimeIdentifier=win-x64 -p:SelfContained=true
 dotnet publish windows/MarketPulse.Demo/MarketPulse.Demo.csproj -c Release -r win-x64 --self-contained true --no-restore -o dist/windows/demo
 Copy-Item -Recurse -Force dist/windows/x86_64/MarketPulse-backend dist/windows/demo/MarketPulse-backend
 ```
@@ -135,11 +135,15 @@ demo locally with an installed development backend, first run `uv sync --locked 
 then pass its interpreter explicitly (use the absolute path):
 
 ```bash
-dotnet run --project windows/MarketPulse.Demo -- --python "$PWD/.venv/bin/python"
-dotnet run --project windows/MarketPulse.Demo -- --check-bridge --python "$PWD/.venv/bin/python"
+dotnet restore windows/MarketPulse.Demo/MarketPulse.Demo.csproj --locked-mode -p:UseAppHost=false
+dotnet run --project windows/MarketPulse.Demo --no-restore -p:UseAppHost=false -- --python "$PWD/.venv/bin/python"
+dotnet run --project windows/MarketPulse.Demo --no-restore -p:UseAppHost=false -- --check-bridge --python "$PWD/.venv/bin/python"
 dotnet run --project windows/MarketPulse.BridgeCheck -- "$PWD/.venv/bin/python"
 ```
 
 These commands still request only fictional data. Desktop/tray availability
 depends on the host, and Linux/macOS checks do not establish Windows UI behavior.
+`UseAppHost=false` runs the development app through `dotnet`, keeping the lock
+file's runtime targets independent of the developer's machine. Windows publishing
+sets `RuntimeIdentifier=win-x64` explicitly during restore and produces an executable.
 The SwiftUI Mac app remains the supported Mac interface.

@@ -22,7 +22,7 @@ public partial class App : Application
             _window = new MainWindow();
             _window.Closing += (_, args) =>
             {
-                if (_exiting)
+                if (_exiting || args.CloseReason is WindowCloseReason.OSShutdown or WindowCloseReason.ApplicationShutdown)
                     return;
                 args.Cancel = true;
                 _window.Hide();

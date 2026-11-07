@@ -81,7 +81,7 @@ jobs:
       - name: Check Windows bridge decoding and backend error paths
         run: dotnet run --project windows/MarketPulse.BridgeCheck -- "$env:RUNNER_TEMP/Windows backend/x86_64/MarketPulse-backend/python/python.exe"
       - name: Restore locked Windows demo dependencies
-        run: dotnet restore windows/MarketPulse.Demo/MarketPulse.Demo.csproj --locked-mode -r win-x64 -p:SelfContained=true
+        run: dotnet restore windows/MarketPulse.Demo/MarketPulse.Demo.csproj --locked-mode -p:RuntimeIdentifier=win-x64 -p:SelfContained=true
       - name: Publish the standalone Windows demo with its backend
         run: |
           dotnet publish windows/MarketPulse.Demo/MarketPulse.Demo.csproj -c Release -r win-x64 --self-contained true --no-restore -o "$env:RUNNER_TEMP/Windows demo"
