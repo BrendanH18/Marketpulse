@@ -22,7 +22,7 @@ runs:
         $ErrorActionPreference = 'Stop'
         $tag = 'is-' + $env:INNO_VERSION.Replace('.', '_')
         $installer = Join-Path $env:RUNNER_TEMP "innosetup-$env:INNO_VERSION.exe"
-        Invoke-WebRequest -Uri "https://github.com/jrsoftware/issrc/releases/download/$tag/innosetup-$env:INNO_VERSION.exe" -OutFile $installer
+        Invoke-WebRequest -Uri "https://github.com/jrsoftware/issrc/releases/download/$tag/innosetup-$env:INNO_VERSION.exe" -OutFile $installer -MaximumRetryCount 5 -RetryIntervalSec 10
         $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
         if ($hash -ne $env:INNO_SHA256) { throw "innosetup-$env:INNO_VERSION.exe has SHA-256 $hash, expected $env:INNO_SHA256." }
         # Portable mode writes only to $dir (no registry entry, shortcuts or uninstaller), so it

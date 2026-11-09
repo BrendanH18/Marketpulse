@@ -177,7 +177,14 @@ Installs for your account only; it never asks for administrator rights. Your por
                 }
             }
             if ($expected.Count -ne 1) { Fail "SHA256SUMS for $tag has no single entry for $setupName." }
-            $actual = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            # .NET rather than Get-FileHash: Windows PowerShell started from PowerShell 7 inherits a
+            # PSModulePath that hides Get-FileHash, but SHA256 is always there.
+            $stream = [IO.File]::OpenRead($setupPath)
+            try {
+                $sha = [Security.Cryptography.SHA256]::Create()
+                try { $digest = $sha.ComputeHash($stream) } finally { $sha.Dispose() }
+            } finally { $stream.Dispose() }
+            $actual = ([BitConverter]::ToString($digest) -replace '-', '').ToLowerInvariant()
             if ($actual -cne $expected[0]) {
                 Fail "$setupName doesn't match its checksum in SHA256SUMS (expected $($expected[0]), got $actual). Nothing was installed."
             }

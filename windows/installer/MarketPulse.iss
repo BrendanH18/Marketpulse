@@ -100,11 +100,12 @@ begin
   if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' +
     '$folder = ''' + Folder + '''; ' +
-    'Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ' +
-    '$_.ExecutablePath.StartsWith($folder, [StringComparison]::OrdinalIgnoreCase) -and ' +
-    '@(''MarketPulse.exe'', ''python.exe'', ''pythonw.exe'') -contains $_.Name } | ' +
-    'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; ' +
-    'Start-Sleep -Milliseconds 500"',
+    // Plain .NET, no modules: setup started from PowerShell 7 hands this Windows PowerShell a
+    // PSModulePath that can hide cmdlets such as Get-CimInstance.
+    'foreach ($name in ''MarketPulse'', ''python'', ''pythonw'') { ' +
+    'foreach ($p in [Diagnostics.Process]::GetProcessesByName($name)) { ' +
+    'try { if ($p.MainModule.FileName.StartsWith($folder, [StringComparison]::OrdinalIgnoreCase)) { ' +
+    '$p.Kill(); [void]$p.WaitForExit(5000) } } catch { } } }"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     Log('Could not run PowerShell to stop MarketPulse: ' + SysErrorMessage(ResultCode))
   else
