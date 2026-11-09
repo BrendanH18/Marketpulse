@@ -1,6 +1,7 @@
 name: Release
 
-# Pushing a v* tag builds the unsigned macOS apps and opens a draft GitHub Release with them.
+# Pushing a v* tag builds the unsigned macOS apps and the unsigned Windows installer and portable
+# zip, combines them into one folder with one SHA256SUMS, and opens a draft GitHub Release with it.
 # Running it by hand (Actions > Release > Run workflow) is a dry run: it builds and verifies the
 # same artifacts and uploads them to the run, but creates no release. See CONTRIBUTING.md.
 
@@ -99,10 +100,73 @@ jobs:
       - name: Verify the downloaded artifacts and run the Intel app
         run: uv run --locked python scripts/release.py verify dist/release --version "$VERSION" --require-smoke x86_64
 
+  build-windows:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false # nothing a branch build cached can reach a release
+      - name: Install build dependencies
+        run: uv sync --locked --dev --python 3.14
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.403
+      - name: Install pinned Inno Setup
+        id: inno
+        uses: ./.github/actions/install-inno-setup
+      - name: Build the installer, portable zip, and SHA256SUMS (smoke-tests the backend, app, and installer)
+        env:
+          ISCC: ${{ steps.inno.outputs.iscc }}
+        run: uv run --locked python scripts/build_windows_release.py --iscc "$env:ISCC" --out dist/windows-release
+      - name: Install with install.ps1 from a local mirror (Windows PowerShell 5.1 and PowerShell 7)
+        run: uv run --locked python scripts/check_windows_install.py dist/windows-release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: marketpulse-${{ env.VERSION }}-windows
+          path: dist/windows-release/
+          if-no-files-found: error
+
+  assemble:
+    # Runs on dry runs too, so combining the macOS and Windows files is tested before a tag.
+    needs: [prepare, build, verify-intel, build-windows]
+    runs-on: namespace-profile-gitrunner
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false # nothing a branch build cached can reach a release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: marketpulse-${{ env.VERSION }}
+          path: dist/mac
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: marketpulse-${{ env.VERSION }}-windows
+          path: dist/windows
+      - name: Combine the macOS and Windows files with one SHA256SUMS
+        run: uv run --locked --no-dev python scripts/release.py combine --out dist/release dist/mac dist/windows
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: marketpulse-${{ env.VERSION }}-release
+          path: dist/release/
+          if-no-files-found: error
+
   publish:
     # A manual run is a dry run even when started on a tag.
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [prepare, checks, build, verify-intel]
+    needs: [prepare, checks, assemble]
     runs-on: namespace-profile-gitrunner
     timeout-minutes: 10
     permissions:
@@ -114,7 +178,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: marketpulse-${{ env.VERSION }}
+          name: marketpulse-${{ env.VERSION }}-release
           path: dist/release
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

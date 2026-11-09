@@ -4,12 +4,14 @@
     uv run --locked python scripts/release.py notes 2.2.0 > notes.md   # that version's CHANGELOG section
     uv run --locked python scripts/release.py package --apps dist/app --python-dist dist/python --out dist/release
     uv run --locked python scripts/release.py verify dist/release --require-smoke arm64
+    uv run --locked python scripts/release.py combine --out dist/publish dist/release dist/windows-release
 
 `package` turns each `<apps>/<arch>/MarketPulse.app` from scripts/build_app.py into a zip
 (`ditto -c -k --keepParent`, which keeps symlinks and signatures) and a DMG, copies the wheel,
 sdist, and scripts/install.sh, and writes SHA256SUMS. `verify` checks the checksums, then opens every
 zip and DMG and checks the versions, architectures, and signatures inside, and smoke-tests each app this
-Mac can run.
+Mac can run. `combine` merges the checked macOS and Windows release folders into the one folder a
+GitHub Release publishes, with a single SHA256SUMS; unlike `package` and `verify`, it runs anywhere.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = "MarketPulse.app"
 SUMS = "SHA256SUMS"
 INSTALLER = "install.sh"
+INSTALLER_PS1 = "install.ps1"
 
 
 def _build_app():
@@ -69,11 +72,29 @@ def changelog_section(changelog: str, version: str) -> str:
     return text
 
 
+def macos_release_names(version: str) -> set[str]:
+    """What the macOS release folder from `package` holds (besides SHA256SUMS)."""
+    names = {f"MarketPulse-{version}-macos-{a}.{ext}" for a in ("arm64", "x86_64") for ext in ("zip", "dmg")}
+    return names | {f"marketpulse-{version}-py3-none-any.whl", f"marketpulse-{version}.tar.gz", INSTALLER}
+
+
+def windows_release_names(version: str) -> set[str]:
+    """What the Windows release folder holds (besides SHA256SUMS)."""
+    stem = f"MarketPulse-{version}-windows-x64"
+    return {f"{stem}-setup.exe", f"{stem}.zip", INSTALLER_PS1}
+
+
+def release_names(version: str) -> set[str]:
+    """Every file a published GitHub Release holds (besides SHA256SUMS)."""
+    return macos_release_names(version) | windows_release_names(version)
+
+
 def release_notes(changelog: str, version: str) -> str:
     repo = "https://github.com/BrendanH18/Marketpulse"
+    stem = f"MarketPulse-{version}-windows-x64"
     return (
         changelog_section(changelog, version)
-        + "\n\n## Downloads\n\n"
+        + "\n\n## Downloads\n\n### Mac\n\n"
         + "Install the Mac app with one command, which checks the download against `SHA256SUMS` and avoids "
         + f"macOS's security prompt ([read the script]({repo}/blob/v{version}/scripts/{INSTALLER}) first):\n\n"
         + f"```bash\ncurl -fsSL {repo}/releases/download/v{version}/{INSTALLER}"
@@ -82,6 +103,19 @@ def release_notes(changelog: str, version: str) -> str:
         + f"`MarketPulse-{version}-macos-arm64` is for Apple silicon Macs, `-x86_64` for Intel Macs; each "
         + "comes as a zip and a DMG. The apps are ad-hoc signed, not notarized by Apple. Check what you "
         + f"downloaded against `{SUMS}`:\n\n```bash\nshasum -a 256 -c {SUMS} --ignore-missing\n```\n"
+        + "\n### Windows\n\n"
+        + "Install for your Windows account (no administrator rights) with one PowerShell command, which "
+        + f"checks the installer against `{SUMS}` ([read the script]({repo}/blob/v{version}/scripts/{INSTALLER_PS1})"
+        + " first):\n\n"
+        + f"```powershell\n& ([scriptblock]::Create((irm {repo}/releases/download/v{version}/{INSTALLER_PS1})))"
+        + f" -Version v{version}\n```\n\n"
+        + f"Or download `{stem}-setup.exe` (installer) or `{stem}.zip` (portable; unzip and run "
+        + '`MarketPulse.exe`). They aren\'t code-signed, so SmartScreen says "Windows protected your PC" the '
+        + "first time: click **More info**, then **Run anyway**. Check a download against "
+        + f"`{SUMS}` first; this prints `True` when it matches:\n\n"
+        + f'```powershell\n$file = "{stem}-setup.exe"\n'
+        + f'$expected = (Select-String -LiteralPath {SUMS} -SimpleMatch "  $file").Line.Split(" ")[0]\n'
+        + "(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -eq $expected\n```\n"
     )
 
 
@@ -191,8 +225,7 @@ def verify(folder: Path, version: str = __version__, require_smoke: tuple[str, .
     build_app = _build_app()
     pattern = re.compile(rf"MarketPulse-{re.escape(version)}-macos-(arm64|x86_64)\.(zip|dmg)")
     apps = [(p, m.group(1)) for p in files if (m := pattern.fullmatch(p.name))]
-    expected = {f"MarketPulse-{version}-macos-{a}.{ext}" for a in ("arm64", "x86_64") for ext in ("zip", "dmg")}
-    expected |= {f"marketpulse-{version}-py3-none-any.whl", f"marketpulse-{version}.tar.gz", INSTALLER}
+    expected = macos_release_names(version)
     if {p.name for p in files} != expected:
         raise SystemExit(f"Expected exactly {sorted(expected)}, found {sorted(p.name for p in files)}.")
     if (folder / INSTALLER).read_bytes() != (ROOT / "scripts" / INSTALLER).read_bytes():
@@ -221,6 +254,43 @@ def verify(folder: Path, version: str = __version__, require_smoke: tuple[str, .
         raise SystemExit(f"Couldn't run the {', '.join(sorted(missing))} app on this Mac, but it was required.")
 
 
+def combine(out: Path, folders: list[Path], version: str = __version__) -> None:
+    """Merge checked release folders into a fresh `out` that holds the full release and one SHA256SUMS."""
+    if not folders:
+        raise SystemExit("Name at least one release folder to combine.")
+    for folder in folders:
+        if out == folder or out in folder.parents or folder in out.parents:
+            raise SystemExit(f"--out {out} overlaps the input folder {folder}; pick a new folder.")
+    sources: dict[str, Path] = {}
+    for folder in folders:
+        if not (folder / SUMS).is_file():
+            raise SystemExit(f"{folder} has no {SUMS}; is it a release folder?")
+        files = check_sums(folder)
+        print(f"{folder}: {SUMS} matches its {len(files)} files.")
+        for path in files:
+            if path.name in sources:
+                raise SystemExit(f"{path.name} is in both {sources[path.name].parent} and {folder}.")
+            sources[path.name] = path
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    for name, path in sorted(sources.items()):
+        shutil.copy2(path, out / name)
+    write_sums(out)
+    files = check_sums(out)
+    expected = release_names(version)
+    found = {p.name for p in files}
+    if found != expected:
+        missing, extra = sorted(expected - found), sorted(found - expected)
+        raise SystemExit(f"The combined release for {version} is missing {missing} and has unexpected {extra}.")
+    for installer in (INSTALLER, INSTALLER_PS1):
+        if (out / installer).read_bytes() != (ROOT / "scripts" / installer).read_bytes():
+            raise SystemExit(f"{installer} isn't this checkout's scripts/{installer}.")
+    for path in files:
+        print(f"{path.name}  ({path.stat().st_size / 1_000_000:.0f} MB)")
+    print(f"{SUMS}: {len(files)} files, the full MarketPulse {version} release.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -236,6 +306,10 @@ def main() -> None:
     check.add_argument("folder", type=Path)
     check.add_argument("--version", default=__version__)
     check.add_argument("--require-smoke", action="append", default=[], choices=["arm64", "x86_64"])
+    merge = commands.add_parser("combine", help="Merge checked macOS and Windows release folders for publishing.")
+    merge.add_argument("folders", type=Path, nargs="+")
+    merge.add_argument("--out", type=Path, required=True)
+    merge.add_argument("--version", default=__version__)
     args = parser.parse_args()
 
     if args.command == "check-tag":
@@ -243,6 +317,8 @@ def main() -> None:
         print(f"{args.tag} matches MarketPulse {__version__}.")
     elif args.command == "notes":
         sys.stdout.write(release_notes((ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), args.version))
+    elif args.command == "combine":
+        combine(args.out.resolve(), [folder.resolve() for folder in args.folders], args.version)
     elif sys.platform != "darwin":
         raise SystemExit("Packaging and verifying the macOS app need macOS.")
     elif args.command == "package":

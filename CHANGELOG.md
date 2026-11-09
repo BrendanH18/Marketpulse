@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Windows releases ([#53](https://github.com/BrendanH18/Marketpulse/issues/53)): a per-user
+  installer that needs no administrator rights, a portable zip, and a one-line PowerShell
+  install (`irm …/install.ps1 | iex`) that runs the installer only if it matches the release's
+  `SHA256SUMS`. The installer and app aren't code-signed; [Install on Windows](docs/install.md#windows)
+  covers the SmartScreen prompt, checking a download with `Get-FileHash`, updating, and uninstalling,
+  which keeps your portfolio. Each GitHub Release now has the macOS and Windows files with one `SHA256SUMS`.
+
 - A Windows portfolio workspace with holdings, signed activity, accounts, watchlists and
   alerts, income, automation, transaction entry, CSV preview/import, privacy mode, and
   system-tray controls ([#52](https://github.com/BrendanH18/Marketpulse/issues/52)).

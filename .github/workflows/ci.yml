@@ -61,9 +61,9 @@ jobs:
         run: uv run --locked pytest -q
 
   windows-backend:
-    name: Standalone Windows backend (x64)
+    name: Windows app and installer (x64)
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,33 +73,39 @@ jobs:
           enable-cache: true
       - name: Install build dependencies
         run: uv sync --locked --dev --python 3.14
-      - name: Build and smoke-test the relocated backend
-        run: uv run --locked python scripts/build_windows_backend.py --out "$env:RUNNER_TEMP/Windows backend"
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: 10.0.403
+      - name: Install pinned Inno Setup
+        id: inno
+        uses: ./.github/actions/install-inno-setup
+      # Builds and smoke-tests the relocated backend, publishes MarketPulse.exe with it and runs its
+      # bridge check, writes the installer, portable zip and SHA256SUMS, then installs, upgrades and
+      # uninstalls the installer in a temporary folder.
+      - name: Build and test the Windows release files
+        env:
+          ISCC: ${{ steps.inno.outputs.iscc }}
+        run: >-
+          uv run --locked python scripts/build_windows_release.py --iscc "$env:ISCC"
+          --work "$env:RUNNER_TEMP/Windows build" --out "$env:RUNNER_TEMP/Windows release"
       - name: Check Windows bridge decoding and backend error paths
-        run: dotnet run --project windows/MarketPulse.BridgeCheck -- "$env:RUNNER_TEMP/Windows backend/x86_64/MarketPulse-backend/python/python.exe"
-      - name: Restore locked Windows app dependencies
-        run: dotnet restore windows/MarketPulse.Demo/MarketPulse.Demo.csproj --locked-mode -p:RuntimeIdentifier=win-x64 -p:SelfContained=true
-      - name: Publish the standalone Windows app with its backend
-        run: |
-          dotnet publish windows/MarketPulse.Demo/MarketPulse.Demo.csproj -c Release -r win-x64 --self-contained true --no-restore -o "$env:RUNNER_TEMP/Windows app"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item -Recurse "$env:RUNNER_TEMP/Windows backend/x86_64/MarketPulse-backend" "$env:RUNNER_TEMP/Windows app/MarketPulse-backend"
-      - name: Check the published app against the bundled desktop bridge
-        run: |
-          $demo = Start-Process -FilePath "$env:RUNNER_TEMP/Windows app/MarketPulse.exe" -ArgumentList "--check-bridge" -Wait -PassThru -NoNewWindow
-          if ($demo.ExitCode -ne 0) { throw "Windows app bridge check failed with exit code $($demo.ExitCode)." }
+        run: dotnet run --project windows/MarketPulse.BridgeCheck -- "$env:RUNNER_TEMP/Windows build/MarketPulse/MarketPulse-backend/python/python.exe"
+      - name: Install with install.ps1 from a local mirror (Windows PowerShell 5.1 and PowerShell 7)
+        run: uv run --locked python scripts/check_windows_install.py "$env:RUNNER_TEMP/Windows release"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: marketpulse-windows-x64-release
+          path: ${{ runner.temp }}/Windows release/
+          if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: marketpulse-windows-x64-backend
-          path: ${{ runner.temp }}/Windows backend/
+          path: ${{ runner.temp }}/Windows build/backend/
           if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: marketpulse-windows-x64-app
-          path: ${{ runner.temp }}/Windows app/
+          path: ${{ runner.temp }}/Windows build/MarketPulse/
           if-no-files-found: error
 
   coverage:

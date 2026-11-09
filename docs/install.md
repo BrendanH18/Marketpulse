@@ -1,11 +1,11 @@
-# Install the Mac app
+# Install the app
 
-[Back to the README](../README.md) · [Native app guide](desktop.md) · [Data and backups](data.md)
+[Back to the README](../README.md) · [Native app guide](desktop.md) · [Data and backups](data.md) · [Windows](#windows)
 
 `MarketPulse.app` runs on macOS 14 (Sonoma) or later, on Apple silicon and Intel Macs. It
 carries its own copy of the MarketPulse engine, so you don't need Python, Homebrew, or
 developer tools. Each [GitHub Release](https://github.com/BrendanH18/Marketpulse/releases)
-from 2.2.0 has the app for both kinds of Mac.
+from 2.2.0 has the app for both kinds of Mac. For Windows, see [Windows](#windows).
 
 ## Install with one command (recommended)
 
@@ -110,7 +110,8 @@ Apple only lets apps skip its security prompt if they are signed with a paid App
 Developer ID and notarized (scanned) by Apple. MarketPulse is a free, open-source project
 and deliberately doesn't pay for one ([app plan](app-plan.md#decisions)). Its app is
 *ad-hoc signed*: the signature proves nothing in the app changed after it was built, but
-not who built it.
+not who built it. The Windows app isn't code-signed either, for the same reason, so
+Windows SmartScreen warns about it ([Windows](#windows)).
 
 What you can rely on instead:
 
@@ -163,3 +164,145 @@ This deletes your portfolio permanently. If you set `MARKETPULSE_DATA` or
 A checkout install (`marketpulse desktop install` or `menubar install`) is a separate app,
 `~/Applications/MarketPulse Bar.app`, with preferences under `dev.marketpulse.bar`; remove it
 the same way.
+
+## Windows
+
+MarketPulse for Windows runs on 64-bit (x64) Windows 10 and 11 and carries its own copy
+of the MarketPulse engine, so you don't need Python or .NET. Releases after 2.2.0 include
+it as an installer and as a portable zip. It installs for your Windows account only and
+never needs administrator rights.
+
+### Install on Windows with one command (recommended)
+
+Open **PowerShell** (type `PowerShell` in the Start menu) and paste:
+
+```powershell
+irm https://github.com/BrendanH18/Marketpulse/releases/latest/download/install.ps1 | iex
+```
+
+Running a script from the internet means trusting it, so [read it first](../scripts/install.ps1).
+The script:
+
+1. downloads the latest release's installer and its `SHA256SUMS` file;
+2. runs nothing unless the installer's SHA-256 matches its line in `SHA256SUMS`;
+3. installs MarketPulse silently for your account into
+   `%LOCALAPPDATA%\Programs\MarketPulse` (or where it is already installed), replacing an
+   older version and closing MarketPulse first if it is running;
+4. checks that the installed `MarketPulse.exe` is the version it downloaded, and starts it.
+
+Your portfolio in `%USERPROFILE%\.marketpulse` is never touched.
+
+To install a particular version, take the script from that release and name the version
+(replace `v2.3.0` with the one you want):
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/BrendanH18/Marketpulse/releases/download/v2.3.0/install.ps1))) -Version v2.3.0
+```
+
+Other options go at the end the same way: `-Dir FOLDER` installs somewhere else,
+`-NoLaunch` doesn't start the app afterwards, and `-Help` lists them all. A copy you
+downloaded runs with `powershell -ExecutionPolicy Bypass -File install.ps1 -Version v2.3.0`.
+
+Why doesn't SmartScreen ask about this? Browsers mark downloaded files with the "Mark of
+the Web", and SmartScreen checks marked programs before they run. PowerShell's own
+downloads don't get that mark ([Eric Lawrence on the Mark of the Web](https://textslashplain.com/2016/04/04/downloads-and-the-mark-of-the-web/));
+if security software adds it anyway, the script removes it from its own copy only after
+the checksum matches. As on the Mac, the checksum shows the installer is the one this
+GitHub release published, not who built it, and nobody else has scanned it.
+
+**Smart App Control.** If Smart App Control is on (Windows Security › App & browser
+control), Windows may block MarketPulse however you install it. Smart App Control allows
+an app its cloud service predicts is safe; when it can't make a confident prediction, it
+blocks apps that aren't code-signed, and it has no way to allow a single app
+([Microsoft](https://support.microsoft.com/en-us/topic/what-is-smart-app-control-285ea03d-fa88-4d56-882e-6698afdb7003)).
+If it blocks MarketPulse, the app can't run on that PC unless you turn Smart App Control
+off, which is a choice for the whole computer.
+
+### Install on Windows with the installer
+
+1. On the [latest release](https://github.com/BrendanH18/Marketpulse/releases/latest),
+   under **Assets**, download `MarketPulse-<version>-windows-x64-setup.exe`. Your browser
+   may say the file isn't commonly downloaded; choose to keep it.
+2. Optional but recommended: also download `SHA256SUMS` and
+   [check the download](#verify-a-windows-download).
+3. Open the installer. Because it isn't code-signed, a blue window says "Windows protected
+   your PC". Click **More info**, check that the app is
+   `MarketPulse-<version>-windows-x64-setup.exe`, then click **Run anyway**.
+4. Follow the installer. It doesn't ask for administrator rights, and it adds MarketPulse
+   to the Start menu.
+
+SmartScreen asks again for each new version: an unsigned file starts with no reputation
+([Microsoft](https://learn.microsoft.com/windows/apps/package-and-deploy/smartscreen-reputation)).
+The [install command](#install-on-windows-with-one-command-recommended) doesn't ask.
+
+### Portable zip
+
+`MarketPulse-<version>-windows-x64.zip` holds a `MarketPulse` folder with
+`MarketPulse.exe` and its `MarketPulse-backend` folder. Nothing is installed: put the folder
+anywhere you can write to (not the installer's `%LOCALAPPDATA%\Programs\MarketPulse`),
+keep its contents together, and run `MarketPulse.exe`. To remove it, delete the folder.
+
+A zip your browser downloaded carries the Mark of the Web, and **Extract All** in File
+Explorer copies the mark onto every file it extracts, so Windows asks before
+`MarketPulse.exe` runs. To avoid that, [check the zip's hash](#verify-a-windows-download)
+first; if it matches, remove the mark from the zip and then extract it:
+
+```powershell
+cd ~\Downloads
+Unblock-File -LiteralPath .\MarketPulse-2.3.0-windows-x64.zip
+```
+
+Or extract it as is and answer the SmartScreen prompt with **More info** › **Run anyway**.
+
+### Verify a Windows download
+
+Every release lists a SHA-256 checksum for each file in `SHA256SUMS`. In PowerShell, in
+the folder you downloaded to, set `$file` to the file you downloaded and run:
+
+```powershell
+cd ~\Downloads
+$file = "MarketPulse-2.3.0-windows-x64-setup.exe"
+$expected = (Select-String -LiteralPath SHA256SUMS -SimpleMatch "  $file").Line.Split(" ")[0]
+(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -eq $expected
+```
+
+`True` means the file is the one the release published. `False` or an error means it is
+damaged or isn't what the release published; delete it and download again.
+
+### Update on Windows
+
+Run the [install command](#install-on-windows-with-one-command-recommended) again, or
+download and run the newer installer. Either replaces the app where it is installed,
+closing MarketPulse in the notification area first, and keeps your portfolio and
+settings. For the portable zip, replace the whole `MarketPulse` folder with the new one.
+
+### Uninstall on Windows
+
+Open **Settings › Apps › Installed apps** (**Apps & features** on Windows 10), find
+**MarketPulse**, and choose **Uninstall** (on Windows 11, from its **…** menu). Or run
+`unins000.exe` in the install folder:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\MarketPulse\unins000.exe"
+```
+
+Uninstalling closes MarketPulse and removes the install folder and its shortcuts.
+
+Your portfolio is **kept**: the ledger and backups stay in `%USERPROFILE%\.marketpulse`,
+and settings in `%USERPROFILE%\.config\marketpulse\config.toml`, shared with the command
+line if you use it. To remove those too, first make sure you have a copy of anything you
+want to keep (`%USERPROFILE%\.marketpulse\backups` holds the backups), then:
+
+```powershell
+Remove-Item -Recurse -Force "$HOME\.marketpulse", "$HOME\.config\marketpulse"
+```
+
+This deletes your portfolio permanently. If you set `MARKETPULSE_DATA` or
+`MARKETPULSE_CONFIG`, your data is in those locations instead.
+
+### winget
+
+MarketPulse has no winget package yet. winget's community repository doesn't require
+code signing, but each submission must install without user interaction, download from the
+publisher's own release, and pass Microsoft's antivirus scans and test installs
+([Microsoft](https://learn.microsoft.com/windows/package-manager/package/repository)).

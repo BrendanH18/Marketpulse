@@ -321,6 +321,30 @@ scratch path overrides. Record PASS / FAIL / UNVERIFIED with observed evidence:
 | W9 Tray and reopen | Close the window; tray remains. Open restores one window, including after minimizing. Tray refresh updates status while preserving privacy. Exit during refresh stops both app and child Python. |
 | W10 Keyboard and Narrator | Reach navigation, actions and form fields using Tab, activate with Space/Enter, dismiss dialogs with Escape. Narrator announces labels/errors. Check Windows text scaling and light/dark appearance for clipping and contrast. |
 | W11 Demo and relocation | Run `--demo`: fictional data, writes unavailable, no real ledger/settings access. Copy the full published app to a path with spaces; with no Python/.NET on PATH, `--check-bridge` and demo launch work. |
+| W12 Install with install.ps1 | On a test account without MarketPulse, run the release's `install.ps1` (`irm … \| iex`, or the script-block form with `-Version`). It prints "Checksum verified", installs to `%LOCALAPPDATA%\Programs\MarketPulse` with no administrator or SmartScreen prompt, and starts the app. The Start menu has MarketPulse; Settings › Apps › Installed apps lists it with the release version. |
+| W13 Install with the setup exe | Download the setup exe in Edge and check it with the `Get-FileHash` snippet in the [install guide](install.md#verify-a-windows-download) (prints `True`). Opening it shows "Windows protected your PC"; **More info** names the file and **Run anyway** continues. Setup asks for no administrator rights and offers to start MarketPulse. Quote the dialog text. |
+| W14 Portable zip | Download the zip in a browser and verify its hash. Extract it as is: `MarketPulse.exe` gets a SmartScreen prompt (record it). Then run `Unblock-File` on the zip, extract it again to a new folder: the exe starts without a prompt and shows the fictional portfolio. |
+| W15 Upgrade while running | With an older release installed and running in the tray (window closed), run the newer release's install command or setup. It closes MarketPulse and its Python process without a prompt and installs into the same folder. Started again, the app shows the new version and the same portfolio. |
+| W16 Uninstall keeps data | Uninstall from Settings › Apps › Installed apps (or `unins000.exe`) while the app runs in the tray. The app closes; the install folder, Start menu entry and Installed apps entry go; the scratch `MARKETPULSE_DATA` folder and `MARKETPULSE_CONFIG` file are unchanged. Reinstalling shows the same portfolio. |
+
+W12–W16 install release builds, which the Start menu and Explorer launch without
+`--data-dir`/`--config`. Point them at scratch data instead: run them on a Windows test
+account or virtual machine without a real portfolio, and before W12 set both variables for
+that account to the helper's fictional ledger, then sign out and back in so the Start menu
+and Explorer pass them on:
+
+```powershell
+$qa = uv run --locked python scripts/qa_windows.py | ConvertFrom-Json
+if (-not ($qa.data -and $qa.config)) { throw 'qa_windows.py printed no scratch paths; stop here.' }
+[Environment]::SetEnvironmentVariable('MARKETPULSE_DATA', $qa.data, 'User')
+[Environment]::SetEnvironmentVariable('MARKETPULSE_CONFIG', $qa.config, 'User')
+```
+
+"The same portfolio" in W15 and W16 means the helper's ledger. W16 checks that this scratch
+folder and config are unchanged, and that `%USERPROFILE%\.marketpulse` was never created.
+Afterwards remove both variables (set them to `$null` the same way).
+`scripts/check_windows_install.py` automates the silent install, version and uninstall
+checks of W12 in CI; it doesn't see SmartScreen, the tray, or the Start menu.
 
 Linux/macOS visual checks are supplementary. Mark Windows items UNVERIFIED when
 Windows desktop access is unavailable; do not infer them from a passing CI build.
