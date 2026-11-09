@@ -1,0 +1,41 @@
+name: Install Inno Setup
+description: >-
+  Download a pinned Inno Setup 6 installer from its GitHub release, check its SHA-256, and install it
+  in portable mode under RUNNER_TEMP. Outputs the path to ISCC.exe. Windows runners only.
+
+outputs:
+  iscc:
+    description: Path to the pinned ISCC.exe
+    value: ${{ steps.install.outputs.iscc }}
+
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: pwsh
+      env:
+        # Upgrade deliberately: take the version and the asset's SHA-256 from
+        # https://github.com/jrsoftware/issrc/releases (each asset lists its digest).
+        INNO_VERSION: 6.7.4
+        INNO_SHA256: a549929319f9120716677c685535ca4671e4b937b5fdc87e2585f32d8eb30e8c
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $tag = 'is-' + $env:INNO_VERSION.Replace('.', '_')
+        $installer = Join-Path $env:RUNNER_TEMP "innosetup-$env:INNO_VERSION.exe"
+        Invoke-WebRequest -Uri "https://github.com/jrsoftware/issrc/releases/download/$tag/innosetup-$env:INNO_VERSION.exe" -OutFile $installer
+        $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
+        if ($hash -ne $env:INNO_SHA256) { throw "innosetup-$env:INNO_VERSION.exe has SHA-256 $hash, expected $env:INNO_SHA256." }
+        # Portable mode writes only to $dir (no registry entry, shortcuts or uninstaller), so it
+        # leaves any Inno Setup preinstalled on the image alone; /CURRENTUSER needs no elevation.
+        $dir = Join-Path $env:RUNNER_TEMP "InnoSetup-$env:INNO_VERSION"
+        $log = "$dir-install.log"
+        $arguments = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/CURRENTUSER', '/PORTABLE=1', "/DIR=`"$dir`"", "/LOG=`"$log`""
+        $setup = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru
+        if ($setup.ExitCode -ne 0) {
+          Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
+          throw "Installing Inno Setup $env:INNO_VERSION failed with exit code $($setup.ExitCode)."
+        }
+        $iscc = Join-Path $dir 'ISCC.exe'
+        if (-not (Test-Path -LiteralPath $iscc)) { throw "Inno Setup installed no ISCC.exe in $dir." }
+        Write-Output "Using $iscc (version $((Get-Item -LiteralPath $iscc).VersionInfo.ProductVersion))"
+        "iscc=$iscc" >> $env:GITHUB_OUTPUT

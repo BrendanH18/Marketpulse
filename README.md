@@ -62,6 +62,20 @@ how to [verify a download](docs/install.md#verify-a-download), and how to
 [uninstall](docs/install.md#uninstall). Releases from 2.2.0 include the app; for 2.1.0 and
 earlier, build it from a checkout ([macOS and Omarchy](#macos-and-omarchy)).
 
+### Download the Windows app
+
+MarketPulse for Windows runs on 64-bit Windows 10 and 11 and installs for your account
+without administrator rights. Paste this into PowerShell ([read the script first](scripts/install.ps1)):
+
+```powershell
+irm https://github.com/BrendanH18/Marketpulse/releases/latest/download/install.ps1 | iex
+```
+
+It checks the installer against the release's SHA-256 checksums before running it. You can
+also download the installer or a portable zip yourself; they aren't code-signed, so SmartScreen
+asks you to click **More info › Run anyway**. See [Install on Windows](docs/install.md#windows)
+for both, updating, and uninstalling. Releases after 2.2.0 include the Windows app.
+
 ### Command line and terminal interface
 
 You need **Python 3.11+**, [uv](https://docs.astral.sh/uv/getting-started/installation/),

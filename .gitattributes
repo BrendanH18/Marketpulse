@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Release installers are published byte-for-byte as in the repository, and release.py checks the
+# copies against the checkout on every OS, so never convert their line endings (Windows checkouts
+# would otherwise get CRLF).
+scripts/install.sh text eol=lf
+scripts/install.ps1 text eol=lf

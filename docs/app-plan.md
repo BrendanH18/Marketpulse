@@ -66,9 +66,16 @@ The DMG with Open Anyway instructions is the alternative, and building from the 
 [#35](https://github.com/BrendanH18/Marketpulse/issues/35).
 
 **Windows.** Unsigned installers trigger SmartScreen ("Windows protected your PC" →
-More info → Run anyway). MSIX requires signing, so use a per-user classic installer
-plus a PowerShell script that verifies checksums. See
-[#53](https://github.com/BrendanH18/Marketpulse/issues/53).
+More info → Run anyway), and an unsigned file starts with no reputation on every
+release. MSIX requires signing, so releases ship a per-user Inno Setup installer (no
+administrator rights) and a portable zip. The primary install path is
+`scripts/install.ps1`, which downloads the installer with `Invoke-WebRequest` (which
+doesn't add the Mark of the Web, so SmartScreen doesn't prompt), checks its SHA-256
+against `SHA256SUMS`, installs silently, and checks the installed version. Smart App
+Control, where it is on, blocks unsigned apps outright; only signing would avoid that.
+winget doesn't require signing, but there is no package yet. See
+[#53](https://github.com/BrendanH18/Marketpulse/issues/53) and the
+[Windows install guide](install.md#windows).
 
 **Trust without signatures:** releases are built only by the tag-triggered
 workflow, every artifact has a published SHA-256, and anyone can rebuild from the tag.

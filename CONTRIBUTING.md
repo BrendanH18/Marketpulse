@@ -95,7 +95,7 @@ the bundle or how the app finds its backend). AI agents should read
 [AGENTS.md](AGENTS.md); the app's direction is in the [App 1.0 plan](docs/app-plan.md).
 
 For the self-contained Windows x64 backend, see [Windows backend builds](docs/windows.md).
-It uses the same engine and desktop bridge; the Windows interface is separate work.
+It uses the same engine and desktop bridge; the same guide covers the Windows app and its installer.
 
 CI runs on [Namespace](https://namespace.so) runners and GitHub-hosted Windows runners:
 lint, formatting, type checks, Python tests on Linux, macOS and Windows, Python distribution
@@ -265,7 +265,14 @@ commit is on `main` and CI is green.
    for the version. It then runs the CI checks, builds the wheel, sdist, and
    `MarketPulse.app` for arm64 and x86_64 (`scripts/build_app.py`), packages each
    app as a zip and a DMG, attaches `scripts/install.sh`, and writes `SHA256SUMS`
-   (`scripts/release.py package`).
+   (`scripts/release.py package`). On `windows-latest` it builds the Windows installer
+   (`MarketPulse-<version>-windows-x64-setup.exe`), the portable zip
+   (`MarketPulse-<version>-windows-x64.zip`) and a copy of `scripts/install.ps1`
+   ([Build the installer](docs/windows.md#build-the-installer)), and
+   `scripts/check_windows_install.py` installs that build with `install.ps1` from a local
+   mirror in Windows PowerShell 5.1 and PowerShell 7, checks its version, and uninstalls it.
+   `scripts/release.py combine` then merges the macOS and Windows files into one folder
+   with a single `SHA256SUMS` and refuses if any file is missing, duplicated, or doesn't match.
    `scripts/release.py verify` opens every artifact, checks that the app and the
    bundled backend both report the tag's version, the architecture, and the
    signature, and runs each app: arm64 on a Namespace macOS runner, x86_64 on GitHub's `macos-15-intel`
@@ -273,7 +280,8 @@ commit is on `main` and CI is green.
    Only then does it create a **draft** release whose notes are that version's
    CHANGELOG section plus download and checksum instructions.
 
-8. Review the draft release on GitHub (assets, notes) and publish it. Re-running
+8. Review the draft release on GitHub (assets, notes) and publish it. Its assets are the
+   macOS files, the three Windows files, and one `SHA256SUMS` covering all of them. Re-running
    the workflow for the same tag replaces the draft's files; it refuses once the
    release is published.
 
@@ -291,10 +299,16 @@ commit is on `main` and CI is green.
    user account ([QA item 16](docs/qa.md#checklist)); the `latest` URL only resolves
    once the release is published.
 
+   On Windows 11, on a test account or VM without a real portfolio, run the PowerShell
+   one-line install from the [install guide](docs/install.md#windows) and confirm
+   Settings › Apps › Installed apps shows the new version; then download the setup exe,
+   check it with `Get-FileHash` against `SHA256SUMS`, and confirm the SmartScreen
+   **More info › Run anyway** path ([QA items W12–W16](docs/qa.md#windows-app)).
+
 **Dry run.** Before tagging, run the workflow from **Actions › Release › Run
 workflow** on the release branch (or `gh workflow run release.yml --ref <branch>`).
-It builds and verifies the same artifacts and attaches them to the run as
-`marketpulse-<version>`, but creates no release; a missing CHANGELOG section is
+It builds and verifies the same artifacts, combines them, and attaches them to the run
+(the full set as `marketpulse-<version>-release`), but creates no release; a missing CHANGELOG section is
 only a warning. Everything except the draft release can also be run locally:
 
 ```bash
@@ -304,6 +318,15 @@ uv run --locked python scripts/build_app.py --arch arm64 --arch x86_64 \
 uv run --locked python scripts/release.py package --python-dist dist/python   # dist/release
 uv run --locked python scripts/release.py verify dist/release
 uv run --locked python scripts/release.py notes       # this version's release notes
+```
+
+The Windows files need Windows. There, build them and then install and uninstall them
+with `install.ps1`; `combine` merges both folders on any system:
+
+```powershell
+uv run --locked python scripts/build_windows_release.py --out dist/windows-release
+uv run --locked python scripts/check_windows_install.py dist/windows-release
+uv run --locked python scripts/release.py combine --out dist/publish dist/release dist/windows-release
 ```
 
 The workflow doesn't publish to PyPI.

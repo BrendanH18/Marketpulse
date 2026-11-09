@@ -45,13 +45,17 @@ Trust comes from how releases are produced instead:
   each release, downloads with `curl` and installs nothing unless the zip matches
   `SHA256SUMS` and the app inside has MarketPulse's bundle ID, the requested
   version, and a valid signature (`codesign --verify --deep --strict`).
+  On Windows, [`scripts/install.ps1`](scripts/install.ps1) runs the installer only if it
+  matches `SHA256SUMS`, and then checks the installed `MarketPulse.exe` reports the requested
+  version. The Windows installer and app aren't code-signed.
 
 To verify a download yourself, run `shasum -a 256 -c SHA256SUMS --ignore-missing`
-in the download folder ([install guide](docs/install.md#verify-a-download)).
+in the download folder ([install guide](docs/install.md#verify-a-download); on Windows, see
+[Verify a Windows download](docs/install.md#verify-a-windows-download)).
 `SHA256SUMS` is published on the same release as the files it covers, so it detects
 damaged or truncated downloads and files altered on their own, but not someone who
 can replace both: a compromised GitHub account or release, or a mirror you download
-both from (`install.sh --base-url`). To check a mirrored file, take `SHA256SUMS` from
+both from (`install.sh --base-url` or `install.ps1 -BaseUrl`). To check a mirrored file, take `SHA256SUMS` from
 the GitHub release itself. If that is your concern, build the app from the tag with
 `scripts/build_app.py` ([build guide](docs/desktop.md#build-the-standalone-app)).
 Builds aren't guaranteed to be bit-for-bit reproducible, so compare behaviour and source, not hashes.

@@ -8,6 +8,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <ApplicationIcon>Assets/app.ico</ApplicationIcon>
+    <!-- Releases pass -p:Version=<marketpulse version>; keep the commit hash out of ProductVersion. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.5" />
