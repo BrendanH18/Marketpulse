@@ -61,7 +61,7 @@ The spike pins .NET SDK 10.0.403 and Avalonia 12.1.5, with a NuGet dependency lo
 It uses a
 folder publish: bundled Python already requires multiple files. A successful
 spike does not establish the full Windows MVP or installer acceptance criteria.
-Build and verification commands are in [the Windows guide](../windows.md#windows-ui-demo).
+Build and verification commands are in [the Windows guide](../windows.md#windows-portfolio-app).
 
 ## Consequences
 

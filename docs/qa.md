@@ -302,25 +302,30 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
 
 Quit the QA app with ⌘Q when done.
 
-## Windows demo
+## Windows app
 
-The Avalonia spike in [the Windows guide](windows.md#windows-ui-demo) is separate
-from the Mac checklist and the future Windows MVP. Build it and run its bridge
-checks first. It only loads fictional data and sets temporary data/config paths
-for every backend request. Record PASS / FAIL / UNVERIFIED with observed evidence:
+Build the [Windows app](windows.md#windows-portfolio-app), run its bridge checks,
+and create the fictional ledger with `scripts/qa_windows.py`. Launch with both
+scratch path overrides. Record PASS / FAIL / UNVERIFIED with observed evidence:
 
 | Item | Check |
 | --- | --- |
-| W1 Launch and value | Launch the demo on Windows 11. A single window shows “Fictional data”, net worth and CAD. The value matches the bundled `desktop snapshot --demo` output. |
-| W2 Refresh | Click **Refresh demo**. The window stays responsive and returns to its loaded state. |
-| W3 Tray and reopen | Close the window. Its tray icon remains; **Open MarketPulse demo** restores one window. Repeat after minimizing. The tray's **Refresh demo** also reloads the snapshot. |
-| W4 Exit | Choose **Exit** from the tray. The window and tray icon disappear and no demo process remains. Repeat while a snapshot is loading: Python also exits and its temporary data/config folder is removed. |
-| W5 Error | Launch with `--python` pointing at a nonexistent scratch path. An error appears instead of a balance; refresh remains available and the tray can exit. |
-| W6 Keyboard and Narrator | Reach the refresh control with Tab and activate with Space/Enter. Narrator announces the demo context, net worth/currency, refresh action and tray menu labels. Check Windows text scaling and light/dark system appearance for clipping and contrast. |
-| W7 Relocation | Copy the whole published folder to a scratch path with spaces. With no developer Python/.NET on PATH, the executable's `--check-bridge` succeeds and its window loads. |
+| W1 Launch and overview | Launch on Windows 11 with scratch paths. Overview shows the fictional portfolio; compare totals to `desktop snapshot` with the same overrides. Empty-ledger launch explains how to add an account or import. |
+| W2 Workspaces | Open Holdings, Activity, Accounts, Watchlist, Income and Automation. Check native/base currency labels, stale/error indicators, income, backup/refresh state and signed activity (buy/fee negative, deposit/sell/dividend positive). Archived QA account and its rows stay hidden and out of totals. |
+| W3 Transactions | Record a fictional deposit, buy, sell and fee. Confirm account/date/currency/fees/notes in Activity and the scratch CLI. Invalid input reports an error without a write. Refresh after save does not record twice. |
+| W4 Accounts | Add an account, edit its details, then archive it after confirmation. It disappears from workspaces, transaction choices and totals. |
+| W5 Watchlist and alerts | Add/remove a fictional watch symbol; add an alert and disable/remove it. Quote requests may fail offline: errors/staleness remain visible; stale quotes never fire alerts. Windows toast delivery is not implemented. |
+| W6 CSV | Preview the helper's sample CSV: valid/skipped rows and reasons appear without changing Activity. Import the preview and compare receipt counts to the preview. Change the file after preview and confirm it must be previewed again. Cancel leaves the ledger unchanged. |
+| W7 Privacy | Hide details, visit every workspace and inspect tray text. No amounts, account names, symbols or notes remain. Relaunch on the same scratch settings and check privacy persists; reveal restores data. |
+| W8 Refresh and failure | Refresh while navigating; controls remain responsive. Launch with a missing scratch Python path: show an error rather than a zero portfolio. A failed mutation must not claim success. |
+| W9 Tray and reopen | Close the window; tray remains. Open restores one window, including after minimizing. Tray refresh updates status while preserving privacy. Exit during refresh stops both app and child Python. |
+| W10 Keyboard and Narrator | Reach navigation, actions and form fields using Tab, activate with Space/Enter, dismiss dialogs with Escape. Narrator announces labels/errors. Check Windows text scaling and light/dark appearance for clipping and contrast. |
+| W11 Demo and relocation | Run `--demo`: fictional data, writes unavailable, no real ledger/settings access. Copy the full published app to a path with spaces; with no Python/.NET on PATH, `--check-bridge` and demo launch work. |
 
 Linux/macOS visual checks are supplementary. Mark Windows items UNVERIFIED when
 Windows desktop access is unavailable; do not infer them from a passing CI build.
+The helper creates a new temporary directory each time; remove only its printed
+root after closing the QA app.
 
 ## Tool limits and workarounds
 
