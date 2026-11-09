@@ -207,7 +207,7 @@ public partial class MainWindow : Window
         Paragraph("Values and gains use your portfolio's base currency; prices use each holding's currency.");
         foreach (var row in Rows(root, "positions"))
             Card(Text(row, "symbol") + " · " + Text(row, "account"), Text(row, "name"),
-                "Quantity " + Number(row, "quantity") + " · Price " + Money(row, "price") + " " + Text(row, "currency"),
+                "Quantity " + Number(row, "quantity") + " · Price " + Number(row, "price") + " " + Text(row, "currency"),
                 "Value " + Money(row, "value") + " · Book " + Money(row, "book") + " · Gain " + Signed(row, "gain") + " (" + Number(row, "gain_pct") + "%)",
                 Flag(row, "stale") ? "Cached price · " + Text(row, "quote_source") : Text(row, "quote_source"));
         if (!Rows(root, "positions").Any()) Paragraph("No holdings yet. Record a transaction or import a CSV to get started.");
@@ -388,7 +388,8 @@ public partial class MainWindow : Window
         var note = dialog.Text("Note", Text(row, "note"));
         dialog.Explain("Enter explicit prices and currency. Transfers between registered and taxable accounts require their market price for tax. Only fields used by the chosen type are saved.");
         List<string>? intent = null;
-        dialog.Submit = () =>
+        var uncertain = false;
+        dialog.Submit = async () =>
         {
             if (intent is null)
             {
@@ -423,10 +424,19 @@ public partial class MainWindow : Window
                     else values.Add(Numeric(amount, "Amount"));
                 }
                 intent = values;
+            }
+            try { await MutateAsync(intent); }
+            catch (BackendRejectedException) { if (!uncertain) intent = null; throw; }
+            catch (InvalidOperationException) { if (!uncertain) intent = null; throw; }
+            catch (FileNotFoundException) { if (!uncertain) intent = null; throw; }
+            catch
+            {
+                // The engine may have saved before a timeout or communication failure.
+                uncertain = true;
                 dialog.Freeze();
                 dialog.Explain("Retry submits this same entry safely. Close and reopen to start a different entry.");
+                throw;
             }
-            return MutateAsync(intent);
         };
         await dialog.ShowDialog(this);
     }
@@ -521,7 +531,7 @@ public partial class MainWindow : Window
     private static bool Flag(JsonElement row, string key) => Get(row, key).ValueKind == JsonValueKind.True;
     private static decimal? Decimal(JsonElement row, string key) { var value = Get(row, key); return value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var amount) ? amount : null; }
     private static string Money(JsonElement row, string key) => Decimal(row, key)?.ToString("N2", CultureInfo.CurrentCulture) ?? "—";
-    private static string Number(JsonElement row, string key) => Decimal(row, key)?.ToString("0.####", CultureInfo.CurrentCulture) ?? "—";
+    private static string Number(JsonElement row, string key) => Decimal(row, key)?.ToString("0.########", CultureInfo.CurrentCulture) ?? "—";
     private static string InputNumber(JsonElement row, string key, string fallback = "") => Decimal(row, key)?.ToString(CultureInfo.CurrentCulture) ?? fallback;
     private static string Signed(JsonElement row, string key) => Decimal(row, key) is { } amount ? (amount > 0 ? "+" : amount < 0 ? "−" : "") + Math.Abs(amount).ToString("N2", CultureInfo.CurrentCulture) : "—";
     private static Dictionary<string, string> AccountNames(JsonElement root) => Rows(root, "accounts").ToDictionary(x => Text(x, "id"), x => Text(x, "name"));

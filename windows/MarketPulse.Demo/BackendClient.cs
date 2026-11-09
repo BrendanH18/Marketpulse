@@ -4,6 +4,8 @@ using System.Text.Json;
 
 namespace MarketPulse.Demo;
 
+public sealed class BackendRejectedException(string message) : InvalidOperationException(message);
+
 /// <summary>Runs the existing engine without a shell; financial values remain engine-owned.</summary>
 public sealed class BackendClient
 {
@@ -86,7 +88,7 @@ public sealed class BackendClient
             var text = await output;
             var error = await errors;
             if (process.ExitCode != 0)
-                throw new InvalidOperationException($"Backend exited with code {process.ExitCode}: {error.Trim()}");
+                throw new BackendRejectedException($"Backend exited with code {process.ExitCode}: {error.Trim()}");
             return text;
         }
         catch (OperationCanceledException)

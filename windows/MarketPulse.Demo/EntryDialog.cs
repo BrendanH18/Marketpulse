@@ -10,9 +10,10 @@ internal sealed class EntryDialog : Window
     private readonly StackPanel _fields = new() { Spacing = 12 };
     private readonly TextBlock _error = new() { TextWrapping = Avalonia.Media.TextWrapping.Wrap };
     private readonly Button _submit;
-    private readonly Button _cancel = new() { Content = "Cancel" };
+    private readonly Button _cancel = new() { Content = "Cancel", IsCancel = true };
     private bool _saving;
     private bool _saved;
+    private bool _frozen;
     public Func<Task>? Submit { get; set; }
 
     public EntryDialog(string title, string action = "Save")
@@ -27,12 +28,13 @@ internal sealed class EntryDialog : Window
         {
             if (_saving || Submit is null) return;
             _saving = true;
+            _fields.IsEnabled = false;
             _submit.IsEnabled = false;
             _cancel.IsEnabled = false;
             _error.Text = "Working…";
             try { await Submit(); _saved = true; Close(); }
             catch (Exception error) { _error.Text = error.Message; }
-            finally { _saving = false; _submit.IsEnabled = true; _cancel.IsEnabled = true; }
+            finally { _saving = false; _fields.IsEnabled = !_frozen; _submit.IsEnabled = true; _cancel.IsEnabled = true; }
         };
         _cancel.Click += (_, _) => Close();
         Closing += (_, args) => { if (_saving && !_saved) args.Cancel = true; };
@@ -71,7 +73,7 @@ internal sealed class EntryDialog : Window
     }
 
     public void Explain(string text) => _fields.Children.Add(new TextBlock { Text = text, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
-    public void Freeze() => _fields.IsEnabled = false;
+    public void Freeze() { _frozen = true; _fields.IsEnabled = false; }
     private void Add(string label, Control input)
     {
         var panel = new StackPanel { Spacing = 4 };

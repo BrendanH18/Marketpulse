@@ -140,7 +140,7 @@ try
         await client.RunAsync(["not-a-command"]);
         throw new Exception("An engine failure was accepted as success.");
     }
-    catch (InvalidOperationException error) when (error.Message.Contains("Backend exited")) { }
+    catch (BackendRejectedException) { }
     using var requestCanceled = new CancellationTokenSource();
     requestCanceled.Cancel();
     try
