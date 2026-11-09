@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An offline desktop latency benchmark using a fictional 5,000-transaction ledger.
+  [Desktop refresh measurements](docs/performance.md) explains the startup, refresh,
+  and edit-plus-refresh boundaries and the evidence for the next performance decision.
+
 - Windows releases ([#53](https://github.com/BrendanH18/Marketpulse/issues/53)): a per-user
   installer that needs no administrator rights, a portable zip, and a one-line PowerShell
   install (`irm …/install.ps1 | iex`) that runs the installer only if it matches the release's

@@ -73,6 +73,10 @@ use a file path or `-k`, for example `uv run --locked pytest tests/test_csvio.py
 For documentation-only changes, check links, examples, and descriptions against
 the current CLI rather than adding tests that merely repeat the prose.
 
+For an isolated, offline 5,000-transaction desktop latency benchmark, see
+[Desktop refresh measurements](docs/performance.md). It reports startup, refresh,
+and edit-plus-refresh timings without opening your portfolio.
+
 On macOS, changes to the companion should also pass:
 
 ```bash
