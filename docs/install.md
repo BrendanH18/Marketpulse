@@ -211,11 +211,12 @@ the checksum matches. As on the Mac, the checksum shows the installer is the one
 GitHub release published, not who built it, and nobody else has scanned it.
 
 **Smart App Control.** If Smart App Control is on (Windows Security › App & browser
-control), Windows blocks apps that aren't code-signed, including MarketPulse, however you
-install them, and has no way to allow a single app
+control), Windows may block MarketPulse however you install it. Smart App Control allows
+an app its cloud service predicts is safe; when it can't make a confident prediction, it
+blocks apps that aren't code-signed, and it has no way to allow a single app
 ([Microsoft](https://support.microsoft.com/en-us/topic/what-is-smart-app-control-285ea03d-fa88-4d56-882e-6698afdb7003)).
-MarketPulse can't run on that PC unless you turn Smart App Control off, which is a
-choice for the whole computer.
+If it blocks MarketPulse, the app can't run on that PC unless you turn Smart App Control
+off, which is a choice for the whole computer.
 
 ### Install on Windows with the installer
 

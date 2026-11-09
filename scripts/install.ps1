@@ -215,7 +215,7 @@ Installs for your account only; it never asks for administrator rights. Your por
             $start.Arguments = $setupArgs -join ' '
             $start.UseShellExecute = $false
             try { $process = [System.Diagnostics.Process]::Start($start) } catch {
-                Fail ("Windows wouldn't start setup ($($_.Exception.Message)). If Smart App Control is on, it blocks " +
+                Fail ("Windows wouldn't start setup ($($_.Exception.Message)). If Smart App Control is on, it may block " +
                     "programs that aren't code-signed, including MarketPulse: https://github.com/$repo/blob/main/docs/install.md#windows")
             }
             $process.WaitForExit()
