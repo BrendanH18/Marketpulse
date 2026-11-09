@@ -258,10 +258,12 @@ public partial class MainWindow : Window
             Actions(("Remove symbol", () => ConfirmAsync("Remove from watchlist?", "This does not change your holdings.", ["watch", "rm", "--", Text(row, "symbol")])));
         }
         Section("Price alerts");
-        Paragraph("Alerts are checked on refresh and while the app stays running. Windows toast notifications are not yet available; fired alerts are listed under Automation.");
+        Paragraph("Alerts are checked on refresh and while the app stays running. Windows toast notifications are not yet available; triggered alerts show their saved trigger time here. Automation shows alerts fired during the latest refresh.");
         foreach (var row in Rows(root, "alerts"))
         {
-            Card(Text(row, "description"), Flag(row, "active") ? "Active" : "Inactive", Text(row, "note"));
+            Card(Text(row, "description"), Flag(row, "active") ? "Active" : "Inactive",
+                Text(row, "triggered_at") is { Length: > 0 } triggered ? "Triggered " + triggered : "Not triggered",
+                Text(row, "note"));
             Actions(("Remove alert", () => ConfirmAsync("Remove alert?", Text(row, "description"), ["alerts", "rm", "--", Text(row, "id")])));
         }
     }
