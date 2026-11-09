@@ -46,7 +46,8 @@ Windows app (later)  ─┘   `marketpulse desktop` └─ SQLite in ~/.marketpu
   every bridge change. `status --json` is a separate, stable contract.
 - If refreshes become slow on large ledgers, a persistent helper process
   ([#48](https://github.com/BrendanH18/Marketpulse/issues/48)) can replace one-shot
-  CLI calls, behind the same bridge.
+  CLI calls, behind the same bridge. [Desktop refresh measurements](performance.md)
+  provides a repeatable offline baseline before that decision.
 
 ## Distributing without code signing
 
