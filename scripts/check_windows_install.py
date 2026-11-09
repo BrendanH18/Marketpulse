@@ -93,15 +93,19 @@ class Mirror:
                 path = unquote(urlsplit(self.path).path)
                 mirror.requests.append(f"{self.command} {path}")
                 parts = [p for p in path.split("/") if p]
+                # Only files listed from the release folder are served or redirected to, so request
+                # text never becomes a filesystem path or a header value.
+                folder = mirror.root / "download" / mirror.tag
+                files = {p.name: p for p in folder.iterdir() if p.is_file()} if folder.is_dir() else {}
                 if parts == ["latest"]:
                     return self._redirect(f"/tag/{mirror.tag}")
-                if len(parts) == 3 and parts[:2] == ["latest", "download"]:
-                    return self._redirect(f"/download/{mirror.tag}/{parts[2]}")
-                if len(parts) == 2 and parts[0] == "tag":
-                    return self._send(200, f"Release {parts[1]}".encode(), "text/html; charset=utf-8", body)
-                if len(parts) == 3 and parts[0] == "download" and all(p not in (".", "..") for p in parts):
-                    file = mirror.root / "download" / parts[1] / parts[2]
-                    if file.is_file():
+                if parts == ["tag", mirror.tag]:
+                    return self._send(200, f"Release {mirror.tag}".encode(), "text/html; charset=utf-8", body)
+                if len(parts) == 3 and parts[2] in files:
+                    file = files[parts[2]]
+                    if parts[:2] == ["latest", "download"]:
+                        return self._redirect(f"/download/{mirror.tag}/{file.name}")
+                    if parts[:2] == ["download", mirror.tag]:
                         return self._send(200, file.read_bytes(), "application/octet-stream", body)
                 self._send(404, b"Not Found", "text/plain", body)
 
