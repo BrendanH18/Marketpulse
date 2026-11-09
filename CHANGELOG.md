@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A Windows portfolio workspace with holdings, signed activity, accounts, watchlists and
+  alerts, income, automation, transaction entry, CSV preview/import, privacy mode, and
+  system-tray controls ([#52](https://github.com/BrendanH18/Marketpulse/issues/52)).
+  The standalone CI artifact includes the Python backend; installer packaging remains
+  separate. An explicit read-only demo and isolated scratch-ledger QA are available.
+
 - An Avalonia Windows demo showing fictional net worth in a window with a system-tray
   menu, plus a self-contained CI build and desktop bridge checks
   ([#50](https://github.com/BrendanH18/Marketpulse/issues/50)). Avalonia with C#/XAML is

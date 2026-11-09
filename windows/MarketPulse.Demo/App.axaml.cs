@@ -20,6 +20,7 @@ public partial class App : Application
             _desktop = desktop;
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             _window = new MainWindow();
+            _window.StatusChanged += UpdateTrayStatus;
             _window.Closing += (_, args) =>
             {
                 if (_exiting || args.CloseReason is WindowCloseReason.OSShutdown or WindowCloseReason.ApplicationShutdown)
@@ -31,6 +32,14 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private void UpdateTrayStatus(string status)
+    {
+        var icons = TrayIcon.GetIcons(this);
+        if (icons is not null)
+            foreach (var icon in icons)
+                icon.ToolTipText = status;
     }
 
     private void OpenWindow(object? sender, EventArgs args)
@@ -54,8 +63,15 @@ public partial class App : Application
         if (_exiting)
             return;
         _exiting = true;
-        if (_window is not null)
-            await _window.StopAsync();
-        _desktop?.Shutdown();
+        try
+        {
+            if (_window is not null)
+                await _window.StopAsync();
+        }
+        finally
+        {
+            TrayIcon.SetIcons(this, null);
+            _desktop?.Shutdown();
+        }
     }
 }

@@ -1,23 +1,36 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="MarketPulse.Demo.MainWindow"
-        Title="MarketPulse — Windows demo" Icon="/Assets/app.ico"
-        Width="560" Height="400" MinWidth="460" MinHeight="360">
-  <Grid Margin="32" RowDefinitions="Auto,*,Auto">
-    <StackPanel Spacing="4">
-      <TextBlock Text="MarketPulse" FontSize="24" FontWeight="SemiBold" />
-      <TextBlock Text="Windows demo · fictional portfolio" Opacity="0.7" />
-    </StackPanel>
-    <StackPanel Grid.Row="1" VerticalAlignment="Center" Spacing="8">
-      <TextBlock Text="Net worth" FontSize="16" />
-      <TextBlock x:Name="NetWorth" Text="—" FontSize="44" FontWeight="SemiBold" />
-      <TextBlock x:Name="Status" Text="Loading fictional portfolio…" TextWrapping="Wrap" />
-    </StackPanel>
-    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="20">
-      <TextBlock Text="Close this window to keep the demo in the tray. Use the tray menu to exit."
-                 TextWrapping="Wrap" VerticalAlignment="Center" Opacity="0.7" />
-      <Button x:Name="RefreshButton" Grid.Column="1" Content="_Refresh demo"
-              Click="RefreshClicked" VerticalAlignment="Center" />
+        Title="MarketPulse" Icon="/Assets/app.ico"
+        Width="1120" Height="760" MinWidth="780" MinHeight="560">
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Border Padding="24,18" BorderBrush="#44808080" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+        <StackPanel Spacing="3">
+          <TextBlock Text="MarketPulse" FontSize="24" FontWeight="SemiBold" />
+          <TextBlock x:Name="Subtitle" Text="Your portfolio, on your computer" Opacity="0.7" />
+        </StackPanel>
+        <CheckBox x:Name="PrivacyToggle" Grid.Column="1" Content="_Privacy" VerticalAlignment="Center"
+                  IsCheckedChanged="PrivacyChanged" />
+        <Button x:Name="RefreshButton" Grid.Column="2" Content="_Refresh" Click="RefreshClicked" VerticalAlignment="Center" />
+      </Grid>
+    </Border>
+    <Grid Grid.Row="1" ColumnDefinitions="180,*">
+      <ListBox x:Name="Navigation" Margin="12,18" SelectionChanged="WorkspaceChanged" SelectedIndex="0">
+        <ListBoxItem Content="Overview" />
+        <ListBoxItem Content="Holdings" />
+        <ListBoxItem Content="Activity" />
+        <ListBoxItem Content="Accounts" />
+        <ListBoxItem Content="Watchlist &amp; alerts" />
+        <ListBoxItem Content="Income" />
+        <ListBoxItem Content="Automation" />
+      </ListBox>
+      <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel x:Name="Workspace" Margin="24" Spacing="16" />
+      </ScrollViewer>
     </Grid>
+    <Border Grid.Row="2" Padding="24,12" BorderBrush="#44808080" BorderThickness="0,1,0,0">
+      <TextBlock x:Name="Status" Text="Loading portfolio…" TextWrapping="Wrap" />
+    </Border>
   </Grid>
 </Window>

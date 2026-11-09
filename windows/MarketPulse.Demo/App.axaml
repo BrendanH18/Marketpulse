@@ -6,11 +6,11 @@
   </Application.Styles>
   <TrayIcon.Icons>
     <TrayIcons>
-      <TrayIcon Icon="/Assets/app.ico" ToolTipText="MarketPulse — fictional portfolio" Clicked="OpenWindow">
+      <TrayIcon Icon="/Assets/app.ico" ToolTipText="MarketPulse — loading…" Clicked="OpenWindow">
         <TrayIcon.Menu>
           <NativeMenu>
-            <NativeMenuItem Header="Open MarketPulse demo" Click="OpenWindow" />
-            <NativeMenuItem Header="Refresh demo" Click="RefreshDemo" />
+            <NativeMenuItem Header="Open MarketPulse" Click="OpenWindow" />
+            <NativeMenuItem Header="Refresh portfolio" Click="RefreshDemo" />
             <NativeMenuItemSeparator />
             <NativeMenuItem Header="Exit" Click="ExitDemo" />
           </NativeMenu>

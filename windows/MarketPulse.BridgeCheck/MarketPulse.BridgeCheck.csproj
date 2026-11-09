@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../MarketPulse.Demo/DemoBackend.cs" Link="DemoBackend.cs" />
+    <Compile Include="../MarketPulse.Demo/BackendClient.cs" Link="BackendClient.cs" />
   </ItemGroup>
 </Project>

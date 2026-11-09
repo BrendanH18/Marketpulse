@@ -80,17 +80,17 @@ jobs:
           dotnet-version: 10.0.403
       - name: Check Windows bridge decoding and backend error paths
         run: dotnet run --project windows/MarketPulse.BridgeCheck -- "$env:RUNNER_TEMP/Windows backend/x86_64/MarketPulse-backend/python/python.exe"
-      - name: Restore locked Windows demo dependencies
+      - name: Restore locked Windows app dependencies
         run: dotnet restore windows/MarketPulse.Demo/MarketPulse.Demo.csproj --locked-mode -p:RuntimeIdentifier=win-x64 -p:SelfContained=true
-      - name: Publish the standalone Windows demo with its backend
+      - name: Publish the standalone Windows app with its backend
         run: |
-          dotnet publish windows/MarketPulse.Demo/MarketPulse.Demo.csproj -c Release -r win-x64 --self-contained true --no-restore -o "$env:RUNNER_TEMP/Windows demo"
+          dotnet publish windows/MarketPulse.Demo/MarketPulse.Demo.csproj -c Release -r win-x64 --self-contained true --no-restore -o "$env:RUNNER_TEMP/Windows app"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item -Recurse "$env:RUNNER_TEMP/Windows backend/x86_64/MarketPulse-backend" "$env:RUNNER_TEMP/Windows demo/MarketPulse-backend"
-      - name: Check the published demo against the bundled desktop bridge
+          Copy-Item -Recurse "$env:RUNNER_TEMP/Windows backend/x86_64/MarketPulse-backend" "$env:RUNNER_TEMP/Windows app/MarketPulse-backend"
+      - name: Check the published app against the bundled desktop bridge
         run: |
-          $demo = Start-Process -FilePath "$env:RUNNER_TEMP/Windows demo/MarketPulse.Demo.exe" -ArgumentList "--check-bridge" -Wait -PassThru -NoNewWindow
-          if ($demo.ExitCode -ne 0) { throw "Windows demo bridge check failed with exit code $($demo.ExitCode)." }
+          $demo = Start-Process -FilePath "$env:RUNNER_TEMP/Windows app/MarketPulse.exe" -ArgumentList "--check-bridge" -Wait -PassThru -NoNewWindow
+          if ($demo.ExitCode -ne 0) { throw "Windows app bridge check failed with exit code $($demo.ExitCode)." }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: marketpulse-windows-x64-backend
@@ -98,8 +98,8 @@ jobs:
           if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: marketpulse-windows-x64-demo
-          path: ${{ runner.temp }}/Windows demo/
+          name: marketpulse-windows-x64-app
+          path: ${{ runner.temp }}/Windows app/
           if-no-files-found: error
 
   coverage:
