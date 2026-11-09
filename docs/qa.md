@@ -335,6 +335,7 @@ and Explorer pass them on:
 
 ```powershell
 $qa = uv run --locked python scripts/qa_windows.py | ConvertFrom-Json
+if (-not ($qa.data -and $qa.config)) { throw 'qa_windows.py printed no scratch paths; stop here.' }
 [Environment]::SetEnvironmentVariable('MARKETPULSE_DATA', $qa.data, 'User')
 [Environment]::SetEnvironmentVariable('MARKETPULSE_CONFIG', $qa.config, 'User')
 ```
