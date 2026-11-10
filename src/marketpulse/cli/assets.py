@@ -7,6 +7,7 @@ from rich.text import Text
 
 from .. import fmt, render
 from ..models import Asset, AssetClass, AssetKind, Transaction, TxnType, parse_date
+from ..requests import record_once
 from .base import App, date_callback, fail, pass_app, retryable
 from .recording import record
 from .root import main
@@ -15,6 +16,25 @@ from .root import main
 @main.group()
 def asset() -> None:
     """GICs, bonds, real estate and other assets the market can't price."""
+
+
+def _create_asset(app: App, asset: Asset, txn: Transaction, *, new_symbol: bool) -> None:
+    def create() -> Transaction:
+        # Includes archived accounts and symbols with no asset metadata. The write lock
+        # keeps another CLI process from claiming the symbol between the check and save.
+        if new_symbol and (asset.symbol in app.store.assets() or app.store.transactions(symbol=asset.symbol)):
+            raise ValueError(f"{asset.symbol} is already in your ledger. Choose another symbol.")
+        app.store.upsert_asset(asset)
+        return app.tracker.add_transaction(txn, restore_id=app.restore_id)
+
+    try:
+        if app.request_id is not None:
+            record_once(app.store, app.request_id, app.request_fingerprint, create)
+        else:
+            with app.store.atomic():
+                create()
+    except ValueError as error:
+        fail(str(error))
 
 
 @asset.command("list")
@@ -54,14 +74,20 @@ def asset_list(app: App) -> None:
 @click.option("--name", default="")
 @click.option("-c", "--currency", default=None)
 @click.option("-a", "--account", default=None)
+@click.option(
+    "--new-symbol", is_flag=True, help="Refuse symbols used anywhere in the ledger, including archived accounts."
+)
 @retryable
 @pass_app
-def asset_fixed(app: App, symbol, principal, rate, start, maturity, compounding, name, currency, account) -> None:
+def asset_fixed(
+    app: App, symbol, principal, rate, start, maturity, compounding, name, currency, account, new_symbol
+) -> None:
     """Add a GIC / term deposit / bond held to maturity, valued by accrual."""
     acct = app.account(account)
     start_d, maturity_d = parse_date(start), parse_date(maturity)
     ccy = (currency or acct.currency).upper()
-    app.store.upsert_asset(
+    _create_asset(
+        app,
         Asset(
             symbol=symbol,
             kind=AssetKind.FIXED_INCOME,
@@ -72,10 +98,7 @@ def asset_fixed(app: App, symbol, principal, rate, start, maturity, compounding,
             compounding=compounding,
             start_date=start_d,
             maturity_date=maturity_d,
-        )
-    )
-    record(
-        app,
+        ),
         Transaction(
             account_id=acct.saved_id,
             type=TxnType.BUY,
@@ -86,6 +109,7 @@ def asset_fixed(app: App, symbol, principal, rate, start, maturity, compounding,
             currency=ccy,
             note=f"{rate:g}% {compounding} to {maturity_d}",
         ),
+        new_symbol=new_symbol,
     )
     app.ok(f"Added {symbol.upper()}: {fmt.money(principal)} {ccy} at {rate:g}% until {maturity_d} in {acct.name}")
 
@@ -100,23 +124,24 @@ def asset_fixed(app: App, symbol, principal, rate, start, maturity, compounding,
 @click.option("-c", "--currency", default=None)
 @click.option("-a", "--account", default=None)
 @click.option("-d", "--date", "when", default=None, callback=date_callback, help="Acquisition date.")
+@click.option(
+    "--new-symbol", is_flag=True, help="Refuse symbols used anywhere in the ledger, including archived accounts."
+)
 @retryable
 @pass_app
-def asset_manual(app: App, symbol, value, name, asset_class, currency, account, when) -> None:
+def asset_manual(app: App, symbol, value, name, asset_class, currency, account, when, new_symbol) -> None:
     """Add a manually valued asset (property, private shares, collectibles, pension…)."""
     acct = app.account(account)
     ccy = (currency or acct.currency).upper()
-    app.store.upsert_asset(
+    _create_asset(
+        app,
         Asset(
             symbol=symbol,
             kind=AssetKind.MANUAL,
             name=name or symbol.upper(),
             asset_class=AssetClass(asset_class),
             currency=ccy,
-        )
-    )
-    record(
-        app,
+        ),
         Transaction(
             account_id=acct.saved_id,
             type=TxnType.BUY,
@@ -126,6 +151,7 @@ def asset_manual(app: App, symbol, value, name, asset_class, currency, account, 
             price=value,
             currency=ccy,
         ),
+        new_symbol=new_symbol,
     )
     app.ok(
         f"Added {symbol.upper()} at {fmt.money(value)} {ccy} in {acct.name}. "

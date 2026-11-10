@@ -191,6 +191,7 @@ public partial class MainWindow : Window
             case 5: Income(root); break;
             case 6: Tax(); break;
             case 7: Automation(root); break;
+            case 8: Allocation(root); break;
             default:
                 Heading("Overview");
                 Metric("Net worth", Money(status, "net_worth") + " " + Text(status, "base"));
@@ -218,12 +219,16 @@ public partial class MainWindow : Window
         Heading("Holdings");
         Paragraph("Values and gains use your portfolio's base currency; prices use each holding's currency.");
         foreach (var row in Rows(root, "positions"))
+        {
             Card(Text(row, "symbol") + " · " + Text(row, "account"), Text(row, "name"),
                 "Quantity " + Number(row, "quantity") + " · Price " + Number(row, "price") + " " + Text(row, "currency"),
                 "Value " + Money(row, "value") + " · Book " + Money(row, "book") + " · Gain " + Signed(row, "gain") + " (" + Number(row, "gain_pct") + "%)",
                 Flag(row, "stale") ? "Cached price · " + Text(row, "quote_source") : Text(row, "quote_source"));
+            HoldingAssetDetails(root, row);
+        }
         if (!Rows(root, "positions").Any()) Paragraph("No holdings yet. Record a transaction or import a CSV to get started.");
-        Actions(("Record transaction", () => RecordAsync()));
+        Actions(("Record transaction", () => RecordAsync()), ("Add GIC or bond", AddFixedAssetAsync),
+            ("Add manually valued asset", AddManualAssetAsync));
     }
 
     private void Activity(JsonElement root)

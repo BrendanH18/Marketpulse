@@ -73,6 +73,13 @@ foreach (var invalid in new[]
     catch (Exception error) when (error is JsonException or InvalidDataException) { continue; }
     throw new Exception("An incomplete or incompatible workspace snapshot was accepted.");
 }
+foreach (var field in new[] { "assets", "allocation", "targets", "rebalance" })
+{
+    var incomplete = demo.GetRawText().Replace($"\"{field}\":", $"\"missing_{field}\":");
+    try { BackendClient.DecodeSnapshot(incomplete, expectDemo: true); }
+    catch (InvalidDataException) { continue; }
+    throw new Exception($"A workspace snapshot missing its {field} array was accepted.");
+}
 try
 {
     await clientDemo.RunAsync(["accounts", "add", "--", "Forbidden demo write"]);
@@ -269,3 +276,5 @@ finally
 {
     workspace.Delete(recursive: true);
 }
+
+await AssetChecks.RunAsync(args[0]);

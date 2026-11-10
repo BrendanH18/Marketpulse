@@ -25,6 +25,7 @@
         <ListBoxItem Content="Income" />
         <ListBoxItem Content="Tax" />
         <ListBoxItem Content="Automation" />
+        <ListBoxItem Content="Allocation" />
       </ListBox>
       <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Disabled">
         <StackPanel x:Name="Workspace" Margin="24" Spacing="16" />
