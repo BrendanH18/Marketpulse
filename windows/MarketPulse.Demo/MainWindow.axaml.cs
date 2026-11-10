@@ -62,6 +62,8 @@ public partial class MainWindow : Window
     {
         _snapshot = await _client.SnapshotAsync(_lifetime.Token);
         InvalidateTax(Text(_snapshot.Value, "ledger_revision"));
+
+        _restoreUncertain = false;
         if (!_privacyInitialized)
         {
             _privacyInitialized = true;
@@ -302,7 +304,7 @@ public partial class MainWindow : Window
         Line("Latest backup", Text(row, "backup"));
         Line("Cached prices", Text(row, "stale_count"));
         Paragraph("Refresh runs valuation, eligible daily snapshots, price-alert checks, and safety backups. These also run every five minutes while MarketPulse stays open.");
-        Actions(("Back up now", () => ConfirmAsync("Back up your ledger?", "Create a backup in your configured backup folder.", ["backup", "now"])));
+        Backups(root);
         foreach (var key in new[] { "fired", "errors", "quote_errors" })
         {
             Section(key == "fired" ? "Fired alerts" : key == "errors" ? "Maintenance errors" : "Quote errors");

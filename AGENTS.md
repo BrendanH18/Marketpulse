@@ -95,6 +95,10 @@ Tests are isolated by autouse fixtures that point `MARKETPULSE_DATA`/`MARKETPULS
 
 ## Rules
 
+- Windows backup/restore UI belongs in `MainWindow.Backups.cs`, with a focused
+  client helper and minimal Automation hooks. Coordinate shared window, client,
+  navigation and documentation edits with parallel feature work; keep their
+  fixtures and features out of the backup/restore change.
 - **Never touch real financial data.** Use fictional data in tests, docs, fixtures,
   and screenshots. For manual runs set `MARKETPULSE_DATA` and `MARKETPULSE_CONFIG`
   to a scratch directory; never read or write `~/.marketpulse`.

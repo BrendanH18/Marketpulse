@@ -7,7 +7,7 @@ namespace MarketPulse.Demo;
 public sealed class BackendRejectedException(string message) : InvalidOperationException(message);
 
 /// <summary>Runs the existing engine without a shell; financial values remain engine-owned.</summary>
-public sealed class BackendClient
+public sealed partial class BackendClient
 {
     private readonly string _pythonPath;
     private readonly string? _dataDirectory;
