@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
-from dataclasses import asdict
+from collections import Counter
+from dataclasses import asdict, fields
 
 import click
 from rich.text import Text
@@ -27,13 +30,45 @@ from .root import main
 @click.option("--oldest-first", is_flag=True, help="Show oldest entries first.")
 @click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip this many matching entries.")
 @click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked transaction records as JSON.")
+@click.option("--csv", "as_csv", is_flag=True, help="Print raw, unmasked transaction CSV to stdout.")
+@click.option("--count", "count_only", is_flag=True, help="Count all matching entries before pagination.")
+@click.option(
+    "--summary",
+    type=click.Choice(["type", "account", "currency", "month", "symbol"]),
+    help="Count all matching entries by this field before pagination; supports --json.",
+)
+@click.option("--has-note/--no-note", default=None, help="Match entries with or without a nonblank note.")
+@click.option("--min-id", type=click.IntRange(min=1), help="Include transaction IDs at or above this value.")
+@click.option("--max-id", type=click.IntRange(min=1), help="Include transaction IDs at or below this value.")
 @pass_app
 def activity(
-    app: App, account, symbol, limit, show_all, since, until, types, search, currency, oldest_first, offset, as_json
+    app: App,
+    account,
+    symbol,
+    limit,
+    show_all,
+    since,
+    until,
+    types,
+    search,
+    currency,
+    oldest_first,
+    offset,
+    as_json,
+    as_csv,
+    count_only,
+    summary,
+    has_note,
+    min_id,
+    max_id,
 ) -> None:
     """The transaction ledger, newest first."""
     if since and until and since > until:
         raise click.UsageError("--since must be on or before --until.")
+    if min_id is not None and max_id is not None and min_id > max_id:
+        raise click.UsageError("--min-id must be at or below --max-id.")
+    if sum(bool(value) for value in (as_csv, count_only, summary)) > 1 or (as_json and (as_csv or count_only)):
+        raise click.UsageError("Choose one of --csv, --count, or --summary; only --summary supports --json.")
     generation = app.store.restore_id
     accounts = app.store.account_map()
     acct = app.store.get_account(account) if account else None
@@ -48,6 +83,9 @@ def activity(
         and (not until or t.date <= until)
         and (not types or t.type in types)
         and (not currency or t.currency == currency.strip().upper())
+        and (has_note is None or bool(t.note.strip()) == has_note)
+        and (min_id is None or t.saved_id >= min_id)
+        and (max_id is None or t.saved_id <= max_id)
         and (
             not needle
             or needle
@@ -57,8 +95,23 @@ def activity(
             ).casefold()
         )
     ]
+    if count_only:
+        click.echo(len(txns))
+        return
+    if summary:
+        _activity_summary(app, txns, accounts, summary, as_json)
+        return
     txns.sort(key=lambda t: (t.date, t.id or 0), reverse=not oldest_first)
     txns = txns[offset:] if show_all else txns[offset : offset + limit]
+    if as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(
+            stream, fieldnames=[f.name for f in fields(Transaction)] + ["account", "target_account", "revision"]
+        )
+        writer.writeheader()
+        writer.writerows(_transaction_json(t, accounts, generation) for t in txns)
+        click.echo(stream.getvalue(), nl=False)
+        return
     if as_json:
         click.echo(json.dumps([_transaction_json(t, accounts, generation) for t in txns], ensure_ascii=False))
         return
@@ -77,6 +130,32 @@ def activity(
         if issue.txn_id in shown:
             message = "Ledger issue (details hidden in privacy mode)." if app.privacy else issue.message
             app.warn(f"#{issue.txn_id} {issue.date}: {message}")
+
+
+def _activity_summary(
+    app: App, txns: list[Transaction], accounts: dict[int, Account], group: str, as_json: bool
+) -> None:
+    def key(t: Transaction) -> str:
+        if group == "account":
+            # Include the ID so identically named accounts remain distinct.
+            return str(t.account_id)
+        if group == "month":
+            return t.date[:7]
+        return str(getattr(t, group))
+
+    counts = Counter(key(t) for t in txns)
+    rows = [{"group": value, "count": count} for value, count in sorted(counts.items())]
+    if group == "account":
+        for row in rows:
+            row["account"] = accounts[int(str(row["group"]))].name
+    if as_json:
+        click.echo(json.dumps(rows, ensure_ascii=False))
+        return
+    table = render.table(group.title(), ("Entries", "right"), title="Matching activity")
+    for row in rows:
+        label = str(row.get("account", row["group"])) or "(no symbol)"
+        table.add_row(Text(label), Text(str(row["count"])))
+    app.console.print(table)
 
 
 def _visible(t: Transaction, accounts: dict[int, Account]) -> bool:

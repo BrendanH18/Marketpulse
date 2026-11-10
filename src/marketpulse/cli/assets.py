@@ -46,13 +46,26 @@ def _create_asset(app: App, asset: Asset, txn: Transaction, *, new_symbol: bool)
 @click.option("--class", "asset_class", type=click.Choice([c.value for c in AssetClass], case_sensitive=False))
 @click.option("--currency", help="Match the asset's configured currency, ignoring case.")
 @click.option("--search", help="Find asset symbols or names containing this text, ignoring case.")
+@click.option("--sort", "sort_by", type=click.Choice(["symbol", "name", "kind", "currency"]))
+@click.option("--descending", is_flag=True, help="Reverse the selected order (default: stored order).")
+@click.option("--limit", type=click.IntRange(min=1), help="Show at most this many matching assets.")
+@click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip this many matching assets.")
 @pass_app
 def asset_list(
-    app: App, as_json: bool, kind: str | None, asset_class: str | None, currency: str | None, search: str | None
+    app: App,
+    as_json: bool,
+    kind: str | None,
+    asset_class: str | None,
+    currency: str | None,
+    search: str | None,
+    sort_by: str | None,
+    descending: bool,
+    limit: int | None,
+    offset: int,
 ) -> None:
     """List configured asset metadata without fetching prices."""
     items = list(app.store.assets().values())
-    filtered = any(value is not None for value in (kind, asset_class, currency, search))
+    filtered = any(value is not None for value in (kind, asset_class, currency, search, limit)) or offset > 0
     if kind is not None:
         items = [a for a in items if a.kind.value == kind]
     if asset_class is not None:
@@ -61,6 +74,11 @@ def asset_list(
         items = [a for a in items if a.currency == currency.strip().upper()]
     if search is not None:
         items = [a for a in items if search.casefold() in a.symbol.casefold() or search.casefold() in a.name.casefold()]
+    if sort_by is not None:
+        items.sort(key=lambda a: (str(getattr(a, sort_by)).casefold(), a.symbol))
+    if descending:
+        items.reverse()
+    items = items[offset:] if limit is None else items[offset : offset + limit]
     if as_json:
         click.echo(json.dumps([asdict(a) for a in items], ensure_ascii=False))
         return
@@ -81,6 +99,26 @@ def asset_list(
             Text(term, style="muted"),
         )
     app.console.print(t)
+
+
+@asset.command("show")
+@click.argument("symbol")
+@click.option("--json", "as_json", is_flag=True, help="Print unmasked asset metadata as JSON.")
+@pass_app
+def asset_show(app: App, symbol: str, as_json: bool) -> None:
+    """Inspect a configured asset without fetching prices or creating metadata."""
+    definition = app.store.assets().get(symbol.strip().upper())
+    if definition is None:
+        fail(f"No configured asset '{symbol}'.")
+    payload = asdict(definition)
+    if as_json:
+        click.echo(json.dumps(payload, ensure_ascii=False))
+        return
+    table = render.table("Field", "Value", title="Asset metadata")
+    for field, value in payload.items():
+        shown = fmt.MASK if app.privacy and field == "rate" else "—" if value is None else str(value)
+        table.add_row(Text(field), Text(shown))
+    app.console.print(table)
 
 
 @asset.command("fixed")

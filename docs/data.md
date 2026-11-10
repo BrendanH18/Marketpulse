@@ -14,6 +14,10 @@ amounts on screen; it does not redact ledger exports, `status --json`, or the
 other [CLI JSON reports](cli-workflows.md). Protect these files as you would
 other financial records.
 
+For offline backup filtering, inspection and read-only verification, see
+[Backup CLI tools](cli-backup-tools.md). Activity CSV exports and JSON inspection
+also contain unmasked data; see [Reporting tools](cli-reporting-tools.md).
+
 There is no application telemetry or brokerage authentication. Yahoo Finance
 receives symbol and market-data requests, including normal request metadata.
 If you set up a [fallback quote provider](#market-data-and-stale-prices), it

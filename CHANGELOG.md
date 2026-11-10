@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Thirty more offline CLI improvements ([#106](https://github.com/BrendanH18/Marketpulse/issues/106)):
+  activity CSV exports, counts and grouped summaries, note and ID filters,
+  detailed account/asset inspection, inventory sorting and paging, and backup
+  discovery, inspection, read-only verification and JSON creation receipts.
+  See [Offline reporting and backup tools](docs/cli-reporting-tools.md).
+
 - Thirty local-first CLI improvements ([#104](https://github.com/BrendanH18/Marketpulse/issues/104)):
   activity date/type/text/currency filters, ordering and pagination, transaction
   inspection with edit revisions, offline ledger checks, offline account and asset
