@@ -104,6 +104,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ordinary CLI activity and transaction inspection hide archived accounts, including
   transfers touching archived accounts. CSV previews no longer create a default
   account in the live ledger when a file omits account names; create an account first.
+- An alert check already fetching prices no longer overwrites an alert paused or
+  edited during that fetch, or fires the paused alert from its stale state.
 
 - Configuration and CSV file exports use UTF-8 explicitly, preserving non-ASCII
   account names on Windows. Saving a provider key no longer calls Unix-only

@@ -343,9 +343,13 @@ class Tracker:
         if quotes is None or any(a.symbol not in quotes for a in active):
             fetched, _ = self.market.quotes([a.symbol for a in active])
             quotes = {**(quotes or {}), **fetched}
-        fired, changed = alerts_mod.evaluate(active, quotes)
-        for a in changed:
-            self.store.update_alert(a)
+        # A pause/edit may land while prices are fetched. Evaluate current rows
+        # under the write lock so a stale copy cannot reactivate or overwrite it.
+        with self.store.atomic():
+            active = self.store.alerts(active_only=True)
+            fired, changed = alerts_mod.evaluate(active, quotes)
+            for a in changed:
+                self.store.update_alert(a)
         if notify:
             for a in fired:
                 q = quotes[a.symbol]
