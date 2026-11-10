@@ -64,7 +64,8 @@ uv run --locked python scripts/benchmark_desktop.py --output desktop-benchmark.j
 
 Standard output remains available when `--output` is omitted. Source metadata
 requires a Git checkout; neither Git command contacts a remote. The file is
-written only after all cases pass their workload validation.
+written only after every command exits successfully and snapshot cases pass
+workload validation.
 
 ## What is timed
 
