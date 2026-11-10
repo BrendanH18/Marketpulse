@@ -199,8 +199,8 @@ measured 2026-11-10 UTC against clean commit
 `427329735a03fd87ce66ab68cd6e192e929f8c1b`. This commit adds benchmark metadata
 and file output; its engine is unchanged from the snapshot-reuse commit
 `b402869`. Seven samples per case use the same 5,000-transaction fixture and
-timing boundaries described above. The checked-in reports are byte-for-byte
-copies of the uploaded artifacts:
+timing boundaries described above. The checked-in reports preserve the uploaded
+artifact JSON; Git normalizes Windows line endings to LF:
 
 - [macOS ARM64 raw JSON](benchmarks/desktop-platform-macos-arm64.json):
   `namespace-profile-macos`, macOS 27.2, Python 3.11.18.
