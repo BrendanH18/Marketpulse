@@ -259,6 +259,7 @@ def backup_verify(app: App, path: str, as_json: bool) -> None:
     Uses the restore preflight with a temporary copy; the source is opened read-only.
     Does not check financial correctness or restore the backup.
     """
+    import sqlite3
     from tempfile import TemporaryDirectory
 
     from ..db import RestoreError, _stage_restore
@@ -268,7 +269,7 @@ def backup_verify(app: App, path: str, as_json: bool) -> None:
     try:
         with TemporaryDirectory(prefix="marketpulse-verify-") as scratch:
             _stage_restore(source, Path(scratch) / "checked.db")
-    except (RestoreError, OSError) as problem:
+    except (RestoreError, OSError, sqlite3.Error) as problem:
         error = str(problem)
     if as_json:
         click.echo(json.dumps({"ok": error is None, "path": str(source.resolve()), "error": error}, ensure_ascii=False))

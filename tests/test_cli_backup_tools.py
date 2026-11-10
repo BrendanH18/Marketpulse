@@ -101,3 +101,23 @@ def test_backup_now_json_creates_readable_copy(cli, store, tmp_path):
     assert payload["taken_at"] is None
     assert cli("backup", "verify", str(destination)).exit_code == 0
     assert "Backed up" in cli("backup").output
+
+
+def test_backup_verify_reports_staging_sqlite_error(cli, copies, monkeypatch):
+    source = copies[0]
+    before = sha256(source.read_bytes()).digest()
+
+    def fail_staging(source, staged):
+        raise sqlite3.OperationalError("database or disk is full")
+
+    monkeypatch.setattr("marketpulse.db._stage_restore", fail_staging)
+    result = cli("backup", "verify", str(source), "--json")
+    assert result.exit_code == 1
+    assert json.loads(result.output) == {
+        "ok": False,
+        "path": str(source.resolve()),
+        "error": "database or disk is full",
+    }
+    human = cli("backup", "verify", str(source))
+    assert human.exit_code == 1 and "database or disk is full" in human.output
+    assert sha256(source.read_bytes()).digest() == before
