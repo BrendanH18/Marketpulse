@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A Windows Tax workspace ([#97](https://github.com/BrendanH18/Marketpulse/issues/97))
+  with year selection, capital gains, superficial-loss
+  details, and CSV export for your accountant. Reports use the existing Python
+  engine, load on demand, and respect privacy mode; the fictional demo is read-only.
+
 - On-demand macOS and Windows desktop benchmarks in the CI workflow, with raw
   samples, source commit, runtime metadata and a run link retained in the reports.
   See [desktop refresh measurements](docs/performance.md) for how to run them.

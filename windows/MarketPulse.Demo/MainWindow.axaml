@@ -23,6 +23,7 @@
         <ListBoxItem Content="Accounts" />
         <ListBoxItem Content="Watchlist &amp; alerts" />
         <ListBoxItem Content="Income" />
+        <ListBoxItem Content="Tax" />
         <ListBoxItem Content="Automation" />
       </ListBox>
       <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Disabled">

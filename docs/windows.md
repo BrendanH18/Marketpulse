@@ -87,12 +87,35 @@ bridge and sends writes through the existing CLI. Financial calculations remain
 in Python. It shares the CLI's ledger and configuration paths by default.
 
 The window provides Overview, Holdings, Activity, Accounts, Watchlist and alerts,
-Income, and Automation. Record transactions and preview a CSV before importing it.
+Income, Tax, and Automation. Record transactions and preview a CSV before importing it.
 Activity uses the bridge's signed cash-flow direction. Archived accounts stay out
 of the workspaces and totals. Privacy hides portfolio details in both the window
 and tray. Closing the window keeps the app running in the tray; choose **Open
 MarketPulse** to reopen it or **Exit** to stop it and its active backend request.
 A failed refresh displays an error rather than a zero balance.
+
+### Tax reports
+
+Open **Tax** to calculate capital gains with the existing Python engine. Choose a
+year to see proceeds, pooled cost base, net and taxable gains, denied losses, and
+the individual dispositions. Superficial-loss details explain the denied amount
+and replacement-share window. All report amounts use the stated base currency;
+the app does not calculate tax figures itself.
+
+Reports load when you open Tax and reload after relevant ledger or settings
+changes. Other workspaces do not calculate tax during routine refreshes.
+**Recalculate** retries a failed report or requests fresh figures. Missing exchange
+rates and ledger issues are shown explicitly: unknown amounts display as a dash,
+and incomplete sales are excluded from the engine's totals. Archived taxable
+transactions remain in tax reports, labelled as archived without their account
+names; ordinary portfolio workspaces continue to hide archived accounts.
+
+**Export CSV…** saves the selected year's dispositions through the same engine
+used by the report. Review any export warnings before sharing the file with your
+accountant. Cancelling the file picker writes nothing. Privacy hides the report
+and its messages; turn it off to read them. The offline demo includes fictional
+tax figures and disables export. Figures are estimates: check them against your
+slips before filing.
 
 Windows desktop notifications are not implemented; alert state remains visible in
 the app. Automatic startup is not implemented. The installer and portable zip are
