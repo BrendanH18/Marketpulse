@@ -19,11 +19,11 @@ internal static class AssetChecks
             var start = DateTime.Today.AddDays(-365).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             const string symbol = "--ART-ÉPARGNE";
             const string name = "Fictional art $(echo nope) & épargne";
-            string[] manual = ["asset", "manual", "--account", accountId, "--currency", "CAD", "--date", today,
+            string[] manual = ["asset", "manual", "--new-symbol", "--account", accountId, "--currency", "CAD", "--date", today,
                 "--class", "alternative", "--name", name, "--request-id", Guid.NewGuid().ToString(), "--", symbol, "3500"];
             await client.RunAsync(manual);
             await client.RunAsync(manual);
-            string[] fixedIncome = ["asset", "fixed", "--account", accountId, "--currency", "CAD", "--rate", "4",
+            string[] fixedIncome = ["asset", "fixed", "--new-symbol", "--account", accountId, "--currency", "CAD", "--rate", "4",
                 "--start", start, "--maturity", today, "--compounding", "annual", "--name", "Fictional GIC",
                 "--request-id", Guid.NewGuid().ToString(), "--", "GIC-QA", "10000"];
             await client.RunAsync(fixedIncome);

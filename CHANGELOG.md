@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows custom-asset forms for GICs, bonds and manually valued holdings, with
   valuation updates and asset-class overrides. The Allocation workspace shows
   current weights, targets, drift and engine-provided suggestions; targets can
-  be edited or cleared without a terminal.
+  be edited or cleared without a terminal. Asset creation checks for symbol
+  collisions in the complete ledger, including archived accounts.
 
 - On-demand macOS and Windows desktop benchmarks in the CI workflow, with raw
   samples, source commit, runtime metadata and a run link retained in the reports.

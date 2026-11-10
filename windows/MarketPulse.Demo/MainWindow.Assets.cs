@@ -34,7 +34,7 @@ public partial class MainWindow
             var last = AssetDate(maturity, "Maturity date", allowFuture: true);
             if (string.CompareOrdinal(last, first) <= 0)
                 throw new InvalidOperationException("The maturity date must be after the start date.");
-            return ["asset", "fixed", "--account", AssetAccountId(account), "--name", Value(name),
+            return ["asset", "fixed", "--new-symbol", "--account", AssetAccountId(account), "--name", Value(name),
                 "--start", first, "--maturity", last, "--rate", AssetNumber(rate, "Annual rate", allowZero: true),
                 "--compounding", Pick(compounding), "--currency", AssetCurrency(currency),
                 "--", code, AssetNumber(principal, "Principal")];
@@ -55,7 +55,7 @@ public partial class MainWindow
         var assetClass = dialog.Choice("Asset class", AssetClasses.Select(AssetClassLabel), AssetClassLabel("real_estate"));
         var date = dialog.Text("Acquisition date (YYYY-MM-DD)", DateTime.Today.ToString("yyyy-MM-dd", Invariant));
         var currency = AssetCurrencyInput(dialog, accounts, account);
-        ConfigureAssetSave(dialog, () => ["asset", "manual", "--account", AssetAccountId(account),
+        ConfigureAssetSave(dialog, () => ["asset", "manual", "--new-symbol", "--account", AssetAccountId(account),
             "--name", Value(name), "--class", AssetClassKey(assetClass), "--date", AssetDate(date, "Acquisition date"),
             "--currency", AssetCurrency(currency), "--", NewAssetSymbol(symbol), AssetNumber(amount, "Value")]);
         await dialog.ShowDialog(this);

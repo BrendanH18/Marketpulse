@@ -123,7 +123,8 @@ In **Holdings**, choose **Add GIC or bond** to record a principal, annual rate,
 compounding method, start and maturity date. Choose **Add manually valued asset**
 for property, private shares or other assets you value yourself. Each form uses
 an active account and defaults to its currency. Symbols must be new to the
-portfolio: adding an asset never replaces an existing symbol's pricing metadata.
+portfolio, including archived accounts. The forms send `--new-symbol` to the
+engine, which checks the complete ledger before changing pricing metadata.
 The engine supplies accrual and valuation results; no quotes are requested for
 these custom assets. A purchase reduces the account's tracked cash balance.
 

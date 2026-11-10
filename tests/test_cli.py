@@ -757,12 +757,80 @@ def test_asset_form_commands_value_holdings_as_the_cli_does(cli, store, tracker)
 def test_asset_save_retried_with_its_request_id_records_once(cli, store):
     cli("accounts", "add", "Fictional TFSA", "-t", "TFSA")
     request = str(uuid4())
-    args = ("asset", "fixed", "--request-id", request, "--rate", "4", "--maturity", "2030-01-01", "--", "GIC1", "5000")
+    args = (
+        "asset",
+        "fixed",
+        "--new-symbol",
+        "--request-id",
+        request,
+        "--rate",
+        "4",
+        "--maturity",
+        "2030-01-01",
+        "--",
+        "GIC1",
+        "5000",
+    )
     assert "Added GIC1" in cli(*args).output
     assert "already recorded" in cli(*args).output
     assert len(store.transactions()) == 1
     status = json.loads(cli("desktop", "transaction-status", request).output)
     assert status["recorded"] is True
+
+
+@pytest.mark.parametrize("kind", ["fixed", "manual"])
+@pytest.mark.parametrize("existing", ["archived_ledger", "metadata"])
+def test_new_asset_symbol_checks_hidden_ledger_before_changing_metadata(cli, store, kind, existing):
+    from marketpulse.models import Asset, AssetKind, Transaction, TxnType
+
+    active = store.add_account(Account(name="Fictional active"))
+    old = store.add_account(Account(name="Fictional archived", archived=True))
+    if existing == "archived_ledger":
+        store.add_transaction(
+            Transaction(account_id=old.saved_id, type=TxnType.BUY, symbol="COLLISION", quantity=1, price=50)
+        )
+    else:
+        store.upsert_asset(Asset(symbol="COLLISION", kind=AssetKind.MANUAL, name="Fictional saved asset"))
+    assets, txns = store.assets(), store.transactions()
+    request = str(uuid4())
+    options = ("--rate", "4", "--maturity", "2030-01-01") if kind == "fixed" else ()
+    result = cli(
+        "asset",
+        kind,
+        "--new-symbol",
+        "--account",
+        str(active.saved_id),
+        "--request-id",
+        request,
+        *options,
+        "--",
+        "collision",
+        "5000",
+    )
+    assert result.exit_code == 1 and "already in your ledger" in result.output
+    assert store.assets() == assets and store.transactions() == txns
+    assert json.loads(cli("desktop", "transaction-status", request).output)["recorded"] is False
+
+
+@pytest.mark.parametrize("kind", ["fixed", "manual"])
+def test_failed_new_asset_purchase_does_not_leave_pricing_metadata(cli, store, kind):
+    account = store.add_account(Account(name="Fictional assets"))
+    options = ("--rate", "4", "--maturity", "2030-01-01") if kind == "fixed" else ()
+    result = cli(
+        "asset",
+        kind,
+        "--new-symbol",
+        "--account",
+        str(account.saved_id),
+        "--request-id",
+        str(uuid4()),
+        *options,
+        "--",
+        "FICTIONAL",
+        "-1",
+    )
+    assert result.exit_code == 1
+    assert store.assets() == {} and store.transactions() == []
 
 
 def test_manual_asset_is_valued_on_its_valuation_not_a_later_purchase(cli, tracker):
