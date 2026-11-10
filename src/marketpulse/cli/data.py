@@ -15,7 +15,7 @@ from rich.text import Text
 from .. import render
 from ..brokers import PROFILE_NAMES
 from ..models import Account
-from .base import App, fail, pass_app
+from .base import App, date_callback, fail, pass_app
 from .root import main
 
 if TYPE_CHECKING:
@@ -153,42 +153,131 @@ def backup(ctx: click.Context) -> None:
 
 @backup.command("now")
 @click.argument("path", type=click.Path(dir_okay=False, path_type=Path), required=False)
+@click.option("--json", "as_json", is_flag=True, help="Print the created backup metadata as unmasked JSON.")
 @pass_app
-def backup_now(app: App, path: Path | None) -> None:
+def backup_now(app: App, path: Path | None, as_json: bool = False) -> None:
     """Back up now (to PATH, or to the backups directory)."""
     dest = app.store.backup(reason="manual", dest=path)
-    app.ok(f"Backed up to {dest}")
+    if as_json:
+        click.echo(json.dumps(_backup_metadata(dest), ensure_ascii=False))
+    else:
+        app.ok(f"Backed up to {dest}")
+
+
+def _backup_metadata(path: Path) -> dict:
+    from ..db import Store
+
+    taken = Store.backup_time(path)
+    return {
+        "file": path.name,
+        "path": str(path.resolve()),
+        "reason": Store.backup_reason(path),
+        "size_bytes": path.stat().st_size,
+        "taken_at": taken.isoformat() if taken is not None else None,
+    }
 
 
 @backup.command("list")
 @click.option("--json", "as_json", is_flag=True, help="Backup paths, reasons, sizes and timestamps as JSON.")
+@click.option("--reason", help="Exact backup reason, ignoring case.")
+@click.option("--since", callback=date_callback, help="Taken on or after this date (from the filename).")
+@click.option("--until", callback=date_callback, help="Taken on or before this date (from the filename).")
+@click.option("--limit", type=click.IntRange(min=1), help="Maximum number of matching backups.")
+@click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip matching backups before listing.")
+@click.option("--oldest-first", is_flag=True, help="Reverse the default newest-first filename order.")
+@click.option("--search", default="", help="Find backup filenames containing this text, ignoring case.")
 @pass_app
-def backup_list(app: App, as_json: bool) -> None:
-    """List backups, newest first."""
+def backup_list(app: App, as_json: bool, reason, since, until, limit, offset, oldest_first, search) -> None:
+    """List backups, newest first. Filters apply before pagination."""
+    if since and until and since > until:
+        raise click.UsageError("--since must be on or before --until.")
     items = app.store.backups()
+    if oldest_first:
+        items.reverse()
+    payload = [_backup_metadata(path) for path in items]
+    payload = [
+        item
+        for item in payload
+        if (not reason or item["reason"].casefold() == reason.casefold())
+        and search.casefold() in item["file"].casefold()
+        and (not since or (item["taken_at"] is not None and item["taken_at"][:10] >= since))
+        and (not until or (item["taken_at"] is not None and item["taken_at"][:10] <= until))
+    ]
+    payload = payload[offset:] if limit is None else payload[offset : offset + limit]
     if as_json:
-        payload = []
-        for p in items:
-            taken = app.store.backup_time(p)
-            payload.append(
-                {
-                    "file": p.name,
-                    "path": str(p.resolve()),
-                    "reason": app.store.backup_reason(p),
-                    "size_bytes": p.stat().st_size,
-                    "taken_at": taken.isoformat() if taken is not None else None,
-                }
-            )
         click.echo(json.dumps(payload, ensure_ascii=False))
         return
-    if not items:
-        app.warn(f"No backups yet in {app.store.backup_dir}")
+    if not payload:
+        if not items:
+            app.warn(f"No backups yet in {app.store.backup_dir}")
+        else:
+            app.warn("No matching backups.")
         return
     t = render.table("File", "Reason", ("Size", "right"), title=str(app.store.backup_dir))
-    for p in items:
-        size = Text(f"{p.stat().st_size / 1024:,.0f} KB")
-        t.add_row(Text(p.name), Text(app.store.backup_reason(p), style="muted"), size)
+    for item in payload:
+        size = Text(f"{item['size_bytes'] / 1024:,.0f} KB")
+        t.add_row(Text(item["file"]), Text(item["reason"], style="muted"), size)
     app.console.print(t)
+
+
+def _backup_source(app: App, path: str) -> Path:
+    source = Path(path).expanduser()
+    if path == source.name and (app.store.backup_dir / path).exists():
+        source = app.store.backup_dir / path
+    if not source.is_file():
+        fail(f"Backup file not found: {path}")
+    return source
+
+
+@backup.command("show")
+@click.argument("path", type=click.Path(dir_okay=False))
+@click.option("--json", "as_json", is_flag=True, help="Print unmasked file metadata as JSON.")
+@pass_app
+def backup_show(app: App, path: str, as_json: bool) -> None:
+    """Inspect backup file metadata without opening or restoring its database."""
+    try:
+        payload = _backup_metadata(_backup_source(app, path))
+    except OSError as error:
+        fail(str(error))
+    if as_json:
+        click.echo(json.dumps(payload, ensure_ascii=False))
+        return
+    table = render.table("Field", "Value")
+    table.columns[0].min_width = 10
+    for field, value in payload.items():
+        table.add_row(Text(field), Text(str(value) if value is not None else "—"))
+    app.console.print(table)
+
+
+@backup.command("verify")
+@click.argument("path", type=click.Path(dir_okay=False))
+@click.option("--json", "as_json", is_flag=True, help="Print validation status as JSON; invalid files exit 1.")
+@pass_app
+def backup_verify(app: App, path: str, as_json: bool) -> None:
+    """Check integrity and schema compatibility without replacing the ledger.
+
+    Uses the restore preflight with a temporary copy; the source is opened read-only.
+    Does not check financial correctness or restore the backup.
+    """
+    from tempfile import TemporaryDirectory
+
+    from ..db import RestoreError, _stage_restore
+
+    source = _backup_source(app, path)
+    error = None
+    try:
+        with TemporaryDirectory(prefix="marketpulse-verify-") as scratch:
+            _stage_restore(source, Path(scratch) / "checked.db")
+    except (RestoreError, OSError) as problem:
+        error = str(problem)
+    if as_json:
+        click.echo(json.dumps({"ok": error is None, "path": str(source.resolve()), "error": error}, ensure_ascii=False))
+    elif error is None:
+        app.ok(f"Backup verified: {source.name}")
+    else:
+        app.warn(error)
+    if error is not None:
+        raise click.exceptions.Exit(1)
 
 
 @backup.command("restore")

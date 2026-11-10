@@ -34,6 +34,10 @@ def accounts(ctx: click.Context) -> None:
 @click.option("-t", "--type", "acct_type", type=click.Choice(ACCOUNT_TYPES, case_sensitive=False))
 @click.option("--institution", help="Match an institution exactly, ignoring case.")
 @click.option("--search", help="Find account names containing this text, ignoring case.")
+@click.option("--currency", help="Match the configured currency, ignoring case.")
+@click.option("--cash/--no-cash", default=None, help="Filter accounts by cash tracking.")
+@click.option("--sort", "sort_by", type=click.Choice(["name", "type", "institution", "currency"]))
+@click.option("--descending", is_flag=True, help="Reverse the selected order (default: account ID).")
 @pass_app
 def accounts_list(
     app: App,
@@ -43,16 +47,28 @@ def accounts_list(
     acct_type: str | None,
     institution: str | None,
     search: str | None,
+    currency: str | None,
+    cash: bool | None,
+    sort_by: str | None,
+    descending: bool,
 ) -> None:
     """List accounts, optionally filtering or reading metadata offline."""
     items = app.store.accounts(include_archived=archived)
-    filtered = any(value is not None for value in (acct_type, institution, search))
+    filtered = any(value is not None for value in (acct_type, institution, search, currency, cash))
     if acct_type is not None:
         items = [a for a in items if a.type.value == acct_type]
     if institution is not None:
         items = [a for a in items if a.institution.casefold() == institution.strip().casefold()]
     if search is not None:
         items = [a for a in items if search.casefold() in a.name.casefold()]
+    if currency is not None:
+        items = [a for a in items if a.currency.casefold() == currency.strip().casefold()]
+    if cash is not None:
+        items = [a for a in items if a.track_cash == cash]
+    if sort_by is not None:
+        items.sort(key=lambda a: (str(getattr(a, sort_by)).casefold(), a.saved_id))
+    if descending:
+        items.reverse()
     if as_json:
         click.echo(json.dumps([asdict(a) for a in items], ensure_ascii=False))
         return
@@ -101,6 +117,25 @@ def accounts_list(
             )
         t.add_row(*cells)
     app.console.print(t)
+
+
+@accounts.command("show")
+@click.argument("ref")
+@click.option("--json", "as_json", is_flag=True, help="Print unmasked account metadata as JSON.")
+@pass_app
+def accounts_show(app: App, ref: str, as_json: bool) -> None:
+    """Inspect an active account by ID, name or unique type, without pricing."""
+    account = app.store.get_account(ref)
+    if account is None or account.archived:
+        fail(f"No active account '{ref}'.")
+    payload = asdict(account)
+    if as_json:
+        click.echo(json.dumps(payload, ensure_ascii=False))
+        return
+    table = render.table("Field", "Value", title="Account metadata")
+    for field, value in payload.items():
+        table.add_row(Text(field), Text(str(value)))
+    app.console.print(table)
 
 
 @accounts.command("add")

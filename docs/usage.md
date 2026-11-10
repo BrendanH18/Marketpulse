@@ -63,6 +63,8 @@ exit 1 when existing ledger issues are found. Account JSON and offline listings
 do not fetch quotes or record valuation snapshots. See
 [Offline CLI workflows](cli-workflows.md) for all 30 additions, including the
 JSON fields, safe edit revisions, inventory filters, and alert controls.
+The next [30 reporting and backup improvements](cli-reporting-tools.md) add
+CSV activity exports, grouped counts, detailed inventories, and backup verification.
 
 ## Contribution room and tax estimates
 
