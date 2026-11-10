@@ -174,6 +174,29 @@ def test_alerts_fire_once_then_rearm(tracker, store, fake, notifications):
     assert len(tracker.check_alerts()) == 1
 
 
+def test_alert_paused_during_quote_fetch_stays_paused(tracker, store, monkeypatch, notifications):
+    """A concurrent CLI pause must win over the check's pre-fetch alert copy."""
+    from marketpulse.db import Store
+
+    alert = store.add_alert(Alert("AAPL", "above", 100))
+    other = Store(store.path)
+    try:
+
+        def fetch(symbols):
+            current = other.alerts()[0]
+            current.active = False
+            other.update_alert(current)
+            return {"AAPL": Quote(symbol="AAPL", price=200, prev_close=200, currency="USD")}, {}
+
+        monkeypatch.setattr(tracker.market, "quotes", fetch)
+        assert tracker.check_alerts() == []
+        saved = next(a for a in other.alerts() if a.id == alert.id)
+        assert not saved.active and not saved.triggered_at
+        assert notifications == []
+    finally:
+        other.close()
+
+
 def test_backfill_rebuilds_daily_history(tracker, store, fake):
     days = [(date.today() - timedelta(days=n)).isoformat() for n in (3, 2, 1, 0)]
     acct = store.add_account(Account(name="Main"))

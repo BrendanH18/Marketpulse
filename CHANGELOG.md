@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Thirty local-first CLI improvements ([#104](https://github.com/BrendanH18/Marketpulse/issues/104)):
+  activity date/type/text/currency filters, ordering and pagination, transaction
+  inspection with edit revisions, offline ledger checks, offline account and asset
+  inventories with composable filters, watchlist reordering, alert pause/resume/rearm
+  and filtering, and full JSON reports for these workflows, backups, and CSV imports.
+  See [Offline CLI workflows](docs/cli-workflows.md) for the numbered list and examples.
+  JSON reports contain unmasked values even in privacy mode.
+
 - A Windows Tax workspace ([#97](https://github.com/BrendanH18/Marketpulse/issues/97))
   with year selection, capital gains, superficial-loss
   details, and CSV export for your accountant. Reports use the existing Python
@@ -92,6 +100,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   revision values stay the same. See [refresh measurements](docs/performance.md).
 
 ### Fixed
+
+- Ordinary CLI activity and transaction inspection hide archived accounts, including
+  transfers touching archived accounts. CSV previews no longer create a default
+  account in the live ledger when a file omits account names; create an account first.
+- An alert check already fetching prices no longer overwrites an alert paused or
+  edited during that fetch, or fires the paused alert from its stale state.
 
 - Configuration and CSV file exports use UTF-8 explicitly, preserving non-ASCII
   account names on Windows. Saving a provider key no longer calls Unix-only

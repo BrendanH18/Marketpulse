@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import math
 import time
+from dataclasses import asdict
 
 import click
 from rich.console import Group
@@ -23,14 +26,46 @@ def watch(ctx: click.Context) -> None:
 
 
 @watch.command("list")
+@click.option("--offline", is_flag=True, help="List saved symbols without fetching prices.")
+@click.option("--json", "as_json", is_flag=True, help="Saved symbols as JSON (offline; no prices).")
 @pass_app
-def watch_list(app: App) -> None:
+def watch_list(app: App, offline: bool, as_json: bool) -> None:
+    """List watched symbols, with prices unless --offline or --json is supplied."""
+    if offline or as_json:
+        symbols = app.store.watchlist()
+        if as_json:
+            click.echo(json.dumps(symbols, ensure_ascii=False))
+        elif symbols:
+            t = render.table(("Position", "right"), "Symbol")
+            for position, symbol in enumerate(symbols, start=1):
+                t.add_row(Text(str(position), style="muted"), Text(symbol, style="bright"))
+            app.console.print(t)
+        else:
+            app.console.print(Text("Watchlist is empty — `marketpulse watch add NVDA XEQT.TO`.", style="muted"))
+        return
     with app.busy("Fetching watchlist…"):
         symbols, quotes, errors = app.tracker.watchlist_quotes()
     if not symbols:
         app.console.print(Text("Watchlist is empty — `marketpulse watch add NVDA XEQT.TO`.", style="muted"))
         return
     app.console.print(render.quotes_table(symbols, quotes, errors, width=app.console.width))
+
+
+@watch.command("move")
+@click.argument("symbol")
+@click.option("--to", "position", type=click.IntRange(min=1), required=True, help="New position (1 is first).")
+@pass_app
+def watch_move(app: App, symbol: str, position: int) -> None:
+    """Move an existing symbol to a position in the saved watchlist."""
+    symbol = symbol.strip().upper()
+    with app.store.transaction():
+        items = app.store.watchlist()
+        if symbol not in items:
+            fail(f"{symbol} is not on the watchlist.")
+        if position > len(items):
+            raise click.BadParameter(f"must be between 1 and {len(items)}", param_hint="--to")
+        app.store.move_watch(symbol, position - 1 - items.index(symbol))
+    app.ok(f"Moved {symbol} to position {position}.")
 
 
 @watch.command("add")
@@ -88,23 +123,94 @@ def alerts(ctx: click.Context) -> None:
 
 
 @alerts.command("list")
+@click.option("-s", "--symbol", help="Only alerts for this symbol.")
+@click.option("--state", type=click.Choice(["armed", "paused", "triggered"], case_sensitive=False))
+@click.option("--json", "as_json", is_flag=True, help="Alert metadata as JSON (unmasked; offline).")
 @pass_app
-def alerts_list(app: App) -> None:
+def alerts_list(app: App, symbol: str | None, state: str | None, as_json: bool) -> None:
+    """List saved alerts, optionally filtered by symbol and current state."""
     items = app.store.alerts()
+    if symbol is not None:
+        items = [a for a in items if a.symbol == symbol.strip().upper()]
+    if state is not None:
+        items = [a for a in items if _alert_state(a) == state]
+    if as_json:
+        payload = []
+        for a in items:
+            row = asdict(a)
+            # Invalid legacy alerts remain inspectable, but JSON has no Infinity/NaN.
+            row["threshold"] = a.threshold if math.isfinite(a.threshold) else None
+            row["state"] = _alert_state(a)
+            payload.append(row)
+        click.echo(json.dumps(payload, ensure_ascii=False, allow_nan=False))
+        return
     if not items:
-        app.console.print(Text("No alerts — `marketpulse alerts add NVDA above 200`.", style="muted"))
+        message = (
+            "No alerts match these filters."
+            if symbol is not None or state
+            else ("No alerts — `marketpulse alerts add NVDA above 200`.")
+        )
+        app.console.print(Text(message, style="muted"))
         return
     t = render.table(("ID", "right"), "Alert", "State", "Note")
     for a in items:
-        state = (
+        shown_state = (
             Text("● triggered", style="warn")
-            if a.triggered_at
-            else Text("armed" if a.active else "paused", style="muted")
+            if _alert_state(a) == "triggered"
+            else Text(_alert_state(a), style="muted")
         )
         t.add_row(
-            Text(str(a.id), style="muted"), Text(a.describe(), style="bright"), state, Text(a.note, style="muted")
+            Text(str(a.id), style="muted"), Text(a.describe(), style="bright"), shown_state, Text(a.note, style="muted")
         )
     app.console.print(t)
+
+
+def _alert_state(alert: Alert) -> str:
+    if not alert.active:
+        return "paused"
+    return "triggered" if alert.triggered_at else "armed"
+
+
+def _set_alert_state(app: App, alert_id: int, *, active: bool, rearm: bool = False) -> None:
+    with app.store.transaction():
+        alert = next((a for a in app.store.alerts() if a.id == alert_id), None)
+        if alert is None:
+            fail(f"No alert #{alert_id}.")
+        if active:
+            try:
+                alert.validate()
+            except ValueError as e:
+                fail(str(e))
+        alert.active = active
+        if rearm:
+            alert.triggered_at = ""
+        app.store.update_alert(alert)
+    verb = "Rearmed" if rearm else ("Resumed" if active else "Paused")
+    app.ok(f"{verb} alert #{alert_id}.")
+
+
+@alerts.command("pause")
+@click.argument("alert_id", type=click.IntRange(min=1))
+@pass_app
+def alerts_pause(app: App, alert_id: int) -> None:
+    """Pause an alert without clearing its trigger history."""
+    _set_alert_state(app, alert_id, active=False)
+
+
+@alerts.command("resume")
+@click.argument("alert_id", type=click.IntRange(min=1))
+@pass_app
+def alerts_resume(app: App, alert_id: int) -> None:
+    """Resume an alert, preserving its trigger history to avoid duplicate notifications."""
+    _set_alert_state(app, alert_id, active=True)
+
+
+@alerts.command("rearm")
+@click.argument("alert_id", type=click.IntRange(min=1))
+@pass_app
+def alerts_rearm(app: App, alert_id: int) -> None:
+    """Activate and clear the trigger history; the next matching fresh price can fire again."""
+    _set_alert_state(app, alert_id, active=True, rearm=True)
 
 
 @alerts.command("add")

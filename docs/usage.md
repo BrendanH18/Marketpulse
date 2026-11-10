@@ -47,6 +47,23 @@ With cash tracking, purchases debit cash and sales, deposits, and income credit
 it. Without cash tracking, valuation includes holdings without a cash balance.
 Cash tracking can be changed with `accounts edit --track-cash`.
 
+### Find activity and inspect records offline
+
+```bash
+marketpulse activity --since 2024-01-01 --until 2024-12-31 --type BUY --type SELL
+marketpulse activity --search winter --currency CAD --oldest-first --offset 20 --limit 20
+marketpulse txn show 12
+marketpulse txn check --json
+marketpulse accounts list --offline --type TFSA
+marketpulse asset list --kind fixed_income --json
+```
+
+Activity filters compose before paging; dates are inclusive. `txn check` returns
+exit 1 when existing ledger issues are found. Account JSON and offline listings
+do not fetch quotes or record valuation snapshots. See
+[Offline CLI workflows](cli-workflows.md) for all 30 additions, including the
+JSON fields, safe edit revisions, inventory filters, and alert controls.
+
 ## Contribution room and tax estimates
 
 Record a known room balance and the year it applies to:
@@ -146,9 +163,16 @@ review the summary first.
 
 An account column takes precedence over the fallback account. Named accounts
 can be created during a real import unless `--no-create-accounts` is supplied.
-Create accounts before a dry run: a preview does not create unknown accounts
-and will skip their rows. Create them explicitly to control account type,
+A preview simulates the same account creation on a temporary copy. Files without
+account names need an existing account for preview or JSON reporting.
+Create accounts explicitly to control account type,
 currency, and cash tracking instead of relying on the importer's guesses.
+
+Use `marketpulse import activities.csv --dry-run --json` for the complete report,
+including every skipped row and duplicate. JSON reporting and previews require
+an existing account when the file does not name its own accounts; they never
+silently create a default account. A successful report can still include skipped
+rows, so inspect `issues` as well as the exit status.
 
 CSV export contains the transaction ledger. It is **not a complete database
 backup**: it does not include all account settings, asset definitions, alerts,
@@ -229,9 +253,20 @@ by the menu bar. JSON contains portfolio amounts even when privacy mode is on.
 ```bash
 marketpulse alerts add NVDA above 200
 marketpulse alerts check
+marketpulse alerts list --symbol NVDA --state armed --json
+marketpulse alerts pause 3
+marketpulse alerts resume 3
+marketpulse alerts rearm 3
 ```
 
 The TUI and menu bar evaluate alerts during refresh. For scheduled CLI checks,
 run `marketpulse alerts check --quiet` from your own cron or launchd setup.
 Notifications require the platform's notification tools; no scheduler is installed
 automatically.
+
+Pause and resume preserve the last trigger, so resuming does not repeat a
+notification while the same condition holds. `rearm` clears the trigger and
+activates the alert; the next matching fresh price may notify again. These
+controls are offline. Use `watch list --offline` to list saved symbols without
+prices, `watch list --json` for an ordered symbol array, or
+`watch move NVDA --to 1` to reorder an existing symbol.

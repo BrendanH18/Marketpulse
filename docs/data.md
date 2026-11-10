@@ -10,8 +10,9 @@ alerts, quote cache, contribution-room inputs, and portfolio snapshots in
 Display settings live in a separate TOML file.
 
 The database and backups are not encrypted by MarketPulse. Privacy mode hides
-amounts on screen; it does not redact ledger exports or the `status --json`
-payload. Protect these files as you would other financial records.
+amounts on screen; it does not redact ledger exports, `status --json`, or the
+other [CLI JSON reports](cli-workflows.md). Protect these files as you would
+other financial records.
 
 There is no application telemetry or brokerage authentication. Yahoo Finance
 receives symbol and market-data requests, including normal request metadata.
@@ -88,6 +89,7 @@ standard input. The free tier is for personal use; check Alpha Vantage's terms.
 marketpulse backup
 marketpulse backup now /path/to/portfolio-backup.db
 marketpulse backup list
+marketpulse backup list --json
 marketpulse backup restore marketpulse-20261019-091500-daily.db
 ```
 
@@ -106,6 +108,11 @@ Default backups live in the data directory's `backups/` folder. A backup written
 to an explicit path is not included in `backup list`. Local backups do not
 protect against losing the disk; copy important backups to another location.
 The database backup does not include the TOML configuration file.
+`backup list --json` returns the same newest-first inventory as a JSON array,
+including absolute paths, reasons, sizes in bytes, and timestamps parsed from
+backup filenames (`null` when unavailable). It does not restore files. As with
+other CLI commands, opening the ledger may take an overdue daily backup and
+prune older daily backups according to the retention policy above.
 
 ## Restore a database
 
