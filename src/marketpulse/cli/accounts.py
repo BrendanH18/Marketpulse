@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
+
 import click
 from rich.text import Text
 
@@ -24,15 +27,51 @@ def accounts(ctx: click.Context) -> None:
 
 @accounts.command("list")
 @click.option("--archived", is_flag=True, help="Include archived accounts.")
+@click.option("--offline", is_flag=True, help="Show account metadata without fetching prices or recording a snapshot.")
+@click.option(
+    "--json", "as_json", is_flag=True, help="Print unmasked account metadata as JSON, without fetching prices."
+)
+@click.option("-t", "--type", "acct_type", type=click.Choice(ACCOUNT_TYPES, case_sensitive=False))
+@click.option("--institution", help="Match an institution exactly, ignoring case.")
+@click.option("--search", help="Find account names containing this text, ignoring case.")
 @pass_app
-def accounts_list(app: App, archived: bool) -> None:
+def accounts_list(
+    app: App,
+    archived: bool,
+    offline: bool,
+    as_json: bool,
+    acct_type: str | None,
+    institution: str | None,
+    search: str | None,
+) -> None:
+    """List accounts, optionally filtering or reading metadata offline."""
     items = app.store.accounts(include_archived=archived)
-    if not items:
-        app.console.print(Text('No accounts yet — `marketpulse accounts add "My TFSA" -t TFSA`.', style="muted"))
+    filtered = any(value is not None for value in (acct_type, institution, search))
+    if acct_type is not None:
+        items = [a for a in items if a.type.value == acct_type]
+    if institution is not None:
+        items = [a for a in items if a.institution.casefold() == institution.strip().casefold()]
+    if search is not None:
+        items = [a for a in items if search.casefold() in a.name.casefold()]
+    if as_json:
+        click.echo(json.dumps([asdict(a) for a in items], ensure_ascii=False))
         return
-    with app.busy("Pricing accounts…"):
-        view = app.tracker.valuation()
-    values = {b.key: b for b in view.by_account}
+    if not items:
+        message = (
+            "No accounts match these filters."
+            if filtered
+            else 'No accounts yet — `marketpulse accounts add "My TFSA" -t TFSA`.'
+        )
+        app.console.print(Text(message, style="muted"))
+        return
+    view = None
+    if not offline:
+        with app.busy("Pricing accounts…"):
+            view = app.tracker.valuation()
+    values = {b.key: b for b in view.by_account} if view is not None else {}
+    value_columns: list[render.Column] = (
+        [("Value", "right"), ("Today", "right"), ("Weight", "right")] if view is not None else []
+    )
     t = render.table(
         ("ID", "right"),
         "Name",
@@ -40,23 +79,27 @@ def accounts_list(app: App, archived: bool) -> None:
         "Ccy",
         "Institution",
         "Cash",
-        ("Value", "right"),
-        ("Today", "right"),
-        ("Weight", "right"),
+        *value_columns,
     )
     for a in items:
-        b = values.get(str(a.id))
-        t.add_row(
+        cells = [
             Text(str(a.id), style="muted"),
             Text(a.name + (" (archived)" if a.archived else ""), style="bright"),
             Text(a.type.label, style="accent" if a.type.registered else ""),
             Text(a.currency, style="muted"),
             Text(a.institution or "—", style="muted"),
             Text("tracked" if a.track_cash else "—", style="muted"),
-            Text(fmt.money(b.value, view.base, privacy=app.privacy)) if b else render.dash(),
-            render.trend(fmt.pct(b.day_change_pct), b.day_change) if b else render.dash(),
-            Text(fmt.pct(b.weight, sign=False), style="muted") if b else render.dash(),
-        )
+        ]
+        if view is not None:
+            b = values.get(str(a.id))
+            cells.extend(
+                [
+                    Text(fmt.money(b.value, view.base, privacy=app.privacy)) if b else render.dash(),
+                    render.trend(fmt.pct(b.day_change_pct), b.day_change) if b else render.dash(),
+                    Text(fmt.pct(b.weight, sign=False), style="muted") if b else render.dash(),
+                ]
+            )
+        t.add_row(*cells)
     app.console.print(t)
 
 

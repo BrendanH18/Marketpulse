@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import sys
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,7 +35,9 @@ def backfill(app: App) -> None:
     app.ok(f"Rebuilt {n:,} daily snapshots.")
 
 
-def _import_default(app: App, account: str | None, path: Path, profile: str) -> Account | None:
+def _import_default(
+    app: App, account: str | None, path: Path, profile: str, *, create_default: bool = True
+) -> Account | None:
     """Account for rows without one. A file whose rows name their own account gets no default,
     so rows are never silently filed into whichever account happens to be first."""
     from ..brokers import names_accounts, resolve
@@ -42,7 +46,11 @@ def _import_default(app: App, account: str | None, path: Path, profile: str) -> 
     if account:
         return app.account(account)
     headers = read_headers(path.read_text(encoding="utf-8-sig"))
-    return None if names_accounts(resolve(profile, headers), headers) else app.account(None)
+    if names_accounts(resolve(profile, headers), headers):
+        return None
+    if not create_default and not app.store.accounts():
+        fail("No active account. Create one with `marketpulse accounts add` or use a CSV with account names.")
+    return app.account(None)
 
 
 def _import_line(issue: RowIssue) -> str:
@@ -64,8 +72,11 @@ def _import_line(issue: RowIssue) -> str:
 )
 @click.option("--dry-run", is_flag=True)
 @click.option("--no-create-accounts", is_flag=True)
+@click.option(
+    "--json", "as_json", is_flag=True, help="Full import report as JSON (unmasked, including all row issues)."
+)
 @pass_app
-def import_cmd(app: App, path: Path, account, profile, dry_run, no_create_accounts) -> None:
+def import_cmd(app: App, path: Path, account, profile, dry_run, no_create_accounts, as_json: bool) -> None:
     """Import transactions from a broker or MarketPulse CSV.
 
     \b
@@ -77,7 +88,7 @@ def import_cmd(app: App, path: Path, account, profile, dry_run, no_create_accoun
     from ..csvio import import_transactions
 
     try:
-        default = _import_default(app, account, path, profile)
+        default = _import_default(app, account, path, profile, create_default=not (dry_run or as_json))
         result = import_transactions(
             app.store,
             path,
@@ -86,8 +97,14 @@ def import_cmd(app: App, path: Path, account, profile, dry_run, no_create_accoun
             dry_run=dry_run,
             profile=profile,
         )
-    except ValueError as e:
+    except (OSError, UnicodeError, ValueError) as e:
         fail(str(e))
+    if as_json:
+        payload = asdict(result)
+        payload["backup"] = str(result.backup) if result.backup is not None else None
+        payload["dry_run"] = dry_run
+        click.echo(json.dumps(payload, ensure_ascii=False))
+        return
     verb = "Would import" if dry_run else "Imported"
     app.ok(f"{verb} {result.added} transaction(s); {result.duplicates} duplicate(s) skipped. ({result.profile_label})")
     if result.backup is not None:
@@ -144,10 +161,26 @@ def backup_now(app: App, path: Path | None) -> None:
 
 
 @backup.command("list")
+@click.option("--json", "as_json", is_flag=True, help="Backup paths, reasons, sizes and timestamps as JSON.")
 @pass_app
-def backup_list(app: App) -> None:
+def backup_list(app: App, as_json: bool) -> None:
     """List backups, newest first."""
     items = app.store.backups()
+    if as_json:
+        payload = []
+        for p in items:
+            taken = app.store.backup_time(p)
+            payload.append(
+                {
+                    "file": p.name,
+                    "path": str(p.resolve()),
+                    "reason": app.store.backup_reason(p),
+                    "size_bytes": p.stat().st_size,
+                    "taken_at": taken.isoformat() if taken is not None else None,
+                }
+            )
+        click.echo(json.dumps(payload, ensure_ascii=False))
+        return
     if not items:
         app.warn(f"No backups yet in {app.store.backup_dir}")
         return

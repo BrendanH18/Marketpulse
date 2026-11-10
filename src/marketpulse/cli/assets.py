@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
+
 import click
 from rich.text import Text
 
@@ -38,14 +41,35 @@ def _create_asset(app: App, asset: Asset, txn: Transaction, *, new_symbol: bool)
 
 
 @asset.command("list")
+@click.option("--json", "as_json", is_flag=True, help="Print unmasked asset metadata as JSON.")
+@click.option("--kind", type=click.Choice([k.value for k in AssetKind], case_sensitive=False))
+@click.option("--class", "asset_class", type=click.Choice([c.value for c in AssetClass], case_sensitive=False))
+@click.option("--currency", help="Match the asset's configured currency, ignoring case.")
+@click.option("--search", help="Find asset symbols or names containing this text, ignoring case.")
 @pass_app
-def asset_list(app: App) -> None:
-    items = app.store.assets()
+def asset_list(
+    app: App, as_json: bool, kind: str | None, asset_class: str | None, currency: str | None, search: str | None
+) -> None:
+    """List configured asset metadata without fetching prices."""
+    items = list(app.store.assets().values())
+    filtered = any(value is not None for value in (kind, asset_class, currency, search))
+    if kind is not None:
+        items = [a for a in items if a.kind.value == kind]
+    if asset_class is not None:
+        items = [a for a in items if a.asset_class is not None and a.asset_class.value == asset_class]
+    if currency is not None:
+        items = [a for a in items if a.currency == currency.strip().upper()]
+    if search is not None:
+        items = [a for a in items if search.casefold() in a.symbol.casefold() or search.casefold() in a.name.casefold()]
+    if as_json:
+        click.echo(json.dumps([asdict(a) for a in items], ensure_ascii=False))
+        return
     if not items:
-        app.console.print(Text("No custom assets. Market symbols need no setup.", style="muted"))
+        message = "No assets match these filters." if filtered else "No custom assets. Market symbols need no setup."
+        app.console.print(Text(message, style="muted"))
         return
     t = render.table("Symbol", "Kind", "Name", "Class", "Ccy", ("Rate", "right"), "Term")
-    for a in items.values():
+    for a in items:
         term = f"{a.start_date} → {a.maturity_date}" if a.kind is AssetKind.FIXED_INCOME else ""
         t.add_row(
             Text(a.symbol, style="bright"),
