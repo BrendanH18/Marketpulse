@@ -55,11 +55,13 @@ public partial class MainWindow : Window
     {
         RefreshButton.IsEnabled = !busy;
         foreach (var button in _writeButtons) button.IsEnabled = !busy && !_client.IsDemo;
+        TaxBusy(busy);
     }
 
     private async Task LoadAsync()
     {
         _snapshot = await _client.SnapshotAsync(_lifetime.Token);
+        InvalidateTax(Text(_snapshot.Value, "ledger_revision"));
         if (!_privacyInitialized)
         {
             _privacyInitialized = true;
@@ -75,7 +77,7 @@ public partial class MainWindow : Window
     {
         Busy(true);
         SetStatus("Refreshing portfolio…");
-        try { await LoadAsync(); }
+        try { await LoadAsync(); await LoadTaxIfNeededAsync(); }
         catch (OperationCanceledException) { if (!_stopping) Failed("The refresh took too long. Try again."); }
         catch (Exception error) { if (!_stopping) Failed(error.Message); }
         finally { Busy(false); }
@@ -84,6 +86,7 @@ public partial class MainWindow : Window
     private void Failed(string message)
     {
         _snapshot = null;
+        InvalidateTax(null);
         Render();
         SetStatus(Privacy ? "Couldn't refresh. Turn privacy off to see details." : $"Couldn't refresh: {message}");
     }
@@ -102,7 +105,7 @@ public partial class MainWindow : Window
         {
             await _client.RunAsync(arguments, _lifetime.Token);
             // A successful write stays successful even if the following quote refresh fails.
-            try { await LoadAsync(); }
+            try { await LoadAsync(); await LoadTaxIfNeededAsync(); }
             catch (Exception error) { Failed($"The change was saved, but refreshing failed: {error.Message}"); }
         }
         finally { Busy(false); }
@@ -138,7 +141,8 @@ public partial class MainWindow : Window
         if (Workspace is null) return;
         Render();
         SetStatus(Privacy ? "Privacy is on" : "Privacy is off");
-        if (_settingPrivacy || !_privacyInitialized || _client.IsDemo) return;
+        if (_settingPrivacy || !_privacyInitialized) return;
+        if (_client.IsDemo) { await EnsureTaxAsync(); return; }
         var desired = Privacy;
         PrivacyToggle.IsEnabled = false;
         try
@@ -151,13 +155,20 @@ public partial class MainWindow : Window
         catch (Exception error) { SetStatus("Privacy changed for this session, but saving the setting failed: " + error.Message); }
         finally { PrivacyToggle.IsEnabled = true; }
     }
-    private void WorkspaceChanged(object? sender, SelectionChangedEventArgs args) { if (Workspace is not null) Render(); }
+    private async void WorkspaceChanged(object? sender, SelectionChangedEventArgs args)
+    {
+        if (Workspace is null) return;
+        Render();
+        await EnsureTaxAsync();
+    }
     private async void RefreshClicked(object? sender, RoutedEventArgs args) => await RefreshAsync();
 
     private void Render()
     {
         Workspace.Children.Clear();
         _writeButtons.Clear();
+        _taxButtons.Clear();
+        _taxExportButton = null;
         if (Privacy)
         {
             Heading("Your portfolio is hidden");
@@ -178,7 +189,8 @@ public partial class MainWindow : Window
             case 3: Accounts(root); break;
             case 4: Watchlist(root); break;
             case 5: Income(root); break;
-            case 6: Automation(root); break;
+            case 6: Tax(); break;
+            case 7: Automation(root); break;
             default:
                 Heading("Overview");
                 Metric("Net worth", Money(status, "net_worth") + " " + Text(status, "base"));

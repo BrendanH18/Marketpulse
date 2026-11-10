@@ -22,16 +22,33 @@ public sealed class BackendClient
         _configPath = configPath is null ? null : Path.GetFullPath(configPath);
     }
 
-    public async Task<JsonElement> SnapshotAsync(CancellationToken cancellationToken = default)
+    public async Task<JsonElement> SnapshotAsync(CancellationToken cancellationToken = default) =>
+        DecodeSnapshot(await ReadAsync("snapshot", cancellationToken), expectDemo: IsDemo);
+
+    public async Task<JsonElement> TaxAsync(CancellationToken cancellationToken = default) =>
+        DecodeTax(await ReadAsync("tax", cancellationToken), expectDemo: IsDemo);
+
+    public async Task<JsonElement> ExportTaxCsvAsync(int year, string path, CancellationToken cancellationToken = default)
+    {
+        var json = await RunAsync(["desktop", "tax-csv", "--year",
+            year.ToString(System.Globalization.CultureInfo.InvariantCulture), "--", path], cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Require(root.ValueKind == JsonValueKind.Object && root.TryGetProperty("exported", out var count) &&
+            count.ValueKind == JsonValueKind.Number && count.TryGetInt32(out var rows) && rows >= 0, "The tax export did not return a row count.");
+        RequireArray(root, "issues");
+        return root.Clone();
+    }
+
+    private async Task<string> ReadAsync(string command, CancellationToken cancellationToken)
     {
         if (!IsDemo)
-            return DecodeSnapshot(await ExecuteAsync(["desktop", "snapshot"], null, cancellationToken));
+            return await ExecuteAsync(["desktop", command], null, cancellationToken);
 
         var scratch = Directory.CreateTempSubdirectory("marketpulse-windows-demo-");
         try
         {
-            return DecodeSnapshot(await ExecuteAsync(["desktop", "snapshot", "--demo"], scratch.FullName,
-                cancellationToken), expectDemo: true);
+            return await ExecuteAsync(["desktop", command, "--demo"], scratch.FullName, cancellationToken);
         }
         finally
         {
@@ -132,9 +149,66 @@ public sealed class BackendClient
         return root.Clone();
     }
 
+    /// <summary>Checks required version-1 tax fields, preserving explicit unknown amounts.</summary>
+    public static JsonElement DecodeTax(string json, bool expectDemo = false)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Require(root.ValueKind == JsonValueKind.Object, "The tax report must be an object.");
+        Require(root.TryGetProperty("version", out var version) && version.ValueKind == JsonValueKind.Number &&
+            version.TryGetInt32(out var number) && number == 1, "Unsupported tax bridge version; expected 1.");
+        RequireBoolean(root, "demo");
+        Require(root.GetProperty("demo").GetBoolean() == expectDemo,
+            "The tax report's demo flag does not match the requested portfolio.");
+        RequireText(root, "base_currency");
+        RequireNumber(root, "inclusion_rate");
+        foreach (var field in new[] { "years", "issues", "room", "notes" }) RequireArray(root, field);
+        foreach (var year in root.GetProperty("years").EnumerateArray())
+        {
+            Require(year.ValueKind == JsonValueKind.Object && year.TryGetProperty("year", out var value) &&
+                value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out _), "The tax report has an invalid year.");
+            foreach (var field in new[] { "proceeds", "acb", "denied", "net_gain", "taxable", "inclusion_rate",
+                "dispositions", "missing_fx", "superficial" }) RequireNumber(year, field);
+            RequireArray(year, "securities");
+            RequireArray(year, "rows");
+            foreach (var security in year.GetProperty("securities").EnumerateArray())
+            {
+                RequireText(security, "symbol");
+                foreach (var field in new[] { "dispositions", "quantity", "proceeds", "acb", "denied", "net_gain", "missing_fx" })
+                    RequireNumber(security, field);
+            }
+            foreach (var row in year.GetProperty("rows").EnumerateArray())
+            {
+                foreach (var field in new[] { "date", "symbol", "currency", "kind" }) RequireText(row, field);
+                foreach (var field in new[] { "complete", "archived", "superficial", "window_open" }) RequireBoolean(row, field);
+                foreach (var field in new[] { "quantity", "acquired_in_window", "held_after_window" }) RequireNumber(row, field);
+                foreach (var field in new[] { "proceeds", "acb", "gain", "denied", "allowed_gain" })
+                    RequireNumber(row, field, nullable: !row.GetProperty("complete").GetBoolean());
+                RequireNumber(row, "fx", nullable: true);
+            }
+        }
+        return root.Clone();
+    }
+
+    private static void RequireNumber(JsonElement parent, string field, bool nullable = false) => Require(
+        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(field, out var value) &&
+        ((nullable && value.ValueKind == JsonValueKind.Null) ||
+            (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out _))),
+        $"The tax report is missing or has an invalid {field} value.");
+
+    private static void RequireText(JsonElement parent, string field) => Require(
+        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(field, out var value) &&
+        value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString()),
+        $"The tax report is missing its {field}.");
+
+    private static void RequireBoolean(JsonElement parent, string field) => Require(
+        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(field, out var value) &&
+        value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+        $"The tax report is missing its {field} flag.");
+
     private static void RequireArray(JsonElement parent, string name) => Require(
         parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array,
-        $"The snapshot is missing its {name} array.");
+        $"The response is missing its {name} array.");
 
     private static void RequireObject(JsonElement parent, string name) => Require(
         parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Object,
