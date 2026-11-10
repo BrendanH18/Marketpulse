@@ -28,7 +28,7 @@ def watch(ctx: click.Context) -> None:
 @watch.command("list")
 @click.option("--offline", is_flag=True, help="List saved symbols without fetching prices.")
 @click.option("--json", "as_json", is_flag=True, help="Saved symbols as JSON (offline; no prices).")
-@click.option("--search", default="", help="Offline symbol substring filter (case-insensitive).")
+@click.option("--search", help="Offline symbol substring filter (case-insensitive).")
 @click.option("--offset", type=click.IntRange(min=0), help="Skip matching symbols (implies offline).")
 @click.option("--limit", type=click.IntRange(min=1), help="Maximum matching symbols (implies offline).")
 @click.option("--count", "count_only", is_flag=True, help="Count matches before pagination, offline.")
@@ -38,16 +38,24 @@ def watch_list(
     app: App,
     offline: bool,
     as_json: bool,
-    search: str,
+    search: str | None,
     offset: int | None,
     limit: int | None,
     count_only: bool,
     alphabetical: bool,
 ) -> None:
     """List watched symbols; filters, paging and reports imply offline output."""
-    if offline or as_json or search or offset is not None or limit is not None or count_only or alphabetical:
+    if (
+        offline
+        or as_json
+        or search is not None
+        or offset is not None
+        or limit is not None
+        or count_only
+        or alphabetical
+    ):
         saved = app.store.watchlist()
-        symbols = [symbol for symbol in saved if search.casefold() in symbol.casefold()]
+        symbols = [symbol for symbol in saved if (search or "").casefold() in symbol.casefold()]
         if count_only:
             click.echo(len(symbols))
             return

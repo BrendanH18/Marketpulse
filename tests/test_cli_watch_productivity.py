@@ -27,6 +27,7 @@ def test_watch_search_pages_count_and_sort_are_offline_and_keep_saved_order(cli,
     assert store.watchlist() == ["ZETA.TO", "ALPHA", "BETA.TO", "GAMMA"]
     assert "BETA.TO" in cli("watch", "list", "--search", "beta").output
     assert "ZETA.TO" in cli("watch", "list", "--offset", "0").output
+    assert "ZETA.TO" in cli("watch", "list", "--search", "").output
     assert cli("watch", "list", "--search", "absent", "--count").output.strip() == "0"
     assert json.loads(cli("watch", "list", "--offset", "99", "--json").output) == []
     assert cli("watch", "list", "--limit", "0").exit_code == 2
