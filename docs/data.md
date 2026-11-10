@@ -110,7 +110,9 @@ protect against losing the disk; copy important backups to another location.
 The database backup does not include the TOML configuration file.
 `backup list --json` returns the same newest-first inventory as a JSON array,
 including absolute paths, reasons, sizes in bytes, and timestamps parsed from
-backup filenames (`null` when unavailable). It does not restore or prune files.
+backup filenames (`null` when unavailable). It does not restore files. As with
+other CLI commands, opening the ledger may take an overdue daily backup and
+prune older daily backups according to the retention policy above.
 
 ## Restore a database
 
