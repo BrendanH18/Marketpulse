@@ -147,6 +147,46 @@ allocation and targets but disables changes. If an asset save has an uncertain
 result, the dialog keeps the submitted fields fixed: retry submits the same
 request safely, rather than recording the asset or valuation twice.
 
+### Backups and restore
+
+In **Automation › Backups and restore**, **Back up now** saves a consistent copy
+of the ledger in the engine's backup folder. The list shows each backup's file
+name, time, reason and size. **Restore this backup…** asks you to confirm the
+selected file and that entries recorded after it will be replaced. Configuration
+is kept; it is not part of the backup.
+
+The engine validates the selected database and creates a **Before a restore**
+backup of the current ledger before replacing it. If validation or that safety
+copy fails, the restore is refused. To undo a successful restore, restore the
+corresponding **Before a restore** copy. The app refreshes after creating or
+restoring a backup. A successful restore followed by a failed refresh is reported
+as restored, with a separate refresh error. If a timeout or crash leaves the
+restore result unknown, refresh and inspect Activity and the backup list before
+confirming another restore. Confirmation rechecks the current ledger and backup
+metadata through the engine, including edits made by the CLI or another app.
+This includes saved assets, watchlists (even symbols without quotes), alerts,
+and allocation targets as well as ledger entries and accounts.
+
+Privacy hides backup paths and details. The fictional demo cannot create or
+restore backups. These controls use the same engine commands as the CLI; no
+backup file is uploaded. Backups outside the configured folder can still be
+restored using the [CLI](data.md#restore-a-database).
+
+The focused headless UI regression check runs against an installed or bundled
+Python engine and creates its own fictional cash ledger:
+
+```powershell
+dotnet restore windows/MarketPulse.BackupUiCheck --locked-mode -p:UseAppHost=false
+dotnet run --project windows/MarketPulse.BackupUiCheck --no-restore -p:UseAppHost=false -- "$python"
+```
+
+`$python` is the absolute engine interpreter path from the build checks below.
+An optional second argument saves rendered screenshots to that directory.
+The check exercises create/restore button events, confirmation and cancellation,
+stale confirmations, privacy, and demo controls. Linux additionally injects a
+missing backend and a failed post-restore refresh. These headless checks run in
+Windows CI too; they do not replace the Windows desktop and Narrator checklist.
+
 Windows desktop notifications are not implemented; alert state remains visible in
 the app. Automatic startup is not implemented. The installer and portable zip are
 built as described in [Build the installer](#build-the-installer).

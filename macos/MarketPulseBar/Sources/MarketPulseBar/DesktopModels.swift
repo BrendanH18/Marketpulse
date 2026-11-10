@@ -495,6 +495,8 @@ struct StorageInfo: Decodable {
   let backupDir: String?
   /// Backups the app can restore, newest first. Absent from older engines; empty in the demo.
   let backups: [BackupInfo]?
+  /// Saved asset/watchlist/alert/target data; combine with ledgerRevision before a restore.
+  let restoreRevision: String?
 }
 
 /// The engine configuration the Settings window edits with `marketpulse config set`.

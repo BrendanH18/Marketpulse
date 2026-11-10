@@ -204,6 +204,19 @@ def storage_info(store: Store) -> dict:
         "empty": not store.accounts(include_archived=True),
         "backup_dir": str(store.backup_dir),
         "backups": [row for p in store.backups() if (row := backup_row(store, p)) is not None],
+        # These user-managed tables are restored too, but do not affect the Tax/ledger revision.
+        # Read saved watchlist membership even when no quote could be fetched for a symbol.
+        "restore_revision": hashlib.sha256(
+            json.dumps(
+                {
+                    "assets": {symbol: asdict(asset) for symbol, asset in store.assets().items()},
+                    "watchlist": store.watchlist(),
+                    "alerts": [asdict(alert) for alert in store.alerts()],
+                    "targets": store.targets(),
+                },
+                sort_keys=True,
+            ).encode()
+        ).hexdigest(),
     }
 
 

@@ -9,5 +9,6 @@
   <ItemGroup>
     <Compile Include="../MarketPulse.Demo/DemoBackend.cs" Link="DemoBackend.cs" />
     <Compile Include="../MarketPulse.Demo/BackendClient.cs" Link="BackendClient.cs" />
+    <Compile Include="../MarketPulse.Demo/BackendClient.Backups.cs" Link="BackendClient.Backups.cs" />
   </ItemGroup>
 </Project>

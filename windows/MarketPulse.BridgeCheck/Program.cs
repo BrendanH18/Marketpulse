@@ -271,6 +271,8 @@ try
     }
     catch (FileNotFoundException) { }
     Console.WriteLine("PASS: real Python multi-year CAD tax report, superficial-loss working, anonymized archived activity, selected-year UTF-8 CSV parity, export/backend errors, and canceled tax requests/exports.");
+
+    await BackupChecks.RunAsync(args[0]);
 }
 finally
 {

@@ -74,6 +74,7 @@ struct NativeBridgeCheck {
     let ledger = try decoder.decode(
       StorageInfo.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[4])))
     let backups = ledger.backups ?? []
+    precondition(ledger.restoreRevision?.count == 64)
     precondition(ledger.backupDir?.hasSuffix("/backups") == true && backups.count >= 2)
     precondition(Set(backups.map(\.reasonLabel)) == ["Daily backup", "Before a restore"])
     precondition(backups.allSatisfy { $0.date != nil && $0.size > 0 && $0.when != $0.name })
