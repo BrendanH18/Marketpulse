@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Thirty offline CLI productivity improvements ([#108](https://github.com/BrendanH18/Marketpulse/issues/108)):
+  activity exclusions and date filters, grouped CSV reports and page metadata,
+  saved-watchlist browsing and alert editing, and redacted configuration inspection,
+  defaults, individual resets and validation. See [CLI productivity](docs/cli-productivity.md).
+
 - Thirty more offline CLI improvements ([#106](https://github.com/BrendanH18/Marketpulse/issues/106)):
   activity CSV exports, counts and grouped summaries, note and ID filters,
   detailed account/asset inspection, inventory sorting and paging, and backup

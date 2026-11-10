@@ -139,7 +139,6 @@ def test_note_and_inclusive_id_filters_compose(reports):
         ("--count", "--json"),
         ("--count", "--csv"),
         ("--count", "--summary", "type"),
-        ("--csv", "--summary", "type"),
         ("--min-id", "2", "--max-id", "1"),
         ("--min-id", "0"),
         ("--max-id", "-1"),

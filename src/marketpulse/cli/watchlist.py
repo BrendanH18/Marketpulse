@@ -11,7 +11,7 @@ import click
 from rich.console import Group
 from rich.text import Text
 
-from .. import render
+from .. import fmt, render
 from ..models import ALERT_CONDITIONS, Alert, parse_symbols
 from .base import App, fail, pass_app
 from .root import main
@@ -28,20 +28,56 @@ def watch(ctx: click.Context) -> None:
 @watch.command("list")
 @click.option("--offline", is_flag=True, help="List saved symbols without fetching prices.")
 @click.option("--json", "as_json", is_flag=True, help="Saved symbols as JSON (offline; no prices).")
+@click.option("--search", help="Offline symbol substring filter (case-insensitive).")
+@click.option("--offset", type=click.IntRange(min=0), help="Skip matching symbols (implies offline).")
+@click.option("--limit", type=click.IntRange(min=1), help="Maximum matching symbols (implies offline).")
+@click.option("--count", "count_only", is_flag=True, help="Count matches before pagination, offline.")
+@click.option("--alphabetical", is_flag=True, help="Sort offline output without changing saved order.")
 @pass_app
-def watch_list(app: App, offline: bool, as_json: bool) -> None:
-    """List watched symbols, with prices unless --offline or --json is supplied."""
-    if offline or as_json:
-        symbols = app.store.watchlist()
+def watch_list(
+    app: App,
+    offline: bool,
+    as_json: bool,
+    search: str | None,
+    offset: int | None,
+    limit: int | None,
+    count_only: bool,
+    alphabetical: bool,
+) -> None:
+    """List watched symbols; filters, paging and reports imply offline output."""
+    if (
+        offline
+        or as_json
+        or search is not None
+        or offset is not None
+        or limit is not None
+        or count_only
+        or alphabetical
+    ):
+        saved = app.store.watchlist()
+        symbols = [symbol for symbol in saved if (search or "").casefold() in symbol.casefold()]
+        if count_only:
+            click.echo(len(symbols))
+            return
+        if alphabetical:
+            symbols.sort()
+        start = offset or 0
+        symbols = symbols[start:] if limit is None else symbols[start : start + limit]
         if as_json:
             click.echo(json.dumps(symbols, ensure_ascii=False))
         elif symbols:
             t = render.table(("Position", "right"), "Symbol")
-            for position, symbol in enumerate(symbols, start=1):
+            for symbol in symbols:
+                position = saved.index(symbol) + 1
                 t.add_row(Text(str(position), style="muted"), Text(symbol, style="bright"))
             app.console.print(t)
         else:
-            app.console.print(Text("Watchlist is empty — `marketpulse watch add NVDA XEQT.TO`.", style="muted"))
+            message = (
+                "No watchlist symbols on this page."
+                if saved
+                else "Watchlist is empty — `marketpulse watch add NVDA XEQT.TO`."
+            )
+            app.console.print(Text(message, style="muted"))
         return
     with app.busy("Fetching watchlist…"):
         symbols, quotes, errors = app.tracker.watchlist_quotes()
@@ -126,28 +162,35 @@ def alerts(ctx: click.Context) -> None:
 @click.option("-s", "--symbol", help="Only alerts for this symbol.")
 @click.option("--state", type=click.Choice(["armed", "paused", "triggered"], case_sensitive=False))
 @click.option("--json", "as_json", is_flag=True, help="Alert metadata as JSON (unmasked; offline).")
+@click.option("--condition", type=click.Choice(ALERT_CONDITIONS, case_sensitive=False))
+@click.option("--count", "count_only", is_flag=True, help="Print the number of matching alerts.")
 @pass_app
-def alerts_list(app: App, symbol: str | None, state: str | None, as_json: bool) -> None:
+def alerts_list(
+    app: App,
+    symbol: str | None,
+    state: str | None,
+    as_json: bool,
+    condition: str | None,
+    count_only: bool,
+) -> None:
     """List saved alerts, optionally filtered by symbol and current state."""
     items = app.store.alerts()
     if symbol is not None:
         items = [a for a in items if a.symbol == symbol.strip().upper()]
     if state is not None:
         items = [a for a in items if _alert_state(a) == state]
+    if condition is not None:
+        items = [a for a in items if a.condition == condition]
+    if count_only:
+        click.echo(len(items))
+        return
     if as_json:
-        payload = []
-        for a in items:
-            row = asdict(a)
-            # Invalid legacy alerts remain inspectable, but JSON has no Infinity/NaN.
-            row["threshold"] = a.threshold if math.isfinite(a.threshold) else None
-            row["state"] = _alert_state(a)
-            payload.append(row)
-        click.echo(json.dumps(payload, ensure_ascii=False, allow_nan=False))
+        click.echo(json.dumps([_alert_json(a) for a in items], ensure_ascii=False, allow_nan=False))
         return
     if not items:
         message = (
             "No alerts match these filters."
-            if symbol is not None or state
+            if symbol is not None or state or condition
             else ("No alerts — `marketpulse alerts add NVDA above 200`.")
         )
         app.console.print(Text(message, style="muted"))
@@ -163,6 +206,65 @@ def alerts_list(app: App, symbol: str | None, state: str | None, as_json: bool) 
             Text(str(a.id), style="muted"), Text(a.describe(), style="bright"), shown_state, Text(a.note, style="muted")
         )
     app.console.print(t)
+
+
+def _alert_json(alert: Alert) -> dict:
+    row = asdict(alert)
+    # Invalid legacy alerts remain inspectable, but JSON has no Infinity/NaN.
+    row["threshold"] = alert.threshold if math.isfinite(alert.threshold) else None
+    row["state"] = _alert_state(alert)
+    return row
+
+
+@alerts.command("show")
+@click.argument("alert_id", type=click.IntRange(min=1))
+@click.option("--json", "as_json", is_flag=True, help="Print unmasked alert metadata, offline.")
+@pass_app
+def alerts_show(app: App, alert_id: int, as_json: bool) -> None:
+    """Inspect an alert's full note, threshold, state and trigger history."""
+    alert = next((a for a in app.store.alerts() if a.id == alert_id), None)
+    if alert is None:
+        fail(f"No alert #{alert_id}.")
+    row = _alert_json(alert)
+    if as_json:
+        click.echo(json.dumps(row, ensure_ascii=False, allow_nan=False))
+        return
+    table = render.table("Field", "Value", title=f"Alert #{alert_id}")
+    for field, value in row.items():
+        shown = fmt.MASK if app.privacy and field == "threshold" else str(value)
+        table.add_row(Text(field), Text(shown))
+    app.console.print(table)
+
+
+@alerts.command("edit")
+@click.argument("alert_id", type=click.IntRange(min=1))
+@click.option("--threshold", type=float, help="New finite, positive threshold.")
+@click.option("--condition", type=click.Choice(ALERT_CONDITIONS, case_sensitive=False))
+@click.option("--note", help="Replace the note; pass an empty string to clear it.")
+@pass_app
+def alerts_edit(app: App, alert_id: int, threshold: float | None, condition: str | None, note: str | None) -> None:
+    """Edit saved criteria or notes offline, preserving state and trigger history.
+
+    Use `alerts rearm` explicitly to clear the trigger history after an edit.
+    """
+    if threshold is None and condition is None and note is None:
+        raise click.UsageError("Supply --threshold, --condition, or --note.")
+    with app.store.transaction():
+        alert = next((a for a in app.store.alerts() if a.id == alert_id), None)
+        if alert is None:
+            fail(f"No alert #{alert_id}.")
+        if threshold is not None:
+            alert.threshold = threshold
+        if condition is not None:
+            alert.condition = condition
+        if note is not None:
+            alert.note = note
+        try:
+            alert.validate()
+        except ValueError as e:
+            fail(str(e))
+        app.store.update_alert(alert)
+    app.ok(f"Updated alert #{alert_id}.")
 
 
 def _alert_state(alert: Alert) -> str:

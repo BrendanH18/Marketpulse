@@ -39,6 +39,9 @@ The directory is created when settings are saved. Use
 The benchmark field is currently stored but is not used to calculate benchmark
 performance. The companion also has settings in its own popover.
 
+See [Configuration productivity](cli-config-productivity.md) for redacted JSON,
+individual setting inspection, defaults, reset, and read-only validation commands.
+
 Unknown TOML keys and values of an incompatible type are ignored. Malformed
 TOML produces a warning and falls back to defaults for that process.
 
