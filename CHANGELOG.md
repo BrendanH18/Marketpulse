@@ -63,6 +63,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `stale_since`, each position's `quote_source` and `quote_age_seconds`, and the provider
   fields in `settings`.
 
+### Changed
+
+- Desktop refreshes reuse transaction rows and revision hashes within each snapshot,
+  reducing repeated ledger reads and serialization. The desktop JSON payload and edit
+  revision values stay the same. See [refresh measurements](docs/performance.md).
+
 ### Fixed
 
 - Configuration and CSV file exports use UTF-8 explicitly, preserving non-ASCII

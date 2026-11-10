@@ -19,9 +19,9 @@ from .automation import run_cycle
 from .brokers import PROFILES, skip_reasons
 from .config import Config, config_path
 from .db import Snapshot, Store
-from .ledger import LedgerIssue
+from .ledger import LedgerIssue, replay
 from .market import MarketData, MarketError
-from .models import Account, AccountType, Asset, AssetClass, AssetKind, Quote, Transaction, TxnType
+from .models import Account, AccountType, Asset, AssetClass, AssetKind, Quote, Transaction, TxnType, record_revision
 from .providers import PROVIDERS
 from .services import Tracker
 from .tax import Disposition
@@ -34,18 +34,22 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
     generation = tracker.store.restore_id
     cycle = run_cycle(tracker, fresh=fresh)
     view = cycle.view
-    state = tracker.store.ledger()
+    # Reuse only within this snapshot, after the cycle's quote fetch; later refreshes read anew.
+    txns = tracker.store.transactions()
+    amap = tracker.store.account_map()
+    state = replay(txns, amap)
     status = tracker.status_payload(view, history_days=None, evaluate_alerts=False)
     # Alerts were already evaluated by the cycle; report what it fired, as `status --json` does.
     status["fired"] = cycle.report["fired"]
     # Archived accounts never appear in the app (valuation already leaves out their
     # holdings); their own transactions are hidden too, though the ledger keeps them.
-    amap = tracker.store.account_map()
     archived = {i for i, a in amap.items() if a.archived}
+    # Hidden entries still contribute to the Tax revision. Serialize and hash each entry once.
+    rows = [activity_row(t, amap, generation) for t in txns]
     targets = tracker.store.targets()
     # What each manual asset's value rests on: the valuation pricing uses, else the latest purchase.
     valued: dict[str, str] = {}
-    for t in tracker.store.transactions():
+    for t in txns:
         if t.type is TxnType.BUY and t.date > valued.get(t.symbol, ""):
             valued[t.symbol] = t.date
     valued.update({symbol: day for symbol, (day, _) in state.valuations.items()})
@@ -85,11 +89,7 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
             }
             for p in view.positions
         ],
-        "activity": [
-            activity_row(t, amap, generation)
-            for t in reversed(tracker.store.transactions())
-            if t.account_id not in archived
-        ],
+        "activity": [row for row in reversed(rows) if row["account_id"] not in archived],
         "allocation": [asdict(b) for b in view.by_class],
         # Asset-class targets (`allocation --target`) and how far the portfolio is from each, as
         # `marketpulse allocation` shows them. Suggestions only: MarketPulse never trades.
@@ -108,7 +108,7 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         "backend": {"version": __version__, "python": platform.python_version()},
         "storage": storage_info(tracker.store),
         "settings": settings_info(tracker),
-        "ledger_revision": ledger_revision(tracker, generation),
+        "ledger_revision": _ledger_revision(tracker, generation, [row["revision"] for row in rows]),
         # English text, as before; `warning_items` has the same warnings with codes for the app.
         "warnings": [w["text"] for w in warnings],
         "warning_items": warnings,
@@ -152,10 +152,15 @@ def ledger_revision(tracker: Tracker, generation: str = "") -> str:
     """Changes whenever anything a tax report reads does, archived accounts and their entries
     included (the snapshot leaves those out): the app reloads its Tax workspace only then.
     That includes the day: room rolls over on January 1, and superficial-loss windows close."""
+    return _ledger_revision(tracker, generation, [t.revision(generation) for t in tracker.store.transactions()])
+
+
+def _ledger_revision(tracker: Tracker, generation: str, transaction_revisions: list[str]) -> str:
+    """Use the same transaction revisions as Activity when assembling a snapshot."""
     store = tracker.store
     parts = [
         date.today().isoformat(),
-        *(t.revision(generation) for t in store.transactions()),
+        *transaction_revisions,
         *(a.revision(generation) for a in store.accounts(include_archived=True)),
         json.dumps(sorted(store.rooms().items())),
         tracker.base,
@@ -371,13 +376,14 @@ def archived_warning(name: str) -> str:
 def activity_row(t: Transaction, accounts: dict[int, Account], generation: str = "") -> dict:
     """A ledger entry for the app; `value` is unsigned and `direction` gives its sign."""
     target = accounts.get(t.target_account_id) if t.target_account_id is not None else None
+    values = asdict(t)
     return {
-        **asdict(t),
+        **values,
         "value": t.gross_value,
         "direction": t.cash_direction,
         "target_account": target.name if target else "",
         # Sent back with an edit or delete (`txn edit --revision`), which is refused if the entry changed.
-        "revision": t.revision(generation),
+        "revision": record_revision(values, generation),
     }
 
 
