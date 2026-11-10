@@ -87,7 +87,7 @@ bridge and sends writes through the existing CLI. Financial calculations remain
 in Python. It shares the CLI's ledger and configuration paths by default.
 
 The window provides Overview, Holdings, Activity, Accounts, Watchlist and alerts,
-Income, Tax, and Automation. Record transactions and preview a CSV before importing it.
+Income, Tax, Automation, and Allocation. Record transactions and preview a CSV before importing it.
 Activity uses the bridge's signed cash-flow direction. Archived accounts stay out
 of the workspaces and totals. Privacy hides portfolio details in both the window
 and tray. Closing the window keeps the app running in the tray; choose **Open
@@ -116,6 +116,35 @@ accountant. Cancelling the file picker writes nothing. Privacy hides the report
 and its messages; turn it off to read them. The offline demo includes fictional
 tax figures and disables export. Figures are estimates: check them against your
 slips before filing.
+
+### Custom assets and allocation
+
+In **Holdings**, choose **Add GIC or bond** to record a principal, annual rate,
+compounding method, start and maturity date. Choose **Add manually valued asset**
+for property, private shares or other assets you value yourself. Each form uses
+an active account and defaults to its currency. Symbols must be new to the
+portfolio: adding an asset never replaces an existing symbol's pricing metadata.
+The engine supplies accrual and valuation results; no quotes are requested for
+these custom assets. A purchase reduces the account's tracked cash balance.
+
+Manual holdings offer **Record a valuation**, with a date and value per unit.
+The valuation applies to that symbol across accounts, including archived ones.
+Every holding offers **Change asset class**, which changes its classification
+across accounts without changing transactions. Holdings show the saved valuation
+date or the fixed-income term and rate.
+
+**Allocation** shows each asset class's value and share in the portfolio's base
+currency. **Set targets** or **Change targets** replaces the saved percentages;
+each must be between 0 and 100, with a total at or below 100. A blank field means
+no target for that class. **Clear targets** removes all targets after confirmation
+and keeps holdings and transactions. The engine supplies target drift and
+suggested adjustments. These are suggestions only; MarketPulse does not trade.
+Review warnings about missing prices or exchange rates before using the totals.
+
+Privacy hides holdings and allocation details. Demo mode displays fictional
+allocation and targets but disables changes. If an asset save has an uncertain
+result, the dialog keeps the submitted fields fixed: retry submits the same
+request safely, rather than recording the asset or valuation twice.
 
 Windows desktop notifications are not implemented; alert state remains visible in
 the app. Automatic startup is not implemented. The installer and portable zip are

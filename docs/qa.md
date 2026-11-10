@@ -354,6 +354,21 @@ Windows desktop access is unavailable; do not infer them from a passing CI build
 The helper creates a new temporary directory each time; remove only its printed
 root after closing the QA app.
 
+### Windows custom assets and allocation
+
+Use the same fictional scratch paths for both the app and CLI. These checks add
+only fictional assets; no live quotes are needed for them.
+
+| Item | Check |
+| --- | --- |
+| WA1 Fixed income | In Holdings, Add GIC or bond to Fictional TFSA: symbol `QA-GIC`, principal 1,000, rate 4.5%, start today, maturity a year later, annual compounding. Invalid maturity at/before start or nonpositive principal stays in the form without a write. After saving, Holdings shows the term/rate and matches the scratch CLI value. Adding the same symbol again is rejected without changing metadata or recording another purchase. |
+| WA2 Manual assets | Add manually valued asset `QA-ART`, name `Fictional art`, value 300, class Alternative, to Fictional TFSA. Record a valuation of 350 dated today. Holdings shows the value and valuation date; scratch Activity has one new valuation. A nonmanual holding offers no valuation action. Change the art to Real Estate: Holdings and Allocation show the new class. Canceling any form changes nothing. |
+| WA3 Allocation targets | Open Allocation and set Fixed Income 60 and Real Estate 40. Values, weights, target, drift and suggested amounts match `marketpulse allocation` against the same scratch paths. Targets above 100% combined, negative or nonnumeric values are rejected without replacing old targets. Reopen and check values; clear targets after confirmation and check holdings are unchanged. Archived QA holdings never enter allocation totals. |
+| WA4 Privacy, demo and failure | Privacy hides all asset/allocation amounts and identifying details. In demo, Allocation shows fictional targets and every asset/target write action is disabled. While saving, duplicate submits and other write actions are disabled. With an unavailable backend a save reports an error; an uncertain retry keeps the same request and cannot add duplicate purchase/valuation rows. Check keyboard labels, scrolling and clipping at Windows text scaling. |
+
+Report WA1–WA4 separately from build and bridge checks. Windows appearance,
+Narrator and native window behavior require observed Windows evidence.
+
 ## Tool limits and workarounds
 
 Some computer-use tools only see the app's own window, not the Dock or the system

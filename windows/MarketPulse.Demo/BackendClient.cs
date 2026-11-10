@@ -141,7 +141,8 @@ public sealed class BackendClient
             "The snapshot is missing its net worth.");
         foreach (var name in new[] { "accounts", "watchlist", "history" })
             RequireArray(status, name);
-        foreach (var name in new[] { "accounts", "positions", "activity", "income_months", "room", "alerts", "warnings" })
+        foreach (var name in new[] { "accounts", "positions", "activity", "income_months", "room", "alerts", "warnings",
+            "assets", "allocation", "targets", "rebalance" })
             RequireArray(root, name);
         foreach (var name in new[] { "settings", "automation", "storage" })
             RequireObject(root, name);

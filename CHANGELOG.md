@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   details, and CSV export for your accountant. Reports use the existing Python
   engine, load on demand, and respect privacy mode; the fictional demo is read-only.
 
+- Windows custom-asset forms for GICs, bonds and manually valued holdings, with
+  valuation updates and asset-class overrides. The Allocation workspace shows
+  current weights, targets, drift and engine-provided suggestions; targets can
+  be edited or cleared without a terminal.
+
 - On-demand macOS and Windows desktop benchmarks in the CI workflow, with raw
   samples, source commit, runtime metadata and a run link retained in the reports.
   See [desktop refresh measurements](docs/performance.md) for how to run them.
