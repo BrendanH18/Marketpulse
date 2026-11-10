@@ -248,6 +248,12 @@ def guess_currency(symbol: str, default: str = "USD") -> str:
 # ── Entities ──────────────────────────────────────────────────────────────────
 
 
+def record_revision(values: dict, generation: str) -> str:
+    """Hash stored fields with the restore generation, reusing an already serialized row."""
+    fields = json.dumps({**values, "generation": generation}, sort_keys=True, default=str)
+    return hashlib.sha256(fields.encode()).hexdigest()[:16]
+
+
 @dataclass
 class Account:
     name: str
@@ -275,8 +281,7 @@ class Account:
     def revision(self, generation: str) -> str:
         """As `Transaction.revision`: an edit, archive or unarchive sent with it is refused if the
         account changed since it was loaded, or a restore replaced the ledger (and maybe this id)."""
-        fields = json.dumps({**asdict(self), "generation": generation}, sort_keys=True, default=str)
-        return hashlib.sha256(fields.encode()).hexdigest()[:16]
+        return record_revision(asdict(self), generation)
 
 
 _CASH_DIRECTION = {
@@ -324,8 +329,7 @@ class Transaction:
         `Store.restore_id`). A client that loaded the entry sends it back with an edit or delete,
         so a row changed or replaced since (another window, a restore, or a reused id) is
         refused instead of overwritten, even when a restore brought back identical fields."""
-        fields = json.dumps({**asdict(self), "generation": generation}, sort_keys=True, default=str)
-        return hashlib.sha256(fields.encode()).hexdigest()[:16]
+        return record_revision(asdict(self), generation)
 
     @property
     def gross_value(self) -> float:

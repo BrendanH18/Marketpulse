@@ -103,7 +103,54 @@ about 0.94 seconds. That body cost remains without startup or network waiting.
 Process reuse can help, but this experiment does not prove the benefit of a
 server, and it omits the server protocol, crash recovery, locking, and UI costs.
 
-No runtime optimization is part of this measurement PR. Keep #48 open and gated
-on a maintainer decision. Repeat this baseline on target macOS and Windows
-hardware before choosing a helper, and use the same harness for before/after
-numbers if a later optimization is approved.
+The original measurement change did not optimize runtime. The maintainer approved
+the snapshot reuse below as the next slice on 2026-11-09. Keep #48 open; choosing
+a persistent helper remains a separate maintainer decision. Repeat this benchmark
+on target macOS and Windows hardware before making that decision.
+
+## Snapshot reuse
+
+After the refresh cycle fetches prices, the desktop snapshot now reads transactions
+once for its own replay, manual-asset dates, Activity, and ledger revision. Each
+transaction's serialized fields supply both its Activity row and revision hash;
+the ledger revision reuses those hashes, including entries in archived accounts.
+The revision algorithm, restore-generation read before the cycle, and bridge
+version stay unchanged. Nothing is cached across refreshes, so edits and restores
+are seen by the next refresh. Valuation, contribution room, and their replays are
+unchanged.
+
+On the same fictional ledger, profiling a warmed snapshot found five transaction
+reads instead of eight, 5,015 dataclass serializations instead of 15,015, and 5,008
+record revision hashes instead of 10,008 (the extra eight are account revisions).
+The three ledger replays remain. A full sorted-JSON comparison with the previous
+snapshot implementation, with timestamps fixed, matched every field on the
+5,000-transaction fixture. Regression tests check every transaction type's original
+Activity fields and revision bytes, hidden archived entries in the ledger hash,
+and changed hashes after a later edit. Existing restore-during-refresh tests pass.
+
+Measured on 2026-11-09 on the same Raspberry Pi 5 / Linux aarch64 / Python
+3.11.18, using seven samples per case in each run. The fresh baseline is commit
+`23de62d`; the optimized run uses the snapshot reuse in this change. The harness
+and workload were unchanged, and each run ran alone. Raw samples:
+[before](benchmarks/desktop-snapshot-before-linux-arm64.json) and
+[after](benchmarks/desktop-snapshot-after-linux-arm64.json).
+
+Times are median milliseconds (observed min–max).
+
+| Case | Zero delay, before | Zero delay, after | 100 ms/request, before | 100 ms/request, after |
+| --- | ---: | ---: | ---: | ---: |
+| CLI readiness | 191 (184–475) | 203 (185–544) | 221 (183–501) | 199 (183–373) |
+| Refresh | 1158 (1122–1432) | 736 (718–1016) | 1490 (1314–3052) | 959 (926–1220) |
+| Edit | 349 (331–468) | 331 (319–710) | 444 (348–792) | 352 (323–476) |
+| Edit + refresh | 1487 (1452–1700) | 1050 (1034–2131) | 1855 (1687–4091) | 1311 (1248–1771) |
+| Reused Tracker, fresh prices | 955 (941–1179) | 551 (538–1219) | 1067 (1059–3648) | 673 (645–1297) |
+| Reused Tracker, cached prices | 960 (941–1050) | 588 (544–839) | 994 (948–1826) | 589 (539–1356) |
+
+The zero-delay refresh median fell 36%, and edit + refresh fell 29%. With the
+simulated request delay, the corresponding reductions were 36% and 29%. Request
+counts remained identical (two per one-shot refresh, one per reused fresh-price
+snapshot, none per reused cached-price snapshot). CLI readiness and the edit
+command did not gain a new optimization; their variation and the broad ranges
+show host scheduling noise. These seven-sample runs are not tail-latency estimates.
+The remaining snapshot work is still measurable; this result does not establish
+macOS/Windows UI responsiveness or justify a persistent helper.
