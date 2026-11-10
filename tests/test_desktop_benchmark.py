@@ -19,14 +19,30 @@ def test_benchmark_runs_on_fictional_data_and_ignores_inherited_paths(tmp_path):
     ledger.write_bytes(b"Not a database: inherited data must never be opened")
     config = tmp_path / "do-not-read.toml"
     config.write_text("Invalid TOML: inherited config must never be loaded", encoding="utf-8")
+    output = tmp_path / "résultats.json"
     result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--samples", "1", "--delay-ms", "1"],
-        env={**os.environ, "MARKETPULSE_DATA": str(data), "MARKETPULSE_CONFIG": str(config)},
+        [sys.executable, str(SCRIPT), "--samples", "1", "--delay-ms", "1", "--output", str(output)],
+        env={
+            **os.environ,
+            "MARKETPULSE_DATA": str(data),
+            "MARKETPULSE_CONFIG": str(config),
+            "BENCHMARK_RUN_URL": "https://example.invalid/run/1",
+            "BENCHMARK_RUNNER": "fictional-runner",
+        },
         capture_output=True,
         check=True,
         timeout=120,
     )
-    report = json.loads(result.stdout)
+    assert result.stdout == b""
+    report = json.loads(output.read_text(encoding="utf-8"))
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=SCRIPT.parents[1], text=True).strip()
+    assert report["source"]["commit"] == commit
+    assert isinstance(report["source"]["tracked_changes"], bool)
+    assert report["run"]["url"] == "https://example.invalid/run/1"
+    assert report["run"]["samples_per_case"] == 1
+    assert report["run"]["started_at"].endswith("+00:00")
+    assert report["environment"]["python"] == sys.version
+    assert report["environment"]["runner"] == "fictional-runner"
     assert report["workload"] == {"transactions": 5000, "accounts": 4, "positions": 12, "currencies": ["CAD", "USD"]}
     assert set(report["scenarios"]) == {"0.0", "1.0"}
     for scenario in report["scenarios"].values():

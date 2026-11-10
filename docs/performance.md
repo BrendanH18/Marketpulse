@@ -29,6 +29,43 @@ Run it alone, without tests or a profiler competing for CPU. Use the same host,
 Python version, sample count, and delay when comparing a later change. These are
 observations, not timing thresholds for CI.
 
+### Run on macOS and Windows in Actions
+
+Open **Actions › CI › Run workflow**, select the branch to measure, and enable
+**Run offline desktop benchmarks on macOS and Windows**. The normal CI checks
+also run; benchmarks are skipped on ordinary pushes, pull requests, release
+checks, and manual runs with the option disabled. With the GitHub CLI:
+
+```bash
+gh workflow run ci.yml --ref main -f desktop_benchmark=true
+```
+
+Each platform runs the unchanged workload above with Python 3.11, seven samples
+per case, and both zero and 100 ms/request simulated waits. The jobs use
+`namespace-profile-macos` and `windows-latest`; the report records the actual
+OS, architecture and Python version, since hosted runner images can change.
+The runner is dedicated to that benchmark job, but hosted infrastructure still
+has scheduling noise. These measure the Python engine on macOS and Windows,
+not native app rendering, first-install latency or live quote-service delays.
+
+Download the run's `desktop-benchmark-<OS>-<architecture>-<commit>` artifacts
+within 90 days. Each contains `desktop-benchmark.json`: the complete samples
+and summaries, full source commit, whether tracked files were modified, UTC
+start time, run URL and runtime metadata. Copy reports cited in a decision into
+`docs/benchmarks/` so the evidence survives artifact expiry. Compare revisions
+on the same runner type and Python version; don't treat a cross-OS difference
+as a measured optimization.
+
+For a local file, including in Windows PowerShell 5.1, use explicit UTF-8 output:
+
+```bash
+uv run --locked python scripts/benchmark_desktop.py --output desktop-benchmark.json
+```
+
+Standard output remains available when `--output` is omitted. Source metadata
+requires a Git checkout; neither Git command contacts a remote. The file is
+written only after all cases pass their workload validation.
+
 ## What is timed
 
 The fixture has exactly 5,000 valid transactions: 1,250 each of deposits,
