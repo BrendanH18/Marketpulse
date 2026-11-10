@@ -164,6 +164,8 @@ as restored, with a separate refresh error. If a timeout or crash leaves the
 restore result unknown, refresh and inspect Activity and the backup list before
 confirming another restore. Confirmation rechecks the current ledger and backup
 metadata through the engine, including edits made by the CLI or another app.
+This includes saved assets, watchlists (even symbols without quotes), alerts,
+and allocation targets as well as ledger entries and accounts.
 
 Privacy hides backup paths and details. The fictional demo cannot create or
 restore backups. These controls use the same engine commands as the CLI; no

@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a clear confirmation. The existing engine validates the file and saves a
   pre-restore copy first; privacy hides backup details and the demo stays read-only.
   See [Windows backups and restore](docs/windows.md#backups-and-restore).
+  The version-1 snapshot adds `storage.restore_revision` for saved asset,
+  watchlist, alert and allocation-target changes, complementing `ledger_revision`.
 
 - On-demand macOS and Windows desktop benchmarks in the CI workflow, with raw
   samples, source commit, runtime metadata and a run link retained in the reports.

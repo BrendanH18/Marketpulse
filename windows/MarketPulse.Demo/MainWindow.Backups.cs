@@ -58,7 +58,7 @@ public partial class MainWindow
         if (name.Length == 0 || Path.GetFileName(name) != name)
             throw new InvalidDataException("The engine returned an invalid backup name. Refresh before restoring.");
         var path = Path.GetFullPath(Path.Combine(folder, name));
-        var revision = _snapshot is { } root ? Text(root, "ledger_revision") : "";
+        var revision = RestoreRevision(_snapshot!.Value);
         var dialog = new EntryDialog("Restore backup?", "Restore backup");
         dialog.Explain("Restore " + name + " (taken " + Text(backup, "taken_at", "Unknown time") + ") from " + folder + "?");
         dialog.Explain("This replaces your ledger, including entries recorded after this backup. Your configuration stays unchanged. The engine checks the backup and creates a pre-restore copy of the current ledger before replacing it. If validation or that safety backup fails, nothing is restored.");
@@ -83,7 +83,7 @@ public partial class MainWindow
             var current = await _client.SnapshotAsync(_lifetime.Token);
             if (_stopping || Privacy)
                 throw new InvalidOperationException("Restore was not started. Turn Privacy off and select the backup again.");
-            if (Text(current, "ledger_revision") != revision ||
+            if (RestoreRevision(current) != revision ||
                 Text(Get(current, "storage"), "backup_dir") != folder ||
                 !Rows(Get(current, "storage"), "backups").Any(row => Text(row, "name") == Text(backup, "name") &&
                     Text(row, "taken_at") == Text(backup, "taken_at") && Text(row, "size") == Text(backup, "size")))
@@ -91,6 +91,14 @@ public partial class MainWindow
             await BackupOperationCoreAsync(path);
         }
         finally { Busy(false); }
+    }
+
+    private static string RestoreRevision(JsonElement snapshot)
+    {
+        var metadata = Text(Get(snapshot, "storage"), "restore_revision");
+        if (metadata.Length == 0)
+            throw new InvalidDataException("The engine cannot verify all saved portfolio data before restore. Update the engine and refresh.");
+        return Text(snapshot, "ledger_revision") + ":" + metadata;
     }
 
     private void RequireBackupOperation()

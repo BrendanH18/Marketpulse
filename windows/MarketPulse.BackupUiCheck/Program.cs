@@ -69,6 +69,20 @@ try
     Console.WriteLine("PASS: a CLI edit without a window refresh invalidates an open restore confirmation.");
 
     dialog = OpenRestore(manual);
+    var beforeMetadata = Revision();
+    Pump(client.RunAsync(["asset", "classify", "--", "QA-METADATA", "equity"]));
+    Acknowledge(dialog);
+    Click(dialog, "Restore backup");
+    try { WaitOperation(); throw new Exception("External asset metadata was overwritten by restore."); }
+    catch (InvalidOperationException error) when (error.Message.Contains("changed while confirming")) { }
+    Click(dialog, "Cancel");
+    Pump(window.RefreshAsync());
+    Require(Revision() == beforeMetadata && Snapshot().GetProperty("assets").EnumerateArray()
+        .Any(asset => asset.GetProperty("symbol").GetString() == "QA-METADATA" && asset.GetProperty("asset_class").GetString() == "equity"),
+        "Metadata-only edit was lost or changed the Tax ledger revision.");
+    Console.WriteLine("PASS: an external metadata-only edit invalidates confirmation without changing the Tax ledger revision.");
+
+    dialog = OpenRestore(manual);
     Acknowledge(dialog);
     Click(dialog, "Restore backup");
     WaitOperation();

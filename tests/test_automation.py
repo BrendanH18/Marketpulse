@@ -91,6 +91,7 @@ def test_desktop_bridge_reports_missing_prices(tracker):
 
 def test_desktop_bridge_reports_where_data_lives_and_a_new_ledger(tracker, tmp_path):
     storage = snapshot(tracker)["storage"]
+    assert len(storage.pop("restore_revision")) == 64
     backups = str(tmp_path / "backups")
     assert storage == {"data_dir": str(tmp_path), "empty": True, "backup_dir": backups, "backups": []}
     account = tracker.store.add_account(Account(name="Old TFSA"))
