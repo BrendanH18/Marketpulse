@@ -58,12 +58,12 @@ class Config:
             return cfg
         try:
             raw = tomllib.loads(path.read_text(encoding="utf-8"))
-        except OSError:
+        except (OSError, UnicodeError):
             return cfg
-        except tomllib.TOMLDecodeError as e:
+        except tomllib.TOMLDecodeError:
             if path not in _warned:  # once per process; nothing worse than silently losing every setting
                 _warned.add(path)
-                print(f"warning: {path}: {e}; using default settings", file=sys.stderr)
+                print(f"warning: {path}: invalid TOML; using default settings", file=sys.stderr)
             return cfg
         known = {f.name: f for f in fields(cls)}
         for key, value in raw.items():
@@ -79,7 +79,11 @@ class Config:
             else:
                 ok = isinstance(value, str)
             if ok:
-                setattr(cfg, key, type(default)(value) if isinstance(default, int | float) else value)
+                try:
+                    parsed = type(default)(value) if isinstance(default, int | float) else value
+                except (ValueError, OverflowError):
+                    continue  # Invalid numeric data remains diagnosable with `config validate`.
+                setattr(cfg, key, parsed)
         return cfg
 
     def save(self, path: Path | None = None) -> Path:

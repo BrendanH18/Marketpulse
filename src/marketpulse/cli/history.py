@@ -34,12 +34,29 @@ from .root import main
 @click.option("--count", "count_only", is_flag=True, help="Count all matching entries before pagination.")
 @click.option(
     "--summary",
-    type=click.Choice(["type", "account", "currency", "month", "symbol"]),
-    help="Count all matching entries by this field before pagination; supports --json.",
+    type=click.Choice(["type", "account", "currency", "month", "symbol", "year", "day"]),
+    help="Count all matching entries by this field before pagination; supports --json or --csv.",
 )
 @click.option("--has-note/--no-note", default=None, help="Match entries with or without a nonblank note.")
 @click.option("--min-id", type=click.IntRange(min=1), help="Include transaction IDs at or above this value.")
 @click.option("--max-id", type=click.IntRange(min=1), help="Include transaction IDs at or below this value.")
+@click.option(
+    "--exclude-type",
+    "excluded_types",
+    multiple=True,
+    type=click.Choice([t.value for t in TxnType], case_sensitive=False),
+)
+@click.option("--exclude-symbol", "excluded_symbols", multiple=True, help="Exclude a symbol; repeat for several.")
+@click.option("--note", help="Find text only in transaction notes (case-insensitive).")
+@click.option("--year", type=click.IntRange(min=1, max=9999), help="Include only this calendar year.")
+@click.option("--on", "on_date", callback=date_callback, help="Include only this date.")
+@click.option(
+    "--summary-sort",
+    type=click.Choice(["group", "count"]),
+    default="group",
+    help="Sort summaries by group or descending count.",
+)
+@click.option("--page-info", is_flag=True, help="With --json, wrap transactions with pagination metadata.")
 @pass_app
 def activity(
     app: App,
@@ -61,20 +78,33 @@ def activity(
     has_note,
     min_id,
     max_id,
+    excluded_types,
+    excluded_symbols,
+    note,
+    year,
+    on_date,
+    summary_sort,
+    page_info,
 ) -> None:
     """The transaction ledger, newest first."""
     if since and until and since > until:
         raise click.UsageError("--since must be on or before --until.")
     if min_id is not None and max_id is not None and min_id > max_id:
         raise click.UsageError("--min-id must be at or below --max-id.")
-    if sum(bool(value) for value in (as_csv, count_only, summary)) > 1 or (as_json and (as_csv or count_only)):
-        raise click.UsageError("Choose one of --csv, --count, or --summary; only --summary supports --json.")
+    if (as_json and as_csv) or (count_only and (as_json or as_csv or summary)):
+        raise click.UsageError("Choose one output format; --count cannot be combined with --summary, --json or --csv.")
+    if page_info and (not as_json or summary or count_only):
+        raise click.UsageError("--page-info requires --json transaction output without --summary or --count.")
+    if summary_sort != "group" and not summary:
+        raise click.UsageError("--summary-sort requires --summary.")
     generation = app.store.restore_id
     accounts = app.store.account_map()
     acct = app.store.get_account(account) if account else None
     if account and (acct is None or acct.archived):
         fail(f"No active account '{account}'.")
     needle = search.casefold()
+    note_needle = note.casefold() if note is not None else None
+    excluded = {value.strip().upper() for value in excluded_symbols}
     txns = [
         t
         for t in app.store.transactions(account_id=acct.id if acct else None, symbol=symbol)
@@ -82,6 +112,11 @@ def activity(
         and (not since or t.date >= since)
         and (not until or t.date <= until)
         and (not types or t.type in types)
+        and t.type not in excluded_types
+        and t.symbol not in excluded
+        and (note_needle is None or note_needle in t.note.casefold())
+        and (year is None or t.date[:4] == f"{year:04d}")
+        and (not on_date or t.date == on_date)
         and (not currency or t.currency == currency.strip().upper())
         and (has_note is None or bool(t.note.strip()) == has_note)
         and (min_id is None or t.saved_id >= min_id)
@@ -99,8 +134,9 @@ def activity(
         click.echo(len(txns))
         return
     if summary:
-        _activity_summary(app, txns, accounts, summary, as_json)
+        _activity_summary(app, txns, accounts, summary, as_json, as_csv, summary_sort)
         return
+    total = len(txns)
     txns.sort(key=lambda t: (t.date, t.id or 0), reverse=not oldest_first)
     txns = txns[offset:] if show_all else txns[offset : offset + limit]
     if as_csv:
@@ -113,7 +149,20 @@ def activity(
         click.echo(stream.getvalue(), nl=False)
         return
     if as_json:
-        click.echo(json.dumps([_transaction_json(t, accounts, generation) for t in txns], ensure_ascii=False))
+        rows = [_transaction_json(t, accounts, generation) for t in txns]
+        payload = (
+            {
+                "total": total,
+                "offset": offset,
+                "limit": None if show_all else limit,
+                "returned": len(rows),
+                "next_offset": offset + len(rows) if offset + len(rows) < total else None,
+                "items": rows,
+            }
+            if page_info
+            else rows
+        )
+        click.echo(json.dumps(payload, ensure_ascii=False))
         return
     if not txns:
         app.console.print(
@@ -133,7 +182,13 @@ def activity(
 
 
 def _activity_summary(
-    app: App, txns: list[Transaction], accounts: dict[int, Account], group: str, as_json: bool
+    app: App,
+    txns: list[Transaction],
+    accounts: dict[int, Account],
+    group: str,
+    as_json: bool,
+    as_csv: bool,
+    sort: str,
 ) -> None:
     def key(t: Transaction) -> str:
         if group == "account":
@@ -141,6 +196,10 @@ def _activity_summary(
             return str(t.account_id)
         if group == "month":
             return t.date[:7]
+        if group == "year":
+            return t.date[:4]
+        if group == "day":
+            return t.date
         return str(getattr(t, group))
 
     counts = Counter(key(t) for t in txns)
@@ -148,6 +207,15 @@ def _activity_summary(
     if group == "account":
         for row in rows:
             row["account"] = accounts[int(str(row["group"]))].name
+    if sort == "count":
+        rows.sort(key=lambda row: (-int(str(row["count"])), str(row["group"])))
+    if as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(stream, fieldnames=["group", "count"] + (["account"] if group == "account" else []))
+        writer.writeheader()
+        writer.writerows(rows)
+        click.echo(stream.getvalue(), nl=False)
+        return
     if as_json:
         click.echo(json.dumps(rows, ensure_ascii=False))
         return
