@@ -1,0 +1,599 @@
+{
+  "schema_version": 1,
+  "source": {
+    "commit": "427329735a03fd87ce66ab68cd6e192e929f8c1b",
+    "tracked_changes": false
+  },
+  "run": {
+    "started_at": "2026-11-10T04:25:36.719094+00:00",
+    "url": "https://github.com/BrendanH18/Marketpulse/actions/runs/42755689928/attempts/1",
+    "samples_per_case": 7
+  },
+  "environment": {
+    "platform": "macOS-27.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.11.18 (main, Oct 26 2026, 13:58:42) [Clang 23.1.3 ]",
+    "runner": "namespace-profile-macos"
+  },
+  "workload": {
+    "transactions": 5000,
+    "accounts": 4,
+    "positions": 12,
+    "currencies": [
+      "CAD",
+      "USD"
+    ]
+  },
+  "scenarios": {
+    "0.0": {
+      "delay_per_request_ms": 0.0,
+      "timings": {
+        "startup": {
+          "median_ms": 67.10720799999592,
+          "min_ms": 65.19474999999986,
+          "max_ms": 83.11991599999757,
+          "samples": [
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 66.8545000000016,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 83.11991599999757,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 65.19474999999986,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 66.52270800000082,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 70.92054199999964,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 67.88483300000081,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 67.10720799999592,
+              "stdout_bytes": 44
+            }
+          ]
+        },
+        "refresh": {
+          "median_ms": 208.8274169999984,
+          "min_ms": 200.13199999999998,
+          "max_ms": 213.53091699999993,
+          "samples": [
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 209.67670900000002,
+              "stdout_bytes": 1548526
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 209.51145900000157,
+              "stdout_bytes": 1548525
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 208.8274169999984,
+              "stdout_bytes": 1548526
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 203.18091700000096,
+              "stdout_bytes": 1548525
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 213.53091699999993,
+              "stdout_bytes": 1548527
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 200.13199999999998,
+              "stdout_bytes": 1548522
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 206.5892500000004,
+              "stdout_bytes": 1548527
+            }
+          ]
+        },
+        "edit": {
+          "median_ms": 109.41041599999934,
+          "min_ms": 102.32295799999847,
+          "max_ms": 116.64470899999912,
+          "samples": [
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 116.64470899999912,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 102.32295799999847,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 109.41041599999934,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 103.98950000000085,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 109.46374999999975,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 109.45837499999911,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 103.68812499999791,
+              "stdout_bytes": 595
+            }
+          ]
+        },
+        "edit_refresh": {
+          "median_ms": 313.48874999999765,
+          "min_ms": 303.6129999999986,
+          "max_ms": 343.08950100000146,
+          "samples": [
+            {
+              "process_ms": 343.08950100000146,
+              "requests": 2
+            },
+            {
+              "process_ms": 303.6129999999986,
+              "requests": 2
+            },
+            {
+              "process_ms": 338.92200000000014,
+              "requests": 2
+            },
+            {
+              "process_ms": 306.88312500000234,
+              "requests": 2
+            },
+            {
+              "process_ms": 316.25816699999734,
+              "requests": 2
+            },
+            {
+              "process_ms": 313.48874999999765,
+              "requests": 2
+            },
+            {
+              "process_ms": 308.42062500000367,
+              "requests": 2
+            }
+          ]
+        },
+        "reused_fresh": {
+          "median_ms": 134.81795899999938,
+          "min_ms": 129.79033299999898,
+          "max_ms": 144.93416699999528,
+          "samples": [
+            {
+              "requests": 1,
+              "body_ms": 139.135207999999,
+              "process_ms": 340.16812499999816,
+              "stdout_bytes": 1548524
+            },
+            {
+              "requests": 1,
+              "body_ms": 134.81795899999938,
+              "process_ms": 337.4362919999996,
+              "stdout_bytes": 1548525
+            },
+            {
+              "requests": 1,
+              "body_ms": 139.58229200000005,
+              "process_ms": 349.3391250000002,
+              "stdout_bytes": 1548527
+            },
+            {
+              "requests": 1,
+              "body_ms": 133.24987500000063,
+              "process_ms": 332.27837500000135,
+              "stdout_bytes": 1548527
+            },
+            {
+              "requests": 1,
+              "body_ms": 129.79033299999898,
+              "process_ms": 328.20241699999997,
+              "stdout_bytes": 1548527
+            },
+            {
+              "requests": 1,
+              "body_ms": 130.14083299999868,
+              "process_ms": 329.8084169999953,
+              "stdout_bytes": 1548525
+            },
+            {
+              "requests": 1,
+              "body_ms": 144.93416699999528,
+              "process_ms": 354.410792000003,
+              "stdout_bytes": 1548527
+            }
+          ]
+        },
+        "reused_cached": {
+          "median_ms": 142.06295900000043,
+          "min_ms": 135.21495899999536,
+          "max_ms": 149.5786250000002,
+          "samples": [
+            {
+              "requests": 0,
+              "body_ms": 149.5786250000002,
+              "process_ms": 353.53133399999945,
+              "stdout_bytes": 1548522
+            },
+            {
+              "requests": 0,
+              "body_ms": 142.06295900000043,
+              "process_ms": 343.115375,
+              "stdout_bytes": 1548523
+            },
+            {
+              "requests": 0,
+              "body_ms": 138.90058300000163,
+              "process_ms": 350.64274999999867,
+              "stdout_bytes": 1548525
+            },
+            {
+              "requests": 0,
+              "body_ms": 148.0746659999994,
+              "process_ms": 348.2304159999998,
+              "stdout_bytes": 1548525
+            },
+            {
+              "requests": 0,
+              "body_ms": 147.11641699999944,
+              "process_ms": 345.3835410000004,
+              "stdout_bytes": 1548521
+            },
+            {
+              "requests": 0,
+              "body_ms": 135.21495899999536,
+              "process_ms": 331.41125000000216,
+              "stdout_bytes": 1548521
+            },
+            {
+              "requests": 0,
+              "body_ms": 135.43999999999556,
+              "process_ms": 366.4382499999945,
+              "stdout_bytes": 1548524
+            }
+          ]
+        }
+      }
+    },
+    "100": {
+      "delay_per_request_ms": 100,
+      "timings": {
+        "startup": {
+          "median_ms": 65.06687499999941,
+          "min_ms": 63.91016700000307,
+          "max_ms": 71.70566599999972,
+          "samples": [
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 71.70566599999972,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 70.69549999999936,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 65.06687499999941,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 64.40254099999976,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 68.15154200000251,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 64.25404199999463,
+              "stdout_bytes": 44
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 63.91016700000307,
+              "stdout_bytes": 44
+            }
+          ]
+        },
+        "refresh": {
+          "median_ms": 411.1079999999987,
+          "min_ms": 404.91125000000494,
+          "max_ms": 439.75579099999607,
+          "samples": [
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 409.92570800000294,
+              "stdout_bytes": 1548523
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 439.75579099999607,
+              "stdout_bytes": 1548523
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 404.91125000000494,
+              "stdout_bytes": 1548525
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 416.0159159999992,
+              "stdout_bytes": 1548523
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 411.1079999999987,
+              "stdout_bytes": 1548523
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 414.2236249999982,
+              "stdout_bytes": 1548523
+            },
+            {
+              "requests": 2,
+              "body_ms": null,
+              "process_ms": 410.3713749999969,
+              "stdout_bytes": 1548523
+            }
+          ]
+        },
+        "edit": {
+          "median_ms": 102.672333000001,
+          "min_ms": 99.29029199999917,
+          "max_ms": 116.77416700000265,
+          "samples": [
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 102.672333000001,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 116.77416700000265,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 100.33745799999849,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 104.59691700000207,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 103.2607499999969,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 99.29029199999917,
+              "stdout_bytes": 595
+            },
+            {
+              "requests": 0,
+              "body_ms": null,
+              "process_ms": 100.04658399999755,
+              "stdout_bytes": 595
+            }
+          ]
+        },
+        "edit_refresh": {
+          "median_ms": 518.6276250000005,
+          "min_ms": 512.3780010000019,
+          "max_ms": 562.1048749999957,
+          "samples": [
+            {
+              "process_ms": 518.6276250000005,
+              "requests": 2
+            },
+            {
+              "process_ms": 562.1048749999957,
+              "requests": 2
+            },
+            {
+              "process_ms": 515.5621250000024,
+              "requests": 2
+            },
+            {
+              "process_ms": 534.414125000005,
+              "requests": 2
+            },
+            {
+              "process_ms": 522.9439579999919,
+              "requests": 2
+            },
+            {
+              "process_ms": 512.3780010000019,
+              "requests": 2
+            },
+            {
+              "process_ms": 516.1862089999971,
+              "requests": 2
+            }
+          ]
+        },
+        "reused_fresh": {
+          "median_ms": 236.41570799999556,
+          "min_ms": 232.4333749999994,
+          "max_ms": 242.92804099999898,
+          "samples": [
+            {
+              "requests": 1,
+              "body_ms": 242.92804099999898,
+              "process_ms": 654.7730829999949,
+              "stdout_bytes": 1548520
+            },
+            {
+              "requests": 1,
+              "body_ms": 240.63800000000413,
+              "process_ms": 657.1502919999972,
+              "stdout_bytes": 1548525
+            },
+            {
+              "requests": 1,
+              "body_ms": 234.9604579999962,
+              "process_ms": 639.2819170000053,
+              "stdout_bytes": 1548524
+            },
+            {
+              "requests": 1,
+              "body_ms": 236.41570799999556,
+              "process_ms": 648.5485420000003,
+              "stdout_bytes": 1548526
+            },
+            {
+              "requests": 1,
+              "body_ms": 235.50712499999804,
+              "process_ms": 641.4546249999944,
+              "stdout_bytes": 1548526
+            },
+            {
+              "requests": 1,
+              "body_ms": 237.5212090000005,
+              "process_ms": 644.9149170000012,
+              "stdout_bytes": 1548526
+            },
+            {
+              "requests": 1,
+              "body_ms": 232.4333749999994,
+              "process_ms": 643.1823750000021,
+              "stdout_bytes": 1548525
+            }
+          ]
+        },
+        "reused_cached": {
+          "median_ms": 130.12041700000054,
+          "min_ms": 127.68333399999676,
+          "max_ms": 140.36420799999405,
+          "samples": [
+            {
+              "requests": 0,
+              "body_ms": 140.36420799999405,
+              "process_ms": 561.936958000004,
+              "stdout_bytes": 1548517
+            },
+            {
+              "requests": 0,
+              "body_ms": 127.68333399999676,
+              "process_ms": 529.9780420000034,
+              "stdout_bytes": 1548522
+            },
+            {
+              "requests": 0,
+              "body_ms": 130.12041700000054,
+              "process_ms": 530.8721250000019,
+              "stdout_bytes": 1548518
+            },
+            {
+              "requests": 0,
+              "body_ms": 132.3720000000037,
+              "process_ms": 542.1267499999942,
+              "stdout_bytes": 1548521
+            },
+            {
+              "requests": 0,
+              "body_ms": 128.25850000000116,
+              "process_ms": 528.0122499999961,
+              "stdout_bytes": 1548520
+            },
+            {
+              "requests": 0,
+              "body_ms": 130.3572079999995,
+              "process_ms": 527.7797919999969,
+              "stdout_bytes": 1548518
+            },
+            {
+              "requests": 0,
+              "body_ms": 129.80412499999971,
+              "process_ms": 538.8152080000026,
+              "stdout_bytes": 1548520
+            }
+          ]
+        }
+      }
+    }
+  }
+}
