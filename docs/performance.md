@@ -29,6 +29,44 @@ Run it alone, without tests or a profiler competing for CPU. Use the same host,
 Python version, sample count, and delay when comparing a later change. These are
 observations, not timing thresholds for CI.
 
+### Run on macOS and Windows in Actions
+
+Open **Actions › CI › Run workflow**, select the branch to measure, and enable
+**Run offline desktop benchmarks on macOS and Windows**. The normal CI checks
+also run; benchmarks are skipped on ordinary pushes, pull requests, release
+checks, and manual runs with the option disabled. With the GitHub CLI:
+
+```bash
+gh workflow run ci.yml --ref main -f desktop_benchmark=true
+```
+
+Each platform runs the unchanged workload above with Python 3.11, seven samples
+per case, and both zero and 100 ms/request simulated waits. The jobs use
+`namespace-profile-macos` and `windows-latest`; the report records the actual
+OS, architecture and Python version, since hosted runner images can change.
+The runner is dedicated to that benchmark job, but hosted infrastructure still
+has scheduling noise. These measure the Python engine on macOS and Windows,
+not native app rendering, first-install latency or live quote-service delays.
+
+Download the run's `desktop-benchmark-<OS>-<architecture>-<commit>` artifacts
+within 90 days. Each contains `desktop-benchmark.json`: the complete samples
+and summaries, full source commit, whether tracked files were modified, UTC
+start time, run URL and runtime metadata. Copy reports cited in a decision into
+`docs/benchmarks/` so the evidence survives artifact expiry. Compare revisions
+on the same runner type and Python version; don't treat a cross-OS difference
+as a measured optimization.
+
+For a local file, including in Windows PowerShell 5.1, use explicit UTF-8 output:
+
+```bash
+uv run --locked python scripts/benchmark_desktop.py --output desktop-benchmark.json
+```
+
+Standard output remains available when `--output` is omitted. Source metadata
+requires a Git checkout; neither Git command contacts a remote. The file is
+written only after every command exits successfully and snapshot cases pass
+workload validation.
+
 ## What is timed
 
 The fixture has exactly 5,000 valid transactions: 1,250 each of deposits,
@@ -154,3 +192,56 @@ command did not gain a new optimization; their variation and the broad ranges
 show host scheduling noise. These seven-sample runs are not tail-latency estimates.
 The remaining snapshot work is still measurable; this result does not establish
 macOS/Windows UI responsiveness or justify a persistent helper.
+
+## Target-platform engine measurements
+
+The opt-in jobs both passed in [Actions run 42755689928](https://github.com/BrendanH18/Marketpulse/actions/runs/42755689928),
+measured 2026-11-10 UTC against clean commit
+`427329735a03fd87ce66ab68cd6e192e929f8c1b`. This commit adds benchmark metadata
+and file output; its engine is unchanged from the snapshot-reuse commit
+`b402869`. Seven samples per case use the same 5,000-transaction fixture and
+timing boundaries described above. The checked-in reports preserve the uploaded
+artifact JSON; Git normalizes Windows line endings to LF:
+
+- [macOS ARM64 raw JSON](benchmarks/desktop-platform-macos-arm64.json):
+  `namespace-profile-macos`, macOS 27.2, Python 3.11.18.
+- [Windows x64 raw JSON](benchmarks/desktop-platform-windows-x64.json):
+  `windows-latest`, Windows build 26100, Python 3.11.9.
+
+Times are median milliseconds (observed min–max), rounded to whole milliseconds.
+These are two different hosted machines and Python builds, not an OS performance
+comparison or a before/after optimization experiment.
+
+| Case | macOS, zero delay | macOS, 100 ms/request | Windows, zero delay | Windows, 100 ms/request |
+| --- | ---: | ---: | ---: | ---: |
+| CLI readiness | 67 (65–83) | 65 (64–72) | 216 (213–216) | 220 (214–225) |
+| Refresh | 209 (200–214) | 411 (405–440) | 628 (626–658) | 832 (826–839) |
+| Edit | 109 (102–117) | 103 (99–117) | 352 (343–381) | 347 (346–368) |
+| Edit + refresh | 313 (304–343) | 519 (512–562) | 986 (978–1056) | 1188 (1183–1200) |
+| Reused Tracker, fresh prices | 135 (130–145) | 236 (232–243) | 358 (348–366) | 452 (450–455) |
+| Reused Tracker, cached prices | 142 (135–150) | 130 (128–140) | 340 (332–342) | 338 (333–340) |
+
+All 24 summary medians and ranges were recomputed from the 168 retained samples.
+Both reports identify the same clean commit and workload. Request counts are
+unchanged in every sample: readiness/edit 0, refresh/edit-plus-refresh 2,
+reused fresh-price snapshot 1, reused cached-price snapshot 0. Each snapshot
+also passed the harness's activity/position, warning, quote-error and staleness
+checks. The file output path and platform workflow succeeded on both systems.
+
+**Recommendation:** keep the persistent helper deferred. On these hosts, an
+offline fresh-process refresh takes about 0.21 seconds on macOS and 0.63 seconds
+on Windows; save plus refresh takes about 0.31 and 0.99 seconds. The Windows path
+is worth following up if it produces noticeable waiting in the app. First
+measure the native clients' save-to-visible-result latency on representative
+user hardware and, if it is a problem, profile that path to pick the next
+optimization. The unchanged benchmark is now repeatable on both platforms.
+
+The reused-Tracker body timings show that local snapshot work remains even
+without startup. They are not a helper implementation or a prediction of its
+speedup: protocol transport, stdout capture, restart/fallback behavior, locking,
+native decoding and UI drawing remain unmeasured. The simulated wait is not a
+measurement of live Yahoo latency. Seven samples do not establish tail latency,
+and these results do not cover Intel Macs, Windows ARM64, bundled runtimes,
+long snapshot histories or interactive UI QA. No native UI item is claimed as
+passing. Keep #48 open and `needs-decision`; building a helper or changing
+runtime behavior still requires a separate maintainer decision.

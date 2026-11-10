@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 ROWS = 5000
@@ -177,9 +177,23 @@ def summarize(samples: list[dict], key: str = "process_ms") -> dict:
 
 
 def benchmark(samples: int, delay_ms: float) -> dict:
+    repo = Path(__file__).resolve().parents[1]
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    dirty = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=repo, text=True)
     report = {
         "schema_version": 1,
-        "environment": {"platform": platform.platform(), "machine": platform.machine(), "python": sys.version},
+        "source": {"commit": commit, "tracked_changes": bool(dirty)},
+        "run": {
+            "started_at": datetime.now(UTC).isoformat(),
+            "url": os.environ.get("BENCHMARK_RUN_URL"),
+            "samples_per_case": samples,
+        },
+        "environment": {
+            "platform": platform.platform(),
+            "machine": platform.machine(),
+            "python": sys.version,
+            "runner": os.environ.get("BENCHMARK_RUNNER"),
+        },
         "workload": {"transactions": ROWS, "accounts": 4, "positions": 12, "currencies": ["CAD", "USD"]},
         "scenarios": {},
     }
@@ -234,10 +248,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--samples", type=int, default=7, help="Measured repetitions per case (default: 7).")
     parser.add_argument("--delay-ms", type=float, default=100, help="Simulated wait per request (default: 100 ms).")
+    parser.add_argument("--output", type=Path, help="Write UTF-8 JSON to this file instead of standard output.")
     args = parser.parse_args()
     if args.samples < 1 or not 0 <= args.delay_ms <= 1000:
         parser.error("samples must be positive and delay-ms must be between 0 and 1000")
-    print(json.dumps(benchmark(args.samples, args.delay_ms), indent=2, allow_nan=False))
+    output = json.dumps(benchmark(args.samples, args.delay_ms), indent=2, allow_nan=False) + "\n"
+    if args.output:
+        args.output.write_text(output, encoding="utf-8")
+    else:
+        print(output, end="")
 
 
 if __name__ == "__main__":
