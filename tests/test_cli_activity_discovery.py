@@ -88,6 +88,14 @@ def test_symbol_presence_and_transfer_target(discovery):
     assert ids(discovery, "--target-account", "Maple") == []
 
 
+def test_transfer_destination_ignores_nontransfer_target_metadata(discovery, store):
+    store.add_transaction(Transaction(1, TxnType.DEPOSIT, "2024-07-04", amount=10, currency="CAD", target_account_id=2))
+    assert ids(discovery, "--target-account", "Birch") == [4]
+    assert discovery("--target-account", "Birch", "--count").output == "1\n"
+    result = discovery("--target-account", "Birch", "--csv")
+    assert [row["type"] for row in csv.DictReader(io.StringIO(result.output))] == ["TRANSFER"]
+
+
 def test_quarter_weekday_and_composition(discovery):
     assert ids(discovery, "--quarter", "1") == [1]
     assert ids(discovery, "--quarter", "2") == [2]

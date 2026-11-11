@@ -143,7 +143,7 @@ def activity(
         and (account_type is None or accounts[t.account_id].type.value == account_type)
         and (institution is None or accounts[t.account_id].institution.casefold() == institution.strip().casefold())
         and (has_symbol is None or bool(t.symbol.strip()) == has_symbol)
-        and (target is None or t.target_account_id == target.saved_id)
+        and (target is None or (t.type == TxnType.TRANSFER and t.target_account_id == target.saved_id))
         and (quarter is None or (int(t.date[5:7]) - 1) // 3 + 1 == quarter)
         and (weekday is None or weekdays[date.fromisoformat(t.date).weekday()] == weekday)
         and (not since or t.date >= since)
