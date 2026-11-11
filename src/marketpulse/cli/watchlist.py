@@ -352,9 +352,19 @@ def alerts_list(
             if _alert_state(a) == "triggered"
             else Text(_alert_state(a), style="muted")
         )
+        description = (
+            {
+                "above": f"{a.symbol} ≥ {fmt.MASK}",
+                "below": f"{a.symbol} ≤ {fmt.MASK}",
+                "up_pct": f"{a.symbol} up {fmt.MASK}% today",
+                "down_pct": f"{a.symbol} down {fmt.MASK}% today",
+            }[a.condition]
+            if app.privacy
+            else a.describe()
+        )
         t.add_row(
             Text(str(a.id), style="muted"),
-            Text(f"{a.symbol} {a.condition} {fmt.MASK}" if app.privacy else a.describe(), style="bright"),
+            Text(description, style="bright"),
             shown_state,
             Text(a.note, style="muted"),
         )

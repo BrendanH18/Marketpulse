@@ -100,3 +100,15 @@ def test_empty_human_output_and_privacy(cli, alerts, tracker):
     result = cli("--min-threshold", "100")
     assert result.exit_code == 0
     assert "100" not in result.output
+
+
+@pytest.mark.parametrize("condition,direction", [("up_pct", "up"), ("down_pct", "down")])
+def test_private_percentage_labels_keep_units(cli, tracker, store, condition, direction):
+    store.add_alert(Alert("FICTION", condition, 12.5))
+    tracker.config.privacy = True
+    tracker.config.save()
+    output = cli().output
+    assert f"FICTION {direction}" in output
+    assert "% today" in output
+    assert "12.5" not in output and condition not in output
+    assert json.loads(cli("--json").output)[0]["threshold"] == 12.5
