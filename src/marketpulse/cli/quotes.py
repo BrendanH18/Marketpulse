@@ -2,24 +2,52 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
 import click
+from rich.table import Table
 from rich.text import Text
 
 from .. import fmt, render
 from ..market import BARS_PER_YEAR, PERIOD_INTERVALS, PERIODS, MarketError
-from ..models import parse_symbols
+from ..models import Quote, parse_symbols
 from .base import App, fail, pass_app
 from .root import main
 
 
 @main.command()
 @click.argument("symbols", nargs=-1, required=True)
+@click.option("--cached", is_flag=True, help="Show the saved offline quote cache; no network request.")
+@click.option("--json", "as_json", is_flag=True, help="Print machine-readable quotes, with per-symbol errors.")
 @pass_app
-def quote(app: App, symbols: tuple[str, ...]) -> None:
+def quote(app: App, symbols: tuple[str, ...], cached: bool, as_json: bool) -> None:
     """Live quotes. One symbol shows a detail card."""
     syms = parse_symbols(" ".join(symbols))
-    with app.busy("Fetching quotes…"):
+    if not syms:
+        raise click.UsageError("Give at least one symbol.")
+    if cached:
+        quotes = app.store.cached_quotes(syms)
+        errors = {s: "not in the offline cache" for s in syms if s not in quotes}
+    elif as_json:
         quotes, errors = app.tracker.market.quotes(syms)
+    else:
+        with app.busy("Fetching quotes…"):
+            quotes, errors = app.tracker.market.quotes(syms)
+    found = any(s in quotes for s in syms)
+    if as_json:
+        click.echo(json.dumps([_quote_json(s, quotes.get(s), errors) for s in syms], ensure_ascii=False))
+        if not found:
+            click.get_current_context().exit(1)
+        return
+    if cached:
+        if not found:
+            fail("No cached quotes for " + ", ".join(syms) + ". Run `marketpulse quote` online to fill the cache.")
+        app.console.print(_cached_table(syms, quotes))
+        for s in syms:
+            if s not in quotes:
+                app.warn(f"{s}: {errors[s]}")
+        return
     if len(syms) == 1:
         q = quotes.get(syms[0])
         if q is None:
@@ -27,6 +55,69 @@ def quote(app: App, symbols: tuple[str, ...]) -> None:
         app.console.print(render.quote_card(q))
         return
     app.console.print(render.quotes_table(syms, quotes, errors, width=app.console.width))
+
+
+def _iso(epoch: float | None) -> str | None:
+    """Local ISO time with its UTC offset, or None when unknown."""
+    return datetime.fromtimestamp(epoch).astimezone().isoformat(timespec="seconds") if epoch else None
+
+
+def _quote_json(symbol: str, q: Quote | None, errors: dict[str, str]) -> dict:
+    if q is None:
+        return {
+            "symbol": symbol,
+            "name": None,
+            "price": None,
+            "prev_close": None,
+            "change": None,
+            "change_pct": None,
+            "currency": None,
+            "stale": None,
+            "fetched_at": None,
+            "source": None,
+            "error": errors.get(symbol, "no data"),
+        }
+    return {
+        "symbol": q.symbol,
+        "name": q.name,
+        "price": q.price,
+        "prev_close": q.prev_close,
+        "change": q.change,
+        "change_pct": q.change_pct,
+        "currency": q.currency,
+        "stale": q.stale,
+        "fetched_at": _iso(q.fetched_at),
+        "source": q.source,
+        "error": None,
+    }
+
+
+def _cached_table(symbols: list[str], quotes: dict[str, Quote]) -> Table:
+    t = render.table(
+        "Symbol",
+        "Name",
+        ("Price", "right"),
+        ("Chg", "right"),
+        ("%", "right"),
+        "Ccy",
+        "Cached at",
+        title="Cached quotes (offline)",
+    )
+    for s in symbols:
+        q = quotes.get(s)
+        if q is None:
+            continue
+        fetched = _iso(q.fetched_at)
+        t.add_row(
+            Text(q.symbol, style="bright"),
+            Text(render.truncate(q.name, 28), style="muted"),
+            Text(fmt.price(q.price) + " ◌"),
+            render.trend(f"{q.change:+,.2f}", q.change),
+            render.trend(f"{fmt.arrow(q.change)} {fmt.pct(q.change_pct)}", q.change),
+            Text(q.currency, style="muted"),
+            Text(f"{fetched[:19].replace('T', ' ')} · {fmt.age(q.age())} ago" if fetched else "unknown", style="warn"),
+        )
+    return t
 
 
 @main.command()

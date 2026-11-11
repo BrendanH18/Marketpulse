@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Thirty offline ledger report and diagnostics improvements ([#111](https://github.com/BrendanH18/Marketpulse/issues/111)):
+  `positions` and `cash` cost-base views with filters, sorting and an overdraft exit code,
+  native-currency `realized` gain and `payouts` income logs with grouped totals, `snapshots`
+  history, `quote --cached` and `--json`, and `doctor --offline`, `--json` and `--strict`.
+  See [Ledger reports and diagnostics](docs/cli-ledger-reports.md).
+
 - Thirty offline CLI productivity improvements ([#108](https://github.com/BrendanH18/Marketpulse/issues/108)):
   activity exclusions and date filters, grouped CSV reports and page metadata,
   saved-watchlist browsing and alert editing, and redacted configuration inspection,

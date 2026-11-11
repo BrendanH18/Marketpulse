@@ -67,6 +67,9 @@ The next [30 reporting and backup improvements](cli-reporting-tools.md) add
 CSV activity exports, grouped counts, detailed inventories, and backup verification.
 The third [30 productivity improvements](cli-productivity.md) extend activity
 reports, offline watchlist and alert management, and configuration tools.
+The fourth [30 ledger report and diagnostics improvements](cli-ledger-reports.md) add
+offline positions, cash, realized gains, payouts, snapshot history, cached quotes,
+and scriptable `doctor` checks.
 
 ## Contribution room and tax estimates
 
