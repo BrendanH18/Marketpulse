@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Thirty offline ledger selection improvements ([#120](https://github.com/BrendanH18/Marketpulse/issues/120)):
+  position metadata and quantity/book filters, average-cost ordering, cash pages
+  and balance/account filters, and activity month, amount, fee and exclusion
+  filters with quarterly and account-type counts. See
+  [Offline ledger selection](docs/cli-ledger-selection.md).
+
 - Thirty offline report filtering improvements ([#118](https://github.com/BrendanH18/Marketpulse/issues/118)):
   search and amount bounds for sales and income, snapshot book/contribution/change
   filters, and saved-alert threshold, note, trigger-date and paging controls.

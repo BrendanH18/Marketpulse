@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 from collections import Counter
 from dataclasses import asdict, fields
 from datetime import date
@@ -16,6 +17,16 @@ from .. import fmt, render
 from ..models import Account, AccountType, Transaction, TxnType
 from .base import App, date_callback, fail, pass_app
 from .root import main
+
+
+def _finite_value(ctx: click.Context, param: click.Parameter, value: float | None) -> float | None:
+    if value is not None and not math.isfinite(value):
+        raise click.BadParameter("must be finite", ctx=ctx, param=param)
+    return value
+
+
+def _excluded_dates(ctx: click.Context, param: click.Parameter, values: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(str(date_callback(ctx, param, value)) for value in values)
 
 
 @main.command()
@@ -35,7 +46,21 @@ from .root import main
 @click.option("--count", "count_only", is_flag=True, help="Count all matching entries before pagination.")
 @click.option(
     "--summary",
-    type=click.Choice(["type", "account", "currency", "month", "symbol", "year", "day", "weekday", "institution"]),
+    type=click.Choice(
+        [
+            "type",
+            "account",
+            "currency",
+            "month",
+            "symbol",
+            "year",
+            "day",
+            "weekday",
+            "institution",
+            "quarter",
+            "account-type",
+        ]
+    ),
     help="Count all matching entries by this field before pagination; supports --json or --csv.",
 )
 @click.option("--has-note/--no-note", default=None, help="Match entries with or without a nonblank note.")
@@ -66,6 +91,32 @@ from .root import main
 @click.option("--target-account", help="Match this transfer destination by ID, name or unique account type.")
 @click.option("--quarter", type=click.IntRange(min=1, max=4), help="Include only this calendar quarter.")
 @click.option("--weekday", type=click.Choice(["mon", "tue", "wed", "thu", "fri", "sat", "sun"], case_sensitive=False))
+@click.option("--month", type=click.IntRange(min=1, max=12), help="Include only this calendar month in any year.")
+@click.option(
+    "--exclude-currency", "excluded_currencies", multiple=True, help="Exclude a currency; repeat for several."
+)
+@click.option(
+    "--exclude-date",
+    "excluded_dates",
+    multiple=True,
+    callback=_excluded_dates,
+    help="Exclude a date; repeat for several.",
+)
+@click.option(
+    "--min-amount",
+    type=float,
+    callback=_finite_value,
+    help="Minimum recorded amount, inclusive (not trade consideration).",
+)
+@click.option(
+    "--max-amount",
+    type=float,
+    callback=_finite_value,
+    help="Maximum recorded amount, inclusive (not trade consideration).",
+)
+@click.option("--min-fees", type=float, callback=_finite_value, help="Minimum recorded fees, inclusive.")
+@click.option("--max-fees", type=float, callback=_finite_value, help="Maximum recorded fees, inclusive.")
+@click.option("--has-fees/--no-fees", default=None, help="Match entries with nonzero or zero recorded fees.")
 @pass_app
 def activity(
     app: App,
@@ -102,8 +153,19 @@ def activity(
     target_account,
     quarter,
     weekday,
+    month,
+    excluded_currencies,
+    excluded_dates,
+    min_amount,
+    max_amount,
+    min_fees,
+    max_fees,
+    has_fees,
 ) -> None:
     """The transaction ledger, newest first."""
+    for lower, upper, label in ((min_amount, max_amount, "amount"), (min_fees, max_fees, "fees")):
+        if lower is not None and upper is not None and lower > upper:
+            raise click.UsageError(f"--min-{label} must be at or below --max-{label}.")
     if since and until and since > until:
         raise click.UsageError("--since must be on or before --until.")
     if min_id is not None and max_id is not None and min_id > max_id:
@@ -129,6 +191,7 @@ def activity(
     excluded_account_ids = {active_account(ref).saved_id for ref in excluded_accounts}
     target = active_account(target_account) if target_account is not None else None
     included_symbols = {value.strip().upper() for value in symbols}
+    excluded_ccys = {value.strip().upper() for value in excluded_currencies}
     weekdays = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
     needle = search.casefold()
     note_needle = note.casefold() if note is not None else None
@@ -146,6 +209,14 @@ def activity(
         and (target is None or (t.type == TxnType.TRANSFER and t.target_account_id == target.saved_id))
         and (quarter is None or (int(t.date[5:7]) - 1) // 3 + 1 == quarter)
         and (weekday is None or weekdays[date.fromisoformat(t.date).weekday()] == weekday)
+        and (month is None or int(t.date[5:7]) == month)
+        and t.currency.upper() not in excluded_ccys
+        and t.date not in excluded_dates
+        and (min_amount is None or t.amount >= min_amount)
+        and (max_amount is None or t.amount <= max_amount)
+        and (min_fees is None or t.fees >= min_fees)
+        and (max_fees is None or t.fees <= max_fees)
+        and (has_fees is None or (t.fees != 0) == has_fees)
         and (not since or t.date >= since)
         and (not until or t.date <= until)
         and (not types or t.type in types)
@@ -231,6 +302,10 @@ def _activity_summary(
         if group == "account":
             # Include the ID so identically named accounts remain distinct.
             return str(t.account_id)
+        if group == "quarter":
+            return f"{t.date[:4]}-Q{(int(t.date[5:7]) - 1) // 3 + 1}"
+        if group == "account-type":
+            return accounts[t.account_id].type.value
         if group == "weekday":
             return ("mon", "tue", "wed", "thu", "fri", "sat", "sun")[date.fromisoformat(t.date).weekday()]
         if group == "institution":

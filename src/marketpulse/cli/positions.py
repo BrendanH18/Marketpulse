@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 from typing import Any
 
 import click
@@ -12,14 +13,25 @@ from rich.text import Text
 
 from .. import fmt, render
 from ..ledger import Holding
-from ..models import EPSILON, Account
+from ..models import EPSILON, Account, AccountType
 from .base import App, date_callback, fail, pass_app
 from .root import main
 
 POSITION_FIELDS = ["account_id", "account", "symbol", "quantity", "book", "average_cost", "currency", "first_date"]
 CASH_FIELDS = ["account_id", "account", "currency", "balance"]
-SORTS = ["account", "symbol", "quantity", "book", "first-date"]
+SORTS = ["account", "symbol", "quantity", "book", "first-date", "average-cost"]
 OFFLINE_NOTE = "Cost basis from the local ledger; prices are not fetched. Run `marketpulse holdings` for market values."
+
+
+def _finite(ctx: click.Context, param: click.Parameter, value: float | None) -> float | None:
+    if value is not None and not math.isfinite(value):
+        raise click.BadParameter("Must be a finite number.")
+    return value
+
+
+def _bounds(minimum: float | None, maximum: float | None, name: str) -> None:
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise click.UsageError(f"--min-{name} must be at or below --max-{name}.")
 
 
 def _active_account(app: App, ref: str | None) -> Account | None:
@@ -66,6 +78,17 @@ def _emit_csv(fieldnames: list[str], rows: list[dict[str, Any]]) -> None:
 @click.option("--page-info", is_flag=True, help="Include total, offset and limit in a JSON envelope; requires --json.")
 @click.option("--held-since", callback=date_callback, help="Only holdings first opened on or after this date.")
 @click.option("--held-until", callback=date_callback, help="Only holdings first opened on or before this date.")
+@click.option("--search", help="Match account name, symbol or currency text, ignoring case.")
+@click.option("--symbols", multiple=True, help="Include any exact symbol; repeat for several.")
+@click.option(
+    "--exclude-symbol", "excluded_symbols", multiple=True, help="Exclude an exact symbol; repeat for several."
+)
+@click.option("--account-type", type=click.Choice([a.value for a in AccountType], case_sensitive=False))
+@click.option("--institution", help="Match account institution exactly, ignoring case.")
+@click.option("--min-quantity", type=float, callback=_finite, help="Inclusive quantity minimum.")
+@click.option("--max-quantity", type=float, callback=_finite, help="Inclusive quantity maximum.")
+@click.option("--min-book", type=float, callback=_finite, help="Inclusive book-cost minimum, in recorded currency.")
+@click.option("--max-book", type=float, callback=_finite, help="Inclusive book-cost maximum, in recorded currency.")
 @pass_app
 def positions(
     app: App,
@@ -82,6 +105,15 @@ def positions(
     page_info: bool,
     held_since: str | None,
     held_until: str | None,
+    search: str | None,
+    symbols: tuple[str, ...],
+    excluded_symbols: tuple[str, ...],
+    account_type: str | None,
+    institution: str | None,
+    min_quantity: float | None,
+    max_quantity: float | None,
+    min_book: float | None,
+    max_book: float | None,
 ) -> None:
     """Open positions at cost from the ledger, offline (no quotes, no snapshot)."""
     _check_outputs(as_json, as_csv, count_only)
@@ -91,6 +123,8 @@ def positions(
         raise click.UsageError("--page-info requires --json.")
     if held_since and held_until and held_since > held_until:
         raise click.UsageError("--held-since must be on or before --held-until.")
+    _bounds(min_quantity, max_quantity, "quantity")
+    _bounds(min_book, max_book, "book")
     acct = _active_account(app, account)
     accounts = app.store.account_map()
     held = [
@@ -100,6 +134,9 @@ def positions(
     ]
     needle = symbol.strip().casefold() if symbol is not None else None
     wanted = currency.strip().upper() if currency is not None else None
+    search_needle = search.strip().casefold() if search is not None else None
+    included = {value.strip().upper() for value in symbols}
+    excluded = {value.strip().upper() for value in excluded_symbols}
     matches = [
         h
         for h in held
@@ -107,6 +144,18 @@ def positions(
         and (wanted is None or h.currency.upper() == wanted)
         and (not held_since or h.first_date >= held_since)
         and (not held_until or h.first_date <= held_until)
+        and (
+            search_needle is None
+            or search_needle in " ".join([accounts[h.account_id].name, h.symbol, h.currency]).casefold()
+        )
+        and (not included or h.symbol in included)
+        and h.symbol not in excluded
+        and (account_type is None or accounts[h.account_id].type.value == account_type)
+        and (institution is None or accounts[h.account_id].institution.casefold() == institution.strip().casefold())
+        and (min_quantity is None or h.quantity >= min_quantity)
+        and (max_quantity is None or h.quantity <= max_quantity)
+        and (min_book is None or h.book >= min_book)
+        and (max_book is None or h.book <= max_book)
     ]
 
     def account_key(h: Holding) -> tuple[str, int, str]:
@@ -118,6 +167,7 @@ def positions(
         "quantity": lambda h: (h.quantity, *account_key(h)),
         "book": lambda h: (h.book, *account_key(h)),
         "first-date": lambda h: (h.first_date, *account_key(h)),
+        "average-cost": lambda h: (h.avg_cost, *account_key(h)),
     }
     matches.sort(key=keys[sort_by.lower()], reverse=descending)
     if count_only:
@@ -193,6 +243,20 @@ def positions(
 @click.option("--search", help="Match account names containing this text, ignoring case.")
 @click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked balances as JSON.")
 @click.option("--csv", "as_csv", is_flag=True, help="Print raw, unmasked balances as CSV to stdout.")
+@click.option("--limit", type=click.IntRange(min=1), help="Show at most N matching balances.")
+@click.option("--offset", type=click.IntRange(min=0), help="Skip N matching balances after sorting.")
+@click.option("--page-info", is_flag=True, help="Include total, offset and limit in JSON; requires --json.")
+@click.option("--min-balance", type=float, callback=_finite, help="Inclusive balance minimum, in recorded currency.")
+@click.option("--max-balance", type=float, callback=_finite, help="Inclusive balance maximum, in recorded currency.")
+@click.option("--positive", is_flag=True, help="Show only strictly positive balances.")
+@click.option(
+    "--exclude-currency", "excluded_currencies", multiple=True, help="Exclude a currency; repeat for several."
+)
+@click.option(
+    "--exclude-account", "excluded_accounts", multiple=True, help="Exclude an active account; repeat for several."
+)
+@click.option("--account-type", type=click.Choice([a.value for a in AccountType], case_sensitive=False))
+@click.option("--institution", help="Match account institution exactly, ignoring case.")
 @pass_app
 def cash(
     app: App,
@@ -206,12 +270,36 @@ def cash(
     search: str | None,
     as_json: bool,
     as_csv: bool,
+    limit: int | None,
+    offset: int | None,
+    page_info: bool,
+    min_balance: float | None,
+    max_balance: float | None,
+    positive: bool,
+    excluded_currencies: tuple[str, ...],
+    excluded_accounts: tuple[str, ...],
+    account_type: str | None,
+    institution: str | None,
 ) -> None:
     """Cash balances from the ledger for accounts that track cash, offline.
 
-    With --negative, exits 1 when any listed balance is overdrawn so scripts can alert on it."""
+    With --negative, exits 1 when any matching balance is overdrawn, even outside the selected page."""
     _check_outputs(as_json, as_csv, count_only)
+    if count_only and (limit is not None or offset is not None or page_info):
+        raise click.UsageError("--count cannot be combined with --limit, --offset or --page-info.")
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
+    if positive and negative:
+        raise click.UsageError("Choose either --positive or --negative.")
+    _bounds(min_balance, max_balance, "balance")
     acct = _active_account(app, account)
+    excluded_ids = set()
+    for ref in excluded_accounts:
+        excluded_account = _active_account(app, ref)
+        if excluded_account is None:
+            fail(f"No active account '{ref}'.")
+        excluded_ids.add(excluded_account.saved_id)
+    excluded_ccys = {value.strip().upper() for value in excluded_currencies}
     accounts = app.store.account_map()
     wanted = currency.strip().upper() if currency is not None else None
     needle = search.strip().casefold() if search is not None else None
@@ -219,6 +307,12 @@ def cash(
     for (account_id, ccy), balance in sorted(app.store.ledger().cash.items()):
         owner = accounts.get(account_id)
         if owner is None or owner.archived or not owner.track_cash:
+            continue
+        if account_id in excluded_ids or ccy.upper() in excluded_ccys:
+            continue
+        if account_type is not None and owner.type.value != account_type:
+            continue
+        if institution is not None and owner.institution.casefold() != institution.strip().casefold():
             continue
         if needle is not None and needle not in owner.name.casefold():
             continue
@@ -231,6 +325,12 @@ def cash(
             continue
         if negative and balance >= 0:
             continue
+        if positive and balance <= 0:
+            continue
+        if min_balance is not None and balance < min_balance:
+            continue
+        if max_balance is not None and balance > max_balance:
+            continue
         rows.append({"account_id": account_id, "account": owner.name, "currency": ccy, "balance": balance})
 
     def account_key(row: dict[str, Any]) -> tuple[str, int, str]:
@@ -242,18 +342,35 @@ def cash(
         "balance": lambda row: (row["balance"], *account_key(row)),
     }
     rows.sort(key=keys[sort_by.lower()], reverse=descending)
+    total = len(rows)
+    offset = offset or 0
+    rows = rows[offset : offset + limit if limit is not None else None]
     if count_only:
         click.echo(len(rows))
     elif as_csv:
         _emit_csv(CASH_FIELDS, rows)
     elif as_json:
-        click.echo(json.dumps(rows, ensure_ascii=False))
+        payload = {"rows": rows, "total": total, "offset": offset, "limit": limit} if page_info else rows
+        click.echo(json.dumps(payload, ensure_ascii=False))
     elif not rows:
         if acct is not None and not acct.track_cash:
             message = f"Account '{acct.name}' doesn't track cash."
+        elif total:
+            message = "No cash balances on this page."
         elif negative:
             message = "No overdrawn cash balances."
-        elif wanted is not None or needle is not None or nonzero:
+        elif (
+            wanted is not None
+            or needle is not None
+            or nonzero
+            or positive
+            or min_balance is not None
+            or max_balance is not None
+            or excluded_currencies
+            or excluded_accounts
+            or account_type is not None
+            or institution is not None
+        ):
             message = "No cash balances match these filters."
         else:
             message = "No cash balances yet. Only accounts that track cash have one."
@@ -269,5 +386,5 @@ def cash(
                 Text(fmt.money(row["balance"], privacy=privacy), style="down" if overdrawn else ""),
             )
         app.console.print(table)
-    if negative and rows:
+    if negative and total:
         raise click.exceptions.Exit(1)
