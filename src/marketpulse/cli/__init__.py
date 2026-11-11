@@ -11,10 +11,13 @@ from . import (  # noqa: F401  (importing a module registers its commands)
     history,
     native,
     overview,
+    positions,
     provider,
     quotes,
+    realized,
     recording,
     settings,
+    snapshots,
     taxes,
     watchlist,
 )
