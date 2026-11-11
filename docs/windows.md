@@ -101,14 +101,17 @@ symbol order. The first and last rows disable moves past the ends. Symbols whose
 quotes are unavailable stay in the list and can still be moved or removed.
 
 Each alert offers **Edit alert** for its threshold and note, and **Pause** or
-**Resume** for whether it is enabled. Editing, pausing and resuming preserve its
-last trigger time: resuming a triggered alert does not make it fire again.
+**Resume** for whether it is enabled. These commands do not reset its last trigger
+time themselves. After a save, the app refreshes and evaluates enabled alerts:
+a fresh price that no longer meets the condition automatically rearms a triggered
+alert by clearing its trigger time. A later crossing can then fire it again.
+Paused alerts keep their trigger time until resumed or explicitly rearmed.
 **Rearm alert…** asks for confirmation, then enables the alert and clears its trigger
 history so the next matching fresh price can fire again. Stale prices never fire
 alerts. Windows toast notifications remain unavailable.
 
 Filter the list by state without changing saved alerts: **Armed** means enabled
-and not yet triggered, **Paused** means disabled (even with a previous trigger),
+and currently untriggered, **Paused** means disabled (even with a previous trigger),
 and **Triggered** means enabled with a saved trigger time. **All** shows every
 alert. Privacy hides identifying details and the demo disables writes.
 

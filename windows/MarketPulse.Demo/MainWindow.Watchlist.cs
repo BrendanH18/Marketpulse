@@ -39,7 +39,7 @@ public partial class MainWindow
         if (symbols.Length == 0) Paragraph("Your watchlist is empty. Add a symbol to follow its price.");
         Section("Price alerts");
         Paragraph("Alerts are checked on refresh and while the app stays running. Windows toast notifications are not yet available; triggered alerts show their saved trigger time here. Automation shows alerts fired during the latest refresh.");
-        Paragraph("Armed alerts can fire on a matching fresh price. Paused alerts cannot fire. Triggered alerts keep their history until you explicitly rearm them; editing or resuming does not clear it.");
+        Paragraph("Armed alerts can fire on a matching fresh price. Paused alerts cannot fire. Triggered alerts rearm automatically when a fresh price no longer meets their condition. Editing and resuming do not reset trigger history themselves; the following refresh evaluates enabled alerts normally.");
         var filter = new ComboBox
         {
             ItemsSource = new[] { "All", "Armed", "Paused", "Triggered" },
@@ -173,7 +173,7 @@ public partial class MainWindow
     {
         RequireWatchlistWrite();
         var dialog = new EntryDialog("Edit price alert");
-        dialog.Explain(Text(row, "description") + ". Editing preserves the alert's state and trigger history.");
+        dialog.Explain(Text(row, "description") + ". Editing does not reset trigger history. The following refresh evaluates enabled alerts normally, including automatic rearming.");
         var threshold = dialog.Text("Threshold (price or percent)", InputNumber(row, "threshold"));
         var note = dialog.Text("Note", Text(row, "note"));
         dialog.Submit = () =>
