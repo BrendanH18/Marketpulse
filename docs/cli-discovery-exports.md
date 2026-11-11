@@ -1,6 +1,6 @@
 # Offline CLI discovery and exports
 
-This fourth batch adds 30 improvements under
+This batch adds 30 improvements under
 [#110](https://github.com/BrendanH18/Marketpulse/issues/110).
 
 | Improvements | Guide | Purpose |
