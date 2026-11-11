@@ -7,12 +7,13 @@ import io
 import json
 from collections import Counter
 from dataclasses import asdict, fields
+from datetime import date
 
 import click
 from rich.text import Text
 
 from .. import fmt, render
-from ..models import Account, Transaction, TxnType
+from ..models import Account, AccountType, Transaction, TxnType
 from .base import App, date_callback, fail, pass_app
 from .root import main
 
@@ -34,7 +35,7 @@ from .root import main
 @click.option("--count", "count_only", is_flag=True, help="Count all matching entries before pagination.")
 @click.option(
     "--summary",
-    type=click.Choice(["type", "account", "currency", "month", "symbol", "year", "day"]),
+    type=click.Choice(["type", "account", "currency", "month", "symbol", "year", "day", "weekday", "institution"]),
     help="Count all matching entries by this field before pagination; supports --json or --csv.",
 )
 @click.option("--has-note/--no-note", default=None, help="Match entries with or without a nonblank note.")
@@ -57,6 +58,14 @@ from .root import main
     help="Sort summaries by group or descending count.",
 )
 @click.option("--page-info", is_flag=True, help="With --json, wrap transactions with pagination metadata.")
+@click.option("--symbols", multiple=True, help="Include any of these exact symbols; repeat for several.")
+@click.option("--exclude-account", "excluded_accounts", multiple=True, help="Exclude either end of these accounts.")
+@click.option("--account-type", type=click.Choice([a.value for a in AccountType], case_sensitive=False))
+@click.option("--institution", help="Match the source account's institution exactly, ignoring case.")
+@click.option("--has-symbol/--no-symbol", default=None, help="Match entries with or without a symbol.")
+@click.option("--target-account", help="Match this transfer destination by ID, name or unique account type.")
+@click.option("--quarter", type=click.IntRange(min=1, max=4), help="Include only this calendar quarter.")
+@click.option("--weekday", type=click.Choice(["mon", "tue", "wed", "thu", "fri", "sat", "sun"], case_sensitive=False))
 @pass_app
 def activity(
     app: App,
@@ -85,6 +94,14 @@ def activity(
     on_date,
     summary_sort,
     page_info,
+    symbols,
+    excluded_accounts,
+    account_type,
+    institution,
+    has_symbol,
+    target_account,
+    quarter,
+    weekday,
 ) -> None:
     """The transaction ledger, newest first."""
     if since and until and since > until:
@@ -102,6 +119,17 @@ def activity(
     acct = app.store.get_account(account) if account else None
     if account and (acct is None or acct.archived):
         fail(f"No active account '{account}'.")
+
+    def active_account(ref: str) -> Account:
+        found = app.store.get_account(ref)
+        if found is None or found.archived:
+            fail(f"No active account '{ref}'.")
+        return found
+
+    excluded_account_ids = {active_account(ref).saved_id for ref in excluded_accounts}
+    target = active_account(target_account) if target_account is not None else None
+    included_symbols = {value.strip().upper() for value in symbols}
+    weekdays = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
     needle = search.casefold()
     note_needle = note.casefold() if note is not None else None
     excluded = {value.strip().upper() for value in excluded_symbols}
@@ -109,6 +137,15 @@ def activity(
         t
         for t in app.store.transactions(account_id=acct.id if acct else None, symbol=symbol)
         if _visible(t, accounts)
+        and (not included_symbols or t.symbol in included_symbols)
+        and t.account_id not in excluded_account_ids
+        and t.target_account_id not in excluded_account_ids
+        and (account_type is None or accounts[t.account_id].type.value == account_type)
+        and (institution is None or accounts[t.account_id].institution.casefold() == institution.strip().casefold())
+        and (has_symbol is None or bool(t.symbol.strip()) == has_symbol)
+        and (target is None or t.target_account_id == target.saved_id)
+        and (quarter is None or (int(t.date[5:7]) - 1) // 3 + 1 == quarter)
+        and (weekday is None or weekdays[date.fromisoformat(t.date).weekday()] == weekday)
         and (not since or t.date >= since)
         and (not until or t.date <= until)
         and (not types or t.type in types)
@@ -194,6 +231,10 @@ def _activity_summary(
         if group == "account":
             # Include the ID so identically named accounts remain distinct.
             return str(t.account_id)
+        if group == "weekday":
+            return ("mon", "tue", "wed", "thu", "fri", "sat", "sun")[date.fromisoformat(t.date).weekday()]
+        if group == "institution":
+            return accounts[t.account_id].institution
         if group == "month":
             return t.date[:7]
         if group == "year":
@@ -221,7 +262,8 @@ def _activity_summary(
         return
     table = render.table(group.title(), ("Entries", "right"), title="Matching activity")
     for row in rows:
-        label = str(row.get("account", row["group"])) or "(no symbol)"
+        empty_label = "(no institution)" if group == "institution" else "(no symbol)"
+        label = str(row.get("account", row["group"])) or empty_label
         table.add_row(Text(label), Text(str(row["count"])))
     app.console.print(table)
 

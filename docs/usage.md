@@ -65,6 +65,10 @@ do not fetch quotes or record valuation snapshots. See
 JSON fields, safe edit revisions, inventory filters, and alert controls.
 The next [30 reporting and backup improvements](cli-reporting-tools.md) add
 CSV activity exports, grouped counts, detailed inventories, and backup verification.
+The fourth [30 discovery and export improvements](cli-discovery-exports.md) add
+inventory exports and paging, account and calendar activity filters, and saved
+watchlist and alert reporting.
+
 The third [30 productivity improvements](cli-productivity.md) extend activity
 reports, offline watchlist and alert management, and configuration tools.
 The fourth [30 ledger report and diagnostics improvements](cli-ledger-reports.md) add

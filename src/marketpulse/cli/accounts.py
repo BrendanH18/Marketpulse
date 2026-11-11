@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
-from dataclasses import asdict
+from dataclasses import asdict, fields
 
 import click
 from rich.text import Text
@@ -26,6 +28,11 @@ def accounts(ctx: click.Context) -> None:
 
 
 @accounts.command("list")
+@click.option("--csv", "as_csv", is_flag=True, help="Print raw account metadata as CSV, offline.")
+@click.option("--count", "count_only", is_flag=True, help="Count matching accounts before pagination, offline.")
+@click.option("--limit", type=click.IntRange(min=1), help="Show at most this many accounts, offline.")
+@click.option("--offset", type=click.IntRange(min=0), help="Skip matching accounts, offline.")
+@click.option("--page-info", is_flag=True, help="With --json, include pagination metadata.")
 @click.option("--archived", is_flag=True, help="Include archived accounts.")
 @click.option("--offline", is_flag=True, help="Show account metadata without fetching prices or recording a snapshot.")
 @click.option(
@@ -42,6 +49,11 @@ def accounts(ctx: click.Context) -> None:
 def accounts_list(
     app: App,
     archived: bool,
+    as_csv: bool,
+    count_only: bool,
+    limit: int | None,
+    offset: int | None,
+    page_info: bool,
     offline: bool,
     as_json: bool,
     acct_type: str | None,
@@ -53,6 +65,11 @@ def accounts_list(
     descending: bool,
 ) -> None:
     """List accounts, optionally filtering or reading metadata offline."""
+    if sum((as_json, as_csv, count_only)) > 1:
+        raise click.UsageError("Choose one of --json, --csv, or --count.")
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
+    offline = offline or as_csv or count_only or limit is not None or offset is not None
     items = app.store.accounts(include_archived=archived)
     filtered = any(value is not None for value in (acct_type, institution, search, currency, cash))
     if acct_type is not None:
@@ -69,13 +86,39 @@ def accounts_list(
         items.sort(key=lambda a: (str(getattr(a, sort_by)).casefold(), a.saved_id))
     if descending:
         items.reverse()
+    total = len(items)
+    if count_only:
+        click.echo(total)
+        return
+    start = offset or 0
+    items = items[start:] if limit is None else items[start : start + limit]
+    if as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(stream, fieldnames=[field.name for field in fields(Account)])
+        writer.writeheader()
+        writer.writerows(asdict(a) for a in items)
+        click.echo(stream.getvalue(), nl=False)
+        return
     if as_json:
-        click.echo(json.dumps([asdict(a) for a in items], ensure_ascii=False))
+        rows = [asdict(a) for a in items]
+        payload = (
+            {
+                "total": total,
+                "offset": start,
+                "limit": limit,
+                "returned": len(rows),
+                "next_offset": start + len(rows) if start + len(rows) < total else None,
+                "items": rows,
+            }
+            if page_info
+            else rows
+        )
+        click.echo(json.dumps(payload, ensure_ascii=False))
         return
     if not items:
         message = (
             "No accounts match these filters."
-            if filtered
+            if filtered or limit is not None or offset is not None
             else 'No accounts yet — `marketpulse accounts add "My TFSA" -t TFSA`.'
         )
         app.console.print(Text(message, style="muted"))

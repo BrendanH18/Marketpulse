@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   history, `quote --cached` and `--json`, and `doctor --offline`, `--json` and `--strict`.
   See [Ledger reports and diagnostics](docs/cli-ledger-reports.md).
 
+- Thirty offline CLI discovery and export improvements ([#110](https://github.com/BrendanH18/Marketpulse/issues/110)):
+  account and asset CSV exports, counts and page metadata; account, symbol and
+  calendar activity filters and grouped counts; watchlist exports and page
+  metadata; and alert exports, text search, ordering and pagination.
+  See [CLI discovery and exports](docs/cli-discovery-exports.md).
+
 - Thirty offline CLI productivity improvements ([#108](https://github.com/BrendanH18/Marketpulse/issues/108)):
   activity exclusions and date filters, grouped CSV reports and page metadata,
   saved-watchlist browsing and alert editing, and redacted configuration inspection,

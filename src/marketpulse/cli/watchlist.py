@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import math
 import time
-from dataclasses import asdict
+from dataclasses import asdict, fields
 
 import click
 from rich.console import Group
@@ -33,6 +35,10 @@ def watch(ctx: click.Context) -> None:
 @click.option("--limit", type=click.IntRange(min=1), help="Maximum matching symbols (implies offline).")
 @click.option("--count", "count_only", is_flag=True, help="Count matches before pagination, offline.")
 @click.option("--alphabetical", is_flag=True, help="Sort offline output without changing saved order.")
+@click.option("--csv", "as_csv", is_flag=True, help="Export saved positions and symbols offline as CSV.")
+@click.option("--descending", is_flag=True, help="Reverse offline output before pagination.")
+@click.option("--exclude-symbol", "excluded_symbols", multiple=True, help="Exclude exact symbols; repeat for several.")
+@click.option("--page-info", is_flag=True, help="With --json, include pagination metadata.")
 @pass_app
 def watch_list(
     app: App,
@@ -43,10 +49,22 @@ def watch_list(
     limit: int | None,
     count_only: bool,
     alphabetical: bool,
+    as_csv: bool,
+    descending: bool,
+    excluded_symbols: tuple[str, ...],
+    page_info: bool,
 ) -> None:
     """List watched symbols; filters, paging and reports imply offline output."""
+    if sum((as_json, as_csv, count_only)) > 1:
+        raise click.UsageError("Choose one of --json, --csv or --count.")
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
     if (
-        offline
+        as_csv
+        or descending
+        or excluded_symbols
+        or page_info
+        or offline
         or as_json
         or search is not None
         or offset is not None
@@ -55,16 +73,40 @@ def watch_list(
         or alphabetical
     ):
         saved = app.store.watchlist()
-        symbols = [symbol for symbol in saved if (search or "").casefold() in symbol.casefold()]
+        excluded = {symbol.strip().upper() for symbol in excluded_symbols}
+        symbols = [
+            symbol for symbol in saved if (search or "").casefold() in symbol.casefold() and symbol not in excluded
+        ]
+        total = len(symbols)
         if count_only:
             click.echo(len(symbols))
             return
         if alphabetical:
             symbols.sort()
+        if descending:
+            symbols.reverse()
         start = offset or 0
         symbols = symbols[start:] if limit is None else symbols[start : start + limit]
-        if as_json:
-            click.echo(json.dumps(symbols, ensure_ascii=False))
+        if as_csv:
+            stream = io.StringIO(newline="")
+            writer = csv.DictWriter(stream, fieldnames=["position", "symbol"])
+            writer.writeheader()
+            writer.writerows({"position": saved.index(symbol) + 1, "symbol": symbol} for symbol in symbols)
+            click.echo(stream.getvalue(), nl=False)
+        elif as_json:
+            payload = (
+                {
+                    "total": total,
+                    "offset": start,
+                    "limit": limit,
+                    "returned": len(symbols),
+                    "next_offset": start + len(symbols) if start + len(symbols) < total else None,
+                    "items": symbols,
+                }
+                if page_info
+                else symbols
+            )
+            click.echo(json.dumps(payload, ensure_ascii=False))
         elif symbols:
             t = render.table(("Position", "right"), "Symbol")
             for symbol in symbols:
@@ -164,6 +206,12 @@ def alerts(ctx: click.Context) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Alert metadata as JSON (unmasked; offline).")
 @click.option("--condition", type=click.Choice(ALERT_CONDITIONS, case_sensitive=False))
 @click.option("--count", "count_only", is_flag=True, help="Print the number of matching alerts.")
+@click.option("--csv", "as_csv", is_flag=True, help="Export raw, unmasked alert metadata as CSV, offline.")
+@click.option("--search", help="Find symbol or note text, ignoring case.")
+@click.option("--sort", "sort_by", type=click.Choice(["id", "symbol", "state", "condition"]))
+@click.option("--descending", is_flag=True, help="Reverse output before pagination.")
+@click.option("--limit", type=click.IntRange(min=1), help="Show at most this many matching alerts.")
+@click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip matching alerts.")
 @pass_app
 def alerts_list(
     app: App,
@@ -172,8 +220,16 @@ def alerts_list(
     as_json: bool,
     condition: str | None,
     count_only: bool,
+    as_csv: bool,
+    search: str | None,
+    sort_by: str | None,
+    descending: bool,
+    limit: int | None,
+    offset: int,
 ) -> None:
     """List saved alerts, optionally filtered by symbol and current state."""
+    if sum((as_json, as_csv, count_only)) > 1:
+        raise click.UsageError("Choose one of --json, --csv or --count.")
     items = app.store.alerts()
     if symbol is not None:
         items = [a for a in items if a.symbol == symbol.strip().upper()]
@@ -181,8 +237,22 @@ def alerts_list(
         items = [a for a in items if _alert_state(a) == state]
     if condition is not None:
         items = [a for a in items if a.condition == condition]
+    if search is not None:
+        items = [a for a in items if search.casefold() in a.symbol.casefold() or search.casefold() in a.note.casefold()]
     if count_only:
         click.echo(len(items))
+        return
+    if sort_by is not None:
+        items.sort(key=lambda a: ((_alert_state(a) if sort_by == "state" else getattr(a, sort_by)), a.id or 0))
+    if descending:
+        items.reverse()
+    items = items[offset:] if limit is None else items[offset : offset + limit]
+    if as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(stream, fieldnames=[f.name for f in fields(Alert)] + ["state"])
+        writer.writeheader()
+        writer.writerows(_alert_json(a) for a in items)
+        click.echo(stream.getvalue(), nl=False)
         return
     if as_json:
         click.echo(json.dumps([_alert_json(a) for a in items], ensure_ascii=False, allow_nan=False))
@@ -190,7 +260,7 @@ def alerts_list(
     if not items:
         message = (
             "No alerts match these filters."
-            if symbol is not None or state or condition
+            if symbol is not None or state or condition or search is not None or offset or limit is not None
             else ("No alerts — `marketpulse alerts add NVDA above 200`.")
         )
         app.console.print(Text(message, style="muted"))
