@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
-from dataclasses import asdict
+from dataclasses import asdict, fields
 
 import click
 from rich.text import Text
@@ -41,6 +43,11 @@ def _create_asset(app: App, asset: Asset, txn: Transaction, *, new_symbol: bool)
 
 
 @asset.command("list")
+@click.option("--csv", "as_csv", is_flag=True, help="Print raw asset metadata as CSV, offline.")
+@click.option("--count", "count_only", is_flag=True, help="Count all matches before pagination.")
+@click.option("--page-info", is_flag=True, help="With --json, include pagination metadata.")
+@click.option("--symbol", help="Match one configured symbol exactly, ignoring case.")
+@click.option("--unclassified", is_flag=True, help="Only assets without an explicit asset class.")
 @click.option("--json", "as_json", is_flag=True, help="Print unmasked asset metadata as JSON.")
 @click.option("--kind", type=click.Choice([k.value for k in AssetKind], case_sensitive=False))
 @click.option("--class", "asset_class", type=click.Choice([c.value for c in AssetClass], case_sensitive=False))
@@ -54,6 +61,11 @@ def _create_asset(app: App, asset: Asset, txn: Transaction, *, new_symbol: bool)
 def asset_list(
     app: App,
     as_json: bool,
+    as_csv: bool,
+    count_only: bool,
+    page_info: bool,
+    symbol: str | None,
+    unclassified: bool,
     kind: str | None,
     asset_class: str | None,
     currency: str | None,
@@ -64,8 +76,17 @@ def asset_list(
     offset: int,
 ) -> None:
     """List configured asset metadata without fetching prices."""
+    if sum((as_json, as_csv, count_only)) > 1:
+        raise click.UsageError("Choose one of --json, --csv, or --count.")
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
     items = list(app.store.assets().values())
     filtered = any(value is not None for value in (kind, asset_class, currency, search, limit)) or offset > 0
+    filtered = filtered or symbol is not None or unclassified
+    if symbol is not None:
+        items = [a for a in items if a.symbol == symbol.strip().upper()]
+    if unclassified:
+        items = [a for a in items if a.asset_class is None]
     if kind is not None:
         items = [a for a in items if a.kind.value == kind]
     if asset_class is not None:
@@ -78,9 +99,33 @@ def asset_list(
         items.sort(key=lambda a: (str(getattr(a, sort_by)).casefold(), a.symbol))
     if descending:
         items.reverse()
+    total = len(items)
+    if count_only:
+        click.echo(total)
+        return
     items = items[offset:] if limit is None else items[offset : offset + limit]
+    if as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(stream, fieldnames=[field.name for field in fields(Asset)])
+        writer.writeheader()
+        writer.writerows(asdict(a) for a in items)
+        click.echo(stream.getvalue(), nl=False)
+        return
     if as_json:
-        click.echo(json.dumps([asdict(a) for a in items], ensure_ascii=False))
+        rows = [asdict(a) for a in items]
+        payload = (
+            {
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+                "returned": len(rows),
+                "next_offset": offset + len(rows) if offset + len(rows) < total else None,
+                "items": rows,
+            }
+            if page_info
+            else rows
+        )
+        click.echo(json.dumps(payload, ensure_ascii=False))
         return
     if not items:
         message = "No assets match these filters." if filtered else "No custom assets. Market symbols need no setup."
