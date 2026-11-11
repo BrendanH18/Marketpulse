@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Thirty offline report filtering improvements ([#118](https://github.com/BrendanH18/Marketpulse/issues/118)):
+  search and amount bounds for sales and income, snapshot book/contribution/change
+  filters, and saved-alert threshold, note, trigger-date and paging controls.
+  Alert list thresholds now respect privacy mode in human output. See
+  [Offline report filters](docs/cli-report-filters.md).
+
 - Thirty offline report browsing improvements ([#116](https://github.com/BrendanH18/Marketpulse/issues/116)):
   position pages and holding-date filters, searchable and sortable cash balances,
   currency filters and pages for realized gains and payouts, and calendar,

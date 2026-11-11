@@ -61,6 +61,15 @@ def _finite_callback(ctx, param, value: float | None) -> float | None:
     return value
 
 
+def _exclude_dates_callback(ctx, param, values: tuple[str, ...]) -> tuple[str, ...]:
+    dates = []
+    for value in values:
+        normalized = date_callback(ctx, param, value)
+        assert normalized is not None  # Click supplies strings for a repeatable option.
+        dates.append(normalized)
+    return tuple(dates)
+
+
 @main.command()
 @click.option("--since", callback=date_callback, help="Include snapshots on or after this date.")
 @click.option("--until", callback=date_callback, help="Include snapshots on or before this date.")
@@ -86,6 +95,26 @@ def _finite_callback(ctx, param, value: float | None) -> float | None:
 @click.option("--max-net-worth", type=float, callback=_finite_callback, help="Inclusive native net-worth maximum.")
 @click.option("--changed-only", is_flag=True, help="Only snapshots with a known, nonzero recorded change.")
 @click.option("--unchanged-only", is_flag=True, help="Only snapshots with a known zero recorded change.")
+@click.option("--min-book", type=float, callback=_finite_callback, help="Inclusive recorded book-value minimum.")
+@click.option("--max-book", type=float, callback=_finite_callback, help="Inclusive recorded book-value maximum.")
+@click.option(
+    "--min-contributions", type=float, callback=_finite_callback, help="Inclusive recorded contributions minimum."
+)
+@click.option(
+    "--max-contributions", type=float, callback=_finite_callback, help="Inclusive recorded contributions maximum."
+)
+@click.option("--min-change", type=float, callback=_finite_callback, help="Inclusive known recorded-change minimum.")
+@click.option("--max-change", type=float, callback=_finite_callback, help="Inclusive known recorded-change maximum.")
+@click.option("--increases-only", is_flag=True, help="Only snapshots with a known positive recorded change.")
+@click.option("--decreases-only", is_flag=True, help="Only snapshots with a known negative recorded change.")
+@click.option("--unknown-change-only", is_flag=True, help="Only snapshots without a comparable previous snapshot.")
+@click.option(
+    "--exclude-date",
+    "excluded_dates",
+    multiple=True,
+    callback=_exclude_dates_callback,
+    help="Exclude a recorded date (YYYY-MM-DD); repeat for several.",
+)
 @click.option("--latest", is_flag=True, help="Show only the most recent matching snapshot.")
 @click.option("--count", "count_only", is_flag=True, help="Print the number of matching snapshots.")
 @click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked snapshots as JSON.")
@@ -111,6 +140,16 @@ def snapshots(
     max_net_worth: float | None,
     changed_only: bool,
     unchanged_only: bool,
+    min_book: float | None,
+    max_book: float | None,
+    min_contributions: float | None,
+    max_contributions: float | None,
+    min_change: float | None,
+    max_change: float | None,
+    increases_only: bool,
+    decreases_only: bool,
+    unknown_change_only: bool,
+    excluded_dates: tuple[str, ...],
 ) -> None:
     """Recorded daily net-worth snapshots, oldest first. Offline: no prices are fetched."""
     if since and until and since > until:
@@ -122,6 +161,17 @@ def snapshots(
         raise click.UsageError("--page-info requires --json.")
     if changed_only and unchanged_only:
         raise click.UsageError("Choose one of --changed-only or --unchanged-only.")
+    if sum((increases_only, decreases_only, unchanged_only, unknown_change_only)) > 1:
+        raise click.UsageError("Choose only one change direction or --unknown-change-only.")
+    if unknown_change_only and (changed_only or min_change is not None or max_change is not None):
+        raise click.UsageError("--unknown-change-only cannot be combined with known-change filters.")
+    for field, minimum, maximum in (
+        ("book", min_book, max_book),
+        ("contributions", min_contributions, max_contributions),
+        ("change", min_change, max_change),
+    ):
+        if minimum is not None and maximum is not None and minimum > maximum:
+            raise click.UsageError(f"--min-{field} must be at most --max-{field}.")
     if min_net_worth is not None and max_net_worth is not None and min_net_worth > max_net_worth:
         raise click.UsageError("--min-net-worth must be at most --max-net-worth.")
     if year is not None and month is not None and month[:4] != f"{year:04d}":
@@ -140,6 +190,7 @@ def snapshots(
 
     every = app.store.snapshots()
     changes = _changes(every)
+    excluded = set(excluded_dates)
     rows = [
         s
         for s in every
@@ -152,6 +203,16 @@ def snapshots(
         and (max_net_worth is None or s.net_worth <= max_net_worth)
         and (not changed_only or changes[s.date] not in (None, 0))
         and (not unchanged_only or changes[s.date] == 0)
+        and (min_book is None or s.book >= min_book)
+        and (max_book is None or s.book <= max_book)
+        and (min_contributions is None or s.contributions >= min_contributions)
+        and (max_contributions is None or s.contributions <= max_contributions)
+        and (min_change is None or ((change := changes[s.date]) is not None and change >= min_change))
+        and (max_change is None or ((change := changes[s.date]) is not None and change <= max_change))
+        and (not increases_only or ((change := changes[s.date]) is not None and change > 0))
+        and (not decreases_only or ((change := changes[s.date]) is not None and change < 0))
+        and (not unknown_change_only or changes[s.date] is None)
+        and s.date not in excluded
     ]
     if count_only:
         click.echo(len(rows))

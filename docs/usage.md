@@ -2,6 +2,9 @@
 
 [Back to the README](../README.md) · [Configuration](configuration.md) · [Data and backups](data.md)
 
+For additional offline search, value bounds and saved-alert inspection, see
+[Offline report filters](cli-report-filters.md).
+
 ## Accounts and transactions
 
 Create accounts before recording transactions. Names, IDs, and account types
