@@ -4,6 +4,8 @@
 
 For additional offline search, value bounds and saved-alert inspection, see
 [Offline report filters](cli-report-filters.md).
+For position and cash selection, cash pages, and activity amount/fee filters,
+see [Offline ledger selection](cli-ledger-selection.md).
 
 ## Accounts and transactions
 
