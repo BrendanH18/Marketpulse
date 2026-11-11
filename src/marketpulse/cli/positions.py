@@ -62,7 +62,7 @@ def _emit_csv(fieldnames: list[str], rows: list[dict[str, Any]]) -> None:
 @click.option("--csv", "as_csv", is_flag=True, help="Print raw, unmasked positions as CSV to stdout.")
 @click.option("--count", "count_only", is_flag=True, help="Print only the number of matching positions.")
 @click.option("--limit", type=click.IntRange(min=1), help="Show at most N matching positions.")
-@click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip N matching positions after sorting.")
+@click.option("--offset", type=click.IntRange(min=0), help="Skip N matching positions after sorting.")
 @click.option("--page-info", is_flag=True, help="Include total, offset and limit in a JSON envelope; requires --json.")
 @click.option("--held-since", callback=date_callback, help="Only holdings first opened on or after this date.")
 @click.option("--held-until", callback=date_callback, help="Only holdings first opened on or before this date.")
@@ -78,14 +78,14 @@ def positions(
     as_csv: bool,
     count_only: bool,
     limit: int | None,
-    offset: int,
+    offset: int | None,
     page_info: bool,
     held_since: str | None,
     held_until: str | None,
 ) -> None:
     """Open positions at cost from the ledger, offline (no quotes, no snapshot)."""
     _check_outputs(as_json, as_csv, count_only)
-    if count_only and (limit is not None or offset or page_info):
+    if count_only and (limit is not None or offset is not None or page_info):
         raise click.UsageError("--count cannot be combined with --limit, --offset or --page-info.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
@@ -124,6 +124,7 @@ def positions(
         click.echo(len(matches))
         return
     total = len(matches)
+    offset = offset or 0
     matches = matches[offset : offset + limit if limit is not None else None]
     rows: list[dict[str, Any]] = [
         {

@@ -83,6 +83,7 @@ def test_held_date_bounds_are_inclusive_and_composable(browse):
         ("--page-info",),
         ("--count", "--limit", "1"),
         ("--count", "--offset", "1"),
+        ("--count", "--offset", "0"),
         ("--count", "--page-info"),
         ("--held-since", "invalid"),
         ("--held-until", "2024-02-30"),
