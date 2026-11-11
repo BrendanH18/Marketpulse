@@ -21,7 +21,7 @@
         <ListBoxItem Content="Holdings" />
         <ListBoxItem Content="Activity" />
         <ListBoxItem Content="Accounts" />
-        <ListBoxItem Content="Watchlist &amp; alerts" />
+        <ListBoxItem Content="Watchlist" />
         <ListBoxItem Content="Income" />
         <ListBoxItem Content="Tax" />
         <ListBoxItem Content="Automation" />

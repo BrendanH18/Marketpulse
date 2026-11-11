@@ -9,6 +9,7 @@ struct NativeBridgeCheck {
     decoder.keyDecodingStrategy = .convertFromSnakeCase
     let payload = try decoder.decode(DesktopPayload.self, from: data)
     precondition(payload.version == 1 && payload.demo)
+    precondition(payload.watchlistSymbols == ["AAPL", "MSFT", "NVDA", "XEQT.TO"])
     precondition(payload.accounts.count == 3 && payload.positions.count == 6)
     precondition(payload.status.history.count == 181 && payload.incomeMonths.count == 12)
     precondition(payload.warnings.isEmpty && payload.automation.backup == nil)

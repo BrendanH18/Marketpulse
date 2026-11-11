@@ -58,6 +58,8 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         "version": 1,
         "demo": False,
         "status": status,
+        # Saved order includes symbols whose quotes are unavailable; status only has priced rows.
+        "watchlist_symbols": tracker.store.watchlist(),
         # Each with the revision an edit, archive or unarchive sends back (`accounts edit --revision`).
         "accounts": [
             # `registered`: tax-sheltered, so an in-kind transfer across that line needs a market price.

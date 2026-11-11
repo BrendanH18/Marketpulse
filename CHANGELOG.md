@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Windows watchlist ordering and alert management ([#114](https://github.com/BrendanH18/Marketpulse/issues/114)):
+  edit thresholds and notes, pause/resume without losing trigger history, explicitly
+  rearm, and filter alerts by state. Unpriced watched symbols remain visible and
+  movable through the additive version-1 `watchlist_symbols` snapshot field.
+
 - Thirty offline ledger report and diagnostics improvements ([#111](https://github.com/BrendanH18/Marketpulse/issues/111)):
   `positions` and `cash` cost-base views with filters, sorting and an overdraft exit code,
   native-currency `realized` gain and `payouts` income logs with grouped totals, `snapshots`

@@ -129,6 +129,10 @@ jobs:
         run: |
           dotnet restore windows/MarketPulse.BackupUiCheck --locked-mode -p:UseAppHost=false
           dotnet run --project windows/MarketPulse.BackupUiCheck --no-restore -p:UseAppHost=false -- "$env:RUNNER_TEMP/Windows build/MarketPulse/MarketPulse-backend/python/python.exe"
+      - name: Check watchlist and alert UI on fictional data
+        run: |
+          dotnet restore windows/MarketPulse.WatchlistUiCheck --locked-mode -p:UseAppHost=false
+          dotnet run --project windows/MarketPulse.WatchlistUiCheck --no-restore -p:UseAppHost=false -- "$env:RUNNER_TEMP/Windows build/MarketPulse/MarketPulse-backend/python/python.exe"
       - name: Install with install.ps1 from a local mirror (Windows PowerShell 5.1 and PowerShell 7)
         run: uv run --locked python scripts/check_windows_install.py "$env:RUNNER_TEMP/Windows release"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

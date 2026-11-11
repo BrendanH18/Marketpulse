@@ -280,3 +280,5 @@ finally
 }
 
 await AssetChecks.RunAsync(args[0]);
+
+await WatchlistChecks.RunAsync(args[0]);

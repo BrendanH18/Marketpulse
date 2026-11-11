@@ -320,6 +320,8 @@ struct DesktopPayload: Decodable {
   let version: Int
   let demo: Bool
   var status: StatusPayload
+  /// Saved order, including symbols without quotes. Absent from older engines.
+  let watchlistSymbols: [String]?
   let accounts: [DesktopAccount]
   /// Only Settings › Data lists these, to unarchive them. Absent from older engines.
   let archivedAccounts: [ArchivedAccount]?

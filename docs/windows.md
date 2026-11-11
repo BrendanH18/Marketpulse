@@ -94,6 +94,32 @@ and tray. Closing the window keeps the app running in the tray; choose **Open
 MarketPulse** to reopen it or **Exit** to stop it and its active backend request.
 A failed refresh displays an error rather than a zero balance.
 
+### Watchlists and alerts
+
+In **Watchlist & alerts**, use **Move up** and **Move down** to change the saved
+symbol order. The first and last rows disable moves past the ends. Symbols whose
+quotes are unavailable stay in the list and can still be moved or removed.
+
+Each alert offers **Edit alert** for its threshold and note, and **Pause** or
+**Resume** for whether it is enabled. These commands do not reset its last trigger
+time themselves. After a save, the app refreshes and evaluates enabled alerts:
+a fresh price that no longer meets the condition automatically rearms a triggered
+alert by clearing its trigger time. A later crossing can then fire it again.
+Paused alerts keep their trigger time until resumed or explicitly rearmed.
+**Rearm alert…** asks for confirmation, then enables the alert and clears its trigger
+history so the next matching fresh price can fire again. Stale prices never fire
+alerts. Windows toast notifications remain unavailable.
+
+Filter the list by state without changing saved alerts: **Armed** means enabled
+and currently untriggered, **Paused** means disabled (even with a previous trigger),
+and **Triggered** means enabled with a saved trigger time. **All** shows every
+alert. Privacy hides identifying details and the demo disables writes.
+
+The version-1 desktop snapshot adds `watchlist_symbols`, the saved symbol order
+including unpriced entries. Older engines omit it; the Windows app then shows
+the quoted symbols available in their snapshot and disables reordering until
+the engine is updated.
+
 ### Tax reports
 
 Open **Tax** to calculate capital gains with the existing Python engine. Choose a
