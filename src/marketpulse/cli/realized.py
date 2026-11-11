@@ -49,6 +49,15 @@ def _filters(f):
             click.option("--year", type=click.IntRange(min=1, max=9999), help="Only this calendar year."),
             click.option("--since", callback=date_callback, help="On or after this date."),
             click.option("--until", callback=date_callback, help="On or before this date."),
+            click.option("--currency", help="Only this native currency (case-insensitive)."),
+            click.option("--count", "count_only", is_flag=True, help="Print the number of matching rows or groups."),
+            click.option(
+                "--newest-first",
+                is_flag=True,
+                help="Newest dates first; with --by, reverse the group order.",
+            ),
+            click.option("--limit", type=click.IntRange(min=1), help="Show at most N matching rows or groups."),
+            click.option("--offset", type=click.IntRange(min=0), help="Skip N matching rows or groups before --limit."),
             click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked rows and totals as JSON."),
             click.option("--csv", "as_csv", is_flag=True, help="Print raw, unmasked rows as CSV to stdout."),
         ]
@@ -62,6 +71,20 @@ def _check_common(since: str | None, until: str | None, as_json: bool, as_csv: b
         raise click.UsageError("--since must be on or before --until.")
     if as_json and as_csv:
         raise click.UsageError("Choose one output format: --json or --csv.")
+
+
+def _browsing_currency(currency, count_only, as_json, as_csv, limit, offset, newest_first) -> str | None:
+    if count_only and (as_json or as_csv or limit is not None or offset is not None or newest_first):
+        raise click.UsageError("--count cannot be combined with --json, --csv, --limit, --offset or --newest-first.")
+    wanted = currency.strip().upper() if currency is not None else None
+    if wanted == "":
+        raise click.UsageError("--currency cannot be blank.")
+    return wanted
+
+
+def _page(rows, limit, offset):
+    start = offset or 0
+    return rows[start : start + limit if limit is not None else None]
 
 
 def _scope(app: App, account: str | None) -> tuple[dict[int, Account], int | None]:
@@ -131,11 +154,28 @@ def _realized_totals(rows: list[RealizedGain]) -> dict[str, dict]:
 @click.option("--gains-only", is_flag=True, help="Only sales with a gain (rounded to the cent).")
 @click.option("--losses-only", is_flag=True, help="Only sales with a loss (rounded to the cent).")
 @pass_app
-def realized(app: App, account, symbol, year, since, until, as_json, as_csv, gains_only, losses_only) -> None:
+def realized(
+    app: App,
+    account,
+    symbol,
+    year,
+    since,
+    until,
+    as_json,
+    as_csv,
+    gains_only,
+    losses_only,
+    currency,
+    count_only,
+    newest_first,
+    limit,
+    offset,
+) -> None:
     """Realized gains from the ledger, oldest first, totalled per native currency (offline).
 
     Not the tax report: no FX conversion and no superficial-loss rules. Use `marketpulse tax` for that."""
     _check_common(since, until, as_json, as_csv)
+    ccy = _browsing_currency(currency, count_only, as_json, as_csv, limit, offset, newest_first)
     if gains_only and losses_only:
         raise click.UsageError("Choose one of --gains-only or --losses-only.")
     accounts, account_id = _scope(app, account)
@@ -146,15 +186,21 @@ def realized(app: App, account, symbol, year, since, until, as_json, as_csv, gai
         if r.account_id in accounts
         and (account_id is None or r.account_id == account_id)
         and (wanted is None or r.symbol.upper() == wanted)
+        and (ccy is None or r.currency.upper() == ccy)
         and _in_range(r.date, year, since, until)
         and (not gains_only or round(r.gain, 2) > 0)
         and (not losses_only or round(r.gain, 2) < 0)
     ]
+    if count_only:
+        click.echo(len(rows))
+        return
+    all_rows = rows
+    rows = _page(sorted(rows, key=lambda r: r.date, reverse=newest_first), limit, offset)
     if as_csv:
         _echo_csv(REALIZED_FIELDS, [_realized_row(r, accounts) for r in rows])
         return
     if as_json:
-        payload = {"rows": [_realized_row(r, accounts) for r in rows], "totals": _realized_totals(rows)}
+        payload = {"rows": [_realized_row(r, accounts) for r in rows], "totals": _realized_totals(all_rows)}
         click.echo(json.dumps(payload, ensure_ascii=False))
         return
     if not rows:
@@ -191,7 +237,7 @@ def realized(app: App, account, symbol, year, since, until, as_json, as_csv, gai
         ("Gain", "right"),
         title="Totals by currency",
     )
-    for ccy, total in _realized_totals(rows).items():
+    for ccy, total in _realized_totals(all_rows).items():
         totals.add_row(
             Text(ccy),
             Text(str(total["count"])),
@@ -263,9 +309,26 @@ def _payout_groups(rows: list[IncomeEvent], by: str, accounts: dict[int, Account
     help="Show totals per group and currency instead of each payout.",
 )
 @pass_app
-def payouts(app: App, account, symbol, year, since, until, as_json, as_csv, kinds, by) -> None:
+def payouts(
+    app: App,
+    account,
+    symbol,
+    year,
+    since,
+    until,
+    as_json,
+    as_csv,
+    kinds,
+    by,
+    currency,
+    count_only,
+    newest_first,
+    limit,
+    offset,
+) -> None:
     """Recorded dividend, DRIP and interest income, oldest first, per native currency (offline)."""
     _check_common(since, until, as_json, as_csv)
+    ccy = _browsing_currency(currency, count_only, as_json, as_csv, limit, offset, newest_first)
     accounts, account_id = _scope(app, account)
     wanted = symbol.strip().upper() if symbol is not None else None
     chosen = {k.lower() for k in kinds}
@@ -276,17 +339,23 @@ def payouts(app: App, account, symbol, year, since, until, as_json, as_csv, kind
         if e.account_id in accounts
         and (account_id is None or e.account_id == account_id)
         and (wanted is None or e.symbol.upper() == wanted)
+        and (ccy is None or e.currency.upper() == ccy)
         and (not chosen or e.kind.value.lower() in chosen)
         and _in_range(e.date, year, since, until)
     ]
     if by:
-        _grouped_payouts(app, rows, by, accounts, as_json, as_csv)
+        _grouped_payouts(app, rows, by, accounts, as_json, as_csv, count_only, newest_first, limit, offset)
         return
+    if count_only:
+        click.echo(len(rows))
+        return
+    all_rows = rows
+    rows = _page(sorted(rows, key=lambda e: e.date, reverse=newest_first), limit, offset)
     if as_csv:
         _echo_csv(PAYOUT_FIELDS, [_payout_row(e, accounts) for e in rows])
         return
     if as_json:
-        payload = {"rows": [_payout_row(e, accounts) for e in rows], "totals": _payout_totals(rows)}
+        payload = {"rows": [_payout_row(e, accounts) for e in rows], "totals": _payout_totals(all_rows)}
         click.echo(json.dumps(payload, ensure_ascii=False))
         return
     if not rows:
@@ -303,13 +372,26 @@ def payouts(app: App, account, symbol, year, since, until, as_json, as_csv, kind
             Text(e.currency, style="muted"),
         )
     app.console.print(table)
-    _print_payout_totals(app, rows)
+    _print_payout_totals(app, all_rows)
 
 
 def _grouped_payouts(
-    app: App, rows: list[IncomeEvent], by: str, accounts: dict[int, Account], as_json: bool, as_csv: bool
+    app: App,
+    rows: list[IncomeEvent],
+    by: str,
+    accounts: dict[int, Account],
+    as_json: bool,
+    as_csv: bool,
+    count_only: bool,
+    newest_first: bool,
+    limit: int | None,
+    offset: int | None,
 ) -> None:
     groups = _payout_groups(rows, by, accounts)
+    if count_only:
+        click.echo(len(groups))
+        return
+    groups = _page(list(reversed(groups)) if newest_first else groups, limit, offset)
     if as_csv:
         _echo_csv(["group", "currency", "count", "amount"] + (["account"] if by == "account" else []), groups)
         return

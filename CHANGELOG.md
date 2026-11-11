@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Thirty offline report browsing improvements ([#116](https://github.com/BrendanH18/Marketpulse/issues/116)):
+  position pages and holding-date filters, searchable and sortable cash balances,
+  currency filters and pages for realized gains and payouts, and calendar,
+  value, change and ordering controls for snapshot history. See
+  [Offline report browsing](docs/cli-report-browsing.md).
+
 - Windows watchlist ordering and alert management ([#114](https://github.com/BrendanH18/Marketpulse/issues/114)):
   edit thresholds and notes, pause/resume without losing trigger history, explicitly
   rearm, and filter alerts by state. Unpriced watched symbols remain visible and
