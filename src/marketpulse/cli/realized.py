@@ -82,6 +82,28 @@ def _browsing_currency(currency, count_only, as_json, as_csv, limit, offset, new
     return wanted
 
 
+def _finite(ctx, param, value):
+    if value is not None and not math.isfinite(value):
+        raise click.BadParameter("Must be a finite number.")
+    return value
+
+
+def _amount_range(minimum, maximum, label):
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise click.UsageError(f"--min-{label} must be at most --max-{label}.")
+
+
+def _page_metadata(total, rows, limit, offset):
+    start = offset or 0
+    return {
+        "total": total,
+        "offset": start,
+        "limit": limit,
+        "returned": len(rows),
+        "next_offset": start + len(rows) if start + len(rows) < total else None,
+    }
+
+
 def _page(rows, limit, offset):
     start = offset or 0
     return rows[start : start + limit if limit is not None else None]
@@ -151,6 +173,15 @@ def _realized_totals(rows: list[RealizedGain]) -> dict[str, dict]:
 
 @main.command()
 @_filters
+@click.option("--search", help="Find symbol or account text, ignoring case.")
+@click.option(
+    "--sort",
+    "sort_by",
+    type=click.Choice(["date", "account", "symbol", "quantity", "proceeds", "cost", "gain", "currency"]),
+)
+@click.option("--descending", is_flag=True, help="Reverse the selected sort (default: date).")
+@click.option("--min-gain", type=float, callback=_finite, help="Inclusive native-currency gain minimum.")
+@click.option("--max-gain", type=float, callback=_finite, help="Inclusive native-currency gain maximum.")
 @click.option("--gains-only", is_flag=True, help="Only sales with a gain (rounded to the cent).")
 @click.option("--losses-only", is_flag=True, help="Only sales with a loss (rounded to the cent).")
 @pass_app
@@ -163,6 +194,11 @@ def realized(
     until,
     as_json,
     as_csv,
+    search,
+    sort_by,
+    descending,
+    min_gain,
+    max_gain,
     gains_only,
     losses_only,
     currency,
@@ -176,6 +212,11 @@ def realized(
     Not the tax report: no FX conversion and no superficial-loss rules. Use `marketpulse tax` for that."""
     _check_common(since, until, as_json, as_csv)
     ccy = _browsing_currency(currency, count_only, as_json, as_csv, limit, offset, newest_first)
+    _amount_range(min_gain, max_gain, "gain")
+    if newest_first and (sort_by is not None or descending):
+        raise click.UsageError("--newest-first cannot be combined with --sort or --descending.")
+    if count_only and (sort_by is not None or descending):
+        raise click.UsageError("--count cannot be combined with --sort or --descending.")
     if gains_only and losses_only:
         raise click.UsageError("Choose one of --gains-only or --losses-only.")
     accounts, account_id = _scope(app, account)
@@ -188,6 +229,13 @@ def realized(
         and (wanted is None or r.symbol.upper() == wanted)
         and (ccy is None or r.currency.upper() == ccy)
         and _in_range(r.date, year, since, until)
+        and (
+            search is None
+            or search.casefold() in r.symbol.casefold()
+            or search.casefold() in accounts[r.account_id].name.casefold()
+        )
+        and (min_gain is None or r.gain >= min_gain)
+        and (max_gain is None or r.gain <= max_gain)
         and (not gains_only or round(r.gain, 2) > 0)
         and (not losses_only or round(r.gain, 2) < 0)
     ]
@@ -195,7 +243,13 @@ def realized(
         click.echo(len(rows))
         return
     all_rows = rows
-    rows = _page(sorted(rows, key=lambda r: r.date, reverse=newest_first), limit, offset)
+    field = sort_by or "date"
+    rows = sorted(
+        rows,
+        key=lambda r: accounts[r.account_id].name.casefold() if field == "account" else getattr(r, field),
+        reverse=descending or newest_first,
+    )
+    rows = _page(rows, limit, offset)
     if as_csv:
         _echo_csv(REALIZED_FIELDS, [_realized_row(r, accounts) for r in rows])
         return
@@ -296,6 +350,11 @@ def _payout_groups(rows: list[IncomeEvent], by: str, accounts: dict[int, Account
 
 @main.command()
 @_filters
+@click.option("--search", help="Find symbol or account text, ignoring case.")
+@click.option("--min-amount", type=float, callback=_finite, help="Inclusive native-currency payout minimum.")
+@click.option("--max-amount", type=float, callback=_finite, help="Inclusive native-currency payout maximum.")
+@click.option("--exclude-symbol", "excluded_symbols", multiple=True, help="Exclude exact symbols; repeat for several.")
+@click.option("--page-info", is_flag=True, help="With --json, include row or group pagination metadata.")
 @click.option(
     "--kind",
     "kinds",
@@ -318,6 +377,11 @@ def payouts(
     until,
     as_json,
     as_csv,
+    search,
+    min_amount,
+    max_amount,
+    excluded_symbols,
+    page_info,
     kinds,
     by,
     currency,
@@ -329,6 +393,12 @@ def payouts(
     """Recorded dividend, DRIP and interest income, oldest first, per native currency (offline)."""
     _check_common(since, until, as_json, as_csv)
     ccy = _browsing_currency(currency, count_only, as_json, as_csv, limit, offset, newest_first)
+    _amount_range(min_amount, max_amount, "amount")
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
+    excluded = {symbol.strip().upper() for symbol in excluded_symbols}
+    if "" in excluded:
+        raise click.UsageError("--exclude-symbol cannot be blank.")
     accounts, account_id = _scope(app, account)
     wanted = symbol.strip().upper() if symbol is not None else None
     chosen = {k.lower() for k in kinds}
@@ -340,11 +410,19 @@ def payouts(
         and (account_id is None or e.account_id == account_id)
         and (wanted is None or e.symbol.upper() == wanted)
         and (ccy is None or e.currency.upper() == ccy)
+        and (
+            search is None
+            or search.casefold() in e.symbol.casefold()
+            or search.casefold() in accounts[e.account_id].name.casefold()
+        )
+        and (min_amount is None or e.amount >= min_amount)
+        and (max_amount is None or e.amount <= max_amount)
+        and e.symbol.upper() not in excluded
         and (not chosen or e.kind.value.lower() in chosen)
         and _in_range(e.date, year, since, until)
     ]
     if by:
-        _grouped_payouts(app, rows, by, accounts, as_json, as_csv, count_only, newest_first, limit, offset)
+        _grouped_payouts(app, rows, by, accounts, as_json, as_csv, count_only, newest_first, limit, offset, page_info)
         return
     if count_only:
         click.echo(len(rows))
@@ -356,6 +434,8 @@ def payouts(
         return
     if as_json:
         payload = {"rows": [_payout_row(e, accounts) for e in rows], "totals": _payout_totals(all_rows)}
+        if page_info:
+            payload.update(_page_metadata(len(all_rows), rows, limit, offset))
         click.echo(json.dumps(payload, ensure_ascii=False))
         return
     if not rows:
@@ -386,17 +466,22 @@ def _grouped_payouts(
     newest_first: bool,
     limit: int | None,
     offset: int | None,
+    page_info: bool,
 ) -> None:
     groups = _payout_groups(rows, by, accounts)
     if count_only:
         click.echo(len(groups))
         return
+    total = len(groups)
     groups = _page(list(reversed(groups)) if newest_first else groups, limit, offset)
     if as_csv:
         _echo_csv(["group", "currency", "count", "amount"] + (["account"] if by == "account" else []), groups)
         return
     if as_json:
-        click.echo(json.dumps({"by": by, "groups": groups, "totals": _payout_totals(rows)}, ensure_ascii=False))
+        payload = {"by": by, "groups": groups, "totals": _payout_totals(rows)}
+        if page_info:
+            payload.update(_page_metadata(total, groups, limit, offset))
+        click.echo(json.dumps(payload, ensure_ascii=False))
         return
     if not groups:
         app.console.print(Text("No matching payouts.", style="muted"))

@@ -15,7 +15,7 @@ from rich.text import Text
 
 from .. import fmt, render
 from ..models import ALERT_CONDITIONS, Alert, parse_symbols
-from .base import App, fail, pass_app
+from .base import App, date_callback, fail, pass_app
 from .root import main
 
 
@@ -208,7 +208,17 @@ def alerts(ctx: click.Context) -> None:
 @click.option("--count", "count_only", is_flag=True, help="Print the number of matching alerts.")
 @click.option("--csv", "as_csv", is_flag=True, help="Export raw, unmasked alert metadata as CSV, offline.")
 @click.option("--search", help="Find symbol or note text, ignoring case.")
-@click.option("--sort", "sort_by", type=click.Choice(["id", "symbol", "state", "condition"]))
+@click.option(
+    "--sort", "sort_by", type=click.Choice(["id", "symbol", "state", "condition", "threshold", "triggered-at"])
+)
+@click.option("--min-threshold", type=float, help="Inclusive finite threshold minimum, in the condition's units.")
+@click.option("--max-threshold", type=float, help="Inclusive finite threshold maximum, in the condition's units.")
+@click.option("--with-note", is_flag=True, help="Only alerts with a nonblank note.")
+@click.option("--without-note", is_flag=True, help="Only alerts with an empty or whitespace-only note.")
+@click.option("--triggered-since", callback=date_callback, help="Trigger date on or after YYYY-MM-DD.")
+@click.option("--triggered-until", callback=date_callback, help="Trigger date on or before YYYY-MM-DD.")
+@click.option("--exclude-symbol", "excluded_symbols", multiple=True, help="Exclude exact symbols; repeat for several.")
+@click.option("--page-info", is_flag=True, help="With --json, include pagination metadata.")
 @click.option("--descending", is_flag=True, help="Reverse output before pagination.")
 @click.option("--limit", type=click.IntRange(min=1), help="Show at most this many matching alerts.")
 @click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip matching alerts.")
@@ -226,11 +236,43 @@ def alerts_list(
     descending: bool,
     limit: int | None,
     offset: int,
+    min_threshold: float | None,
+    max_threshold: float | None,
+    with_note: bool,
+    without_note: bool,
+    triggered_since: str | None,
+    triggered_until: str | None,
+    excluded_symbols: tuple[str, ...],
+    page_info: bool,
 ) -> None:
     """List saved alerts, optionally filtered by symbol and current state."""
     if sum((as_json, as_csv, count_only)) > 1:
         raise click.UsageError("Choose one of --json, --csv or --count.")
-    items = app.store.alerts()
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
+    if with_note and without_note:
+        raise click.UsageError("Choose one of --with-note or --without-note.")
+    for name, value in (("--min-threshold", min_threshold), ("--max-threshold", max_threshold)):
+        if value is not None and not math.isfinite(value):
+            raise click.BadParameter("Must be a finite number.", param_hint=name)
+    if min_threshold is not None and max_threshold is not None and min_threshold > max_threshold:
+        raise click.UsageError("--min-threshold must be at most --max-threshold.")
+    if triggered_since and triggered_until and triggered_since > triggered_until:
+        raise click.UsageError("--triggered-since must be on or before --triggered-until.")
+    excluded = {s.strip().upper() for s in excluded_symbols}
+    if "" in excluded:
+        raise click.UsageError("--exclude-symbol cannot be blank.")
+    items = [
+        a
+        for a in app.store.alerts()
+        if a.symbol not in excluded
+        and (min_threshold is None or (math.isfinite(a.threshold) and a.threshold >= min_threshold))
+        and (max_threshold is None or (math.isfinite(a.threshold) and a.threshold <= max_threshold))
+        and (not with_note or bool(a.note.strip()))
+        and (not without_note or not a.note.strip())
+        and (not triggered_since or bool(a.triggered_at) and a.triggered_at[:10] >= triggered_since)
+        and (not triggered_until or bool(a.triggered_at) and a.triggered_at[:10] <= triggered_until)
+    ]
     if symbol is not None:
         items = [a for a in items if a.symbol == symbol.strip().upper()]
     if state is not None:
@@ -242,10 +284,23 @@ def alerts_list(
     if count_only:
         click.echo(len(items))
         return
-    if sort_by is not None:
-        items.sort(key=lambda a: ((_alert_state(a) if sort_by == "state" else getattr(a, sort_by)), a.id or 0))
-    if descending:
-        items.reverse()
+    total = len(items)
+    if sort_by in ("threshold", "triggered-at"):
+        field = sort_by.replace("-", "_")
+        known = (
+            [a for a in items if math.isfinite(a.threshold)]
+            if field == "threshold"
+            else [a for a in items if a.triggered_at]
+        )
+        unknown = [a for a in items if a not in known]
+        known.sort(key=lambda a: (getattr(a, field), a.id or 0), reverse=descending)
+        unknown.sort(key=lambda a: a.id or 0, reverse=descending)
+        items = known + unknown
+    else:
+        if sort_by is not None:
+            items.sort(key=lambda a: ((_alert_state(a) if sort_by == "state" else getattr(a, sort_by)), a.id or 0))
+        if descending:
+            items.reverse()
     items = items[offset:] if limit is None else items[offset : offset + limit]
     if as_csv:
         stream = io.StringIO(newline="")
@@ -255,12 +310,37 @@ def alerts_list(
         click.echo(stream.getvalue(), nl=False)
         return
     if as_json:
-        click.echo(json.dumps([_alert_json(a) for a in items], ensure_ascii=False, allow_nan=False))
+        records = [_alert_json(a) for a in items]
+        payload = (
+            {
+                "items": records,
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+                "returned": len(records),
+                "next_offset": offset + len(records) if offset + len(records) < total else None,
+            }
+            if page_info
+            else records
+        )
+        click.echo(json.dumps(payload, ensure_ascii=False, allow_nan=False))
         return
     if not items:
         message = (
             "No alerts match these filters."
-            if symbol is not None or state or condition or search is not None or offset or limit is not None
+            if symbol is not None
+            or state
+            or condition
+            or search is not None
+            or offset
+            or limit is not None
+            or min_threshold is not None
+            or max_threshold is not None
+            or with_note
+            or without_note
+            or triggered_since
+            or triggered_until
+            or excluded_symbols
             else ("No alerts — `marketpulse alerts add NVDA above 200`.")
         )
         app.console.print(Text(message, style="muted"))
@@ -272,8 +352,21 @@ def alerts_list(
             if _alert_state(a) == "triggered"
             else Text(_alert_state(a), style="muted")
         )
+        description = (
+            {
+                "above": f"{a.symbol} ≥ {fmt.MASK}",
+                "below": f"{a.symbol} ≤ {fmt.MASK}",
+                "up_pct": f"{a.symbol} up {fmt.MASK}% today",
+                "down_pct": f"{a.symbol} down {fmt.MASK}% today",
+            }[a.condition]
+            if app.privacy
+            else a.describe()
+        )
         t.add_row(
-            Text(str(a.id), style="muted"), Text(a.describe(), style="bright"), shown_state, Text(a.note, style="muted")
+            Text(str(a.id), style="muted"),
+            Text(description, style="bright"),
+            shown_state,
+            Text(a.note, style="muted"),
         )
     app.console.print(t)
 
