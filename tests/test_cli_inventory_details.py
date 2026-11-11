@@ -122,6 +122,6 @@ def test_asset_order_then_paging(cli, assets, fake, args, symbols):
     assert fake.calls == []
 
 
-@pytest.mark.parametrize("args", [("--limit", "0"), ("--offset", "-1"), ("--sort", "rate")])
+@pytest.mark.parametrize("args", [("--limit", "0"), ("--offset", "-1"), ("--sort", "unknown")])
 def test_asset_invalid_paging_or_order_rejected(cli, assets, args):
     assert cli("asset", "list", *args).exit_code == 2

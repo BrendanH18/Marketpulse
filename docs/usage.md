@@ -7,6 +7,9 @@ For additional offline search, value bounds and saved-alert inspection, see
 For position and cash selection, cash pages, and activity amount/fee filters,
 see [Offline ledger selection](cli-ledger-selection.md).
 
+For account metadata summaries, configured-asset rate and term selection, and
+saved watchlist/alert filters, see [Offline inventory selection](cli-inventory-selection.md).
+
 ## Accounts and transactions
 
 Create accounts before recording transactions. Names, IDs, and account types

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Thirty offline inventory selection improvements ([#122](https://github.com/BrendanH18/Marketpulse/issues/122)):
+  account exclusions, registration and metadata filters with grouped counts;
+  configured-asset rate, term and compounding selection; and saved watchlist
+  position/alert filters with alert summaries. See
+  [Offline inventory selection](docs/cli-inventory-selection.md).
+
 - Thirty offline ledger selection improvements ([#120](https://github.com/BrendanH18/Marketpulse/issues/120)):
   position metadata and quantity/book filters, average-cost ordering, cash pages
   and balance/account filters, and activity month, amount, fee and exclusion

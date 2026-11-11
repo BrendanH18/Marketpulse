@@ -7,6 +7,7 @@ import io
 import json
 import math
 import time
+from collections import Counter
 from dataclasses import asdict, fields
 
 import click
@@ -38,6 +39,12 @@ def watch(ctx: click.Context) -> None:
 @click.option("--csv", "as_csv", is_flag=True, help="Export saved positions and symbols offline as CSV.")
 @click.option("--descending", is_flag=True, help="Reverse offline output before pagination.")
 @click.option("--exclude-symbol", "excluded_symbols", multiple=True, help="Exclude exact symbols; repeat for several.")
+@click.option("--symbol", "included_symbols", multiple=True, help="Include exact symbols; repeat for several, offline.")
+@click.option("--min-position", type=click.IntRange(min=1), help="Minimum saved position, inclusive, offline.")
+@click.option("--max-position", type=click.IntRange(min=1), help="Maximum saved position, inclusive, offline.")
+@click.option(
+    "--with-alert/--without-alert", default=None, help="Match symbols with or without any saved alert, offline."
+)
 @click.option("--page-info", is_flag=True, help="With --json, include pagination metadata.")
 @pass_app
 def watch_list(
@@ -53,14 +60,25 @@ def watch_list(
     descending: bool,
     excluded_symbols: tuple[str, ...],
     page_info: bool,
+    included_symbols: tuple[str, ...],
+    min_position: int | None,
+    max_position: int | None,
+    with_alert: bool | None,
 ) -> None:
     """List watched symbols; filters, paging and reports imply offline output."""
     if sum((as_json, as_csv, count_only)) > 1:
         raise click.UsageError("Choose one of --json, --csv or --count.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
+    included = _symbol_selection(included_symbols, "--symbol")
+    if min_position is not None and max_position is not None and min_position > max_position:
+        raise click.UsageError("--min-position must be at most --max-position.")
     if (
-        as_csv
+        included
+        or min_position is not None
+        or max_position is not None
+        or with_alert is not None
+        or as_csv
         or descending
         or excluded_symbols
         or page_info
@@ -74,8 +92,16 @@ def watch_list(
     ):
         saved = app.store.watchlist()
         excluded = {symbol.strip().upper() for symbol in excluded_symbols}
+        alerted = {a.symbol for a in app.store.alerts()} if with_alert is not None else set()
         symbols = [
-            symbol for symbol in saved if (search or "").casefold() in symbol.casefold() and symbol not in excluded
+            symbol
+            for position, symbol in enumerate(saved, 1)
+            if (search or "").casefold() in symbol.casefold()
+            and symbol not in excluded
+            and (not included or symbol in included)
+            and (min_position is None or position >= min_position)
+            and (max_position is None or position <= max_position)
+            and (with_alert is None or (symbol in alerted) == with_alert)
         ]
         total = len(symbols)
         if count_only:
@@ -127,6 +153,13 @@ def watch_list(
         app.console.print(Text("Watchlist is empty — `marketpulse watch add NVDA XEQT.TO`.", style="muted"))
         return
     app.console.print(render.quotes_table(symbols, quotes, errors, width=app.console.width))
+
+
+def _symbol_selection(values: tuple[str, ...], option: str) -> set[str]:
+    symbols = {value.strip().upper() for value in values}
+    if "" in symbols:
+        raise click.UsageError(f"{option} cannot be blank.")
+    return symbols
 
 
 @watch.command("move")
@@ -222,6 +255,18 @@ def alerts(ctx: click.Context) -> None:
 @click.option("--descending", is_flag=True, help="Reverse output before pagination.")
 @click.option("--limit", type=click.IntRange(min=1), help="Show at most this many matching alerts.")
 @click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip matching alerts.")
+@click.option("--symbols", "included_symbols", multiple=True, help="Include exact symbols; repeat for several.")
+@click.option(
+    "--exclude-state",
+    "excluded_states",
+    multiple=True,
+    type=click.Choice(["armed", "paused", "triggered"], case_sensitive=False),
+    help="Exclude alert states; repeat for several.",
+)
+@click.option("--note", help="Find text only in notes, ignoring case.")
+@click.option(
+    "--summary", type=click.Choice(["symbol", "state", "condition"]), help="Count matches by field before paging."
+)
 @pass_app
 def alerts_list(
     app: App,
@@ -244,12 +289,19 @@ def alerts_list(
     triggered_until: str | None,
     excluded_symbols: tuple[str, ...],
     page_info: bool,
+    included_symbols: tuple[str, ...],
+    excluded_states: tuple[str, ...],
+    note: str | None,
+    summary: str | None,
 ) -> None:
     """List saved alerts, optionally filtered by symbol and current state."""
     if sum((as_json, as_csv, count_only)) > 1:
         raise click.UsageError("Choose one of --json, --csv or --count.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
+    if summary and (count_only or page_info):
+        raise click.UsageError("--summary cannot be combined with --count or --page-info.")
+    included = _symbol_selection(included_symbols, "--symbols")
     if with_note and without_note:
         raise click.UsageError("Choose one of --with-note or --without-note.")
     for name, value in (("--min-threshold", min_threshold), ("--max-threshold", max_threshold)):
@@ -266,6 +318,9 @@ def alerts_list(
         a
         for a in app.store.alerts()
         if a.symbol not in excluded
+        and (not included or a.symbol in included)
+        and _alert_state(a) not in excluded_states
+        and (note is None or note.casefold() in a.note.casefold())
         and (min_threshold is None or (math.isfinite(a.threshold) and a.threshold >= min_threshold))
         and (max_threshold is None or (math.isfinite(a.threshold) and a.threshold <= max_threshold))
         and (not with_note or bool(a.note.strip()))
@@ -283,6 +338,23 @@ def alerts_list(
         items = [a for a in items if search.casefold() in a.symbol.casefold() or search.casefold() in a.note.casefold()]
     if count_only:
         click.echo(len(items))
+        return
+    if summary:
+        counts = Counter(_alert_state(a) if summary == "state" else getattr(a, summary) for a in items)
+        rows = [{"group": group, "count": count} for group, count in sorted(counts.items())]
+        if as_json:
+            click.echo(json.dumps(rows, ensure_ascii=False))
+        elif as_csv:
+            stream = io.StringIO(newline="")
+            writer = csv.DictWriter(stream, fieldnames=["group", "count"])
+            writer.writeheader()
+            writer.writerows(rows)
+            click.echo(stream.getvalue(), nl=False)
+        else:
+            table = render.table(summary.title(), ("Alerts", "right"), title="Matching alerts")
+            for row in rows:
+                table.add_row(Text(str(row["group"])), Text(str(row["count"])))
+            app.console.print(table)
         return
     total = len(items)
     if sort_by in ("threshold", "triggered-at"):
@@ -328,7 +400,10 @@ def alerts_list(
     if not items:
         message = (
             "No alerts match these filters."
-            if symbol is not None
+            if included_symbols
+            or excluded_states
+            or note is not None
+            or symbol is not None
             or state
             or condition
             or search is not None

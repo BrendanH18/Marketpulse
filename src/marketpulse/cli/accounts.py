@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections import Counter
 from dataclasses import asdict, fields
 
 import click
@@ -45,6 +46,33 @@ def accounts(ctx: click.Context) -> None:
 @click.option("--cash/--no-cash", default=None, help="Filter accounts by cash tracking.")
 @click.option("--sort", "sort_by", type=click.Choice(["name", "type", "institution", "currency"]))
 @click.option("--descending", is_flag=True, help="Reverse the selected order (default: account ID).")
+@click.option(
+    "--exclude-account",
+    "excluded_accounts",
+    multiple=True,
+    help="Exclude an account by ID, name or unique active type; repeat for several.",
+)
+@click.option(
+    "--registered/--nonregistered", default=None, help="Match registered or nonregistered account types, offline."
+)
+@click.option(
+    "--has-institution/--no-institution",
+    default=None,
+    help="Match accounts with or without a nonblank institution, offline.",
+)
+@click.option("--min-id", type=click.IntRange(min=1), help="Minimum account ID, inclusive; offline.")
+@click.option("--max-id", type=click.IntRange(min=1), help="Maximum account ID, inclusive; offline.")
+@click.option(
+    "--summary",
+    type=click.Choice(["type", "currency", "institution", "cash"]),
+    help="Count matching accounts by this field before pagination, offline.",
+)
+@click.option(
+    "--summary-sort",
+    type=click.Choice(["group", "count"]),
+    default="group",
+    help="Sort summaries by group or descending count.",
+)
 @pass_app
 def accounts_list(
     app: App,
@@ -63,15 +91,46 @@ def accounts_list(
     cash: bool | None,
     sort_by: str | None,
     descending: bool,
+    excluded_accounts: tuple[str, ...],
+    registered: bool | None,
+    has_institution: bool | None,
+    min_id: int | None,
+    max_id: int | None,
+    summary: str | None,
+    summary_sort: str,
 ) -> None:
     """List accounts, optionally filtering or reading metadata offline."""
     if sum((as_json, as_csv, count_only)) > 1:
         raise click.UsageError("Choose one of --json, --csv, or --count.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
-    offline = offline or as_csv or count_only or limit is not None or offset is not None
+    if min_id is not None and max_id is not None and min_id > max_id:
+        raise click.UsageError("--min-id must be at or below --max-id.")
+    if summary and (count_only or page_info):
+        raise click.UsageError("--summary cannot be combined with --count or --page-info.")
+    if summary_sort != "group" and not summary:
+        raise click.UsageError("--summary-sort requires --summary.")
+    selection = bool(excluded_accounts) or any(
+        value is not None for value in (registered, has_institution, min_id, max_id)
+    )
+    offline = offline or as_csv or count_only or limit is not None or offset is not None or selection or bool(summary)
     items = app.store.accounts(include_archived=archived)
-    filtered = any(value is not None for value in (acct_type, institution, search, currency, cash))
+    excluded_ids = set()
+    for ref in excluded_accounts:
+        found = app.store.get_account(ref)
+        if found is None or (found.archived and not archived):
+            fail(f"No {'matching' if archived else 'active'} account '{ref}'.")
+        excluded_ids.add(found.saved_id)
+    items = [
+        a
+        for a in items
+        if a.saved_id not in excluded_ids
+        and (registered is None or a.type.registered == registered)
+        and (has_institution is None or bool(a.institution.strip()) == has_institution)
+        and (min_id is None or a.saved_id >= min_id)
+        and (max_id is None or a.saved_id <= max_id)
+    ]
+    filtered = selection or any(value is not None for value in (acct_type, institution, search, currency, cash))
     if acct_type is not None:
         items = [a for a in items if a.type.value == acct_type]
     if institution is not None:
@@ -82,6 +141,9 @@ def accounts_list(
         items = [a for a in items if a.currency.casefold() == currency.strip().casefold()]
     if cash is not None:
         items = [a for a in items if a.track_cash == cash]
+    if summary:
+        _account_summary(app, items, summary, summary_sort, as_json, as_csv)
+        return
     if sort_by is not None:
         items.sort(key=lambda a: (str(getattr(a, sort_by)).casefold(), a.saved_id))
     if descending:
@@ -160,6 +222,33 @@ def accounts_list(
             )
         t.add_row(*cells)
     app.console.print(t)
+
+
+def _account_summary(app: App, items: list[Account], group: str, sort: str, as_json: bool, as_csv: bool) -> None:
+    def key(account: Account) -> str:
+        if group == "type":
+            return account.type.value
+        if group == "cash":
+            return "tracked" if account.track_cash else "untracked"
+        return str(getattr(account, group)).strip()
+
+    counts = Counter(key(account) for account in items)
+    rows = [{"group": value, "count": count} for value, count in sorted(counts.items())]
+    if sort == "count":
+        rows.sort(key=lambda row: (-int(str(row["count"])), str(row["group"])))
+    if as_json:
+        click.echo(json.dumps(rows, ensure_ascii=False))
+    elif as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(stream, fieldnames=["group", "count"])
+        writer.writeheader()
+        writer.writerows(rows)
+        click.echo(stream.getvalue(), nl=False)
+    else:
+        table = render.table(group.title(), ("Accounts", "right"), title="Matching accounts")
+        for row in rows:
+            table.add_row(Text(str(row["group"]) or "(no institution)"), Text(str(row["count"])))
+        app.console.print(table)
 
 
 @accounts.command("show")

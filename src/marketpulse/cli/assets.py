@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 from dataclasses import asdict, fields
 
 import click
@@ -53,7 +54,19 @@ def _create_asset(app: App, asset: Asset, txn: Transaction, *, new_symbol: bool)
 @click.option("--class", "asset_class", type=click.Choice([c.value for c in AssetClass], case_sensitive=False))
 @click.option("--currency", help="Match the asset's configured currency, ignoring case.")
 @click.option("--search", help="Find asset symbols or names containing this text, ignoring case.")
-@click.option("--sort", "sort_by", type=click.Choice(["symbol", "name", "kind", "currency"]))
+@click.option("--exclude-symbol", "excluded_symbols", multiple=True, help="Exclude exact symbols; repeat for several.")
+@click.option("--min-rate", type=float, help="Minimum fixed-income annual rate in percent, inclusive.")
+@click.option("--max-rate", type=float, help="Maximum fixed-income annual rate in percent, inclusive.")
+@click.option("--starts-since", callback=date_callback, help="Fixed-income start date on or after this date.")
+@click.option("--starts-until", callback=date_callback, help="Fixed-income start date on or before this date.")
+@click.option("--matures-since", callback=date_callback, help="Fixed-income maturity on or after this date.")
+@click.option("--matures-until", callback=date_callback, help="Fixed-income maturity on or before this date.")
+@click.option(
+    "--compounding",
+    type=click.Choice(["annual", "semiannual", "quarterly", "monthly", "simple"], case_sensitive=False),
+    help="Match a fixed-income compounding schedule.",
+)
+@click.option("--sort", "sort_by", type=click.Choice(["symbol", "name", "kind", "currency", "rate", "maturity-date"]))
 @click.option("--descending", is_flag=True, help="Reverse the selected order (default: stored order).")
 @click.option("--limit", type=click.IntRange(min=1), help="Show at most this many matching assets.")
 @click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip this many matching assets.")
@@ -74,15 +87,51 @@ def asset_list(
     descending: bool,
     limit: int | None,
     offset: int,
+    excluded_symbols: tuple[str, ...],
+    min_rate: float | None,
+    max_rate: float | None,
+    starts_since: str | None,
+    starts_until: str | None,
+    matures_since: str | None,
+    matures_until: str | None,
+    compounding: str | None,
 ) -> None:
     """List configured asset metadata without fetching prices."""
     if sum((as_json, as_csv, count_only)) > 1:
         raise click.UsageError("Choose one of --json, --csv, or --count.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
-    items = list(app.store.assets().values())
+    excluded = {value.strip().upper() for value in excluded_symbols}
+    if "" in excluded:
+        raise click.UsageError("--exclude-symbol cannot be blank.")
+    for option, value in (("--min-rate", min_rate), ("--max-rate", max_rate)):
+        if value is not None and not math.isfinite(value):
+            raise click.BadParameter("must be finite", param_hint=option)
+    if min_rate is not None and max_rate is not None and min_rate > max_rate:
+        raise click.UsageError("--min-rate must be at or below --max-rate.")
+    for lower, upper, label in ((starts_since, starts_until, "starts"), (matures_since, matures_until, "matures")):
+        if lower and upper and lower > upper:
+            raise click.UsageError(f"--{label}-since must be on or before --{label}-until.")
+    items = [a for a in app.store.assets().values() if a.symbol not in excluded]
+    fixed_filters = any(
+        value is not None
+        for value in (min_rate, max_rate, starts_since, starts_until, matures_since, matures_until, compounding)
+    )
+    if fixed_filters:
+        items = [
+            a
+            for a in items
+            if a.kind is AssetKind.FIXED_INCOME
+            and (min_rate is None or math.isfinite(a.rate) and a.rate >= min_rate)
+            and (max_rate is None or math.isfinite(a.rate) and a.rate <= max_rate)
+            and (not starts_since or bool(a.start_date) and a.start_date >= starts_since)
+            and (not starts_until or bool(a.start_date) and a.start_date <= starts_until)
+            and (not matures_since or bool(a.maturity_date) and a.maturity_date >= matures_since)
+            and (not matures_until or bool(a.maturity_date) and a.maturity_date <= matures_until)
+            and (compounding is None or a.compounding == compounding)
+        ]
     filtered = any(value is not None for value in (kind, asset_class, currency, search, limit)) or offset > 0
-    filtered = filtered or symbol is not None or unclassified
+    filtered = filtered or symbol is not None or unclassified or bool(excluded) or fixed_filters
     if symbol is not None:
         items = [a for a in items if a.symbol == symbol.strip().upper()]
     if unclassified:
@@ -95,10 +144,22 @@ def asset_list(
         items = [a for a in items if a.currency == currency.strip().upper()]
     if search is not None:
         items = [a for a in items if search.casefold() in a.symbol.casefold() or search.casefold() in a.name.casefold()]
-    if sort_by is not None:
-        items.sort(key=lambda a: (str(getattr(a, sort_by)).casefold(), a.symbol))
-    if descending:
-        items.reverse()
+    if sort_by in ("rate", "maturity-date"):
+        known = [
+            a
+            for a in items
+            if a.kind is AssetKind.FIXED_INCOME
+            and (math.isfinite(a.rate) if sort_by == "rate" else bool(a.maturity_date))
+        ]
+        unknown = [a for a in items if a not in known]
+        known.sort(key=lambda a: (a.rate if sort_by == "rate" else a.maturity_date, a.symbol), reverse=descending)
+        unknown.sort(key=lambda a: a.symbol, reverse=descending)
+        items = known + unknown
+    else:
+        if sort_by is not None:
+            items.sort(key=lambda a: (str(getattr(a, sort_by)).casefold(), a.symbol))
+        if descending:
+            items.reverse()
     total = len(items)
     if count_only:
         click.echo(total)
