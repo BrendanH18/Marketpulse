@@ -373,6 +373,24 @@ only fictional assets; no live quotes are needed for them.
 Report WA1–WA4 separately from build and bridge checks. Windows appearance,
 Narrator and native window behavior require observed Windows evidence.
 
+### Windows watchlists and alerts
+
+Use fictional symbols and alerts with both scratch path overrides. Trigger-history
+fixtures can be seeded in the scratch database; do not depend on live prices to
+exercise lifecycle controls.
+
+| Item | Check |
+| --- | --- |
+| WL1 Saved order | Add three fictional watched symbols, including one without a quote. Move the last to the first position, refresh and restart: the order persists and the unpriced symbol remains visible. Boundary moves are disabled; remove a symbol and check the remaining order. |
+| WL2 Edit and validation | Edit a fictional alert's threshold and note; clear the note and try text beginning with `--` and non-ASCII characters. Refresh/restart and compare saved values with `alerts show --json`. Invalid, zero or nonfinite thresholds show an error without a write. Cancel changes nothing. |
+| WL3 Lifecycle | On a scratch alert with trigger history, pause, edit and resume: the trigger time stays unchanged. Cancel rearming: unchanged. Confirm rearming: the alert becomes enabled and its trigger time clears. The explanation says a matching fresh price can fire again. |
+| WL4 State filters | Armed shows enabled/untriggered alerts; Paused shows disabled alerts even with trigger history; Triggered shows enabled/triggered alerts. All restores the full list. A filter with no matching rows explains the empty result. Filtering never writes. |
+| WL5 Safeguards | Privacy hides symbols, notes, values and error details; the demo disables all writes. While saving, duplicate writes are disabled. With a missing scratch backend, an action shows an error. Check keyboard labels, focus, clipping and native appearance on Windows. |
+
+Report WL1–WL5 with PASS / FAIL / UNVERIFIED and observed evidence. Headless
+checks and Linux rendering supplement Windows desktop QA; they do not establish
+Windows Narrator, native focus or scaling behavior.
+
 ## Tool limits and workarounds
 
 Some computer-use tools only see the app's own window, not the Dock or the system

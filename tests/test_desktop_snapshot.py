@@ -11,6 +11,17 @@ from marketpulse import desktop, models
 from marketpulse.models import Account, Transaction, TxnType
 
 
+def test_snapshot_preserves_saved_watch_order_when_quotes_are_missing(tracker):
+    symbols = ["QA-UNPRICED", "AAPL", "QA-MISSING"]
+    tracker.store.remove_watch(tracker.store.watchlist())
+    tracker.store.add_watch(symbols)
+    payload = desktop.snapshot(tracker)
+    assert payload["watchlist_symbols"] == symbols
+    assert "QA-UNPRICED" not in {row["symbol"] for row in payload["status"]["watchlist"]}
+    tracker.store.move_watch("QA-MISSING", -2)
+    assert desktop.snapshot(tracker)["watchlist_symbols"] == ["QA-MISSING", "QA-UNPRICED", "AAPL"]
+
+
 def legacy_revision(record, generation):
     fields = json.dumps({**asdict(record), "generation": generation}, sort_keys=True, default=str)
     return hashlib.sha256(fields.encode()).hexdigest()[:16]

@@ -56,6 +56,7 @@ public partial class MainWindow : Window
         RefreshButton.IsEnabled = !busy;
         foreach (var button in _writeButtons) button.IsEnabled = !busy && !_client.IsDemo;
         TaxBusy(busy);
+        WatchlistBusy(busy);
     }
 
     private async Task LoadAsync()
@@ -64,6 +65,7 @@ public partial class MainWindow : Window
         InvalidateTax(Text(_snapshot.Value, "ledger_revision"));
 
         _restoreUncertain = false;
+        _alertRearmUncertain = false;
         if (!_privacyInitialized)
         {
             _privacyInitialized = true;
@@ -169,6 +171,7 @@ public partial class MainWindow : Window
     {
         Workspace.Children.Clear();
         _writeButtons.Clear();
+        _watchlistButtons.Clear();
         _taxButtons.Clear();
         _taxExportButton = null;
         if (Privacy)
@@ -267,26 +270,6 @@ public partial class MainWindow : Window
         Actions(("Set contribution room", RoomAsync));
     }
 
-    private void Watchlist(JsonElement root)
-    {
-        Heading("Watchlist & alerts");
-        Actions(("Add symbol", () => WatchSymbolAsync(false)), ("Remove symbol", () => WatchSymbolAsync(true)), ("Add alert", AlertAsync));
-        foreach (var row in Rows(Get(root, "status"), "watchlist"))
-        {
-            Card(Text(row, "symbol") + " · " + Text(row, "name"), Money(row, "price") + " " + Text(row, "currency") + " · " + Number(row, "change_pct") + "%");
-            Actions(("Remove symbol", () => ConfirmAsync("Remove from watchlist?", "This does not change your holdings.", ["watch", "rm", "--", Text(row, "symbol")])));
-        }
-        Section("Price alerts");
-        Paragraph("Alerts are checked on refresh and while the app stays running. Windows toast notifications are not yet available; triggered alerts show their saved trigger time here. Automation shows alerts fired during the latest refresh.");
-        foreach (var row in Rows(root, "alerts"))
-        {
-            Card(Text(row, "description"), Flag(row, "active") ? "Active" : "Inactive",
-                Text(row, "triggered_at") is { Length: > 0 } triggered ? "Triggered " + triggered : "Not triggered",
-                Text(row, "note"));
-            Actions(("Remove alert", () => ConfirmAsync("Remove alert?", Text(row, "description"), ["alerts", "rm", "--", Text(row, "id")])));
-        }
-    }
-
     private void Income(JsonElement root)
     {
         Heading("Income");
@@ -345,25 +328,6 @@ public partial class MainWindow : Window
         var year = dialog.Text("Year", DateTime.Today.Year.ToString(Invariant));
         var amount = dialog.Text("CRA reported room", "", "0.00");
         dialog.Submit = () => MutateAsync(["accounts", "room", "--", Pick(type), Required(year, "Year"), Numeric(amount, "Room")]);
-        await dialog.ShowDialog(this);
-    }
-
-    private async Task WatchSymbolAsync(bool remove)
-    {
-        var dialog = new EntryDialog(remove ? "Remove from watchlist" : "Add to watchlist");
-        var symbol = dialog.Text("Symbol", "", "XEQT.TO");
-        dialog.Submit = () => MutateAsync(["watch", remove ? "rm" : "add", "--", Required(symbol, "Symbol")]);
-        await dialog.ShowDialog(this);
-    }
-
-    private async Task AlertAsync()
-    {
-        var dialog = new EntryDialog("Add price alert");
-        var symbol = dialog.Text("Symbol", "", "XEQT.TO");
-        var condition = dialog.Choice("Condition", ["above", "below", "up_pct", "down_pct"]);
-        var threshold = dialog.Text("Threshold (price or percent)");
-        var note = dialog.Text("Note");
-        dialog.Submit = () => MutateAsync(["alerts", "add", "--note", Value(note), "--", Required(symbol, "Symbol"), Pick(condition), Numeric(threshold, "Threshold")]);
         await dialog.ShowDialog(this);
     }
 
