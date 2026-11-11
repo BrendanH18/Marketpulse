@@ -13,7 +13,7 @@ from rich.text import Text
 from .. import fmt, render
 from ..ledger import Holding
 from ..models import EPSILON, Account
-from .base import App, fail, pass_app
+from .base import App, date_callback, fail, pass_app
 from .root import main
 
 POSITION_FIELDS = ["account_id", "account", "symbol", "quantity", "book", "average_cost", "currency", "first_date"]
@@ -61,6 +61,11 @@ def _emit_csv(fieldnames: list[str], rows: list[dict[str, Any]]) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked positions as JSON.")
 @click.option("--csv", "as_csv", is_flag=True, help="Print raw, unmasked positions as CSV to stdout.")
 @click.option("--count", "count_only", is_flag=True, help="Print only the number of matching positions.")
+@click.option("--limit", type=click.IntRange(min=1), help="Show at most N matching positions.")
+@click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip N matching positions after sorting.")
+@click.option("--page-info", is_flag=True, help="Include total, offset and limit in a JSON envelope; requires --json.")
+@click.option("--held-since", callback=date_callback, help="Only holdings first opened on or after this date.")
+@click.option("--held-until", callback=date_callback, help="Only holdings first opened on or before this date.")
 @pass_app
 def positions(
     app: App,
@@ -72,9 +77,20 @@ def positions(
     as_json: bool,
     as_csv: bool,
     count_only: bool,
+    limit: int | None,
+    offset: int,
+    page_info: bool,
+    held_since: str | None,
+    held_until: str | None,
 ) -> None:
     """Open positions at cost from the ledger, offline (no quotes, no snapshot)."""
     _check_outputs(as_json, as_csv, count_only)
+    if count_only and (limit is not None or offset or page_info):
+        raise click.UsageError("--count cannot be combined with --limit, --offset or --page-info.")
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
+    if held_since and held_until and held_since > held_until:
+        raise click.UsageError("--held-since must be on or before --held-until.")
     acct = _active_account(app, account)
     accounts = app.store.account_map()
     held = [
@@ -87,7 +103,10 @@ def positions(
     matches = [
         h
         for h in held
-        if (needle is None or needle in h.symbol.casefold()) and (wanted is None or h.currency.upper() == wanted)
+        if (needle is None or needle in h.symbol.casefold())
+        and (wanted is None or h.currency.upper() == wanted)
+        and (not held_since or h.first_date >= held_since)
+        and (not held_until or h.first_date <= held_until)
     ]
 
     def account_key(h: Holding) -> tuple[str, int, str]:
@@ -104,6 +123,8 @@ def positions(
     if count_only:
         click.echo(len(matches))
         return
+    total = len(matches)
+    matches = matches[offset : offset + limit if limit is not None else None]
     rows: list[dict[str, Any]] = [
         {
             "account_id": h.account_id,
@@ -121,7 +142,8 @@ def positions(
         _emit_csv(POSITION_FIELDS, rows)
         return
     if as_json:
-        click.echo(json.dumps(rows, ensure_ascii=False))
+        payload = {"rows": rows, "total": total, "offset": offset, "limit": limit} if page_info else rows
+        click.echo(json.dumps(payload, ensure_ascii=False))
         return
     if not rows:
         message = "No positions match these filters." if held else "No open positions yet."
@@ -156,6 +178,18 @@ def positions(
 @click.option("-a", "--account", default=None, help="Only this active account (name, id or type).")
 @click.option("--currency", help="Only balances in this currency, ignoring case.")
 @click.option("--negative", is_flag=True, help="Show only overdrawn balances; exit 1 if any exist.")
+@click.option("--count", "count_only", is_flag=True, help="Print only the number of matching cash balances.")
+@click.option(
+    "--sort",
+    "sort_by",
+    type=click.Choice(["account", "currency", "balance"], case_sensitive=False),
+    default="account",
+    show_default=True,
+    help="Order cash balances by this field.",
+)
+@click.option("--descending", is_flag=True, help="Reverse the selected cash balance order.")
+@click.option("--nonzero", is_flag=True, help="Exclude zero cash balances, ignoring ledger float residue.")
+@click.option("--search", help="Match account names containing this text, ignoring case.")
 @click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked balances as JSON.")
 @click.option("--csv", "as_csv", is_flag=True, help="Print raw, unmasked balances as CSV to stdout.")
 @pass_app
@@ -164,31 +198,52 @@ def cash(
     account: str | None,
     currency: str | None,
     negative: bool,
+    count_only: bool,
+    sort_by: str,
+    descending: bool,
+    nonzero: bool,
+    search: str | None,
     as_json: bool,
     as_csv: bool,
 ) -> None:
     """Cash balances from the ledger for accounts that track cash, offline.
 
     With --negative, exits 1 when any listed balance is overdrawn so scripts can alert on it."""
-    _check_outputs(as_json, as_csv)
+    _check_outputs(as_json, as_csv, count_only)
     acct = _active_account(app, account)
     accounts = app.store.account_map()
     wanted = currency.strip().upper() if currency is not None else None
+    needle = search.strip().casefold() if search is not None else None
     rows: list[dict[str, Any]] = []
     for (account_id, ccy), balance in sorted(app.store.ledger().cash.items()):
         owner = accounts.get(account_id)
         if owner is None or owner.archived or not owner.track_cash:
+            continue
+        if needle is not None and needle not in owner.name.casefold():
             continue
         if acct is not None and account_id != acct.saved_id:
             continue
         if wanted is not None and ccy.upper() != wanted:
             continue
         balance = 0.0 if abs(balance) < EPSILON else balance  # float residue from replay
+        if nonzero and balance == 0:
+            continue
         if negative and balance >= 0:
             continue
         rows.append({"account_id": account_id, "account": owner.name, "currency": ccy, "balance": balance})
-    rows.sort(key=lambda r: (str(r["account"]).casefold(), r["account_id"], r["currency"]))
-    if as_csv:
+
+    def account_key(row: dict[str, Any]) -> tuple[str, int, str]:
+        return (str(row["account"]).casefold(), row["account_id"], row["currency"])
+
+    keys = {
+        "account": account_key,
+        "currency": lambda row: (row["currency"], *account_key(row)),
+        "balance": lambda row: (row["balance"], *account_key(row)),
+    }
+    rows.sort(key=keys[sort_by.lower()], reverse=descending)
+    if count_only:
+        click.echo(len(rows))
+    elif as_csv:
         _emit_csv(CASH_FIELDS, rows)
     elif as_json:
         click.echo(json.dumps(rows, ensure_ascii=False))
@@ -197,7 +252,7 @@ def cash(
             message = f"Account '{acct.name}' doesn't track cash."
         elif negative:
             message = "No overdrawn cash balances."
-        elif wanted is not None:
+        elif wanted is not None or needle is not None or nonzero:
             message = "No cash balances match these filters."
         else:
             message = "No cash balances yet. Only accounts that track cash have one."

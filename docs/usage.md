@@ -73,6 +73,9 @@ and scriptable `doctor` checks.
 The [30 discovery and export improvements](cli-discovery-exports.md) add
 inventory exports and paging, account and calendar activity filters, and saved
 watchlist and alert reporting.
+The [30 report browsing improvements](cli-report-browsing.md) extend positions,
+cash, realized gains, payouts and snapshots with more filters, counts, ordering
+and pagination, all offline.
 
 ## Contribution room and tax estimates
 
