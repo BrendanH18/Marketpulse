@@ -193,7 +193,8 @@ def test_payout_filters(cli):
     ]
     assert payouts(cli, "--symbol", "GUL") == []
     assert "No matching payouts." in cli("payouts", "--kind", "interest", "--year", "2023").output
-    assert cli("payouts", "-a", "3")  # the archived account, by id.exit_code == 1
+    archived = cli("payouts", "-a", "3")  # the archived account, by id
+    assert archived.exit_code == 1 and "No active account" in archived.output
 
 
 def test_payouts_grouped_by_month_year_symbol_and_account(cli):
