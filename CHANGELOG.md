@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thresholds with exit codes, and JSON/CSV output; and priced holdings filters,
   sorting, JSON/CSV, stale and excluded listings, plus `perf --json` and
   `perf --metric`. `tax --csv -` now prints to stdout instead of writing a file
-  named `-`. See [Offline tax, allocation and holdings inspection](docs/cli-portfolio-inspection.md).
+  named `-`, and allocation targets must be from 0 to 100. See
+  [Offline tax, allocation and holdings inspection](docs/cli-portfolio-inspection.md).
 
 - Thirty offline maintenance and diagnostics improvements ([#126](https://github.com/BrendanH18/Marketpulse/issues/126))
   for backup inventories, configuration and theme inspection, the offline quote
