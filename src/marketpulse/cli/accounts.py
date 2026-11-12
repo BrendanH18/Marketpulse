@@ -39,10 +39,38 @@ def accounts(ctx: click.Context) -> None:
 @click.option(
     "--json", "as_json", is_flag=True, help="Print unmasked account metadata as JSON, without fetching prices."
 )
-@click.option("-t", "--type", "acct_type", type=click.Choice(ACCOUNT_TYPES, case_sensitive=False))
-@click.option("--institution", help="Match an institution exactly, ignoring case.")
+@click.option("-t", "--type", "acct_types", type=click.Choice(ACCOUNT_TYPES, case_sensitive=False), multiple=True)
+@click.option(
+    "--institution", "institutions", multiple=True, help="Match any listed institution exactly, ignoring case."
+)
 @click.option("--search", help="Find account names containing this text, ignoring case.")
-@click.option("--currency", help="Match the configured currency, ignoring case.")
+@click.option(
+    "--account",
+    "included_accounts",
+    multiple=True,
+    help="Include only these account IDs, names or unique active types; offline.",
+)
+@click.option(
+    "--exclude-type",
+    "excluded_types",
+    multiple=True,
+    type=click.Choice(ACCOUNT_TYPES, case_sensitive=False),
+    help="Exclude listed account types; offline.",
+)
+@click.option(
+    "--exclude-currency", "excluded_currencies", multiple=True, help="Exclude listed configured currencies; offline."
+)
+@click.option(
+    "--exclude-institution",
+    "excluded_institutions",
+    multiple=True,
+    help="Exclude exact institutions, ignoring case; offline.",
+)
+@click.option(
+    "--exclude-search", multiple=True, help="Exclude names containing any listed text, ignoring case; offline."
+)
+@click.option("--institution-search", help="Find institutions containing this text, ignoring case; offline.")
+@click.option("--currency", "currencies", multiple=True, help="Match any listed configured currency, ignoring case.")
 @click.option("--cash/--no-cash", default=None, help="Filter accounts by cash tracking.")
 @click.option("--sort", "sort_by", type=click.Choice(["name", "type", "institution", "currency"]))
 @click.option("--descending", is_flag=True, help="Reverse the selected order (default: account ID).")
@@ -64,7 +92,7 @@ def accounts(ctx: click.Context) -> None:
 @click.option("--max-id", type=click.IntRange(min=1), help="Maximum account ID, inclusive; offline.")
 @click.option(
     "--summary",
-    type=click.Choice(["type", "currency", "institution", "cash"]),
+    type=click.Choice(["type", "currency", "institution", "cash", "registered"]),
     help="Count matching accounts by this field before pagination, offline.",
 )
 @click.option(
@@ -84,10 +112,16 @@ def accounts_list(
     page_info: bool,
     offline: bool,
     as_json: bool,
-    acct_type: str | None,
-    institution: str | None,
+    acct_types: tuple[str, ...],
+    institutions: tuple[str, ...],
     search: str | None,
-    currency: str | None,
+    currencies: tuple[str, ...],
+    included_accounts: tuple[str, ...],
+    excluded_types: tuple[str, ...],
+    excluded_currencies: tuple[str, ...],
+    excluded_institutions: tuple[str, ...],
+    exclude_search: tuple[str, ...],
+    institution_search: str | None,
     cash: bool | None,
     sort_by: str | None,
     descending: bool,
@@ -110,35 +144,60 @@ def accounts_list(
         raise click.UsageError("--summary cannot be combined with --count or --page-info.")
     if summary_sort != "group" and not summary:
         raise click.UsageError("--summary-sort requires --summary.")
-    selection = bool(excluded_accounts) or any(
-        value is not None for value in (registered, has_institution, min_id, max_id)
-    )
+    selection = (
+        bool(
+            excluded_accounts
+            or included_accounts
+            or excluded_types
+            or excluded_currencies
+            or excluded_institutions
+            or exclude_search
+        )
+        or institution_search is not None
+        or any(len(values) > 1 for values in (acct_types, institutions, currencies))
+    ) or any(value is not None for value in (registered, has_institution, min_id, max_id))
     offline = offline or as_csv or count_only or limit is not None or offset is not None or selection or bool(summary)
     items = app.store.accounts(include_archived=archived)
+    included_ids = set()
+    for ref in included_accounts:
+        found = app.store.get_account(ref)
+        if found is None or (found.archived and not archived):
+            fail(f"No {'matching' if archived else 'active'} account '{ref}'.")
+        included_ids.add(found.saved_id)
     excluded_ids = set()
     for ref in excluded_accounts:
         found = app.store.get_account(ref)
         if found is None or (found.archived and not archived):
             fail(f"No {'matching' if archived else 'active'} account '{ref}'.")
         excluded_ids.add(found.saved_id)
+    excluded_currency_set = {value.strip().casefold() for value in excluded_currencies}
+    excluded_institution_set = {value.strip().casefold() for value in excluded_institutions}
     items = [
         a
         for a in items
         if a.saved_id not in excluded_ids
+        and (not included_accounts or a.saved_id in included_ids)
+        and a.type.value not in excluded_types
+        and a.currency.casefold() not in excluded_currency_set
+        and a.institution.casefold() not in excluded_institution_set
+        and not any(value.casefold() in a.name.casefold() for value in exclude_search)
+        and (institution_search is None or institution_search.casefold() in a.institution.casefold())
         and (registered is None or a.type.registered == registered)
         and (has_institution is None or bool(a.institution.strip()) == has_institution)
         and (min_id is None or a.saved_id >= min_id)
         and (max_id is None or a.saved_id <= max_id)
     ]
-    filtered = selection or any(value is not None for value in (acct_type, institution, search, currency, cash))
-    if acct_type is not None:
-        items = [a for a in items if a.type.value == acct_type]
-    if institution is not None:
-        items = [a for a in items if a.institution.casefold() == institution.strip().casefold()]
+    filtered = selection or bool(acct_types or institutions or currencies) or search is not None or cash is not None
+    if acct_types:
+        items = [a for a in items if a.type.value in acct_types]
+    if institutions:
+        institution_set = {value.strip().casefold() for value in institutions}
+        items = [a for a in items if a.institution.casefold() in institution_set]
     if search is not None:
         items = [a for a in items if search.casefold() in a.name.casefold()]
-    if currency is not None:
-        items = [a for a in items if a.currency.casefold() == currency.strip().casefold()]
+    if currencies:
+        currency_set = {value.strip().casefold() for value in currencies}
+        items = [a for a in items if a.currency.casefold() in currency_set]
     if cash is not None:
         items = [a for a in items if a.track_cash == cash]
     if summary:
@@ -228,6 +287,8 @@ def _account_summary(app: App, items: list[Account], group: str, sort: str, as_j
     def key(account: Account) -> str:
         if group == "type":
             return account.type.value
+        if group == "registered":
+            return "registered" if account.type.registered else "nonregistered"
         if group == "cash":
             return "tracked" if account.track_cash else "untracked"
         return str(getattr(account, group)).strip()
