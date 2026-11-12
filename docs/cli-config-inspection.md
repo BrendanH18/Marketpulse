@@ -15,8 +15,10 @@ write the configuration file, and API keys stay redacted as `(set)` in every for
 9. `config keys --changed` keeps names whose effective value differs from the default. A saved API key counts as changed; its value is never printed.
 10. `theme --json` lists the embedded Omarchy palettes as `{"theme", "current", "themes": [{"name", "label", "mode"}]}`, where `theme` is the configured value (for example `auto`) and `current` the palette it resolves to.
 
-`config validate --quiet` (`-q`) also prints nothing and reports validity only
+`config validate --quiet` (`-q`) prints no report and gives validity only
 through its exit status (0 valid, 1 invalid), for scripts and pre-commit hooks.
+As with every command, a file that is not valid TOML still triggers the startup
+warning on standard error.
 
 Unknown keys fail with the existing `Unknown setting` error and exit 1 before
 anything is printed. `--json` and `--csv` cannot be combined; `--value` cannot

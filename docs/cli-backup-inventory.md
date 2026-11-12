@@ -2,7 +2,9 @@
 
 These ten additions under [#126](https://github.com/BrendanH18/Marketpulse/issues/126)
 browse and check backups offline. Listing reads file names and sizes only; it
-never opens, changes, or deletes a backup. Examples use fictional dates and paths.
+never opens, changes, or deletes a backup. Like every command that opens the
+ledger, these may first take the usual daily safety backup when one is due.
+Examples use fictional dates and paths.
 
 1. `backup list --count --reason manual` prints the number of matching backups.
 2. `backup list --csv --since 2024-01-01` prints matching backups as CSV to stdout

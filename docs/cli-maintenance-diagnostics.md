@@ -16,4 +16,5 @@ These commands only read. Backup listings never open, restore or delete backup
 files; configuration inspection never writes the configuration file and keeps
 API keys redacted; cached quotes come only from the saved offline cache and stay
 marked stale. No option adds a network call, and `doctor --offline` still skips
-every network check. Defaults remain unchanged.
+every network check. As with every command that opens the ledger, the usual
+daily safety backup may be taken when one is due. Defaults remain unchanged.
