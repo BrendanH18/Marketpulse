@@ -32,7 +32,7 @@ def add(store, acct, kind, day, symbol="", qty=0.0, price=0.0, ccy="CAD", **extr
 def cli(tracker, monkeypatch):
     monkeypatch.setattr("marketpulse.services.Tracker.open", classmethod(lambda cls, config=None: tracker))
     monkeypatch.setattr("marketpulse.cli.base.Config.load", lambda: tracker.config)
-    monkeypatch.setenv("COLUMNS", "160")
+    monkeypatch.setenv("COLUMNS", "1000")  # golden output names temp paths, which are long on macOS
     return lambda *args, **kw: CliRunner().invoke(main, list(args), catch_exceptions=False, **kw)
 
 
