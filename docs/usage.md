@@ -10,6 +10,9 @@ see [Offline ledger selection](cli-ledger-selection.md).
 For account metadata summaries, configured-asset rate and term selection, and
 saved watchlist/alert filters, see [Offline inventory selection](cli-inventory-selection.md).
 
+For more account inventory, income report, and snapshot history controls, see
+[Offline report refinements](cli-report-refinements.md).
+
 ## Accounts and transactions
 
 Create accounts before recording transactions. Names, IDs, and account types

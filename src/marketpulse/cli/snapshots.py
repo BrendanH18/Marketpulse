@@ -7,6 +7,7 @@ import io
 import json
 import math
 import re
+from collections import Counter
 from datetime import date
 
 import click
@@ -16,6 +17,8 @@ from .. import fmt, render
 from ..db import Snapshot
 from .base import App, date_callback, fail, pass_app
 from .root import main
+
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 SNAPSHOT_FIELDS = ["date", "net_worth", "book", "contributions", "change", "currency"]
 
@@ -70,6 +73,42 @@ def _exclude_dates_callback(ctx, param, values: tuple[str, ...]) -> tuple[str, .
     return tuple(dates)
 
 
+def _quarter(day: str) -> str:
+    return f"{day[:4]}-Q{(int(day[5:7]) - 1) // 3 + 1}"
+
+
+def _quarter_callback(ctx, param, value: str | None) -> str | None:
+    if value is not None and not re.fullmatch(r"(?:[0-9]{4})-Q[1-4]", value):
+        raise click.BadParameter("Use YYYY-Q1 through YYYY-Q4.")
+    if value is not None and value.startswith("0000"):
+        raise click.BadParameter("Use a calendar year from 0001 to 9999.")
+    return value
+
+
+def _snapshot_summary(app: App, rows: list[Snapshot], group: str, as_json: bool, as_csv: bool) -> None:
+    def key(snapshot: Snapshot) -> str:
+        if group == "currency":
+            return snapshot.currency
+        if group == "quarter":
+            return _quarter(snapshot.date)
+        return snapshot.date[:4] if group == "year" else snapshot.date[:7]
+
+    records = [{"group": value, "count": count} for value, count in sorted(Counter(key(s) for s in rows).items())]
+    if as_json:
+        click.echo(json.dumps(records, ensure_ascii=False))
+    elif as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(stream, fieldnames=["group", "count"])
+        writer.writeheader()
+        writer.writerows(records)
+        click.echo(stream.getvalue(), nl=False)
+    else:
+        table = render.table(group.title(), ("Snapshots", "right"), title="Matching snapshots")
+        for record in records:
+            table.add_row(Text(str(record["group"])), Text(str(record["count"])))
+        app.console.print(table)
+
+
 @main.command()
 @click.option("--since", callback=date_callback, help="Include snapshots on or after this date.")
 @click.option("--until", callback=date_callback, help="Include snapshots on or before this date.")
@@ -119,6 +158,34 @@ def _exclude_dates_callback(ctx, param, values: tuple[str, ...]) -> tuple[str, .
 @click.option("--count", "count_only", is_flag=True, help="Print the number of matching snapshots.")
 @click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked snapshots as JSON.")
 @click.option("--csv", "as_csv", is_flag=True, help="Print raw, unmasked snapshot CSV to stdout.")
+@click.option("--quarter", callback=_quarter_callback, help="Only this calendar quarter (YYYY-Q1 through YYYY-Q4).")
+@click.option(
+    "--weekday",
+    "weekdays",
+    multiple=True,
+    type=click.Choice(WEEKDAYS, case_sensitive=False),
+    help="Only this weekday; repeat to include several weekdays.",
+)
+@click.option(
+    "--on",
+    "included_dates",
+    multiple=True,
+    callback=_exclude_dates_callback,
+    help="Only this recorded date; repeat to include several dates.",
+)
+@click.option(
+    "--exclude-currency",
+    "excluded_currencies",
+    multiple=True,
+    help="Exclude this recorded currency, ignoring case; repeat for several.",
+)
+@click.option("--known-change-only", is_flag=True, help="Only snapshots with a comparable previous snapshot.")
+@click.option("--earliest", is_flag=True, help="Show only the earliest matching snapshot.")
+@click.option(
+    "--summary",
+    type=click.Choice(["year", "month", "quarter", "currency"]),
+    help="Count all matching snapshots by this field, offline.",
+)
 @pass_app
 def snapshots(
     app: App,
@@ -150,12 +217,43 @@ def snapshots(
     decreases_only: bool,
     unknown_change_only: bool,
     excluded_dates: tuple[str, ...],
+    quarter: str | None,
+    weekdays: tuple[str, ...],
+    included_dates: tuple[str, ...],
+    excluded_currencies: tuple[str, ...],
+    known_change_only: bool,
+    earliest: bool,
+    summary: str | None,
 ) -> None:
     """Recorded daily net-worth snapshots, oldest first. Offline: no prices are fetched."""
     if since and until and since > until:
         raise click.UsageError("--since must be on or before --until.")
     if as_json and as_csv:
         raise click.UsageError("Choose one output format: --json or --csv.")
+    if earliest and latest:
+        raise click.UsageError("Choose one of --earliest or --latest.")
+    if earliest and (
+        count_only or limit is not None or sort_by is not None or descending or offset is not None or page_info
+    ):
+        raise click.UsageError("--earliest cannot be combined with counting, ordering or pagination options.")
+    if summary and (
+        count_only
+        or latest
+        or earliest
+        or limit is not None
+        or sort_by is not None
+        or descending
+        or offset is not None
+        or page_info
+    ):
+        raise click.UsageError(
+            "--summary cannot be combined with counting, single-row, ordering or pagination options."
+        )
+    if known_change_only and unknown_change_only:
+        raise click.UsageError("Choose one of --known-change-only or --unknown-change-only.")
+    omitted_currencies = {value.strip().upper() for value in excluded_currencies}
+    if "" in omitted_currencies:
+        raise click.UsageError("--exclude-currency cannot be blank.")
     forward_page = sort_by is not None or descending or offset is not None or page_info
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
@@ -213,7 +311,15 @@ def snapshots(
         and (not decreases_only or ((change := changes[s.date]) is not None and change < 0))
         and (not unknown_change_only or changes[s.date] is None)
         and s.date not in excluded
+        and (quarter is None or _quarter(s.date) == quarter)
+        and (not weekdays or WEEKDAYS[date.fromisoformat(s.date).weekday()] in weekdays)
+        and (not included_dates or s.date in included_dates)
+        and s.currency.upper() not in omitted_currencies
+        and (not known_change_only or changes[s.date] is not None)
     ]
+    if summary:
+        _snapshot_summary(app, rows, summary, as_json, as_csv)
+        return
     if count_only:
         click.echo(len(rows))
         return
@@ -229,10 +335,10 @@ def snapshots(
             rows.sort(key=lambda s: (getattr(s, field), s.date), reverse=descending)
         start = offset or 0
         rows = rows[start : start + limit if limit is not None else None]
-    if latest:
+    if latest or earliest:
         if not rows:
             fail("No matching snapshots." if every else "No snapshots recorded yet.")
-        rows = rows[-1:]
+        rows = rows[:1] if earliest else rows[-1:]
     elif limit is not None and not forward_page:
         rows = rows[-limit:]
 
@@ -241,7 +347,7 @@ def snapshots(
         payload = (
             {"rows": records, "total": total, "offset": offset or 0, "limit": limit}
             if page_info
-            else (records[0] if latest else records)
+            else (records[0] if latest or earliest else records)
         )
         click.echo(json.dumps(payload, ensure_ascii=False))
         return

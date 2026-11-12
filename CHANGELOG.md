@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Thirty offline reporting refinements ([#124](https://github.com/BrendanH18/Marketpulse/issues/124))
+  extend saved account inventories, native-currency realized and payout reports,
+  and snapshot history. See [Offline report refinements](docs/cli-report-refinements.md)
+  for the numbered feature guides and examples.
+
 - Thirty offline inventory selection improvements ([#122](https://github.com/BrendanH18/Marketpulse/issues/122)):
   account exclusions, registration and metadata filters with grouped counts;
   configured-asset rate, term and compounding selection; and saved watchlist

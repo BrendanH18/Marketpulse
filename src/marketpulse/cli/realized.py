@@ -47,6 +47,16 @@ def _filters(f):
             click.option("-a", "--account", default=None, help="Only this account (name, id or type)."),
             click.option("-s", "--symbol", default=None, help="Only this symbol (exact, case-insensitive)."),
             click.option("--year", type=click.IntRange(min=1, max=9999), help="Only this calendar year."),
+            click.option("--month", type=click.IntRange(min=1, max=12), help="Only this calendar month, across years."),
+            click.option(
+                "--quarter", type=click.IntRange(min=1, max=4), help="Only this calendar quarter, across years."
+            ),
+            click.option(
+                "--exclude-account",
+                "excluded_accounts",
+                multiple=True,
+                help="Exclude an active account by ID, name or unique type; repeat for several.",
+            ),
             click.option("--since", callback=date_callback, help="On or after this date."),
             click.option("--until", callback=date_callback, help="On or before this date."),
             click.option("--currency", help="Only this native currency (case-insensitive)."),
@@ -120,8 +130,33 @@ def _scope(app: App, account: str | None) -> tuple[dict[int, Account], int | Non
     return accounts, acct.saved_id
 
 
-def _in_range(day: str, year: int | None, since: str | None, until: str | None) -> bool:
-    return (year is None or day[:4] == f"{year:04d}") and (not since or day >= since) and (not until or day <= until)
+def _in_range(
+    day: str,
+    year: int | None,
+    since: str | None,
+    until: str | None,
+    month: int | None = None,
+    quarter: int | None = None,
+) -> bool:
+    return (
+        (year is None or day[:4] == f"{year:04d}")
+        and (not since or day >= since)
+        and (not until or day <= until)
+        and (month is None or int(day[5:7]) == month)
+        and (quarter is None or (int(day[5:7]) - 1) // 3 + 1 == quarter)
+    )
+
+
+def _excluded_account_ids(app: App, references: tuple[str, ...]) -> set[int]:
+    result = set()
+    for ref in references:
+        if not ref.strip():
+            raise click.UsageError("--exclude-account cannot be blank.")
+        account = app.account(ref)
+        if account.archived:
+            fail(f"No active account '{ref}'.")
+        result.add(account.saved_id)
+    return result
 
 
 def _echo_csv(fieldnames: list[str], rows: list[dict]) -> None:
@@ -182,6 +217,12 @@ def _realized_totals(rows: list[RealizedGain]) -> dict[str, dict]:
 @click.option("--descending", is_flag=True, help="Reverse the selected sort (default: date).")
 @click.option("--min-gain", type=float, callback=_finite, help="Inclusive native-currency gain minimum.")
 @click.option("--max-gain", type=float, callback=_finite, help="Inclusive native-currency gain maximum.")
+@click.option("--exclude-symbol", "excluded_symbols", multiple=True, help="Exclude exact symbols; repeat for several.")
+@click.option("--min-proceeds", type=float, callback=_finite, help="Inclusive native-currency proceeds minimum.")
+@click.option("--max-proceeds", type=float, callback=_finite, help="Inclusive native-currency proceeds maximum.")
+@click.option("--min-quantity", type=click.FloatRange(min=0), callback=_finite, help="Inclusive sold quantity minimum.")
+@click.option("--max-quantity", type=click.FloatRange(min=0), callback=_finite, help="Inclusive sold quantity maximum.")
+@click.option("--page-info", is_flag=True, help="With --json, include pagination metadata.")
 @click.option("--gains-only", is_flag=True, help="Only sales with a gain (rounded to the cent).")
 @click.option("--losses-only", is_flag=True, help="Only sales with a loss (rounded to the cent).")
 @pass_app
@@ -190,6 +231,9 @@ def realized(
     account,
     symbol,
     year,
+    month,
+    quarter,
+    excluded_accounts,
     since,
     until,
     as_json,
@@ -201,6 +245,12 @@ def realized(
     max_gain,
     gains_only,
     losses_only,
+    excluded_symbols,
+    min_proceeds,
+    max_proceeds,
+    min_quantity,
+    max_quantity,
+    page_info,
     currency,
     count_only,
     newest_first,
@@ -213,6 +263,13 @@ def realized(
     _check_common(since, until, as_json, as_csv)
     ccy = _browsing_currency(currency, count_only, as_json, as_csv, limit, offset, newest_first)
     _amount_range(min_gain, max_gain, "gain")
+    _amount_range(min_proceeds, max_proceeds, "proceeds")
+    _amount_range(min_quantity, max_quantity, "quantity")
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
+    excluded = {value.strip().upper() for value in excluded_symbols}
+    if "" in excluded:
+        raise click.UsageError("--exclude-symbol cannot be blank.")
     if newest_first and (sort_by is not None or descending):
         raise click.UsageError("--newest-first cannot be combined with --sort or --descending.")
     if count_only and (sort_by is not None or descending):
@@ -220,15 +277,22 @@ def realized(
     if gains_only and losses_only:
         raise click.UsageError("Choose one of --gains-only or --losses-only.")
     accounts, account_id = _scope(app, account)
+    excluded_ids = _excluded_account_ids(app, excluded_accounts)
     wanted = symbol.strip().upper() if symbol is not None else None
     rows = [
         r
         for r in app.store.ledger().realized  # replay order: date, then same-day order
         if r.account_id in accounts
+        and r.account_id not in excluded_ids
+        and r.symbol.upper() not in excluded
+        and (min_proceeds is None or r.proceeds >= min_proceeds)
+        and (max_proceeds is None or r.proceeds <= max_proceeds)
+        and (min_quantity is None or r.quantity >= min_quantity)
+        and (max_quantity is None or r.quantity <= max_quantity)
         and (account_id is None or r.account_id == account_id)
         and (wanted is None or r.symbol.upper() == wanted)
         and (ccy is None or r.currency.upper() == ccy)
-        and _in_range(r.date, year, since, until)
+        and _in_range(r.date, year, since, until, month, quarter)
         and (
             search is None
             or search.casefold() in r.symbol.casefold()
@@ -255,6 +319,8 @@ def realized(
         return
     if as_json:
         payload = {"rows": [_realized_row(r, accounts) for r in rows], "totals": _realized_totals(all_rows)}
+        if page_info:
+            payload.update(_page_metadata(len(all_rows), rows, limit, offset))
         click.echo(json.dumps(payload, ensure_ascii=False))
         return
     if not rows:
@@ -351,6 +417,7 @@ def _payout_groups(rows: list[IncomeEvent], by: str, accounts: dict[int, Account
 @main.command()
 @_filters
 @click.option("--search", help="Find symbol or account text, ignoring case.")
+@click.option("--has-symbol/--no-symbol", default=None, help="Only payouts with or without a recorded symbol.")
 @click.option("--min-amount", type=float, callback=_finite, help="Inclusive native-currency payout minimum.")
 @click.option("--max-amount", type=float, callback=_finite, help="Inclusive native-currency payout maximum.")
 @click.option("--exclude-symbol", "excluded_symbols", multiple=True, help="Exclude exact symbols; repeat for several.")
@@ -373,6 +440,9 @@ def payouts(
     account,
     symbol,
     year,
+    month,
+    quarter,
+    excluded_accounts,
     since,
     until,
     as_json,
@@ -380,6 +450,7 @@ def payouts(
     search,
     min_amount,
     max_amount,
+    has_symbol,
     excluded_symbols,
     page_info,
     kinds,
@@ -400,6 +471,7 @@ def payouts(
     if "" in excluded:
         raise click.UsageError("--exclude-symbol cannot be blank.")
     accounts, account_id = _scope(app, account)
+    excluded_ids = _excluded_account_ids(app, excluded_accounts)
     wanted = symbol.strip().upper() if symbol is not None else None
     chosen = {k.lower() for k in kinds}
     by = by.lower() if by else None
@@ -407,6 +479,8 @@ def payouts(
         e
         for e in app.store.ledger().income
         if e.account_id in accounts
+        and e.account_id not in excluded_ids
+        and (has_symbol is None or bool(e.symbol.strip()) == has_symbol)
         and (account_id is None or e.account_id == account_id)
         and (wanted is None or e.symbol.upper() == wanted)
         and (ccy is None or e.currency.upper() == ccy)
@@ -419,7 +493,7 @@ def payouts(
         and (max_amount is None or e.amount <= max_amount)
         and e.symbol.upper() not in excluded
         and (not chosen or e.kind.value.lower() in chosen)
-        and _in_range(e.date, year, since, until)
+        and _in_range(e.date, year, since, until, month, quarter)
     ]
     if by:
         _grouped_payouts(app, rows, by, accounts, as_json, as_csv, count_only, newest_first, limit, offset, page_info)
