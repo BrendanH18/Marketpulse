@@ -30,6 +30,9 @@ Another [100 offline inspection improvements](cli-more-hundred-improvements.md)
 extend realized gains, payouts, asset metadata, snapshots and backup browsing,
 and add saved target inspection (`marketpulse targets`) and command selectors.
 
+For a shared offline query and export interface across 25 saved datasets, see
+[Composable offline reports](cli-composable-reports.md) (`marketpulse report SOURCE`).
+
 ## Accounts and transactions
 
 Create accounts before recording transactions. Names, IDs, and account types
