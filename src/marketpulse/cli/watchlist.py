@@ -46,6 +46,11 @@ def watch(ctx: click.Context) -> None:
     "--with-alert/--without-alert", default=None, help="Match symbols with or without any saved alert, offline."
 )
 @click.option("--page-info", is_flag=True, help="With --json, include pagination metadata.")
+@click.option("--held/--not-held", default=None, help="Match symbols held in active accounts, offline.")
+@click.option("--cached/--not-cached", default=None, help="Match symbols with a saved quote, offline.")
+@click.option("--suffix", help="Match a symbol suffix, ignoring case; e.g. .TO, offline.")
+@click.option("--exclude-search", help="Exclude symbols containing this text, ignoring case, offline.")
+@click.option("--lines", is_flag=True, help="Print one saved symbol per line, offline.")
 @pass_app
 def watch_list(
     app: App,
@@ -64,17 +69,30 @@ def watch_list(
     min_position: int | None,
     max_position: int | None,
     with_alert: bool | None,
+    held: bool | None,
+    cached: bool | None,
+    suffix: str | None,
+    exclude_search: str | None,
+    lines: bool,
 ) -> None:
     """List watched symbols; filters, paging and reports imply offline output."""
-    if sum((as_json, as_csv, count_only)) > 1:
-        raise click.UsageError("Choose one of --json, --csv or --count.")
+    if sum((as_json, as_csv, count_only, lines)) > 1:
+        raise click.UsageError("Choose one of --json, --csv, --count or --lines.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
     included = _symbol_selection(included_symbols, "--symbol")
     if min_position is not None and max_position is not None and min_position > max_position:
         raise click.UsageError("--min-position must be at most --max-position.")
+    for option, value in (("--suffix", suffix), ("--exclude-search", exclude_search)):
+        if value is not None and not value.strip():
+            raise click.UsageError(f"{option} cannot be blank.")
     if (
-        included
+        held is not None
+        or cached is not None
+        or suffix is not None
+        or exclude_search is not None
+        or lines
+        or included
         or min_position is not None
         or max_position is not None
         or with_alert is not None
@@ -93,6 +111,13 @@ def watch_list(
         saved = app.store.watchlist()
         excluded = {symbol.strip().upper() for symbol in excluded_symbols}
         alerted = {a.symbol for a in app.store.alerts()} if with_alert is not None else set()
+        active = {a.id for a in app.store.accounts()} if held is not None else set()
+        held_symbols = (
+            {h.symbol for h in app.store.ledger().open_holdings() if h.account_id in active}
+            if held is not None
+            else set()
+        )
+        cached_symbols = set(app.store.cached_quotes(saved)) if cached is not None else set()
         symbols = [
             symbol
             for position, symbol in enumerate(saved, 1)
@@ -102,6 +127,10 @@ def watch_list(
             and (min_position is None or position >= min_position)
             and (max_position is None or position <= max_position)
             and (with_alert is None or (symbol in alerted) == with_alert)
+            and (held is None or (symbol in held_symbols) == held)
+            and (cached is None or (symbol in cached_symbols) == cached)
+            and (suffix is None or symbol.casefold().endswith(suffix.strip().casefold()))
+            and (exclude_search is None or exclude_search.strip().casefold() not in symbol.casefold())
         ]
         total = len(symbols)
         if count_only:
@@ -113,7 +142,10 @@ def watch_list(
             symbols.reverse()
         start = offset or 0
         symbols = symbols[start:] if limit is None else symbols[start : start + limit]
-        if as_csv:
+        if lines:
+            if symbols:
+                click.echo("\n".join(symbols))
+        elif as_csv:
             stream = io.StringIO(newline="")
             writer = csv.DictWriter(stream, fieldnames=["position", "symbol"])
             writer.writeheader()
@@ -265,7 +297,28 @@ def alerts(ctx: click.Context) -> None:
 )
 @click.option("--note", help="Find text only in notes, ignoring case.")
 @click.option(
-    "--summary", type=click.Choice(["symbol", "state", "condition"]), help="Count matches by field before paging."
+    "--summary",
+    type=click.Choice(["symbol", "state", "condition", "trigger-month"]),
+    help="Count matches by field before paging.",
+)
+@click.option(
+    "--id",
+    "included_ids",
+    multiple=True,
+    type=click.IntRange(min=1),
+    help="Include exact alert IDs; repeat for several.",
+)
+@click.option("--min-id", type=click.IntRange(min=1), help="Inclusive saved alert ID minimum.")
+@click.option("--max-id", type=click.IntRange(min=1), help="Inclusive saved alert ID maximum.")
+@click.option(
+    "--exclude-condition",
+    "excluded_conditions",
+    multiple=True,
+    type=click.Choice(ALERT_CONDITIONS, case_sensitive=False),
+)
+@click.option("--watched/--not-watched", default=None, help="Match alerts whose symbol is on the saved watchlist.")
+@click.option(
+    "--ever-triggered/--never-triggered", default=None, help="Match retained trigger history, including paused alerts."
 )
 @pass_app
 def alerts_list(
@@ -293,6 +346,12 @@ def alerts_list(
     excluded_states: tuple[str, ...],
     note: str | None,
     summary: str | None,
+    included_ids: tuple[int, ...],
+    min_id: int | None,
+    max_id: int | None,
+    excluded_conditions: tuple[str, ...],
+    watched: bool | None,
+    ever_triggered: bool | None,
 ) -> None:
     """List saved alerts, optionally filtered by symbol and current state."""
     if sum((as_json, as_csv, count_only)) > 1:
@@ -301,6 +360,9 @@ def alerts_list(
         raise click.UsageError("--page-info requires --json.")
     if summary and (count_only or page_info):
         raise click.UsageError("--summary cannot be combined with --count or --page-info.")
+    if min_id is not None and max_id is not None and min_id > max_id:
+        raise click.UsageError("--min-id must be at most --max-id.")
+    watched_symbols = set(app.store.watchlist()) if watched is not None else set()
     included = _symbol_selection(included_symbols, "--symbols")
     if with_note and without_note:
         raise click.UsageError("Choose one of --with-note or --without-note.")
@@ -320,6 +382,12 @@ def alerts_list(
         if a.symbol not in excluded
         and (not included or a.symbol in included)
         and _alert_state(a) not in excluded_states
+        and (not included_ids or a.id in included_ids)
+        and (min_id is None or (a.id is not None and a.id >= min_id))
+        and (max_id is None or (a.id is not None and a.id <= max_id))
+        and a.condition not in excluded_conditions
+        and (watched is None or (a.symbol in watched_symbols) == watched)
+        and (ever_triggered is None or bool(a.triggered_at) == ever_triggered)
         and (note is None or note.casefold() in a.note.casefold())
         and (min_threshold is None or (math.isfinite(a.threshold) and a.threshold >= min_threshold))
         and (max_threshold is None or (math.isfinite(a.threshold) and a.threshold <= max_threshold))
@@ -340,7 +408,14 @@ def alerts_list(
         click.echo(len(items))
         return
     if summary:
-        counts = Counter(_alert_state(a) if summary == "state" else getattr(a, summary) for a in items)
+        counts = Counter(
+            _alert_state(a)
+            if summary == "state"
+            else (a.triggered_at[:7] if a.triggered_at else "never")
+            if summary == "trigger-month"
+            else getattr(a, summary)
+            for a in items
+        )
         rows = [{"group": group, "count": count} for group, count in sorted(counts.items())]
         if as_json:
             click.echo(json.dumps(rows, ensure_ascii=False))
@@ -400,7 +475,13 @@ def alerts_list(
     if not items:
         message = (
             "No alerts match these filters."
-            if included_symbols
+            if included_ids
+            or min_id is not None
+            or max_id is not None
+            or excluded_conditions
+            or watched is not None
+            or ever_triggered is not None
+            or included_symbols
             or excluded_states
             or note is not None
             or symbol is not None

@@ -8,6 +8,7 @@ from . import (  # noqa: F401  (importing a module registers its commands)
     allocation,
     assets,
     data,
+    discovery,
     doctor,
     history,
     native,

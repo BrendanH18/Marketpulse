@@ -312,6 +312,20 @@ EXPORT_TYPES = [t.value for t in TxnType]
 @click.option("--columns", help="Comma-separated columns to write, in this order (default: all, for re-import).")
 @click.option("--count", "count_only", is_flag=True, help="Print the number of matching rows instead of exporting.")
 @click.option("--jsonl", is_flag=True, help="Write one JSON object per row (JSON Lines) instead of CSV.")
+@click.option("--currency", help="Only rows recorded in this currency, ignoring case.")
+@click.option("--note", help="Only notes containing this text, ignoring case.")
+@click.option("--has-note/--no-note", default=None, help="Only rows with or without a nonblank note.")
+@click.option("--exclude-type", "excluded_types", multiple=True, type=click.Choice(EXPORT_TYPES, case_sensitive=False))
+@click.option(
+    "--exclude-symbol", "excluded_symbols", multiple=True, help="Exclude exact symbols, ignoring case; repeat."
+)
+@click.option(
+    "--exclude-account", "excluded_accounts", multiple=True, help="Exclude rows from these source accounts; repeat."
+)
+@click.option("--year", type=click.IntRange(min=1, max=9999), help="Only rows in this calendar year.")
+@click.option("--month", type=click.IntRange(min=1, max=12), help="Only rows in this calendar month, in any year.")
+@click.option("--limit", type=click.IntRange(min=1), help="Write at most this many matching rows, in ledger order.")
+@click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip this many matching rows before exporting.")
 @pass_app
 def export_cmd(
     app: App,
@@ -324,6 +338,16 @@ def export_cmd(
     columns: str | None,
     count_only: bool,
     jsonl: bool,
+    currency: str | None,
+    note: str | None,
+    has_note: bool | None,
+    excluded_types: tuple[str, ...],
+    excluded_symbols: tuple[str, ...],
+    excluded_accounts: tuple[str, ...],
+    year: int | None,
+    month: int | None,
+    limit: int | None,
+    offset: int,
 ) -> None:
     """Export the ledger as CSV (stdout if no PATH).
 
@@ -331,7 +355,26 @@ def export_cmd(
     other MarketPulse CSV (a file without some columns may not)."""
     from ..csvio import export_transactions
 
-    if not (account_refs or symbols or types or since or until or columns is not None or count_only or jsonl):
+    if not (
+        account_refs
+        or symbols
+        or types
+        or since
+        or until
+        or columns is not None
+        or count_only
+        or jsonl
+        or currency is not None
+        or note is not None
+        or has_note is not None
+        or excluded_types
+        or excluded_symbols
+        or excluded_accounts
+        or year is not None
+        or month is not None
+        or limit is not None
+        or offset
+    ):
         if path is None:
             export_transactions(app.store, sys.stdout)
             return
@@ -343,6 +386,8 @@ def export_cmd(
         raise click.UsageError("--since must be on or before --until.")
     if count_only and (path is not None or jsonl or columns is not None):
         raise click.UsageError("--count prints a number; it takes no PATH, --jsonl or --columns.")
+    if count_only and (limit is not None or offset):
+        raise click.UsageError("--count counts all matching rows; it takes no --limit or --offset.")
     wanted = {value.strip().upper() for value in symbols}
     if "" in wanted:
         raise click.UsageError("--symbol cannot be blank.")
@@ -354,11 +399,26 @@ def export_cmd(
         if acct is None:
             fail(f"No account '{ref}'.")
         account_ids.add(acct.saved_id)
+    excluded_account_ids = set()
+    for ref in excluded_accounts:
+        acct = store.get_account(ref)
+        if acct is None:
+            fail(f"No account '{ref}'.")
+        excluded_account_ids.add(acct.saved_id)
+    excluded_symbol_set = {value.strip().upper() for value in excluded_symbols}
     accounts = store.account_map()
     txns = [
         t
         for t in store.transactions()
         if (not account_ids or t.account_id in account_ids)
+        and t.account_id not in excluded_account_ids
+        and t.symbol not in excluded_symbol_set
+        and t.type.value not in excluded_types
+        and (currency is None or t.currency == currency.strip().upper())
+        and (note is None or note.casefold() in t.note.casefold())
+        and (has_note is None or bool(t.note.strip()) == has_note)
+        and (year is None or t.date[:4] == f"{year:04d}")
+        and (month is None or int(t.date[5:7]) == month)
         and (not wanted or t.symbol in wanted)
         and (not types or t.type.value in types)
         and (not since or t.date >= since)
@@ -367,6 +427,7 @@ def export_cmd(
     if count_only:
         click.echo(len(txns))
         return
+    txns = txns[offset : offset + limit] if limit is not None else txns[offset:]
     if path is None:
         _write_export(sys.stdout, txns, accounts, chosen, jsonl)
         return

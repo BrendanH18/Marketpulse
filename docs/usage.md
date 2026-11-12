@@ -23,6 +23,9 @@ priced holdings and performance output, see
 For recording previews and checks, ledger maintenance, imports and exports,
 chart, compare and search output, status and income options, and terminal app
 keys, see [One hundred improvements](cli-hundred-improvements.md).
+The next [100 offline CLI workflow improvements](cli-next-hundred-improvements.md)
+add deeper ledger and inventory selection, saved-item tools, configuration
+previews and receipts, and a searchable command catalog (`marketpulse commands`).
 
 ## Accounts and transactions
 

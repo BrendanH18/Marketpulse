@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import platform
 import shutil
@@ -81,6 +83,13 @@ def _check_names(ctx, param, values: tuple[str, ...]) -> tuple[str, ...]:
 @click.option("--exclude", multiple=True, callback=_check_names, help="Skip this check (repeatable).")
 @click.option("--failed-only", is_flag=True, help="Show only the checks that failed.")
 @click.option("--summary", is_flag=True, help="Print how many checks ended in each status instead of every row.")
+@click.option("--csv", "as_csv", is_flag=True, help="Export checks or status summary as CSV.")
+@click.option(
+    "--status", "statuses", multiple=True, type=click.Choice(STATUSES), help="Show checks with these statuses."
+)
+@click.option("--search", help="Find text in check names or details, ignoring case.")
+@click.option("--count", is_flag=True, help="Count visible checks.")
+@click.option("--list-checks", is_flag=True, help="List available check names without running them.")
 @pass_app
 def doctor(
     app: App,
@@ -91,12 +100,35 @@ def doctor(
     exclude: tuple[str, ...],
     failed_only: bool,
     summary: bool,
+    as_csv: bool,
+    statuses: tuple[str, ...],
+    search: str | None,
+    count: bool,
+    list_checks: bool,
 ) -> None:
     """Check the installation, data, network and integrations.
 
     Exit status is 0 unless --strict is given and a check failed (then 1).
     --only and --exclude take check names; checks that aren't selected don't run.
     """
+    if sum((as_json, as_csv, count)) > 1:
+        raise click.UsageError("Choose one of --json, --csv or --count.")
+    if count and summary:
+        raise click.UsageError("--count cannot be combined with --summary.")
+    if list_checks:
+        if only or exclude or failed_only or summary or statuses or search or strict:
+            raise click.UsageError("--list-checks cannot be combined with execution or result filters.")
+        if as_json:
+            click.echo(json.dumps(list(CHECKS)))
+        elif as_csv:
+            click.echo("check")
+            for name in CHECKS:
+                click.echo(name)
+        elif count:
+            click.echo(len(CHECKS))
+        else:
+            click.echo("\n".join(CHECKS))
+        return
     if only and exclude:
         raise click.UsageError("Choose one of --only or --exclude.")
     if failed_only and summary:
@@ -106,7 +138,23 @@ def doctor(
     failed = any(c.status == "fail" for c in checks)
     if failed_only:
         checks = [c for c in checks if c.status == "fail"]
-    if summary:
+    if statuses:
+        checks = [c for c in checks if c.status in statuses]
+    if search:
+        checks = [c for c in checks if search.casefold() in (c.check + " " + c.detail).casefold()]
+    if count:
+        click.echo(len(checks))
+    elif as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.writer(stream)
+        if summary:
+            writer.writerow(["status", "count"])
+            writer.writerows((s, sum(c.status == s for c in checks)) for s in STATUSES)
+        else:
+            writer.writerow(["check", "status", "detail"])
+            writer.writerows((c.check, c.status, c.detail) for c in checks)
+        click.echo(stream.getvalue(), nl=False)
+    elif summary:
         counts = {s: sum(c.status == s for c in checks) for s in STATUSES}
         if as_json:
             click.echo(json.dumps({"ok": not failed, "summary": counts}, ensure_ascii=False))
@@ -116,7 +164,8 @@ def doctor(
     elif as_json:
         click.echo(json.dumps({"ok": not failed, "checks": [asdict(c) for c in checks]}, ensure_ascii=False))
     elif failed_only and not checks:
-        app.console.print(Text("No failed checks.", style="muted"))
+        message = "No matching failed checks." if statuses or search else "No failed checks."
+        app.console.print(Text(message, style="muted"))
     else:
         for c in checks:
             mark, style = MARKS[c.status]
