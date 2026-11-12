@@ -31,6 +31,7 @@ from .models import Account, AccountType, CodedError, MessageArgs, Transaction, 
 if TYPE_CHECKING:
     from .analytics import TaxYear
     from .db import Store
+    from .tax import Disposition
 
 EXPORT_COLUMNS = [
     "date",
@@ -179,6 +180,47 @@ def _plain(value: float) -> str:
     return text.rstrip("0").rstrip(".") if "." in text else text
 
 
+def capital_gains_header(base: str) -> list[str]:
+    """The accountant CSV's columns (`marketpulse tax --csv`); amounts are in `base`."""
+    return [
+        "Tax year",
+        "Date",
+        "Account",
+        "Account type",
+        "Symbol",
+        "Quantity",
+        "Trading currency",
+        f"FX rate to {base}",
+        f"Proceeds ({base})",
+        f"ACB ({base})",
+        f"Gain or loss ({base})",
+        f"Denied loss ({base})",
+        f"Reported gain or loss ({base})",
+        "Type",
+        "Note",
+    ]
+
+
+def capital_gains_row(year: int, r: Disposition, accounts: dict[int, Account]) -> list[object]:
+    """One disposition as an accountant CSV row. A row missing an FX rate keeps its date, units
+    and note but no amounts, because they aren't known."""
+    acct = accounts.get(r.account_id)
+    amounts = [f"{v:.2f}" for v in (r.proceeds, r.acb, r.gain, r.denied, r.allowed_gain)] if r.complete else [""] * 5
+    return [
+        year,
+        r.date,
+        acct.name if acct else r.account_id,
+        acct.type.value if acct else "",
+        r.symbol,
+        _plain(r.quantity) if r.quantity else "",
+        r.currency,
+        f"{r.fx:.6f}" if r.fx is not None else "",
+        *amounts,
+        DISPOSITION_KINDS.get(r.kind, r.kind),
+        disposition_note(r),
+    ]
+
+
 def export_capital_gains(
     years: Sequence[TaxYear], accounts: dict[int, Account], base: str, out: TextIO, *, year: int | None = None
 ) -> int:
@@ -186,49 +228,13 @@ def export_capital_gains(
     `base`, as `marketpulse tax` reports them. A row missing an FX rate keeps its date, units
     and note but no amounts, because they aren't known."""
     writer = csv.writer(out)
-    writer.writerow(
-        [
-            "Tax year",
-            "Date",
-            "Account",
-            "Account type",
-            "Symbol",
-            "Quantity",
-            "Trading currency",
-            f"FX rate to {base}",
-            f"Proceeds ({base})",
-            f"ACB ({base})",
-            f"Gain or loss ({base})",
-            f"Denied loss ({base})",
-            f"Reported gain or loss ({base})",
-            "Type",
-            "Note",
-        ]
-    )
+    writer.writerow(capital_gains_header(base))
     n = 0
     for y in sorted(years, key=lambda y: y.year):
         if year is not None and y.year != year:
             continue
         for r in y.rows:
-            acct = accounts.get(r.account_id)
-            amounts = (
-                [f"{v:.2f}" for v in (r.proceeds, r.acb, r.gain, r.denied, r.allowed_gain)] if r.complete else [""] * 5
-            )
-            writer.writerow(
-                [
-                    y.year,
-                    r.date,
-                    acct.name if acct else r.account_id,
-                    acct.type.value if acct else "",
-                    r.symbol,
-                    _plain(r.quantity) if r.quantity else "",
-                    r.currency,
-                    f"{r.fx:.6f}" if r.fx is not None else "",
-                    *amounts,
-                    DISPOSITION_KINDS.get(r.kind, r.kind),
-                    disposition_note(r),
-                ]
-            )
+            writer.writerow(capital_gains_row(y.year, r, accounts))
             n += 1
     return n
 

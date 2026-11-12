@@ -5,6 +5,7 @@
 
 from . import (  # noqa: F401  (importing a module registers its commands)
     accounts,
+    allocation,
     assets,
     data,
     doctor,

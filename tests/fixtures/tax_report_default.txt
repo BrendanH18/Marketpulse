@@ -1,0 +1,31 @@
+▍Tax
+Capital gains — taxable accounts, pooled ACB (CAD)
+
+ Year   Proceeds        ACB   Denied   Net gain         Taxable
+ ──────────────────────────────────────────────────────────────
+ 2025   2,160.00   1,940.00        —    +220.00   110.00  (50%)
+ 2024   1,650.00   1,350.00   150.00    +450.00   225.00  (50%)
+
+
+2025 dispositions (CAD)
+
+ Date         Account         Symbol    Qty   Proceeds        ACB      Gain   Ccy        FX
+ ───────────────────────────────────────────────────────────────────────────────────────────────────────
+ 2025-02-03   Maple Taxable   XEQT.TO    10     350.00     310.00    +40.00   CAD    1.0000
+ 2025-03-03   Birch Margin    AAPL        1     210.00     130.00    +80.00   USD    1.4000
+ 2025-04-01   Maple Taxable   SAP.DE      2       0.00       0.00      0.00   EUR   missing   FX missing
+ 2025-05-01   Old Cedar       ZAG.TO    100   1,600.00   1,500.00   +100.00   CAD    1.0000
+
+
+⚠ Superficial losses (bought back within 30 days and still held):
+   2024-03-01 XEQT.TO: 50.00 of a 50.00 loss denied — sold 10, bought 10 within 30 days, holding 10
+   The denied loss is added to the ACB of the shares you bought back in taxable accounts (and lost for shares bought back in a TFSA/RRSP).
+
+
+⚠ Needs attention:
+   2024-07-02 Transfer of ZCN.TO into a registered account is a deemed sale at market value — add the price per unit to the transfer to include it in the tax
+report
+
+
+Estimates only — confirm figures against your broker slips (T5008/T3/T5) before filing.
+Purchases by a spouse or a corporation you control can also make a loss superficial; MarketPulse can't see those.
