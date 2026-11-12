@@ -11,19 +11,23 @@ import csv
 import io
 import json
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
+from datetime import date
+from typing import TypeVar
 
 import click
 from rich.text import Text
 
 from .. import fmt, render
 from ..ledger import IncomeEvent, RealizedGain
-from ..models import Account
+from ..models import Account, AccountType
 from .base import App, date_callback, fail, pass_app
 from .root import main
 
 NOT_TAX = "Native currency, average cost from the ledger. Not the tax report; see `marketpulse tax`."
 KINDS = ("dividend", "drip", "interest")
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+Row = TypeVar("Row", RealizedGain, IncomeEvent)
 KIND_LABELS = {"dividend": "Dividend", "drip": "DRIP", "interest": "Interest"}
 REALIZED_FIELDS = [
     "date",
@@ -70,10 +74,124 @@ def _filters(f):
             click.option("--offset", type=click.IntRange(min=0), help="Skip N matching rows or groups before --limit."),
             click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked rows and totals as JSON."),
             click.option("--csv", "as_csv", is_flag=True, help="Print raw, unmasked rows as CSV to stdout."),
+            click.option(
+                "--symbols",
+                multiple=True,
+                callback=_normalized_items,
+                help="Include exact symbols; repeat for several.",
+            ),
+            click.option("--account-type", type=click.Choice([a.value for a in AccountType], case_sensitive=False)),
+            click.option(
+                "--institution", callback=_nonblank, help="Match the account's institution exactly, ignoring case."
+            ),
+            click.option("--registered/--nonregistered", default=None, help="Match account registration status."),
+            click.option("--cash-tracked/--cash-untracked", default=None, help="Match account cash-tracking status."),
+            click.option(
+                "--exclude-currency",
+                "excluded_currencies",
+                multiple=True,
+                callback=_normalized_items,
+                help="Exclude native currencies; repeat for several.",
+            ),
+            click.option(
+                "--on",
+                "included_dates",
+                multiple=True,
+                callback=_dates,
+                help="Include exact dates; repeat for several.",
+            ),
+            click.option(
+                "--exclude-date",
+                "excluded_dates",
+                multiple=True,
+                callback=_dates,
+                help="Exclude exact dates; repeat for several.",
+            ),
+            click.option(
+                "--weekday",
+                "weekdays",
+                multiple=True,
+                type=click.Choice(WEEKDAYS, case_sensitive=False),
+                help="Include weekdays; repeat for several.",
+            ),
+            click.option(
+                "--symbol-prefix", callback=_nonblank, help="Match the start of recorded symbols, ignoring case."
+            ),
         ]
     ):
         f = decorator(f)
     return f
+
+
+def _nonblank(ctx, param, value):
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        raise click.BadParameter("Cannot be blank.")
+    return value
+
+
+def _normalized_items(ctx, param, values):
+    return tuple(_nonblank(ctx, param, value).upper() for value in values)
+
+
+def _dates(ctx, param, values):
+    return tuple(date_callback(ctx, param, value) for value in values)
+
+
+def _selection(
+    rows: list[Row],
+    accounts: dict[int, Account],
+    symbols: tuple[str, ...],
+    account_type: str | None,
+    institution: str | None,
+    registered: bool | None,
+    cash_tracked: bool | None,
+    excluded_currencies: tuple[str, ...],
+    included_dates: tuple[str, ...],
+    excluded_dates: tuple[str, ...],
+    weekdays: tuple[str, ...],
+    symbol_prefix: str | None,
+) -> list[Row]:
+    return [
+        row
+        for row in rows
+        if (not symbols or row.symbol.upper() in symbols)
+        and (account_type is None or accounts[row.account_id].type.value == account_type)
+        and (institution is None or accounts[row.account_id].institution.casefold() == institution.casefold())
+        and (registered is None or accounts[row.account_id].type.registered == registered)
+        and (cash_tracked is None or accounts[row.account_id].track_cash == cash_tracked)
+        and row.currency.upper() not in excluded_currencies
+        and (not included_dates or row.date in included_dates)
+        and row.date not in excluded_dates
+        and (not weekdays or WEEKDAYS[date.fromisoformat(row.date).weekday()] in weekdays)
+        and (symbol_prefix is None or row.symbol.casefold().startswith(symbol_prefix.casefold()))
+    ]
+
+
+def _realized_summary(
+    app: App, rows: list[RealizedGain], accounts: dict[int, Account], by: str, as_json: bool, as_csv: bool
+) -> None:
+    def key(row: RealizedGain) -> str:
+        if by == "year":
+            return row.date[:4]
+        if by == "month":
+            return row.date[:7]
+        if by == "account":
+            return accounts[row.account_id].name
+        return row.symbol
+
+    records = [{"group": group, "count": count} for group, count in sorted(Counter(key(row) for row in rows).items())]
+    if as_json:
+        click.echo(json.dumps(records, ensure_ascii=False))
+    elif as_csv:
+        _echo_csv(["group", "count"], records)
+    else:
+        table = render.table(by.title(), ("Sales", "right"), title="Matching realized sales")
+        for record in records:
+            table.add_row(Text(str(record["group"])), Text(str(record["count"])))
+        app.console.print(table)
 
 
 def _check_common(since: str | None, until: str | None, as_json: bool, as_csv: bool) -> None:
@@ -225,6 +343,16 @@ def _realized_totals(rows: list[RealizedGain]) -> dict[str, dict]:
 @click.option("--page-info", is_flag=True, help="With --json, include pagination metadata.")
 @click.option("--gains-only", is_flag=True, help="Only sales with a gain (rounded to the cent).")
 @click.option("--losses-only", is_flag=True, help="Only sales with a loss (rounded to the cent).")
+@click.option("--min-cost", type=float, callback=_finite, help="Inclusive native-currency cost minimum.")
+@click.option("--max-cost", type=float, callback=_finite, help="Inclusive native-currency cost maximum.")
+@click.option("--min-txn-id", type=click.IntRange(min=1), help="Include sales at or above this transaction ID.")
+@click.option("--max-txn-id", type=click.IntRange(min=1), help="Include sales at or below this transaction ID.")
+@click.option("--breakeven-only", is_flag=True, help="Only sales with a zero gain rounded to the cent.")
+@click.option(
+    "--summary",
+    type=click.Choice(["year", "month", "account", "symbol"]),
+    help="Count all matching sales by this field; no monetary totals.",
+)
 @pass_app
 def realized(
     app: App,
@@ -256,6 +384,22 @@ def realized(
     newest_first,
     limit,
     offset,
+    symbols,
+    account_type,
+    institution,
+    registered,
+    cash_tracked,
+    excluded_currencies,
+    included_dates,
+    excluded_dates,
+    weekdays,
+    symbol_prefix,
+    min_cost,
+    max_cost,
+    min_txn_id,
+    max_txn_id,
+    breakeven_only,
+    summary,
 ) -> None:
     """Realized gains from the ledger, oldest first, totalled per native currency (offline).
 
@@ -274,8 +418,20 @@ def realized(
         raise click.UsageError("--newest-first cannot be combined with --sort or --descending.")
     if count_only and (sort_by is not None or descending):
         raise click.UsageError("--count cannot be combined with --sort or --descending.")
-    if gains_only and losses_only:
-        raise click.UsageError("Choose one of --gains-only or --losses-only.")
+    if sum((gains_only, losses_only, breakeven_only)) > 1:
+        raise click.UsageError("Choose one of --gains-only, --losses-only or --breakeven-only.")
+    _amount_range(min_cost, max_cost, "cost")
+    _amount_range(min_txn_id, max_txn_id, "txn-id")
+    if summary and (
+        count_only
+        or newest_first
+        or sort_by is not None
+        or descending
+        or limit is not None
+        or offset is not None
+        or page_info
+    ):
+        raise click.UsageError("--summary cannot be combined with counting, ordering or pagination options.")
     accounts, account_id = _scope(app, account)
     excluded_ids = _excluded_account_ids(app, excluded_accounts)
     wanted = symbol.strip().upper() if symbol is not None else None
@@ -302,7 +458,29 @@ def realized(
         and (max_gain is None or r.gain <= max_gain)
         and (not gains_only or round(r.gain, 2) > 0)
         and (not losses_only or round(r.gain, 2) < 0)
+        and (not breakeven_only or round(r.gain, 2) == 0)
+        and (min_cost is None or r.cost >= min_cost)
+        and (max_cost is None or r.cost <= max_cost)
+        and (min_txn_id is None or r.txn_id >= min_txn_id)
+        and (max_txn_id is None or r.txn_id <= max_txn_id)
     ]
+    rows = _selection(
+        rows,
+        accounts,
+        symbols,
+        account_type,
+        institution,
+        registered,
+        cash_tracked,
+        excluded_currencies,
+        included_dates,
+        excluded_dates,
+        weekdays,
+        symbol_prefix,
+    )
+    if summary:
+        _realized_summary(app, rows, accounts, summary, as_json, as_csv)
+        return
     if count_only:
         click.echo(len(rows))
         return
@@ -396,6 +574,12 @@ def _group_key(e: IncomeEvent, by: str) -> str:
         return e.date[:7]
     if by == "year":
         return e.date[:4]
+    if by == "quarter":
+        return f"{e.date[:4]}-Q{(int(e.date[5:7]) - 1) // 3 + 1}"
+    if by == "kind":
+        return e.kind.value.lower()
+    if by == "currency":
+        return e.currency
     if by == "account":
         return str(e.account_id)  # the id keeps identically named accounts apart
     return e.symbol
@@ -431,8 +615,22 @@ def _payout_groups(rows: list[IncomeEvent], by: str, accounts: dict[int, Account
 )
 @click.option(
     "--by",
-    type=click.Choice(["month", "year", "symbol", "account"], case_sensitive=False),
+    type=click.Choice(["month", "year", "symbol", "account", "quarter", "kind", "currency"], case_sensitive=False),
     help="Show totals per group and currency instead of each payout.",
+)
+@click.option(
+    "--sort",
+    "sort_by",
+    type=click.Choice(["date", "account", "symbol", "kind", "amount", "currency"]),
+    help="Order individual payout rows by this field.",
+)
+@click.option("--descending", is_flag=True, help="Reverse individual row order (default: date).")
+@click.option(
+    "--exclude-kind",
+    "excluded_kinds",
+    multiple=True,
+    type=click.Choice(KINDS, case_sensitive=False),
+    help="Exclude income kinds; repeat for several.",
 )
 @pass_app
 def payouts(
@@ -460,11 +658,30 @@ def payouts(
     newest_first,
     limit,
     offset,
+    symbols,
+    account_type,
+    institution,
+    registered,
+    cash_tracked,
+    excluded_currencies,
+    included_dates,
+    excluded_dates,
+    weekdays,
+    symbol_prefix,
+    sort_by,
+    descending,
+    excluded_kinds,
 ) -> None:
     """Recorded dividend, DRIP and interest income, oldest first, per native currency (offline)."""
     _check_common(since, until, as_json, as_csv)
     ccy = _browsing_currency(currency, count_only, as_json, as_csv, limit, offset, newest_first)
     _amount_range(min_amount, max_amount, "amount")
+    if newest_first and (sort_by is not None or descending):
+        raise click.UsageError("--newest-first cannot be combined with --sort or --descending.")
+    if count_only and (sort_by is not None or descending):
+        raise click.UsageError("--count cannot be combined with --sort or --descending.")
+    if by and (sort_by is not None or descending):
+        raise click.UsageError("--sort and --descending order individual rows; omit --by.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
     excluded = {symbol.strip().upper() for symbol in excluded_symbols}
@@ -493,8 +710,23 @@ def payouts(
         and (max_amount is None or e.amount <= max_amount)
         and e.symbol.upper() not in excluded
         and (not chosen or e.kind.value.lower() in chosen)
+        and e.kind.value.lower() not in excluded_kinds
         and _in_range(e.date, year, since, until, month, quarter)
     ]
+    rows = _selection(
+        rows,
+        accounts,
+        symbols,
+        account_type,
+        institution,
+        registered,
+        cash_tracked,
+        excluded_currencies,
+        included_dates,
+        excluded_dates,
+        weekdays,
+        symbol_prefix,
+    )
     if by:
         _grouped_payouts(app, rows, by, accounts, as_json, as_csv, count_only, newest_first, limit, offset, page_info)
         return
@@ -502,7 +734,17 @@ def payouts(
         click.echo(len(rows))
         return
     all_rows = rows
-    rows = _page(sorted(rows, key=lambda e: e.date, reverse=newest_first), limit, offset)
+
+    def sort_key(event: IncomeEvent):
+        field = sort_by or "date"
+        if field == "account":
+            return accounts[event.account_id].name.casefold()
+        if field == "kind":
+            return event.kind.value.lower()
+        value = getattr(event, field)
+        return value.casefold() if isinstance(value, str) else value
+
+    rows = _page(sorted(rows, key=sort_key, reverse=descending or newest_first), limit, offset)
     if as_csv:
         _echo_csv(PAYOUT_FIELDS, [_payout_row(e, accounts) for e in rows])
         return

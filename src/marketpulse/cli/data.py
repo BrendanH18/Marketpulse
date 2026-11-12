@@ -537,6 +537,22 @@ def _backup_metadata(path: Path) -> dict:
 
 
 BACKUP_FIELDS = ["file", "path", "reason", "size_bytes", "taken_at"]
+BACKUP_WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def _backup_quarter_callback(ctx, param, value: str | None) -> str | None:
+    if value is not None and (not re.fullmatch(r"[0-9]{4}-Q[1-4]", value) or value.startswith("0000")):
+        raise click.BadParameter("Use a valid quarter from 0001-Q1 to 9999-Q4.")
+    return value
+
+
+def _backup_fields(fields: str | None) -> list[str]:
+    if fields is None:
+        return BACKUP_FIELDS
+    selected = [field.strip() for field in fields.split(",")]
+    if any(field not in BACKUP_FIELDS for field in selected) or len(set(selected)) != len(selected):
+        raise click.UsageError(f"--fields must name distinct fields from: {', '.join(BACKUP_FIELDS)}.")
+    return selected
 
 
 def _backup_month_callback(ctx, param, value: str | None) -> str | None:
@@ -588,6 +604,10 @@ def _backup_summary(app: App, payload: list[dict], group: str, as_json: bool, as
         taken = item["taken_at"]
         if taken is None:
             return "unknown"
+        if group == "date":
+            return taken[:10]
+        if group == "weekday":
+            return BACKUP_WEEKDAYS[date.fromisoformat(taken[:10]).weekday()]
         return taken[:4] if group == "year" else taken[:7]
 
     records = [{"group": value, "count": count} for value, count in sorted(Counter(key(i) for i in payload).items())]
@@ -668,9 +688,25 @@ def _backup_sort_key(field: str):
 @click.option("--earliest", is_flag=True, help="Show only the oldest matching backup.")
 @click.option(
     "--summary",
-    type=click.Choice(["reason", "year", "month"]),
+    type=click.Choice(["reason", "year", "month", "date", "weekday"]),
     help="Count matching backups by this field.",
 )
+@click.option("--jsonl", is_flag=True, help="Print one backup metadata JSON object per line.")
+@click.option("--paths", "paths_only", is_flag=True, help="Print matching absolute paths, one per line.")
+@click.option("--fields", help="Comma-separated metadata fields in order; requires --json, --csv or --jsonl.")
+@click.option(
+    "--exclude-file", "excluded_files", multiple=True, help="Exclude exact backup filenames; repeat for several."
+)
+@click.option("--exclude-date", "excluded_dates", multiple=True, callback=_backup_dates_callback)
+@click.option("--weekday", "weekdays", multiple=True, type=click.Choice(BACKUP_WEEKDAYS, case_sensitive=False))
+@click.option(
+    "--quarter", callback=_backup_quarter_callback, help="Only this calendar quarter (YYYY-Q1 through YYYY-Q4)."
+)
+@click.option(
+    "--has-timestamp/--no-timestamp", default=None, help="Only files with or without a recognized filename timestamp."
+)
+@click.option("--filename-prefix", help="Only backup filenames starting with this text, ignoring case.")
+@click.option("--filename-suffix", help="Only backup filenames ending with this text, ignoring case.")
 @pass_app
 def backup_list(
     app: App,
@@ -696,6 +732,16 @@ def backup_list(
     latest: bool,
     earliest: bool,
     summary: str | None,
+    jsonl: bool,
+    paths_only: bool,
+    fields: str | None,
+    excluded_files: tuple[str, ...],
+    excluded_dates: tuple[str, ...],
+    weekdays: tuple[str, ...],
+    quarter: str | None,
+    has_timestamp: bool | None,
+    filename_prefix: str | None,
+    filename_suffix: str | None,
 ) -> None:
     """List backups, newest first. Filters apply before sorting, counting and pagination.
 
@@ -703,8 +749,18 @@ def backup_list(
     """
     if since and until and since > until:
         raise click.UsageError("--since must be on or before --until.")
-    if as_json and as_csv:
-        raise click.UsageError("Choose one output format: --json or --csv.")
+    if sum((as_json, as_csv, jsonl, paths_only, count_only)) > 1:
+        raise click.UsageError("Choose one of --json, --csv, --jsonl, --paths or --count.")
+    if fields is not None and (not (as_json or as_csv or jsonl) or summary):
+        raise click.UsageError("--fields requires --json, --csv or --jsonl, without --summary.")
+    chosen_fields = _backup_fields(fields)
+    if summary and (jsonl or paths_only):
+        raise click.UsageError("--summary cannot be combined with --jsonl or --paths.")
+    if any(not value.strip() or Path(value).name != value for value in excluded_files):
+        raise click.UsageError("--exclude-file requires a nonblank filename without directory components.")
+    for option, value in (("--filename-prefix", filename_prefix), ("--filename-suffix", filename_suffix)):
+        if value is not None and not value.strip():
+            raise click.UsageError(f"{option} cannot be blank.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
     if min_size is not None and max_size is not None and min_size > max_size:
@@ -729,6 +785,7 @@ def backup_list(
     included = _backup_reasons("--reason", reasons)
     excluded = _backup_reasons("--exclude-reason", excluded_reasons)
     on = set(on_dates)
+    omitted_files = {value.casefold() for value in excluded_files}
 
     items = app.store.backups()
     payload = [
@@ -744,6 +801,25 @@ def backup_list(
         and (not on or (item["taken_at"] is not None and item["taken_at"][:10] in on))
         and (min_size is None or item["size_bytes"] >= min_size * 1024)
         and (max_size is None or item["size_bytes"] <= max_size * 1024)
+        and item["file"].casefold() not in omitted_files
+        and (item["taken_at"] is None or item["taken_at"][:10] not in excluded_dates)
+        and (
+            not weekdays
+            or (
+                item["taken_at"] is not None
+                and BACKUP_WEEKDAYS[date.fromisoformat(item["taken_at"][:10]).weekday()] in weekdays
+            )
+        )
+        and (
+            quarter is None
+            or (
+                item["taken_at"] is not None
+                and f"{item['taken_at'][:4]}-Q{(int(item['taken_at'][5:7]) - 1) // 3 + 1}" == quarter
+            )
+        )
+        and (has_timestamp is None or (item["taken_at"] is not None) == has_timestamp)
+        and (filename_prefix is None or item["file"].casefold().startswith(filename_prefix.casefold()))
+        and (filename_suffix is None or item["file"].casefold().endswith(filename_suffix.casefold()))
     ]
     if summary:
         _backup_summary(app, payload, summary, as_json, as_csv)
@@ -762,6 +838,16 @@ def backup_list(
     total = len(payload)
     start = offset or 0
     payload = payload[start:] if limit is None else payload[start : start + limit]
+    if paths_only:
+        for item in payload:
+            click.echo(item["path"])
+        return
+    if as_json or as_csv or jsonl:
+        payload = [{field: item[field] for field in chosen_fields} for item in payload]
+    if jsonl:
+        for item in payload:
+            click.echo(json.dumps(item, ensure_ascii=False))
+        return
     if as_json:
         result = (
             {
@@ -778,7 +864,7 @@ def backup_list(
         click.echo(json.dumps(result, ensure_ascii=False))
         return
     if as_csv:
-        _backup_csv(payload, BACKUP_FIELDS)
+        _backup_csv(payload, chosen_fields)
         return
     if not payload:
         if not items:
@@ -803,23 +889,37 @@ def _backup_source(app: App, path: str) -> Path:
 
 
 @backup.command("show")
-@click.argument("path", type=click.Path(dir_okay=False))
+@click.argument("paths", nargs=-1, required=True, type=click.Path(dir_okay=False))
 @click.option("--json", "as_json", is_flag=True, help="Print unmasked file metadata as JSON.")
+@click.option("--csv", "as_csv", is_flag=True, help="Print file metadata as CSV.")
+@click.option(
+    "--field", type=click.Choice(BACKUP_FIELDS), help="Print only this raw metadata field, one value per file."
+)
 @pass_app
-def backup_show(app: App, path: str, as_json: bool) -> None:
-    """Inspect backup file metadata without opening or restoring its database."""
+def backup_show(app: App, paths: tuple[str, ...], as_json: bool, as_csv: bool, field: str | None) -> None:
+    """Inspect one or more backup files without opening or restoring their databases."""
+    if sum((as_json, as_csv, field is not None)) > 1:
+        raise click.UsageError("Choose one of --json, --csv or --field.")
     try:
-        payload = _backup_metadata(_backup_source(app, path))
+        payload = [_backup_metadata(_backup_source(app, path)) for path in paths]
     except OSError as error:
         fail(str(error))
     if as_json:
-        click.echo(json.dumps(payload, ensure_ascii=False))
+        click.echo(json.dumps(payload[0] if len(payload) == 1 else payload, ensure_ascii=False))
         return
-    table = render.table("Field", "Value")
-    table.columns[0].min_width = 10
-    for field, value in payload.items():
-        table.add_row(Text(field), Text(str(value) if value is not None else "—"))
-    app.console.print(table)
+    if as_csv:
+        _backup_csv(payload, BACKUP_FIELDS)
+        return
+    if field is not None:
+        for item in payload:
+            click.echo("" if item[field] is None else item[field])
+        return
+    for item in payload:
+        table = render.table("Field", "Value")
+        table.columns[0].min_width = 10
+        for key, value in item.items():
+            table.add_row(Text(key), Text(str(value) if value is not None else "—"))
+        app.console.print(table)
 
 
 @backup.command("verify")

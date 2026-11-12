@@ -321,3 +321,107 @@ def allocation(
             app.console.print(Text(message, style="muted"))
     if failing:
         raise click.exceptions.Exit(1)
+
+
+@main.command("targets")
+@click.option("--json", "as_json", is_flag=True, help="Print saved target rows as JSON, without pricing holdings.")
+@click.option("--csv", "as_csv", is_flag=True, help="Export saved target rows as CSV.")
+@click.option("--count", "count_only", is_flag=True, help="Count all matching saved targets before pagination.")
+@click.option(
+    "--class", "classes", multiple=True, type=click.Choice([c.value for c in AssetClass], case_sensitive=False)
+)
+@click.option(
+    "--exclude-class",
+    "excluded_classes",
+    multiple=True,
+    type=click.Choice([c.value for c in AssetClass], case_sensitive=False),
+    help="Exclude classes; repeat for several.",
+)
+@click.option("--search", help="Find class keys or labels containing this text, ignoring case.")
+@click.option("--min-target", type=float, callback=_percent, help="Minimum saved target percentage, inclusive.")
+@click.option("--max-target", type=float, callback=_percent, help="Maximum saved target percentage, inclusive.")
+@click.option("--positive", is_flag=True, help="Only saved targets greater than zero.")
+@click.option("--zero", is_flag=True, help="Only explicitly saved zero targets.")
+@click.option("--sort", "sort_by", type=click.Choice(["class", "label", "target"]), default="class")
+@click.option("--descending", is_flag=True, help="Reverse the chosen order.")
+@click.option("--limit", type=click.IntRange(min=1), help="Maximum matching targets to show.")
+@click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip this many matching targets.")
+@click.option("--page-info", is_flag=True, help="With --json, include total, offset and limit before pagination.")
+@click.option("--buckets-only", is_flag=True, help="Print matching class keys, one per line, for scripts.")
+@click.option("--fields", help="Ordered comma-separated fields for JSON or CSV: bucket,label,target.")
+@pass_app
+def targets(
+    app: App,
+    as_json: bool,
+    as_csv: bool,
+    count_only: bool,
+    classes: tuple[str, ...],
+    excluded_classes: tuple[str, ...],
+    search: str | None,
+    min_target: float | None,
+    max_target: float | None,
+    positive: bool,
+    zero: bool,
+    sort_by: str,
+    descending: bool,
+    limit: int | None,
+    offset: int,
+    page_info: bool,
+    buckets_only: bool,
+    fields: str | None,
+) -> None:
+    """Inspect saved allocation targets offline. Set targets with `allocation --target CLASS=PCT`."""
+    if sum((as_json, as_csv, count_only, buckets_only)) > 1:
+        raise click.UsageError("Choose one of --json, --csv, --count or --buckets-only.")
+    if positive and zero:
+        raise click.UsageError("Choose --positive or --zero.")
+    if min_target is not None and max_target is not None and min_target > max_target:
+        raise click.UsageError("--min-target must be at most --max-target.")
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
+    if count_only and (limit is not None or offset):
+        raise click.UsageError("--count cannot be combined with pagination.")
+    fieldnames = TARGET_FIELDS
+    if fields is not None:
+        if not (as_json or as_csv):
+            raise click.UsageError("--fields requires --json or --csv.")
+        fieldnames = [field.strip() for field in fields.split(",")]
+        if any(field not in TARGET_FIELDS for field in fieldnames) or len(set(fieldnames)) != len(fieldnames):
+            raise click.BadParameter("Use unique fields from bucket,label,target.", param_hint="--fields")
+    if search is not None and not search.strip():
+        raise click.BadParameter("Cannot be blank.", param_hint="--search")
+    needle = search.strip().casefold() if search else ""
+    rows = [
+        row
+        for row in _target_rows(app.store.targets())
+        if (not classes or row["bucket"] in classes)
+        and row["bucket"] not in excluded_classes
+        and (not needle or needle in (row["bucket"] + " " + row["label"]).casefold())
+        and (min_target is None or row["target"] >= min_target)
+        and (max_target is None or row["target"] <= max_target)
+        and (not positive or row["target"] > 0)
+        and (not zero or row["target"] == 0)
+    ]
+    total = len(rows)
+    if count_only:
+        click.echo(total)
+        return
+    field = "bucket" if sort_by == "class" else sort_by
+    rows.sort(key=lambda row: (row[field], row["bucket"]), reverse=descending)
+    rows = rows[offset:][:limit]
+    records = [{key: row[key] for key in fieldnames} for row in rows]
+    if as_json:
+        payload = {"rows": records, "total": total, "offset": offset, "limit": limit} if page_info else records
+        click.echo(json.dumps(payload, ensure_ascii=False))
+    elif as_csv:
+        _emit_csv(fieldnames, records)
+    elif buckets_only:
+        for row in rows:
+            click.echo(row["bucket"])
+    elif not rows:
+        app.console.print(Text("No matching saved targets." if app.store.targets() else "No targets saved.", "muted"))
+    else:
+        table = render.table("Class", ("Target", "right"), title="Saved allocation targets")
+        for row in rows:
+            table.add_row(Text(row["label"]), Text(fmt.pct(row["target"], sign=False)))
+        app.console.print(table)

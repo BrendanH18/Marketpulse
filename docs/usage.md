@@ -26,6 +26,9 @@ keys, see [One hundred improvements](cli-hundred-improvements.md).
 The next [100 offline CLI workflow improvements](cli-next-hundred-improvements.md)
 add deeper ledger and inventory selection, saved-item tools, configuration
 previews and receipts, and a searchable command catalog (`marketpulse commands`).
+Another [100 offline inspection improvements](cli-more-hundred-improvements.md)
+extend realized gains, payouts, asset metadata, snapshots and backup browsing,
+and add saved target inspection (`marketpulse targets`) and command selectors.
 
 ## Accounts and transactions
 
