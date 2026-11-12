@@ -148,46 +148,45 @@ def _collect(app: App, *, offline: bool, selected: set[str] | None = None) -> li
         row("version", f"MarketPulse {__version__} · {python} · {platform.system()} {platform.release()}", None)
     if want("config"):
         row("config", str(config_path()), config_path().exists() or None)
-    tr = app.tracker
     if want("database"):
-        row("database", f"{tr.store.path} (schema v{tr.store.schema_version})")
+        row("database", f"{app.tracker.store.path} (schema v{app.tracker.store.schema_version})")
     if want("backups"):
-        newest = next(iter(tr.store.backups()), None)
+        newest = next(iter(app.tracker.store.backups()), None)
         if newest is None:
             row("backups", "none yet — `marketpulse backup`", None)
         else:
             age_days = (time.time() - newest.stat().st_mtime) / 86400
             # Daily backups keep this under a day; a week means they're failing (full disk, permissions…).
-            row("backups", f"{len(tr.store.backups())} · newest {newest.name}", age_days < 7)
+            row("backups", f"{len(app.tracker.store.backups())} · newest {newest.name}", age_days < 7)
     if want("ledger"):
         row(
             "ledger",
-            f"{len(tr.store.accounts())} accounts · {len(tr.store.transactions())} transactions"
-            f" · {len(tr.store.snapshots())} snapshots",
+            f"{len(app.tracker.store.accounts())} accounts · {len(app.tracker.store.transactions())} transactions"
+            f" · {len(app.tracker.store.snapshots())} snapshots",
             None,
         )
     if want("ledger checks"):
-        issues = tr.store.ledger().issues
+        issues = app.tracker.store.ledger().issues
         row("ledger checks", f"{len(issues)} issue(s)" if issues else "consistent", not issues)
     if want("market data"):
         if offline:
             skip("market data", "Yahoo not contacted (--offline)")
         else:
             t0 = time.perf_counter()
-            quotes, errors = tr.market.quotes(["SPY"], use_cache=False)
+            quotes, errors = app.tracker.market.quotes(["SPY"], use_cache=False)
             spy = quotes.get("SPY")
             if spy is not None and not spy.stale and spy.source == PRIMARY:
                 row("market data", f"Yahoo reachable ({(time.perf_counter() - t0) * 1000:.0f} ms)")
             else:
                 # `quotes` doesn't raise when Yahoo is down: it falls back, then serves cached prices.
-                yahoo = tr.market.provider_status()[0]
+                yahoo = app.tracker.market.provider_status()[0]
                 row("market data", f"Yahoo unreachable: {yahoo.last_error or errors.get('SPY', 'no data')}", False)
-    fallback = tr.market.fallback
     if want("fallback quotes"):
+        fallback = app.tracker.market.fallback
         if fallback is not None and offline:
             skip("fallback quotes", f"{fallback.label} not checked (--offline)")
         elif fallback is not None:
-            st = tr.market.provider_status()[-1]
+            st = app.tracker.market.provider_status()[-1]
             state = "not used yet" if st.ok is None else ("ok" if st.ok else f"failing: {st.last_error}")
             row("fallback quotes", f"{fallback.label} ({state})", st.ok)
         elif app.config.quote_provider:

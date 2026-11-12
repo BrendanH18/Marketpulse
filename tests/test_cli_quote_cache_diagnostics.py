@@ -281,3 +281,13 @@ def test_doctor_default_output_unchanged(offline):
     names = check_names(payload)
     assert names[:7] == ["version", "config", "database", "backups", "ledger", "ledger checks", "market data"]
     assert set(names) <= set(CHECKS)
+
+
+def test_doctor_install_checks_do_not_open_the_ledger(monkeypatch):
+    def broken_ledger(*args, **kwargs):
+        raise AssertionError("install-only checks must not open the ledger")
+
+    monkeypatch.setattr("marketpulse.services.Tracker.open", broken_ledger)
+    result = CliRunner().invoke(main, ["doctor", "--only", "version", "--only", "cli-path", "--json"])
+    assert result.exit_code == 0, result.output
+    assert [c["check"] for c in json.loads(result.output)["checks"]] == ["version", "cli path"]
