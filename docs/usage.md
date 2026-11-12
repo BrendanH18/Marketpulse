@@ -13,6 +13,9 @@ saved watchlist/alert filters, see [Offline inventory selection](cli-inventory-s
 For more account inventory, income report, and snapshot history controls, see
 [Offline report refinements](cli-report-refinements.md).
 
+For backup inventories, configuration inspection, the offline quote cache and
+selective diagnostics, see [Offline maintenance and diagnostics](cli-maintenance-diagnostics.md).
+
 ## Accounts and transactions
 
 Create accounts before recording transactions. Names, IDs, and account types

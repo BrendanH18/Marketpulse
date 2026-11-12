@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import math
 import tomllib
@@ -15,17 +17,32 @@ from ..config import Config, config_path
 from ..market import PERIODS
 from ..models import parse_symbols
 from ..providers import PROVIDERS
-from ..themes import OMARCHY_PALETTES, omarchy_active, pretty_name
+from ..themes import OMARCHY_PALETTES, omarchy_active, palette_from_colors, pretty_name
 from .base import App, fail, pass_app, theme_slug
 from .root import main
 
 
 @main.group(invoke_without_command=True)
+@click.option("--json", "as_json", is_flag=True, help="List embedded themes as JSON.")
 @click.pass_context
-def theme(ctx: click.Context) -> None:
+def theme(ctx: click.Context, as_json: bool) -> None:
     """Omarchy themes. `auto` follows your active Omarchy theme."""
+    if as_json and ctx.invoked_subcommand is not None:
+        raise click.UsageError("Use theme --json without a subcommand.")
     if ctx.invoked_subcommand is None:
         app = ctx.ensure_object(App)
+        if as_json:
+            themes = [
+                {
+                    "name": name,
+                    "label": pretty_name(name),
+                    "mode": "dark" if palette_from_colors(name, OMARCHY_PALETTES[name]).dark else "light",
+                }
+                for name in sorted(OMARCHY_PALETTES)
+            ]
+            payload = {"theme": app.config.theme, "current": app.palette.name, "themes": themes}
+            click.echo(json.dumps(payload, ensure_ascii=False))
+            return
         active = omarchy_active()
         app.console.print(render.theme_table(app.palette.name))
         note = (
@@ -47,15 +64,17 @@ def theme_set(app: App, name: tuple[str, ...]) -> None:
 
 @main.group(invoke_without_command=True)
 @click.option("--json", "as_json", is_flag=True, help="Print settings as JSON; API keys stay redacted.")
+@click.option("--csv", "as_csv", is_flag=True, help="Print key,value CSV rows; API keys stay redacted.")
 @click.pass_context
-def config(ctx: click.Context, as_json: bool) -> None:
+def config(ctx: click.Context, as_json: bool, as_csv: bool) -> None:
     """Show or change settings."""
-    if as_json and ctx.invoked_subcommand is not None:
-        raise click.UsageError("Use config --json without a subcommand.")
+    if (as_json or as_csv) and ctx.invoked_subcommand is not None:
+        raise click.UsageError("Use config --json or --csv without a subcommand.")
+    _one_format(as_json, as_csv)
     if ctx.invoked_subcommand is None:
         app = ctx.ensure_object(App)
-        if as_json:
-            _print_settings(app, app.config.redacted(), True)
+        if as_json or as_csv:
+            _print_settings(app, app.config.redacted(), as_json, as_csv)
             return
         app.console.print(Text(str(config_path()), style="muted"))
         for name, value in app.config.redacted().items():
@@ -153,8 +172,35 @@ def _known_key(key: str) -> None:
         fail(f"Unknown setting '{key}'.")
 
 
-def _print_settings(app: App, values: dict, as_json: bool) -> None:
-    if as_json:
+def _select(values: dict, keys: tuple[str, ...]) -> dict:
+    """Restrict redacted settings to the requested keys, in request order; no keys keeps all."""
+    for key in keys:
+        _known_key(key)
+    return {key: values[key] for key in dict.fromkeys(keys)} if keys else values
+
+
+def _one_format(as_json: bool, as_csv: bool) -> None:
+    if as_json and as_csv:
+        raise click.UsageError("Choose one output format: --json or --csv.")
+
+
+def _plain(value: object) -> str:
+    """Script-friendly text: lowercase booleans, comma-joined lists, everything else as str()."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return ",".join(str(v) for v in value)
+    return str(value)
+
+
+def _print_settings(app: App, values: dict, as_json: bool, as_csv: bool = False) -> None:
+    if as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.writer(stream)
+        writer.writerow(["key", "value"])
+        writer.writerows([key, _plain(value)] for key, value in values.items())
+        click.echo(stream.getvalue(), nl=False)
+    elif as_json:
         # JSON cannot represent invalid legacy Infinity/NaN values.
         safe = {
             key: None if isinstance(value, float) and not math.isfinite(value) else value
@@ -167,39 +213,74 @@ def _print_settings(app: App, values: dict, as_json: bool) -> None:
 
 
 @config.command("get")
-@click.argument("key")
+@click.argument("keys", nargs=-1, required=True)
 @click.option("--json", "as_json", is_flag=True)
+@click.option("--csv", "as_csv", is_flag=True, help="Print key,value CSV rows.")
+@click.option("--value", "value_only", is_flag=True, help="Print only the value(s), one per line, for scripts.")
 @pass_app
-def config_get(app: App, key: str, as_json: bool) -> None:
-    """Inspect one setting (API keys remain redacted)."""
-    _known_key(key)
-    _print_settings(app, {key: app.config.redacted()[key]}, as_json)
+def config_get(app: App, keys: tuple[str, ...], as_json: bool, as_csv: bool, value_only: bool) -> None:
+    """Inspect one or more settings (API keys remain redacted)."""
+    _one_format(as_json, as_csv)
+    if value_only and (as_json or as_csv):
+        raise click.UsageError("--value cannot be combined with --json or --csv.")
+    values = _select(app.config.redacted(), keys)
+    if value_only:
+        for value in values.values():
+            click.echo(_plain(value))
+        return
+    _print_settings(app, values, as_json, as_csv)
 
 
 @config.command("defaults")
+@click.argument("keys", nargs=-1)
 @click.option("--json", "as_json", is_flag=True)
+@click.option("--csv", "as_csv", is_flag=True, help="Print key,value CSV rows.")
 @pass_app
-def config_defaults(app: App, as_json: bool) -> None:
-    """Show factory defaults without modifying the saved configuration."""
-    _print_settings(app, Config().redacted(), as_json)
+def config_defaults(app: App, keys: tuple[str, ...], as_json: bool, as_csv: bool) -> None:
+    """Show factory defaults (optionally only KEYS) without modifying the saved configuration."""
+    _one_format(as_json, as_csv)
+    _print_settings(app, _select(Config().redacted(), keys), as_json, as_csv)
 
 
 @config.command("diff")
+@click.argument("keys", nargs=-1)
 @click.option("--json", "as_json", is_flag=True)
+@click.option("--csv", "as_csv", is_flag=True, help="Print key,value CSV rows.")
+@click.option("--exit-code", is_flag=True, help="Exit 1 when any (selected) setting differs from its default.")
 @pass_app
-def config_diff(app: App, as_json: bool) -> None:
-    """Show effective settings that differ from factory defaults; API keys stay redacted."""
+def config_diff(app: App, keys: tuple[str, ...], as_json: bool, as_csv: bool, exit_code: bool) -> None:
+    """Show effective settings (optionally only KEYS) that differ from factory defaults; API keys stay redacted."""
+    _one_format(as_json, as_csv)
     defaults = Config().redacted()
-    changed = {key: value for key, value in app.config.redacted().items() if value != defaults[key]}
-    _print_settings(app, changed, as_json)
-    if not changed and not as_json:
-        app.ok("All settings match defaults.")
+    current = _select(app.config.redacted(), keys)
+    changed = {key: value for key, value in current.items() if value != defaults[key]}
+    _print_settings(app, changed, as_json, as_csv)
+    if not changed and not (as_json or as_csv):
+        app.ok("All settings match defaults." if not keys else "Selected settings match defaults.")
+    if exit_code and changed:
+        raise click.exceptions.Exit(1)
 
 
 @config.command("keys")
-def config_keys() -> None:
+@click.option("--json", "as_json", is_flag=True, help="Print setting names as a JSON array.")
+@click.option("--search", metavar="TEXT", help="Only names containing TEXT (case-insensitive).")
+@click.option("--changed", is_flag=True, help="Only settings whose effective value differs from the default.")
+@pass_app
+def config_keys(app: App, as_json: bool, search: str | None, changed: bool) -> None:
     """List accepted setting names, one per line."""
-    click.echo("\n".join(f.name for f in fields(Config)))
+    names = [f.name for f in fields(Config)]
+    if search is not None:
+        if not search.strip():
+            raise click.UsageError("--search cannot be blank.")
+        needle = search.strip().casefold()
+        names = [name for name in names if needle in name.casefold()]
+    if changed:
+        current, defaults = app.config.redacted(), Config().redacted()
+        names = [name for name in names if current[name] != defaults[name]]
+    if as_json:
+        click.echo(json.dumps(names))
+    elif names:
+        click.echo("\n".join(names))
 
 
 @config.command("reset")
@@ -218,9 +299,12 @@ def config_reset(app: App, key: str) -> None:
 
 @config.command("validate")
 @click.option("--json", "as_json", is_flag=True, help="Print diagnostics; exit 1 if the file is invalid.")
+@click.option("--quiet", "-q", is_flag=True, help="Print nothing; report validity only through the exit status.")
 @pass_app
-def config_validate(app: App, as_json: bool) -> None:
+def config_validate(app: App, as_json: bool, quiet: bool) -> None:
     """Check the raw TOML file, setting names, types and values without writing it."""
+    if as_json and quiet:
+        raise click.UsageError("--quiet cannot be combined with --json.")
     issues: list[dict[str, str]] = []
     path = config_path()
     raw: dict = {}
@@ -246,7 +330,9 @@ def config_validate(app: App, as_json: bool) -> None:
         error = _setting_error(key, value) if valid_type else "Incorrect value type."
         if error:
             issues.append({"key": key, "message": error})
-    if as_json:
+    if quiet:
+        pass
+    elif as_json:
         click.echo(json.dumps({"ok": not issues, "issues": issues}, ensure_ascii=False))
     elif issues:
         for issue in issues:

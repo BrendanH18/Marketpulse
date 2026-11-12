@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Thirty offline maintenance and diagnostics improvements ([#126](https://github.com/BrendanH18/Marketpulse/issues/126))
+  for backup inventories, configuration and theme inspection, the offline quote
+  cache, and selective `doctor` checks. See
+  [Offline maintenance and diagnostics](docs/cli-maintenance-diagnostics.md).
+
 - Thirty offline reporting refinements ([#124](https://github.com/BrendanH18/Marketpulse/issues/124))
   extend saved account inventories, native-currency realized and payout reports,
   and snapshot history. See [Offline report refinements](docs/cli-report-refinements.md)
