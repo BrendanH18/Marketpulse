@@ -701,16 +701,20 @@ def txn_delete(app: App, txn_ids: tuple[int, ...], yes: bool, revision: str | No
     if not (yes or click.confirm(f"Delete these {len(ids)} transactions?")):
         return
     seen = {t.saved_id: t.revision(restore_id) for t in match}
-    problem = _deletion_problem(app, ids)
-    if problem is not None:
-        fail(f"{problem} Nothing was deleted.")
-    deleted: list[int] = []
-    for t in sorted(match, key=sort_key, reverse=True):
+    # One transaction: the same combined check as the dry run, then every delete, so either all
+    # go or none does (checking each delete on its own can refuse one after another went).
+    with app.store.atomic():
         try:
-            app.tracker.delete_transaction(t.saved_id, restore_id=restore_id, revision=seen[t.saved_id])
+            app.tracker._refuse_if_restored(restore_id, "deleted", "try again")
+            for t in match:
+                app.tracker._stored(t.saved_id, seen[t.saved_id])
         except ValueError as e:
-            fail(f"{e}" + (f" Already deleted: {_id_list(deleted)}." if deleted else ""))
-        deleted.append(t.saved_id)
+            fail(f"{e} Nothing was deleted.")
+        problem = _deletion_problem(app, ids)
+        if problem is not None:
+            fail(f"{problem} Nothing was deleted.")
+        for t in sorted(match, key=sort_key, reverse=True):
+            app.store.delete_transaction(t.saved_id)
     app.ok(f"Deleted {_id_list(ids)}.")
 
 

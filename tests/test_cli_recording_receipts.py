@@ -68,6 +68,12 @@ def test_dry_run_previews_every_command_without_saving(cli, store, maple, args):
     assert result.output.splitlines()[0].removeprefix("○ Dry run, not saved: ") == real.output.splitlines()[0][2:]
 
 
+def test_dry_run_never_creates_the_first_account(cli, store):
+    result = cli("deposit", "100", "--dry-run")
+    assert result.exit_code == 1 and "a dry run doesn't create one" in result.output
+    assert store.accounts() == [] and store.transactions() == []
+
+
 def test_dry_run_refuses_what_the_save_would_refuse(cli, store, maple):
     result = cli("sell", "XEQT.TO", "11", "45", "-a", "Maple Cash", "-d", "2025-01-08", "--dry-run")
     assert result.exit_code == 1
@@ -166,6 +172,14 @@ def test_balance_shows_cash_after_the_entry(cli, maple):
     result = cli("withdraw", "250", "-a", "Maple Cash", "-d", "2025-01-08", "--balance")
     assert result.output.splitlines()[0] == "✓ Withdrawal 250.00 CAD → Maple Cash on 2025-01-08"
     assert result.output.splitlines()[1] == "  cash in Maple Cash: 350.00 CAD"
+
+
+def test_balance_and_negative_cash_are_masked_in_privacy_mode(cli, tracker, maple):
+    tracker.config.privacy = True
+    result = cli("withdraw", "700", "-a", "Maple Cash", "-d", "2025-01-08", "--balance", "--check")
+    assert "-100.00" not in result.output
+    assert "  cash in Maple Cash: •••• CAD" in result.output.splitlines()
+    assert "! cash in Maple Cash is now •••• CAD" in result.output
 
 
 def test_balance_for_a_transfer_names_both_accounts(cli, maple):

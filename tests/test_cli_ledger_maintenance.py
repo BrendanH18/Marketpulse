@@ -329,6 +329,20 @@ def test_txn_delete_several_ids_all_or_nothing(cli, ledger):
     assert ids(ledger) == list(range(1, 10))
 
 
+def test_txn_delete_several_ids_matches_its_dry_run(cli, store):
+    """Deleting the oversold sale first would make deleting the buy look like it breaks the
+    split, so each delete checked on its own refused after one had gone (found in review)."""
+    maple = store.add_account(Account(name="Maple", type=AccountType.NONREG))
+    add(store, maple, TxnType.BUY, "2025-01-03", "XEQT.TO", 1, 30)  # 1
+    add(store, maple, TxnType.SELL, "2025-01-06", "XEQT.TO", 20, 30)  # 2: oversold
+    add(store, maple, TxnType.SPLIT, "2025-01-10", "XEQT.TO", ratio=2)  # 3: nothing held
+    preview = cli("txn", "delete", "--dry-run", "--", "1", "2")
+    assert preview.exit_code == 0 and "would delete #1, #2" in preview.output
+    result = cli("txn", "delete", "-y", "--", "1", "2")
+    assert result.exit_code == 0 and result.output.endswith("✓ Deleted #1, #2.\n")
+    assert ids(store) == [3]
+
+
 # ── 30. txn delete --dry-run ───────────────────────────────────────────────────
 
 

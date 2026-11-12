@@ -188,6 +188,13 @@ def _extras() -> Extras:
     return found if isinstance(found, Extras) else Extras()
 
 
+def _account(app: App, ref: str | None) -> Account:
+    """`app.account`, except that a dry run never creates the first account."""
+    if not ref and _extras().dry_run and not app.store.accounts():
+        fail("No accounts yet, and a dry run doesn't create one. Add one with `marketpulse accounts add`.")
+    return app.account(ref)
+
+
 def _state_on(app: App, day: str) -> LedgerState:
     """The ledger at the end of `day` (every entry dated on or before it)."""
     return replay(app.store.transactions(), app.store.account_map(), until=day)
@@ -281,7 +288,7 @@ def _warnings(app: App, txn: Transaction, accounts: list[Account], state: Ledger
             out.append(
                 Caution(
                     "negative_cash",
-                    f"cash in {primary.name} is now {fmt.money(balance)} {txn.currency}",
+                    f"cash in {primary.name} is now {fmt.money(balance, privacy=app.privacy)} {txn.currency}",
                 )
             )
     recent = (date.today() - day).days <= 7
@@ -384,7 +391,8 @@ def _show(app: App, out: Outcome, ex: Extras, *, dry_run: bool) -> None:
                 continue
             shown = balances or {acct.currency: 0.0}
             for ccy, bal in shown.items():
-                app.console.print(Text(f"  cash in {acct.name}: {fmt.money(bal)} {ccy}", style="info"))
+                shown_bal = fmt.money(bal, privacy=app.privacy)
+                app.console.print(Text(f"  cash in {acct.name}: {shown_bal} {ccy}", style="info"))
 
 
 def _report(app: App, out: Outcome, ex: Extras, *, dry_run: bool) -> None:
@@ -455,7 +463,7 @@ def _trade(
     currency: str,
     note: str,
 ) -> None:
-    acct = app.account(account)
+    acct = _account(app, account)
     sym = symbol.upper()
     ccy = currency.upper()
     day = when or date.today().isoformat()
@@ -551,7 +559,7 @@ def _cash_event(
     currency: str,
     note: str,
 ) -> None:
-    acct = app.account(account)
+    acct = _account(app, account)
     day = when or date.today().isoformat()
     sym = symbol.upper()
     detail = ""
@@ -620,7 +628,7 @@ def drip(app: App, symbol, quantity, price, currency, account, when, note) -> No
         if quantity <= 0:
             fail("Quantity must be positive.")
         price = total / quantity
-    acct = app.account(account)
+    acct = _account(app, account)
     ccy = currency.upper() or app.tracker.resolve_currency(symbol, acct)[0]
     txn = Transaction(
         account_id=acct.saved_id,
@@ -696,7 +704,7 @@ def split(app: App, symbol, ratio, account, when, note) -> None:
 
     RATIO can also be written new:old, e.g. `3:1`, `1:10` or `2-for-1`.
     """
-    acct = app.account(account)
+    acct = _account(app, account)
     txn = Transaction(
         account_id=acct.saved_id, type=TxnType.SPLIT, date=parse_date(when), symbol=symbol, ratio=ratio, note=note
     )
@@ -755,7 +763,7 @@ def roc(app: App, symbol, amount, currency, account, when, note) -> None:
     Funds and ETFs report it in box 42 of the T3 slip. Once the cost base
     reaches zero, the rest counts as a capital gain.
     """
-    acct = app.account(account)
+    acct = _account(app, account)
     sym = symbol.upper()
     day = when or date.today().isoformat()
     detail = ""
@@ -823,7 +831,7 @@ def transfer(app: App, symbol, quantity, source, target, price, currency, when, 
     give --price for those. QUANTITY can be `all`: every unit held in the
     source account at the end of the date.
     """
-    src, dst = app.account(source), app.account(target)
+    src, dst = _account(app, source), _account(app, target)
     day = parse_date(when)
     currency = currency.upper()
     if quantity == ALL:
