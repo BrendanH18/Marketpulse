@@ -164,7 +164,8 @@ def doctor(
     elif as_json:
         click.echo(json.dumps({"ok": not failed, "checks": [asdict(c) for c in checks]}, ensure_ascii=False))
     elif failed_only and not checks:
-        app.console.print(Text("No failed checks.", style="muted"))
+        message = "No matching failed checks." if statuses or search else "No failed checks."
+        app.console.print(Text(message, style="muted"))
     else:
         for c in checks:
             mark, style = MARKS[c.status]

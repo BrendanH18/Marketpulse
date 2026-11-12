@@ -113,6 +113,8 @@ def test_doctor_filters_keep_unfiltered_strict_result(cli, monkeypatch):
     assert list(csv.DictReader(io.StringIO(output)))[0]["check"] == "ledger checks"
     summary = list(csv.DictReader(io.StringIO(cli("doctor", "--csv", "--summary").output)))
     assert {r["status"]: int(r["count"]) for r in summary} == {"ok": 1, "fail": 1, "info": 1, "skipped": 0}
+    hidden = cli("doctor", "--failed-only", "--search", "version", "--strict")
+    assert hidden.exit_code == 1 and "No matching failed checks." in hidden.output
     assert cli("doctor", "--csv", "--json").exit_code == 2
     assert cli("doctor", "--count", "--summary").exit_code == 2
 

@@ -9,7 +9,7 @@ sorting, paging, JSON, CSV and counts. Examples use fictional symbols.
 | # | Capability | Example |
 | --- | --- | --- |
 | 51 | Select watched symbols currently held in active accounts, or their complement | `marketpulse watch list --held` / `--not-held` |
-| 52 | Select watched symbols with a readable local quote, or their complement | `marketpulse watch list --cached` / `--not-cached` |
+| 52 | Select watched symbols with a saved local quote, or their complement | `marketpulse watch list --cached` / `--not-cached` |
 | 53 | Match watched symbol suffixes, ignoring case | `marketpulse watch list --suffix .TO` |
 | 54 | Exclude watched symbols containing text, ignoring case | `marketpulse watch list --exclude-search ALPHA` |
 | 55 | Emit one saved symbol per line for shell pipelines | `marketpulse watch list --lines --alphabetical` |
@@ -35,8 +35,9 @@ sorting, paging, JSON, CSV and counts. Examples use fictional symbols.
 | 75 | Count matching setting names | `marketpulse config keys --changed --count` |
 
 `--held` uses positive open holdings from the ledger and excludes archived
-accounts. `--cached` means that a saved quote can be decoded; it does not claim
-that its price is fresh. Neither filter requests prices, records a snapshot or
+accounts. `--cached` checks the existing saved quote cache; it does not claim
+that its price is fresh. A damaged cache row still raises the existing loader
+error; this filter does not repair corrupted cache data. Neither filter requests prices, records a snapshot or
 fires alerts. Membership selection precedes sorting and pagination and never
 changes the saved watchlist order. `--lines` is an output format and cannot be
 combined with JSON, CSV or count output.

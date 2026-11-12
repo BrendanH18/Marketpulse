@@ -47,7 +47,7 @@ def watch(ctx: click.Context) -> None:
 )
 @click.option("--page-info", is_flag=True, help="With --json, include pagination metadata.")
 @click.option("--held/--not-held", default=None, help="Match symbols held in active accounts, offline.")
-@click.option("--cached/--not-cached", default=None, help="Match symbols with a readable saved quote, offline.")
+@click.option("--cached/--not-cached", default=None, help="Match symbols with a saved quote, offline.")
 @click.option("--suffix", help="Match a symbol suffix, ignoring case; e.g. .TO, offline.")
 @click.option("--exclude-search", help="Exclude symbols containing this text, ignoring case, offline.")
 @click.option("--lines", is_flag=True, help="Print one saved symbol per line, offline.")
