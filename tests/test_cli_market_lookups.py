@@ -23,6 +23,8 @@ def cli(tracker, monkeypatch):
     monkeypatch.setattr("marketpulse.services.Tracker.open", classmethod(lambda cls, config=None: tracker))
     monkeypatch.setattr("marketpulse.cli.base.Config.load", lambda: tracker.config)
     monkeypatch.setenv("COLUMNS", "120")
+    # Rich narrows a legacy Windows console by one column, which would redraw the golden charts.
+    monkeypatch.setattr("rich.console.detect_legacy_windows", lambda: False)
     return lambda *args: CliRunner().invoke(main, list(args), catch_exceptions=False)
 
 
