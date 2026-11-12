@@ -142,6 +142,14 @@ def test_metadata_summaries_in_all_formats(assets_cli, group, counts):
     assert json.loads(empty.output) == []
 
 
+def test_currency_summary_trims_saved_whitespace(store, tracker, monkeypatch):
+    store.upsert_asset(Asset("FIC-BLANK", currency=" "))
+    store.upsert_asset(Asset("FIC-CAD", currency=" CAD "))
+    monkeypatch.setattr("marketpulse.services.Tracker.open", classmethod(lambda cls, config=None: tracker))
+    result = CliRunner().invoke(main, ["asset", "list", "--summary", "currency", "--json"], catch_exceptions=False)
+    assert json.loads(result.output) == [{"group": "(unspecified)", "count": 1}, {"group": "CAD", "count": 1}]
+
+
 def test_symbol_lines_and_projected_list_exports(assets_cli):
     # 45: raw script lines use the same filtering, ordering and pagination.
     result = assets_cli(

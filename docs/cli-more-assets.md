@@ -37,8 +37,10 @@ against a fictional ledger, as described in the [data guide](data.md).
 | 50 | Check whether a symbol has a saved definition using only exit status | `marketpulse asset show FIC-A --exists` |
 
 Filters combine with the existing selectors and use all matching definitions
-before counts or pagination. Text matching ignores case and surrounding
-whitespace. Repeatable inclusion matches any included symbol; exclusions remove
+before counts or pagination. Text matching ignores case. The new `--symbols`,
+`--exclude-currency`, `--name`, `--symbol-prefix` and `--symbol-suffix` selectors
+trim surrounding whitespace; the existing `--search` keeps query whitespace.
+Repeatable inclusion matches any included symbol; exclusions remove
 any excluded value. Excluding classes retains unclassified definitions. Blank
 symbol inclusions, currency exclusions, names, prefixes, and suffixes are usage
 errors. `--classified` conflicts with `--unclassified`.

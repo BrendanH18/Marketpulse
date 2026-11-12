@@ -9,7 +9,45 @@ import pytest
 from click.testing import CliRunner
 
 from marketpulse.cli import main
-from marketpulse.db import Snapshot
+from marketpulse.cli.base import App
+from marketpulse.db import Snapshot, Store
+from marketpulse.models import Account, Transaction, TxnType
+from marketpulse.services import Tracker
+
+
+@pytest.mark.parametrize("recent", [False, True])
+def test_unrecognized_backup_names_allow_real_startup_and_inspection(recent):
+    seed = Store()
+    account = seed.add_account(Account(name="Fictional backup account"))
+    seed.add_transaction(
+        Transaction(account_id=account.id, type=TxnType.DEPOSIT, date="2024-01-01", amount=100, currency="CAD")
+    )
+    if recent:
+        seed.backup(reason="manual")
+    seed.backup_dir.mkdir(exist_ok=True)
+    legacy = seed.backup_dir / "marketpulse-legacy.db"
+    legacy.write_bytes(b"Fictional unrecognized backup")
+    seed.close()
+
+    tracker = Tracker.open()
+    try:
+        assert len(tracker.store.transactions()) == 1
+        daily = [p for p in tracker.store.backups() if Store.backup_reason(p) == "daily"]
+        assert len(daily) == (0 if recent else 1)
+    finally:
+        tracker.store.close()
+
+    app = App()
+    try:
+        result = CliRunner().invoke(
+            main, ["backup", "list", "--no-timestamp", "--json"], obj=app, catch_exceptions=False
+        )
+        assert result.exit_code == 0
+        assert [r["file"] for r in json.loads(result.output)] == [legacy.name]
+        assert legacy.read_bytes() == b"Fictional unrecognized backup"
+    finally:
+        if app._tracker is not None:
+            app._tracker.store.close()
 
 
 @pytest.fixture

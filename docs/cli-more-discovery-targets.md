@@ -42,7 +42,7 @@ and rejects pagination. `--page-info` requires JSON and returns `rows`, `total`,
 Target fields must be unique known names; projection requires JSON or CSV.
 Target percentages must be finite and within 0–100; zero targets must have
 actually been saved, rather than being inferred for unsaved classes. Sorting
-by percentage breaks ties by class key. These are configured percentages, not
+by percentage breaks ties by class key; label sorting ignores case. These are configured percentages, not
 financial valuations or advice; no contributions, ACB, tax or FX are computed.
 
 Command discovery does not open the ledger. Exact and prefix matching ignore

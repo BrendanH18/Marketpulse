@@ -61,7 +61,9 @@ continues to respect privacy masking. JSON, CSV and JSON Lines are raw exports.
 Backup dates always come from filenames, never file modification times. Files
 with unrecognized timestamps appear in date/weekday summaries as `unknown`.
 They fail positive date, quarter and weekday filters, but remain eligible when
-excluding dates. Filename matching ignores case. `--exclude-file` takes exact
+excluding dates. The startup safety-backup check ignores unrecognized timestamps
+and uses the newest recognized backup, so these files do not prevent inspection.
+Filename matching ignores case. `--exclude-file` takes exact
 filenames without directory components; filename prefixes/suffixes cannot be
 blank. These options never delete files.
 

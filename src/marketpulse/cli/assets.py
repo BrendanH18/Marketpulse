@@ -36,7 +36,7 @@ def _asset_summary(app: App, items: list[Asset], group: str, as_json: bool, as_c
             return a.asset_class.value if a.asset_class is not None else "(unclassified)"
         if group == "compounding":
             return a.compounding if a.kind is AssetKind.FIXED_INCOME else "(not applicable)"
-        return a.kind.value if group == "kind" else a.currency or "(unspecified)"
+        return a.kind.value if group == "kind" else a.currency.strip() or "(unspecified)"
 
     rows = [{"group": value, "count": count} for value, count in sorted(Counter(key(a) for a in items).items())]
     if as_json:

@@ -217,6 +217,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Backup filenames without recognized timestamps no longer interrupt startup
+  or prevent offline backup inspection on a populated ledger.
+
 - `summary` no longer crashes on 29 February when working out the start of its
   one-year history window.
 - Ordinary CLI activity and transaction inspection hide archived accounts, including

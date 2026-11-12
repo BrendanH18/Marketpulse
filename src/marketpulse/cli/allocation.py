@@ -407,7 +407,10 @@ def targets(
         click.echo(total)
         return
     field = "bucket" if sort_by == "class" else sort_by
-    rows.sort(key=lambda row: (row[field], row["bucket"]), reverse=descending)
+    rows.sort(
+        key=lambda row: (row[field].casefold() if isinstance(row[field], str) else row[field], row["bucket"]),
+        reverse=descending,
+    )
     rows = rows[offset:][:limit]
     records = [{key: row[key] for key in fieldnames} for row in rows]
     if as_json:
