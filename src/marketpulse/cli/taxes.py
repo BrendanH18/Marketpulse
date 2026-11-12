@@ -284,6 +284,8 @@ def tax(
     rows = [r for r in every if keep(r)]
     if summary:
         _show_summary(app, _summary(years, rows), as_json, filtered, tr.base)
+        if not as_json:
+            _warn_issues(app, [{"date": i.date, "message": i.message} for i in report.issues], "these totals")
         return
     rows = _sort(rows, (sort_by or "date").lower(), descending, accounts)
     if count_only:
@@ -315,10 +317,10 @@ def tax(
         _show_rows(app, rows, accounts, tr.base, total=total, start=start, paged=paged, any_rows=bool(every))
 
 
-def _warn_issues(app: App, issues: list[dict]) -> None:
+def _warn_issues(app: App, issues: list[dict], what: str = "this file") -> None:
     if issues:
         # E.g. a transfer into a TFSA with no price: its deemed sale can't be in the file.
-        app.warn(f"{len(issues)} issue(s) may leave sales out of this file:")
+        app.warn(f"{len(issues)} issue(s) may leave sales out of {what}:")
         for issue in issues:
             app.warn(f"  {issue['date']} {issue['message']}")
 

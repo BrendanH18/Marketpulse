@@ -283,6 +283,8 @@ def test_summary_reuses_the_report_totals(cli, ledger, tracker):
     assert (birch["proceeds"], birch["acb"], birch["net_gain"]) == pytest.approx((210, 130, 80))
     human = cli("tax", "--summary", "--symbol", "SAP").output
     assert "selected dispositions" in human and "Totals cover only the selected" in human
+    # The unpriced transfer into the TFSA can't be in the totals, so the summary says so.
+    assert "1 issue(s) may leave sales out of these totals" in cli("tax", "--summary").output
 
 
 # ── 10. --issues / --exit-code / --room ───────────────────────────────────────
