@@ -193,7 +193,7 @@ def test_55_compare_top(cli, market_data):
 def test_56_compare_no_chart(cli, market_data):
     out = ok(cli("compare", *SYMS, "-p", "1mo", "--no-chart"))
     assert "┤" not in out and "━━" not in out
-    assert (GOLDEN / "compare_plain.txt").read_text().endswith(out)  # the plain table, unchanged
+    assert (GOLDEN / "compare_plain.txt").read_text(encoding="utf-8").endswith(out)  # the plain table, unchanged
     bad = cli("compare", "AAPL", "--json", "--no-chart")
     assert bad.exit_code == 2 and "drop --no-chart" in bad.output
 

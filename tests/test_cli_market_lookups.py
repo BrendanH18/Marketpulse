@@ -66,7 +66,7 @@ def requests_for(cli, tracker, fake, *args) -> list[tuple[str, dict]]:
 )
 def test_plain_commands_print_exactly_what_they_did(cli, market_data, name, args):
     """Byte-for-byte output captured before #130's options were added."""
-    assert ok(cli(*args)) == (GOLDEN / name).read_text()
+    assert ok(cli(*args)) == (GOLDEN / name).read_text(encoding="utf-8")
 
 
 def test_chart_options_reuse_the_plain_requests(cli, tracker, market_data):
@@ -214,10 +214,9 @@ def test_46_chart_normalize_draws_percent_change(cli, market_data):
     assert "+0.0%" in out or "-0" in out  # a percent axis, not a price axis
     assert "110.78" not in out
     # Overlays are already drawn as % change, so --vs output is unchanged.
-    assert (
-        ok(cli("chart", "AAPL", "-p", "1mo", "--vs", "XEQT.TO", "-H", "8", "--normalize"))
-        == (GOLDEN / "chart_vs.txt").read_text()
-    )
+    assert ok(cli("chart", "AAPL", "-p", "1mo", "--vs", "XEQT.TO", "-H", "8", "--normalize")) == (
+        GOLDEN / "chart_vs.txt"
+    ).read_text(encoding="utf-8")
 
 
 def test_46_drawing_options_reject_machine_output(cli, market_data):
@@ -243,7 +242,7 @@ def test_47_chart_width(cli, market_data):
 def test_48_chart_no_card(cli, market_data):
     out = ok(cli("chart", "AAPL", "-p", "1mo", "--no-card"))
     assert "Apple Inc." not in out and "52w range" not in out
-    plain = (GOLDEN / "chart_plain.txt").read_text()
+    plain = (GOLDEN / "chart_plain.txt").read_text(encoding="utf-8")
     assert plain.endswith(out)  # the same chart, without the card above it
 
 

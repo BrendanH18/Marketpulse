@@ -28,6 +28,11 @@ def add(store, acct, kind, day, symbol="", qty=0.0, price=0.0, ccy="CAD", **extr
     )
 
 
+def unix(text: str) -> str:
+    """CSV rows end in \\r\\n on stdout on Windows; compare them with \\n."""
+    return text.replace("\r\n", "\n")
+
+
 @pytest.fixture
 def cli(tracker, monkeypatch):
     monkeypatch.setattr("marketpulse.services.Tracker.open", classmethod(lambda cls, config=None: tracker))
@@ -107,7 +112,7 @@ IMPORT_DONE = (
 
 
 def test_plain_export_is_unchanged(cli, ledger, tmp_path):
-    assert cli("export").output == EXPORT
+    assert unix(cli("export").output) == EXPORT
     out = tmp_path / "ledger.csv"
     assert cli("export", str(out)).output == f"✓ Exported 9 transactions to {out}\n"
     assert out.read_bytes() == EXPORT.replace("\n", "\r\n").encode()
@@ -118,7 +123,7 @@ def test_plain_import_is_unchanged(cli, ledger, incoming, tmp_path):
     assert (result.exit_code, result.output) == (0, IMPORT_DRY_RUN)
     result = cli("import", str(incoming))
     shown = re.sub(r"marketpulse-[0-9-]+-import", "marketpulse-STAMP-import", result.output)
-    assert (result.exit_code, shown.replace(str(tmp_path), "TMP")) == (0, IMPORT_DONE)
+    assert (result.exit_code, shown.replace(str(tmp_path), "TMP").replace("\\", "/")) == (0, IMPORT_DONE)
 
 
 # ── 31. export -a ──────────────────────────────────────────────────────────────
@@ -158,7 +163,7 @@ def test_export_symbol_and_type_filters(cli, ledger):
 def test_export_date_window(cli, ledger, tmp_path):
     rows = csv_rows(cli("export", "--since", "2025-01-03", "--until", "2025-05-01").output)
     assert [r["date"] for r in rows] == ["2025-01-03", "2025-01-06", "2025-03-31", "2025-05-01"]
-    assert cli("export", "--since", "1900-01-01").output == EXPORT  # filtered output keeps the exact format
+    assert unix(cli("export", "--since", "1900-01-01").output) == EXPORT  # filtered output keeps the exact format
     out = tmp_path / "all.csv"
     cli("export", "--until", "2099-12-31", str(out))
     assert out.read_bytes() == EXPORT.replace("\n", "\r\n").encode()
@@ -170,10 +175,10 @@ def test_export_date_window(cli, ledger, tmp_path):
 
 
 def test_export_columns(cli, ledger):
-    text = cli("export", "--columns", "Symbol, date,amount", "--type", "DIVIDEND").output
+    text = unix(cli("export", "--columns", "Symbol, date,amount", "--type", "DIVIDEND").output)
     assert text == "symbol,date,amount\nXEQT.TO,2025-03-31,25\n"
     every = "date,account,type,symbol,quantity,price,amount,fees,currency,note,ratio,target_account"
-    assert cli("export", "--columns", every).output == EXPORT
+    assert unix(cli("export", "--columns", every).output) == EXPORT
     result = cli("export", "--columns", "date,cost")
     assert result.exit_code == 2 and "Unknown column 'cost'" in result.output
     assert cli("export", "--columns", "date,date").exit_code == 2
@@ -219,7 +224,7 @@ def test_export_json_lines(cli, ledger, tmp_path):
     assert picked[0] == {"date": "2025-01-03", "note": "first lot, rounded"}
     out = tmp_path / "ledger.jsonl"
     assert cli("export", "--jsonl", "--type", "BUY", str(out)).output == f"✓ Exported 4 transactions to {out}\n"
-    assert len(out.read_text().splitlines()) == 4
+    assert len(out.read_text(encoding="utf-8").splitlines()) == 4
 
 
 # ── 37. import --summary ───────────────────────────────────────────────────────
