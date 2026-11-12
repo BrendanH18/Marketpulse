@@ -153,7 +153,7 @@ def test_validate_quiet_reports_only_through_exit_status(cli):
     result = cli("config", "validate", "--quiet")
     assert (result.exit_code, result.output) == (0, "")
     config_path().parent.mkdir(parents=True, exist_ok=True)
-    config_path().write_text(f'quote_api_key = "{SECRET}"\nrefresh_seconds = 1\n', encoding="utf-8")
+    config_path().write_text("refresh_seconds = 1\n", encoding="utf-8")
     before = config_path().read_bytes()
     result = cli("config", "validate", "-q")
     assert (result.exit_code, result.output) == (1, "")
