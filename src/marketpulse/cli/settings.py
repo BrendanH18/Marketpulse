@@ -53,6 +53,64 @@ def theme(ctx: click.Context, as_json: bool) -> None:
         app.console.print(Text(f'config: theme = "{app.config.theme}"   {note}', style="muted"))
 
 
+@theme.command("list")
+@click.option("--search", help="Find text in a theme name or label, ignoring case.")
+@click.option("--mode", type=click.Choice(["dark", "light"], case_sensitive=False), help="Only dark or light themes.")
+@click.option("--csv", "as_csv", is_flag=True, help="Export name, label and mode as CSV.")
+@click.option("--count", "count_only", is_flag=True, help="Count matching themes before pagination.")
+@click.option("--names", is_flag=True, help="Print just the theme slugs, one per line.")
+@click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip matching themes.")
+@click.option("--limit", type=click.IntRange(min=1), help="Show at most this many matching themes.")
+@click.option("--descending", is_flag=True, help="Reverse alphabetical order before pagination.")
+@pass_app
+def theme_list(
+    app: App,
+    search: str | None,
+    mode: str | None,
+    as_csv: bool,
+    count_only: bool,
+    names: bool,
+    offset: int,
+    limit: int | None,
+    descending: bool,
+) -> None:
+    """Browse the embedded theme catalog without changing the active theme."""
+    if sum((as_csv, count_only, names)) > 1:
+        raise click.UsageError("Choose one of --csv, --count or --names.")
+    if search is not None and not search.strip():
+        raise click.UsageError("--search cannot be blank.")
+    needle = (search or "").strip().casefold()
+    rows = [
+        {
+            "name": name,
+            "label": pretty_name(name),
+            "mode": "dark" if palette_from_colors(name, colors).dark else "light",
+        }
+        for name, colors in sorted(OMARCHY_PALETTES.items(), reverse=descending)
+        if needle in name.casefold() or needle in pretty_name(name).casefold()
+    ]
+    if mode:
+        rows = [row for row in rows if row["mode"] == mode]
+    if count_only:
+        click.echo(len(rows))
+        return
+    rows = rows[offset:] if limit is None else rows[offset : offset + limit]
+    if as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(stream, fieldnames=["name", "label", "mode"])
+        writer.writeheader()
+        writer.writerows(rows)
+        click.echo(stream.getvalue(), nl=False)
+    elif names:
+        if rows:
+            click.echo("\n".join(row["name"] for row in rows))
+    else:
+        table = render.table("Name", "Label", "Mode", title="Embedded themes")
+        for row in rows:
+            table.add_row(Text(row["name"]), Text(row["label"]), Text(row["mode"]))
+        app.console.print(table)
+
+
 @theme.command("set")
 @click.argument("name", nargs=-1, required=True)
 @pass_app
@@ -85,8 +143,9 @@ def config(ctx: click.Context, as_json: bool, as_csv: bool) -> None:
 @click.argument("key")
 @click.argument("value", nargs=-1, required=True)
 @click.option("--dry-run", is_flag=True, help="Validate and preview the setting without saving.")
+@click.option("--json", "as_json", is_flag=True, help="Print a normalized setting receipt; supports --dry-run.")
 @pass_app
-def config_set(app: App, key: str, value: tuple[str, ...], dry_run: bool) -> None:
+def config_set(app: App, key: str, value: tuple[str, ...], dry_run: bool, as_json: bool) -> None:
     known = {f.name: f for f in fields(Config)}
     if key not in known:
         fail(f"Unknown setting '{key}'. Known: {', '.join(known)}")
@@ -117,6 +176,12 @@ def config_set(app: App, key: str, value: tuple[str, ...], dry_run: bool) -> Non
         parsed = raw.upper()
     if error := _setting_error(key, parsed):
         fail(error)
+    if as_json:
+        if not dry_run:
+            setattr(app.config, key, parsed)
+            app.config.save()
+        click.echo(json.dumps({"key": key, "value": parsed, "saved": not dry_run}, ensure_ascii=False, allow_nan=False))
+        return
     if dry_run:
         app.ok(f"Would set {key} = {parsed!r} (not saved).")
         return
@@ -265,10 +330,26 @@ def config_diff(app: App, keys: tuple[str, ...], as_json: bool, as_csv: bool, ex
 @click.option("--json", "as_json", is_flag=True, help="Print setting names as a JSON array.")
 @click.option("--search", metavar="TEXT", help="Only names containing TEXT (case-insensitive).")
 @click.option("--changed", is_flag=True, help="Only settings whose effective value differs from the default.")
+@click.option(
+    "--type",
+    "value_type",
+    type=click.Choice(["bool", "int", "float", "str", "list"]),
+    help="Filter by the setting's declared value type.",
+)
+@click.option("--count", "count_only", is_flag=True, help="Print only the number of matching setting names.")
 @pass_app
-def config_keys(app: App, as_json: bool, search: str | None, changed: bool) -> None:
+def config_keys(
+    app: App, as_json: bool, search: str | None, changed: bool, value_type: str | None, count_only: bool
+) -> None:
     """List accepted setting names, one per line."""
-    names = [f.name for f in fields(Config)]
+    if as_json and count_only:
+        raise click.UsageError("Choose one of --json or --count.")
+    defaults_config = Config()
+    names = [
+        f.name
+        for f in fields(Config)
+        if value_type is None or type(getattr(defaults_config, f.name)).__name__ == value_type
+    ]
     if search is not None:
         if not search.strip():
             raise click.UsageError("--search cannot be blank.")
@@ -277,7 +358,9 @@ def config_keys(app: App, as_json: bool, search: str | None, changed: bool) -> N
     if changed:
         current, defaults = app.config.redacted(), Config().redacted()
         names = [name for name in names if current[name] != defaults[name]]
-    if as_json:
+    if count_only:
+        click.echo(len(names))
+    elif as_json:
         click.echo(json.dumps(names))
     elif names:
         click.echo("\n".join(names))
@@ -285,16 +368,24 @@ def config_keys(app: App, as_json: bool, search: str | None, changed: bool) -> N
 
 @config.command("reset")
 @click.argument("key")
+@click.option("--dry-run", is_flag=True, help="Preview the default without saving.")
+@click.option("--json", "as_json", is_flag=True, help="Print a reset receipt; supports --dry-run.")
 @pass_app
-def config_reset(app: App, key: str) -> None:
+def config_reset(app: App, key: str, dry_run: bool, as_json: bool) -> None:
     """Reset one non-secret setting to its factory default."""
     _known_key(key)
     if key == "quote_api_key":
         fail("Manage API keys with `marketpulse provider key` or `marketpulse provider clear`.")
     value = getattr(Config(), key)
     updated = replace(app.config, **{key: value})
-    updated.save()
-    app.ok(f"Reset {key} = {value!r}.")
+    if not dry_run:
+        updated.save()
+    if as_json:
+        click.echo(json.dumps({"key": key, "value": value, "saved": not dry_run}, ensure_ascii=False, allow_nan=False))
+    elif dry_run:
+        app.ok(f"Would reset {key} = {value!r} (not saved).")
+    else:
+        app.ok(f"Reset {key} = {value!r}.")
 
 
 @config.command("validate")

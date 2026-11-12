@@ -118,6 +118,26 @@ def _excluded_dates(ctx: click.Context, param: click.Parameter, values: tuple[st
 @click.option("--min-fees", type=float, callback=_finite_value, help="Minimum recorded fees, inclusive.")
 @click.option("--max-fees", type=float, callback=_finite_value, help="Maximum recorded fees, inclusive.")
 @click.option("--has-fees/--no-fees", default=None, help="Match entries with nonzero or zero recorded fees.")
+@click.option("--min-quantity", type=float, callback=_finite_value, help="Inclusive minimum recorded quantity.")
+@click.option("--max-quantity", type=float, callback=_finite_value, help="Inclusive maximum recorded quantity.")
+@click.option("--min-price", type=float, callback=_finite_value, help="Inclusive minimum recorded unit price.")
+@click.option("--max-price", type=float, callback=_finite_value, help="Inclusive maximum recorded unit price.")
+@click.option("--exclude-note", help="Exclude notes containing this text, ignoring case.")
+@click.option("--symbol-prefix", help="Match a symbol prefix, ignoring case.")
+@click.option("--account-search", help="Find text only in source account names, ignoring case.")
+@click.option("--id", "included_ids", multiple=True, type=click.IntRange(min=1), help="Include exact IDs; repeat.")
+@click.option("--exclude-id", "excluded_ids", multiple=True, type=click.IntRange(min=1), help="Exclude IDs; repeat.")
+@click.option("--has-target/--no-target", default=None, help="Match entries with or without a transfer destination.")
+@click.option("--weekend/--no-weekend", default=None, help="Match Saturday/Sunday entries or Monday–Friday entries.")
+@click.option("--has-price/--no-price", default=None, help="Match nonzero or zero recorded unit prices.")
+@click.option("--has-quantity/--no-quantity", default=None, help="Match nonzero or zero recorded quantities.")
+@click.option(
+    "--sort",
+    "sort_by",
+    type=click.Choice(["date", "amount", "fees"]),
+    default="date",
+    help="Order by date, recorded amount or fees, descending unless --oldest-first is set. Ties use date then ID.",
+)
 @pass_app
 def activity(
     app: App,
@@ -162,9 +182,28 @@ def activity(
     min_fees,
     max_fees,
     has_fees,
+    min_quantity,
+    max_quantity,
+    min_price,
+    max_price,
+    exclude_note,
+    symbol_prefix,
+    account_search,
+    included_ids,
+    excluded_ids,
+    has_target,
+    weekend,
+    has_price,
+    has_quantity,
+    sort_by,
 ) -> None:
     """The transaction ledger, newest first."""
-    for lower, upper, label in ((min_amount, max_amount, "amount"), (min_fees, max_fees, "fees")):
+    for lower, upper, label in (
+        (min_amount, max_amount, "amount"),
+        (min_fees, max_fees, "fees"),
+        (min_quantity, max_quantity, "quantity"),
+        (min_price, max_price, "price"),
+    ):
         if lower is not None and upper is not None and lower > upper:
             raise click.UsageError(f"--min-{label} must be at or below --max-{label}.")
     if since and until and since > until:
@@ -201,6 +240,19 @@ def activity(
         t
         for t in app.store.transactions(account_id=acct.id if acct else None, symbol=symbol)
         if _visible(t, accounts)
+        and (min_quantity is None or t.quantity >= min_quantity)
+        and (max_quantity is None or t.quantity <= max_quantity)
+        and (min_price is None or t.price >= min_price)
+        and (max_price is None or t.price <= max_price)
+        and (exclude_note is None or exclude_note.casefold() not in t.note.casefold())
+        and (symbol_prefix is None or t.symbol.startswith(symbol_prefix.strip().upper()))
+        and (account_search is None or account_search.casefold() in accounts[t.account_id].name.casefold())
+        and (not included_ids or t.saved_id in included_ids)
+        and t.saved_id not in excluded_ids
+        and (has_target is None or (t.target_account_id is not None) == has_target)
+        and (weekend is None or (date.fromisoformat(t.date).weekday() >= 5) == weekend)
+        and (has_price is None or (t.price != 0) == has_price)
+        and (has_quantity is None or (t.quantity != 0) == has_quantity)
         and (not included_symbols or t.symbol in included_symbols)
         and t.account_id not in excluded_account_ids
         and t.target_account_id not in excluded_account_ids
@@ -246,7 +298,10 @@ def activity(
         _activity_summary(app, txns, accounts, summary, as_json, as_csv, summary_sort)
         return
     total = len(txns)
-    txns.sort(key=lambda t: (t.date, t.id or 0), reverse=not oldest_first)
+    if sort_by == "date":
+        txns.sort(key=lambda t: (t.date, t.id or 0), reverse=not oldest_first)
+    else:
+        txns.sort(key=lambda t: (getattr(t, sort_by), t.date, t.id or 0), reverse=not oldest_first)
     txns = txns[offset:] if show_all else txns[offset : offset + limit]
     if as_csv:
         stream = io.StringIO(newline="")

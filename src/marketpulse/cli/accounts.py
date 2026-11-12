@@ -101,6 +101,26 @@ def accounts(ctx: click.Context) -> None:
     default="group",
     help="Sort summaries by group or descending count.",
 )
+@click.option(
+    "--has-positions/--no-positions",
+    default=None,
+    help="Match accounts with or without open ledger positions, offline.",
+)
+@click.option(
+    "--has-transactions/--no-transactions", default=None, help="Match accounts with or without ledger entries, offline."
+)
+@click.option(
+    "--min-transactions",
+    type=click.IntRange(min=0),
+    help="Minimum ledger-entry count, including incoming transfers, offline.",
+)
+@click.option(
+    "--max-transactions",
+    type=click.IntRange(min=0),
+    help="Maximum ledger-entry count, including incoming transfers, offline.",
+)
+@click.option("--name-prefix", help="Match account name prefixes, ignoring case, offline.")
+@click.option("--name-suffix", help="Match account name suffixes, ignoring case, offline.")
 @pass_app
 def accounts_list(
     app: App,
@@ -132,6 +152,12 @@ def accounts_list(
     max_id: int | None,
     summary: str | None,
     summary_sort: str,
+    has_positions: bool | None,
+    has_transactions: bool | None,
+    min_transactions: int | None,
+    max_transactions: int | None,
+    name_prefix: str | None,
+    name_suffix: str | None,
 ) -> None:
     """List accounts, optionally filtering or reading metadata offline."""
     if sum((as_json, as_csv, count_only)) > 1:
@@ -142,6 +168,8 @@ def accounts_list(
         raise click.UsageError("--min-id must be at or below --max-id.")
     if summary and (count_only or page_info):
         raise click.UsageError("--summary cannot be combined with --count or --page-info.")
+    if min_transactions is not None and max_transactions is not None and min_transactions > max_transactions:
+        raise click.UsageError("--min-transactions must be at or below --max-transactions.")
     if summary_sort != "group" and not summary:
         raise click.UsageError("--summary-sort requires --summary.")
     selection = (
@@ -156,6 +184,10 @@ def accounts_list(
         or institution_search is not None
         or any(len(values) > 1 for values in (acct_types, institutions, currencies))
     ) or any(value is not None for value in (registered, has_institution, min_id, max_id))
+    selection = selection or any(
+        value is not None
+        for value in (has_positions, has_transactions, min_transactions, max_transactions, name_prefix, name_suffix)
+    )
     offline = offline or as_csv or count_only or limit is not None or offset is not None or selection or bool(summary)
     items = app.store.accounts(include_archived=archived)
     included_ids = set()
@@ -187,6 +219,27 @@ def accounts_list(
         and (min_id is None or a.saved_id >= min_id)
         and (max_id is None or a.saved_id <= max_id)
     ]
+    if has_positions is not None:
+        positioned = {holding.account_id for holding in app.store.ledger().open_holdings()}
+        items = [a for a in items if (a.saved_id in positioned) == has_positions]
+    if any(value is not None for value in (has_transactions, min_transactions, max_transactions)):
+        counts: Counter[int] = Counter()
+        for txn in app.store.transactions():
+            # A transfer belongs to both accounts, once per account.
+            for account_id in {txn.account_id, txn.target_account_id} - {None}:
+                if account_id is not None:
+                    counts[account_id] += 1
+        items = [
+            a
+            for a in items
+            if (has_transactions is None or bool(counts[a.saved_id]) == has_transactions)
+            and (min_transactions is None or counts[a.saved_id] >= min_transactions)
+            and (max_transactions is None or counts[a.saved_id] <= max_transactions)
+        ]
+    if name_prefix is not None:
+        items = [a for a in items if a.name.casefold().startswith(name_prefix.casefold())]
+    if name_suffix is not None:
+        items = [a for a in items if a.name.casefold().endswith(name_suffix.casefold())]
     filtered = selection or bool(acct_types or institutions or currencies) or search is not None or cash is not None
     if acct_types:
         items = [a for a in items if a.type.value in acct_types]

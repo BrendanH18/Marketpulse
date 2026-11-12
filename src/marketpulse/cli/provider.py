@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import sys
 from dataclasses import asdict
@@ -23,24 +25,53 @@ def provider() -> None:
 
 @provider.command("status")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+@click.option("--csv", "as_csv", is_flag=True, help="Export provider status as CSV.")
+@click.option("--name", help="Match an exact provider name, ignoring case.")
+@click.option("--role", type=click.Choice(["primary", "fallback"]), help="Select provider role.")
+@click.option("--state", type=click.Choice(["ok", "failing", "untried"]), help="Select latest attempt state.")
+@click.option("--count", is_flag=True, help="Count matching providers.")
 @pass_app
-def provider_status(app: App, as_json: bool) -> None:
+def provider_status(
+    app: App, as_json: bool, as_csv: bool, name: str | None, role: str | None, state: str | None, count: bool
+) -> None:
     """Each provider's latest attempt, as the last refresh saw it."""
+    if sum((as_json, as_csv, count)) > 1:
+        raise click.UsageError("Choose one of --json, --csv or --count.")
     rows = app.tracker.market.provider_status()
+    if name:
+        rows = [r for r in rows if r.name.casefold() == name.casefold()]
+    if role:
+        rows = [r for r in rows if r.role == role]
+    if state:
+        rows = [r for r in rows if ("untried" if r.ok is None else "ok" if r.ok else "failing") == state]
+    if count:
+        click.echo(len(rows))
+        return
+    if as_csv:
+        from ..market import ProviderStatus
+
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(stream, fieldnames=list(ProviderStatus.__dataclass_fields__))
+        writer.writeheader()
+        writer.writerows(asdict(r) for r in rows)
+        click.echo(stream.getvalue(), nl=False)
+        return
     if as_json:
         click.echo(json.dumps([asdict(r) for r in rows], ensure_ascii=False))
         return
     for r in rows:
         if r.ok is None:
-            state = Text("not tried", style="muted")
+            state_text = Text("not tried", style="muted")
         else:
-            state = Text("ok", style="up") if r.ok else Text("failing", style="down")
-        line = Text(f"{r.label:<16}", style="accent") + Text(f"{r.role:<10}", style="muted") + state
+            state_text = Text("ok", style="up") if r.ok else Text("failing", style="down")
+        line = Text(f"{r.label:<16}", style="accent") + Text(f"{r.role:<10}", style="muted") + state_text
         if r.last_success:
             line.append(f"   last success {r.last_success}", style="muted")
         app.console.print(line)
         if r.ok is False and r.last_error:
             app.console.print(Text(f"  {r.last_error}", style="warn"))
+    if name or role or state:
+        return
     if app.config.quote_provider and app.tracker.market.fallback is None:
         app.warn(f"{provider_label(app.config.quote_provider)} has no key yet: `marketpulse provider key NAME`.")
     elif not app.config.quote_provider:

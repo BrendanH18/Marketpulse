@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- One hundred offline CLI workflow improvements ([#132](https://github.com/BrendanH18/Marketpulse/issues/132)):
+  ledger selection and exports, position/cash/account inspection, watchlist and
+  alert filters, theme discovery, configuration receipts and previews, a
+  searchable command catalog, and provider/doctor exports and filters. See the
+  [numbered inventory](docs/cli-next-hundred-improvements.md) for all 100.
+
 - One hundred recording, ledger, lookup, overview and terminal app improvements ([#130](https://github.com/BrendanH18/Marketpulse/issues/130)).
   See [One hundred improvements](docs/cli-hundred-improvements.md) for the numbered guides.
   - Recording commands gain `--dry-run`, `--json` receipts with the position and

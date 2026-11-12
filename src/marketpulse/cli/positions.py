@@ -6,6 +6,7 @@ import csv
 import io
 import json
 import math
+from collections import Counter
 from typing import Any
 
 import click
@@ -13,7 +14,7 @@ from rich.text import Text
 
 from .. import fmt, render
 from ..ledger import Holding
-from ..models import EPSILON, Account, AccountType
+from ..models import EPSILON, Account, AccountType, Asset, AssetClass, AssetKind
 from .base import App, date_callback, fail, pass_app
 from .root import main
 
@@ -89,6 +90,35 @@ def _emit_csv(fieldnames: list[str], rows: list[dict[str, Any]]) -> None:
 @click.option("--max-quantity", type=float, callback=_finite, help="Inclusive quantity maximum.")
 @click.option("--min-book", type=float, callback=_finite, help="Inclusive book-cost minimum, in recorded currency.")
 @click.option("--max-book", type=float, callback=_finite, help="Inclusive book-cost maximum, in recorded currency.")
+@click.option("--exclude-currency", "excluded_currencies", multiple=True, help="Exclude exact recorded currencies.")
+@click.option(
+    "--exclude-account", "excluded_accounts", multiple=True, help="Exclude active account IDs, names or types."
+)
+@click.option(
+    "--min-average-cost", type=float, callback=_finite, help="Inclusive average-cost minimum, in recorded currency."
+)
+@click.option(
+    "--max-average-cost", type=float, callback=_finite, help="Inclusive average-cost maximum, in recorded currency."
+)
+@click.option("--registered/--nonregistered", default=None, help="Match the account's registration status.")
+@click.option("--cash-tracked/--cash-untracked", default=None, help="Match the account's cash-tracking setting.")
+@click.option("--has-metadata/--no-metadata", default=None, help="Match symbols with or without saved asset metadata.")
+@click.option(
+    "--asset-kind",
+    type=click.Choice([kind.value for kind in AssetKind], case_sensitive=False),
+    help="Match saved asset kind; symbols without metadata are market assets.",
+)
+@click.option(
+    "--asset-class",
+    type=click.Choice([kind.value for kind in AssetClass], case_sensitive=False),
+    help="Match the explicitly saved asset class, without looking up quotes.",
+)
+@click.option("--symbol-prefix", help="Match a symbol prefix, ignoring case.")
+@click.option(
+    "--summary",
+    type=click.Choice(["account", "currency", "symbol"]),
+    help="Count matching positions by this field before pagination.",
+)
 @pass_app
 def positions(
     app: App,
@@ -114,6 +144,17 @@ def positions(
     max_quantity: float | None,
     min_book: float | None,
     max_book: float | None,
+    excluded_currencies: tuple[str, ...],
+    excluded_accounts: tuple[str, ...],
+    min_average_cost: float | None,
+    max_average_cost: float | None,
+    registered: bool | None,
+    cash_tracked: bool | None,
+    has_metadata: bool | None,
+    asset_kind: str | None,
+    asset_class: str | None,
+    symbol_prefix: str | None,
+    summary: str | None,
 ) -> None:
     """Open positions at cost from the ledger, offline (no quotes, no snapshot)."""
     _check_outputs(as_json, as_csv, count_only)
@@ -125,8 +166,13 @@ def positions(
         raise click.UsageError("--held-since must be on or before --held-until.")
     _bounds(min_quantity, max_quantity, "quantity")
     _bounds(min_book, max_book, "book")
+    _bounds(min_average_cost, max_average_cost, "average-cost")
+    _check_summary(summary, count_only, page_info)
     acct = _active_account(app, account)
     accounts = app.store.account_map()
+    excluded_ids = _excluded_account_ids(app, excluded_accounts)
+    excluded_ccys = {value.strip().upper() for value in excluded_currencies}
+    metadata = app.store.assets() if any(value is not None for value in (has_metadata, asset_kind, asset_class)) else {}
     held = [
         h
         for h in app.store.ledger().open_holdings(acct.saved_id if acct else None)
@@ -156,7 +202,22 @@ def positions(
         and (max_quantity is None or h.quantity <= max_quantity)
         and (min_book is None or h.book >= min_book)
         and (max_book is None or h.book <= max_book)
+        and h.currency.upper() not in excluded_ccys
+        and h.account_id not in excluded_ids
+        and (min_average_cost is None or h.avg_cost >= min_average_cost)
+        and (max_average_cost is None or h.avg_cost <= max_average_cost)
+        and (registered is None or accounts[h.account_id].type.registered == registered)
+        and (cash_tracked is None or accounts[h.account_id].track_cash == cash_tracked)
+        and (has_metadata is None or (h.symbol in metadata) == has_metadata)
+        and (asset_kind is None or metadata.get(h.symbol, Asset(h.symbol)).kind.value == asset_kind)
+        and (asset_class is None or metadata.get(h.symbol, Asset(h.symbol)).asset_class == asset_class)
+        and (symbol_prefix is None or h.symbol.casefold().startswith(symbol_prefix.strip().casefold()))
     ]
+
+    if summary:
+        values = [accounts[h.account_id].name if summary == "account" else str(getattr(h, summary)) for h in matches]
+        _count_summary(app, values, summary, "Positions", as_json, as_csv)
+        return
 
     def account_key(h: Holding) -> tuple[str, int, str]:
         return (accounts[h.account_id].name.casefold(), h.account_id, h.symbol)
@@ -257,6 +318,13 @@ def positions(
 )
 @click.option("--account-type", type=click.Choice([a.value for a in AccountType], case_sensitive=False))
 @click.option("--institution", help="Match account institution exactly, ignoring case.")
+@click.option("--zero", is_flag=True, help="Show only zero balances, ignoring ledger float residue.")
+@click.option("--registered/--nonregistered", default=None, help="Match the account's registration status.")
+@click.option(
+    "--summary",
+    type=click.Choice(["account", "currency", "account-type", "institution"]),
+    help="Count matching balances by this field before pagination.",
+)
 @pass_app
 def cash(
     app: App,
@@ -280,6 +348,9 @@ def cash(
     excluded_accounts: tuple[str, ...],
     account_type: str | None,
     institution: str | None,
+    zero: bool,
+    registered: bool | None,
+    summary: str | None,
 ) -> None:
     """Cash balances from the ledger for accounts that track cash, offline.
 
@@ -289,16 +360,12 @@ def cash(
         raise click.UsageError("--count cannot be combined with --limit, --offset or --page-info.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
-    if positive and negative:
-        raise click.UsageError("Choose either --positive or --negative.")
+    if sum((positive, negative, zero)) > 1 or (zero and nonzero):
+        raise click.UsageError("Choose one of --positive, --negative or --zero; --zero conflicts with --nonzero.")
+    _check_summary(summary, count_only, page_info)
     _bounds(min_balance, max_balance, "balance")
     acct = _active_account(app, account)
-    excluded_ids = set()
-    for ref in excluded_accounts:
-        excluded_account = _active_account(app, ref)
-        if excluded_account is None:
-            fail(f"No active account '{ref}'.")
-        excluded_ids.add(excluded_account.saved_id)
+    excluded_ids = _excluded_account_ids(app, excluded_accounts)
     excluded_ccys = {value.strip().upper() for value in excluded_currencies}
     accounts = app.store.account_map()
     wanted = currency.strip().upper() if currency is not None else None
@@ -327,11 +394,30 @@ def cash(
             continue
         if positive and balance <= 0:
             continue
+        if zero and balance != 0:
+            continue
+        if registered is not None and owner.type.registered != registered:
+            continue
         if min_balance is not None and balance < min_balance:
             continue
         if max_balance is not None and balance > max_balance:
             continue
         rows.append({"account_id": account_id, "account": owner.name, "currency": ccy, "balance": balance})
+
+    if summary:
+        values = []
+        for row in rows:
+            owner = accounts[row["account_id"]]
+            if summary == "account-type":
+                values.append(owner.type.value)
+            elif summary == "institution":
+                values.append(owner.institution.strip())
+            else:
+                values.append(str(row[summary]))
+        _count_summary(app, values, summary, "Balances", as_json, as_csv)
+        if negative and rows:
+            raise click.exceptions.Exit(1)
+        return
 
     def account_key(row: dict[str, Any]) -> tuple[str, int, str]:
         return (str(row["account"]).casefold(), row["account_id"], row["currency"])
@@ -364,6 +450,8 @@ def cash(
             or needle is not None
             or nonzero
             or positive
+            or zero
+            or registered is not None
             or min_balance is not None
             or max_balance is not None
             or excluded_currencies
@@ -388,3 +476,31 @@ def cash(
         app.console.print(table)
     if negative and total:
         raise click.exceptions.Exit(1)
+
+
+def _excluded_account_ids(app: App, refs: tuple[str, ...]) -> set[int]:
+    ids = set()
+    for ref in refs:
+        account = _active_account(app, ref)
+        if account is None:
+            fail(f"No active account '{ref}'.")
+        ids.add(account.saved_id)
+    return ids
+
+
+def _check_summary(summary: str | None, count_only: bool, page_info: bool) -> None:
+    if summary and (count_only or page_info):
+        raise click.UsageError("--summary cannot be combined with --count or --page-info.")
+
+
+def _count_summary(app: App, values: list[str], group: str, label: str, as_json: bool, as_csv: bool) -> None:
+    rows = [{"group": key, "count": count} for key, count in sorted(Counter(values).items())]
+    if as_json:
+        click.echo(json.dumps(rows, ensure_ascii=False))
+    elif as_csv:
+        _emit_csv(["group", "count"], rows)
+    else:
+        table = render.table(group.title(), (label, "right"), title="Matching " + label.lower())
+        for row in rows:
+            table.add_row(Text(str(row["group"]) or "(blank)"), Text(str(row["count"])))
+        app.console.print(table)
