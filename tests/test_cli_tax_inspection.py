@@ -250,6 +250,7 @@ def test_sort_and_descending(cli, ledger):
     assert [s for _, s in picked(cli, "--sort", "symbol")][:2] == ["AAPL", "HXT.TO"]
     # Archived accounts sort after the named ones, never by their name.
     assert picked(cli, "--sort", "account")[-1] == ("2025-05-01", "ZAG.TO")
+    assert picked(cli, "--sort", "account", "--descending")[-1] == ("2025-05-01", "ZAG.TO")
 
 
 # ── 8. --count / --limit / --offset / --page-info ─────────────────────────────
@@ -285,6 +286,8 @@ def test_summary_reuses_the_report_totals(cli, ledger, tracker):
     assert "selected dispositions" in human and "Totals cover only the selected" in human
     # The unpriced transfer into the TFSA can't be in the totals, so the summary says so.
     assert "1 issue(s) may leave sales out of these totals" in cli("tax", "--summary").output
+    assert "1 issue(s) may leave sales out of this report" in cli("tax", "--symbol", "SAP").output
+    assert "may leave sales out" not in cli("tax", "--summary", "-y", "1999").output
 
 
 # ── 10. --issues / --exit-code / --room ───────────────────────────────────────

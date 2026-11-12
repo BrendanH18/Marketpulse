@@ -27,7 +27,8 @@ $600 (30%) and Cash $400 (20%), with targets Equity 40, ETF 40 and Cash 20.
     validates the change and prints what would be saved, for example
     `Would save targets (85% allocated). Nothing saved (dry run).` followed by
     each class. Nothing is written and holdings aren't priced. It needs
-    `--target`, `--remove-target` or `--clear-targets`.
+    `--target`, `--remove-target` or `--clear-targets`. Every target, with or
+    without `--dry-run`, must be a number from 0 to 100.
 14. **JSON:** `marketpulse allocation --json` prints
     `{"by", "base", "total", "rows", "rebalance"}`. `rows` has `key`, `label`,
     `value` and `weight` per group; `rebalance` has `bucket`, `label`, `value`,
@@ -44,7 +45,8 @@ $600 (30%) and Cash $400 (20%), with targets Equity 40, ETF 40 and Cash 20.
     both tables.
 17. **Minimum weight:** `marketpulse allocation --min-weight 25` hides groups
     below 25% of the portfolio (Cash here). Weights stay shares of the whole
-    portfolio and `total` is unchanged. It filters the breakdown only.
+    portfolio and `total` is unchanged. It filters the breakdown only, and the
+    bar keeps a dim segment for the hidden groups so it stays to scale.
 18. **Drift only:** `marketpulse allocation --drift-only` prints only the
     rebalancing table. Without saved targets it says so (JSON `[]`).
 19. **Drift threshold and exit code:**

@@ -52,9 +52,9 @@ HOLDING_SORTS: dict[str, Callable[[PositionView], float | None]] = {
     "value": lambda p: p.value_base,
     "weight": lambda p: p.weight if p.priced else None,
     "gain": lambda p: p.gain_base,
-    "gain-pct": lambda p: p.gain_pct,
+    "gain-pct": lambda p: p.gain_pct if p.priced else None,
     "day": lambda p: p.day_change_base,
-    "day-pct": lambda p: p.day_change_pct,
+    "day-pct": lambda p: p.day_change_pct if p.priced else None,
 }
 EXCLUDED_REASONS = {
     "unpriced": "no price or FX rate",
@@ -391,6 +391,8 @@ def holdings(
         app.warn(f"Prices are {render.stale_note(view)}.")
     if view.excluded:
         app.warn("Some holdings have no price or FX rate; `marketpulse holdings --excluded` lists them.")
+    if view.archived_with_value:
+        app.warn(f"Archived {', '.join(view.archived_with_value)} still holds value, so snapshots are paused.")
     for reason in sorted(set(view.errors.values())):
         app.warn(reason)
 

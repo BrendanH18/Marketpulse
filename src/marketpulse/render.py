@@ -344,12 +344,22 @@ def summary(view: PortfolioView, perf: Performance | None = None, *, privacy: bo
 
 
 def allocation(
-    breakdown: Sequence[Breakdown], palette: Palette, *, width: int = 60, privacy: bool = False, base: str = ""
+    breakdown: Sequence[Breakdown],
+    palette: Palette,
+    *,
+    width: int = 60,
+    privacy: bool = False,
+    base: str = "",
+    hidden: float = 0.0,
 ) -> RenderableType:
+    """Allocation bar and legend; `hidden` is the value of groups left out, drawn as a dim segment."""
     if not breakdown:
         return Text("Nothing to allocate yet.", style="muted")
     colors = [palette.series[i % len(palette.series)] for i in range(len(breakdown))]
-    bar = charts.stacked_bar([(b.value, c) for b, c in zip(breakdown, colors, strict=True)], width)
+    segments = [(b.value, c) for b, c in zip(breakdown, colors, strict=True)]
+    if hidden > 0:
+        segments.append((hidden, "dim"))
+    bar = charts.stacked_bar(segments, width)
     legend = Table.grid(padding=(0, 2))
     for _ in range(3):
         legend.add_column()

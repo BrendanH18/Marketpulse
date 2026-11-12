@@ -66,7 +66,8 @@ the existing rules (only when nothing is stale or excluded).
 Filters, `--sort`, `--limit` and `--offset` select positions for display only.
 The human table then leaves out cash rows and the net worth summary rather than
 summing a subset, says how many of the portfolio's positions it shows, and warns
-when prices are stale or something is excluded. Weights stay a share of the whole
+when prices are stale, something is excluded, or an archived account that still
+holds value is pausing snapshots. Weights stay a share of the whole
 portfolio (or of the account with `-a`). Human output respects privacy mode; JSON,
 CSV, `--count` and `--metric` are raw. Conflicting output options are usage errors
 (exit 2).

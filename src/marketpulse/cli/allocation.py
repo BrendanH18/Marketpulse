@@ -70,9 +70,12 @@ def _planned_targets(
         if key not in valid:
             fail(f"Unknown asset class '{key}'. Choose from: {', '.join(sorted(valid))}")
         try:
-            parsed[key] = float(value)
+            weight = float(value)
         except ValueError:
             fail(f"Target for {key} must be a number.")
+        if not (math.isfinite(weight) and 0 <= weight <= 100):
+            fail(f"Target for {key} must be between 0 and 100.")
+        parsed[key] = weight
     for item in removals:
         key = _class_key(item)
         if key not in valid:
@@ -295,7 +298,13 @@ def allocation(
             else:
                 app.console.print(
                     render.allocation(
-                        rows, app.palette, width=min(app.console.width - 4, 80), privacy=app.privacy, base=view.base
+                        rows,
+                        app.palette,
+                        width=min(app.console.width - 4, 80),
+                        privacy=app.privacy,
+                        base=view.base,
+                        # Groups hidden by --min-weight keep their share of the bar, so it stays to scale.
+                        hidden=sum(b.value for b in breakdown) - sum(b.value for b in rows),
                     )
                 )
         if drift:

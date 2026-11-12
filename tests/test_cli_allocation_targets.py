@@ -134,6 +134,14 @@ def test_existing_target_options_behave_as_before(cli, store):
     assert store.targets() == {}
 
 
+@pytest.mark.parametrize("value", ["-20", "120", "nan", "inf"])
+def test_targets_outside_0_to_100_are_rejected_before_preview_or_save(cli, store, value):
+    for extra in ([], ["--dry-run"]):
+        result = cli("allocation", "-q", "--target", f"etf={value}", *extra)
+        assert result.exit_code == 1 and "between 0 and 100" in result.output, result.output
+    assert store.targets() == {}
+
+
 # 11. --show-targets reads saved targets without pricing
 
 
@@ -283,6 +291,17 @@ def test_min_weight_hides_small_rows_but_keeps_shares_of_the_whole(targeted):
     assert "No class weighs 90% or more." in targeted("allocation", "--min-weight", "90").output
     assert targeted("allocation", "--min-weight", "101").exit_code == 2
     assert targeted("allocation", "--min-weight", "nan").exit_code == 2
+
+
+def test_hidden_groups_keep_their_share_of_the_bar():
+    from marketpulse.themes import resolve_palette
+    from marketpulse.valuation import Breakdown
+
+    shown = [Breakdown("equity", "Equity", 1000.0, 50.0), Breakdown("etf", "ETF", 600.0, 30.0)]
+    bar = render.allocation(shown, resolve_palette("auto"), width=20, hidden=400.0).renderables[0]
+    # 50% / 30% / 20% of 20 cells, not 62.5% / 37.5% of the shown subtotal.
+    assert [span.end - span.start for span in bar.spans] == [10, 6, 4]
+    assert bar.spans[-1].style == "dim"
 
 
 # 18. --drift-only

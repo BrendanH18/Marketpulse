@@ -152,6 +152,18 @@ def test_gainers_and_losers_leave_out_positions_missing_fx(priced, store, fake):
     store.add_transaction(Transaction(income.saved_id, TxnType.BUY, "2024-02-01", "EURO.DE", 5, 10, 0, currency="EUR"))
     assert "EURO.DE" in symbols(priced)
     assert "EURO.DE" not in symbols(priced, "--gainers") + symbols(priced, "--losers")
+    for metric in ("gain-pct", "day-pct"):
+        assert symbols(priced, "--sort", metric)[-1] == "EURO.DE"
+        assert symbols(priced, "--sort", metric, "--descending")[-1] == "EURO.DE"
+
+
+def test_selection_warns_when_an_archived_account_pauses_snapshots(priced, store):
+    old = store.add_account(Account(name="Fictional Old", archived=True))
+    store.add_transaction(Transaction(old.saved_id, TxnType.BUY, "2024-02-01", "XEQT.TO", 1, 30, 0, currency="CAD"))
+    assert (
+        "Archived Fictional Old still holds value, so snapshots are paused."
+        in priced("holdings", "--sort", "symbol").output
+    )
 
 
 @pytest.mark.parametrize("ref", ["Fictional Hidden", "3"])

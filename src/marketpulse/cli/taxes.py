@@ -62,7 +62,11 @@ def _sort(rows: list[_Row], sort_by: str, descending: bool, accounts: dict[int, 
         "denied": _amount_key(lambda d: d.denied),
     }
     key = keys[sort_by]
-    if sort_by in ("date", "symbol", "account"):
+    if sort_by == "account":  # archived accounts stay last in either direction
+        hidden = [r for r in rows if account_key(r)[0]]
+        shown = [r for r in rows if not account_key(r)[0]]
+        return sorted(shown, key=key, reverse=descending) + sorted(hidden, key=key, reverse=descending)
+    if sort_by in ("date", "symbol"):
         return sorted(rows, key=key, reverse=descending)
     known = sorted((r for r in rows if r.d.complete), key=key, reverse=descending)
     return known + [r for r in rows if not r.d.complete]
@@ -179,7 +183,7 @@ def _check_options(
 @click.option("--offset", type=click.IntRange(min=0), help="Skip N matching dispositions after sorting.")
 @click.option("--page-info", is_flag=True, help="Wrap --json rows with total, offset and limit.")
 @click.option("--summary", is_flag=True, help="Per-year totals of the matching dispositions.")
-@click.option("--issues", is_flag=True, help="Only the ledger issues that can leave sales out of the report.")
+@click.option("--issues", is_flag=True, help="Only the tax report's own issues (as plain `tax` shows them).")
 @click.option("--exit-code", is_flag=True, help="With --issues, exit 1 when there are any.")
 @click.option("--room", is_flag=True, help="Only the contribution room table (no FX history is fetched).")
 @pass_app
@@ -285,7 +289,7 @@ def tax(
     if summary:
         _show_summary(app, _summary(years, rows), as_json, filtered, tr.base)
         if not as_json:
-            _warn_issues(app, [{"date": i.date, "message": i.message} for i in report.issues], "these totals")
+            _warn_issues(app, _issue_dicts(report.issues, year), "these totals")
         return
     rows = _sort(rows, (sort_by or "date").lower(), descending, accounts)
     if count_only:
@@ -315,6 +319,11 @@ def tax(
         _warn_issues(app, [{"date": i.date, "message": i.message} for i in report.issues])
     else:
         _show_rows(app, rows, accounts, tr.base, total=total, start=start, paged=paged, any_rows=bool(every))
+        _warn_issues(app, _issue_dicts(report.issues, year), "this report")
+
+
+def _issue_dicts(found: list[LedgerIssue], year: int | None) -> list[dict]:
+    return [{"date": i.date, "message": i.message} for i in found if year is None or i.date[:4] == str(year)]
 
 
 def _warn_issues(app: App, issues: list[dict], what: str = "this file") -> None:
