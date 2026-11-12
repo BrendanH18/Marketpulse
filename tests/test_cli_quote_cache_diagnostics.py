@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import os
 import shutil
 import time
 
@@ -310,4 +311,5 @@ def test_filtered_out_cache_still_warns_about_missing_symbols(cache):
 def test_new_csv_outputs_use_newline_endings(cli, store):
     store.backup(reason="manual")
     for args in (("backup", "list", "--csv"), ("config", "--csv")):
-        assert "\r" not in cli(*args).stdout_bytes.decode()
+        # Windows text-mode stdout writes "\n" as os.linesep; the csv default "\r\n" would add a stray "\r".
+        assert "\r" not in cli(*args).stdout_bytes.decode().replace(os.linesep, "\n")
