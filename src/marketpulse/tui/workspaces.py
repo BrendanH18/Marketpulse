@@ -14,6 +14,7 @@ from .. import fmt, render
 from ..analytics import income_by_month, income_by_symbol
 from ..models import AssetKind
 from ..valuation import PositionView
+from . import navigation
 from .constants import HOLDING_COLUMNS, NW_RANGES
 from .widgets import Canvas, Tile, TopBar, money_tile, tile_content
 
@@ -220,8 +221,13 @@ def render_holdings(app: MarketPulseApp) -> None:
     selected = app._selected_key(table)
     table.clear()
     positions = [p for p in v.positions if app.account_filter is None or p.account.id == app.account_filter]
+    in_scope = len(positions)
+    needle = navigation.holdings_needle(app)
+    positions = [
+        x for x in positions if navigation.holdings_match(needle, x.symbol, x.name, x.account.name, x.asset_class.label)
+    ]
     p = app.palette
-    for pos in sorted(positions, key=lambda x: (x.account.name, -(x.value_base or 0))):
+    for pos in navigation.sort_positions(app, positions):
         cells = render.position_cells(pos, v.base, privacy=app.privacy)
         direction = app.flash.get(pos.symbol)
         if direction and pos.price is not None:
@@ -230,6 +236,8 @@ def render_holdings(app: MarketPulseApp) -> None:
         table.add_row(*row, key=f"{pos.account.id}:{pos.symbol}")
     for c in v.cash:
         if app.account_filter is not None and c.account.id != app.account_filter:
+            continue
+        if not navigation.holdings_match(needle, "cash", c.currency, c.account.name):
             continue
         cash_value = fmt.money(c.amount, privacy=app.privacy) + (f" {c.currency}" if c.currency != v.base else "")
         cells = [
@@ -250,13 +258,21 @@ def render_holdings(app: MarketPulseApp) -> None:
         acct = app.tracker.store.get_account(app.account_filter)
         scope = acct.name if acct else scope
     total = sum(x.value_base or 0 for x in positions)
-    if table.row_count == 0:
+    if table.row_count == 0 and needle:
+        subtitle = f"f ▸ {scope} · no match"
+    elif table.row_count == 0:
         subtitle = "No holdings yet — b to buy" if app.account_filter is None else f"f ▸ {scope} · nothing held"
     else:
         money = fmt.money(total, v.base, privacy=app.privacy, decimals=0)
-        subtitle = f"f ▸ {scope} · {len(positions)} positions · {money}"
+        count = f"{len(positions)} of {in_scope}" if needle else str(len(positions))
+        subtitle = f"f ▸ {scope} · {count} positions · {money}"
         if v.excluded:
             subtitle += f" · ⚠ {len(v.excluded)} excluded"
+    if needle:
+        subtitle += f" · F ▸ “{needle}”"
+    order = navigation.sort_label(app, "holdings")
+    if order:
+        subtitle += f" · {order}"
     app.query_one("#pane-holdings").border_subtitle = subtitle
     if app._detail_key is None and positions:
         first = app._selected_key(table)
@@ -294,7 +310,7 @@ def render_activity(app: MarketPulseApp) -> None:
     store = app.tracker.store
     accounts = store.account_map()
     needle = app.query_one("#activity-filter", Input).value.strip().lower()
-    txns = sorted(store.transactions(), key=lambda t: (t.date, t.id or 0), reverse=True)
+    txns = navigation.sort_transactions(app, store.transactions(), accounts)
     shown = 0
     for t in txns:
         cells = render.activity_cells(t, accounts, privacy=app.privacy)
@@ -307,6 +323,9 @@ def render_activity(app: MarketPulseApp) -> None:
     subtitle = f"{shown} of {len(txns)} transactions" if txns else "No transactions — n to add one"
     if issues:
         subtitle += f" · ⚠ {len(issues)} ledger issue(s)"
+    order = navigation.sort_label(app, "activity")
+    if order:
+        subtitle += f" · {order}"
     app.query_one("#pane-activity").border_subtitle = subtitle
 
 
@@ -316,7 +335,15 @@ def render_accounts(app: MarketPulseApp) -> None:
     table.clear()
     values = {b.key: b for b in app.view.by_account} if app.view else {}
     base = app.tracker.base
-    for a in app.tracker.store.accounts(include_archived=True):
+    every = app.tracker.store.accounts(include_archived=True)
+    archived = sum(a.archived for a in every)
+    active = len(every) - archived
+    app.query_one("#pane-accts").border_subtitle = (
+        f"{active} account{'' if active == 1 else 's'}" + (f" · {archived} archived" if archived else "")
+        if every
+        else "No accounts — n to add one"
+    )
+    for a in every:
         b = values.get(str(a.id))
         # Currency and cash tracking live in the edit form (e) to keep this pane narrow
         cells = [

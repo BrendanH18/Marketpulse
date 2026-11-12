@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING
 
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 
+from ..market import PERIODS
 from ..themes import pretty_name, theme_names
+from . import navigation
+from .constants import ALLOC_MODES, NW_RANGES
 from .widgets import WORKSPACES
 
 if TYPE_CHECKING:
@@ -28,7 +31,78 @@ class PortfolioCommands(Provider):
             (f"Theme: {pretty_name(n)}", "Omarchy theme", partial(setattr, app, "theme", n)) for n in theme_names()
         ]
         entries += [(f"Chart {s}", "Open chart", partial(app.open_chart, s)) for s in app.known_symbols()]
+        entries += self._view_actions(app)
+        entries += self._selection_actions(app)
+        entries += self._productivity_actions(app)
         return entries
+
+    @staticmethod
+    def _view_actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:
+        """View actions that used to have only a key, plus direct jumps the keys can only cycle through."""
+        entries: list[tuple[str, str, object]] = [
+            ("Cycle allocation grouping", f"g · {' / '.join(ALLOC_MODES)}", app.action_cycle_alloc),
+            ("Cycle account filter", "f · holdings by account", app.action_filter_account),
+            ("Next theme", "t · cycle Omarchy themes", app.action_next_theme),
+            (
+                "Holdings: all accounts",
+                "Clear the account filter",
+                partial(navigation.filter_holdings_account, app, None),
+            ),
+        ]
+        entries += [
+            (f"Net worth range: {r}", ", / . on the dashboard", partial(navigation.set_nw_range, app, r))
+            for r in NW_RANGES
+        ]
+        entries += [
+            (
+                f"Holdings: {a.name}",
+                "Filter holdings to this account",
+                partial(navigation.filter_holdings_account, app, a.id),
+            )
+            for a in app.tracker.store.accounts()
+        ]
+        return entries
+
+    @staticmethod
+    def _selection_actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:
+        """Actions on the selected row or chart that used to have only a key."""
+        entries: list[tuple[str, str, object]] = [
+            ("Edit selected", "e · transaction or account", app.action_edit),
+            ("Delete selected", "x · transaction, watch, alert or account", app.action_delete),
+            ("Pause or resume selected alert", "space · alerts workspace", app.action_toggle_alert),
+            ("Compare chart with…", "c · overlay symbols as % change", app.action_compare),
+            ("Clear chart comparisons", "C", app.action_clear_compare),
+            ("Move watch symbol up", "K · watchlist", partial(app.action_move_watch, -1)),
+            ("Move watch symbol down", "J · watchlist", partial(app.action_move_watch, 1)),
+            ("Quit", "q", app.exit),
+        ]
+        entries += [
+            (f"Chart period: {per}", "[ / ] on the chart", partial(navigation.set_chart_period, app, per))
+            for per in PERIODS
+        ]
+        return entries
+
+    @staticmethod
+    def _productivity_actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:
+        """Keyboard navigation and productivity actions added under #130, each with its key."""
+        return [
+            ("Previous workspace", "backspace", app.action_previous_workspace),
+            ("Next workspace", "}", partial(app.action_cycle_workspace, 1)),
+            ("Workspace to the left", "{", partial(app.action_cycle_workspace, -1)),
+            ("First row", "<", partial(app.action_row_edge, False)),
+            ("Last row", ">", partial(app.action_row_edge, True)),
+            ("Filter holdings", "F · as you type", app.action_filter_holdings),
+            ("Clear filter", "escape · holdings or activity", app.action_clear_filter),
+            ("Sort by next column", "o · holdings or activity", app.action_sort),
+            ("Reverse sort", "O · holdings or activity", app.action_sort_reverse),
+            ("Copy selected symbol", "y · to the clipboard", app.action_copy_symbol),
+            ("Copy selected row", "Y · tab-separated", app.action_copy_row),
+            ("Chart selected symbol", "v", app.action_chart_selected),
+            ("Show selected symbol's transactions", "T · activity filtered", app.action_symbol_activity),
+            ("Record any transaction type…", "N · picker", app.action_pick_txn),
+            ("Toggle zoom", "z · hide side panes", app.action_zoom),
+            ("Workspace keys", "F1", app.action_workspace_keys),
+        ]
 
     @staticmethod
     def _actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:

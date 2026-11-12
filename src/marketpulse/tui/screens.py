@@ -775,6 +775,24 @@ HELP = [
             (", .", "net worth range"),
         ],
     ),
+    (
+        "Navigation and productivity",
+        [
+            ("backspace", "previous workspace"),
+            ("{ / }", "previous / next workspace"),
+            ("j / k", "next / previous table row"),
+            ("< / >", "first / last table row"),
+            ("F", "filter holdings as you type"),
+            ("escape", "clear a holdings or activity filter"),
+            ("o / O", "sort holdings or activity / reverse"),
+            ("y / Y", "copy selected symbol / row"),
+            ("v", "chart the selected symbol"),
+            ("T", "show the selected symbol's transactions"),
+            ("N", "record any transaction type"),
+            ("z", "zoom: hide side panes"),
+            ("F1", "keys for this workspace"),
+        ],
+    ),
 ]
 
 
@@ -795,4 +813,66 @@ class HelpScreen(ModalScreen[None]):
             yield VerticalScroll(Static(body))
 
     def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class WorkspaceKeysScreen(ModalScreen[None]):
+    """F1: the keys that work in the current workspace, then the ones that work everywhere."""
+
+    BINDINGS = [Binding("escape,q,f1", "close", "Close")]
+
+    def __init__(self, title: str, sections: list[tuple[str, list[tuple[str, str]]]]):
+        super().__init__()
+        self.title_text, self.sections = title, sections
+
+    def compose(self) -> ComposeResult:
+        body = Text()
+        for section, keys in self.sections:
+            if not keys:
+                continue
+            body.append(f"{section}\n", style="title")
+            for key, desc in keys:
+                body.append(f"  {key:<18}", style="accent")
+                body.append(f"{desc}\n")
+            body.append("\n")
+        body.append("? lists every key · ctrl+p runs any command by name", style="muted")
+        with Vertical(classes="modal"):
+            yield Label(self.title_text, classes="modal-title")
+            yield VerticalScroll(Static(body, id="ws-keys"))
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class TxnTypeScreen(ModalScreen[str | None]):
+    """N: pick any transaction type, including the ones without their own key."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, choices: list[tuple[str, str, str]]):
+        super().__init__()
+        self.choices = choices
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal narrow"):
+            yield Label("Record a transaction", classes="modal-title")
+            yield OptionList(
+                *(
+                    Option(Text.assemble((f"{label:<20}", "bold"), (help_text, "dim")), id=value)
+                    for value, label, help_text in self.choices
+                ),
+                id="txn-types",
+            )
+            yield Label("↑↓ choose · enter open · esc close", classes="hint")
+
+    def on_mount(self) -> None:
+        options = self.query_one("#txn-types", OptionList)
+        options.highlighted = 0
+        options.focus()
+
+    @on(OptionList.OptionSelected, "#txn-types")
+    def _picked(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id)
+
+    def action_cancel(self) -> None:
         self.dismiss(None)
