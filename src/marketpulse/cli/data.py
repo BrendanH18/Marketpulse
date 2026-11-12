@@ -12,33 +12,110 @@ from collections import Counter
 from dataclasses import asdict
 from datetime import date, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TextIO
 
 import click
 from rich.text import Text
 
 from .. import render
 from ..brokers import PROFILE_NAMES
-from ..models import Account
+from ..models import Account, Transaction, TxnType
 from .base import App, date_callback, fail, pass_app
 from .root import main
 
 if TYPE_CHECKING:
-    from ..csvio import RowIssue
-    from ..db import Store
+    from collections.abc import Callable
+
+    from ..csvio import ImportResult, RowIssue
+    from ..db import Snapshot, Store
+    from ..services import Tracker
 
 
 @main.command()
+@click.option(
+    "--dry-run", is_flag=True, help="Rebuild on a temporary copy of the ledger and report; write no snapshots."
+)
+@click.option(
+    "--json", "as_json", is_flag=True, help="Report the snapshots written (or, with --dry-run, that would be) as JSON."
+)
 @pass_app
-def backfill(app: App) -> None:
+def backfill(app: App, dry_run: bool, as_json: bool) -> None:
     """Rebuild daily net-worth history from your ledger and historical prices."""
     tr = app.tracker
+    if not (dry_run or as_json):
+        try:
+            with app.busy("Backfilling…") as spinner:
+                n = tr.backfill(progress=lambda msg: spinner.update(Text(f"Backfilling · {msg}", style="accent")))
+        except ValueError as e:
+            fail(str(e))
+        app.ok(f"Rebuilt {n:,} daily snapshots.")
+        return
+    existing = {s.date for s in tr.store.snapshots()}
     try:
-        with app.busy("Backfilling…") as spinner:
-            n = tr.backfill(progress=lambda msg: spinner.update(Text(f"Backfilling · {msg}", style="accent")))
+        if as_json:
+            written = _backfill_written(tr, dry_run, None)
+        else:
+            with app.busy("Backfilling…") as spinner:
+                written = _backfill_written(
+                    tr, dry_run, lambda msg: spinner.update(Text(f"Backfilling · {msg}", style="accent"))
+                )
     except ValueError as e:
         fail(str(e))
-    app.ok(f"Rebuilt {n:,} daily snapshots.")
+    new = sum(1 for s in written if s.date not in existing)
+    report = {
+        "dry_run": dry_run,
+        "snapshots": len(written),
+        "new": new,
+        "replaced": len(written) - new,
+        "first": written[0].date if written else None,
+        "last": written[-1].date if written else None,
+        "currency": tr.base,
+    }
+    if as_json:
+        click.echo(json.dumps(report, ensure_ascii=False))
+        return
+    span = f" ({report['first']} to {report['last']})" if written else ""
+    app.ok(
+        f"Would rebuild {len(written):,} daily snapshots{span}: {new:,} new, {len(written) - new:,} replacing "
+        "existing ones. Nothing was written."
+    )
+
+
+def _backfill_written(tr: Tracker, dry_run: bool, progress: Callable[[str], None] | None) -> list[Snapshot]:
+    """Run the real backfill and return exactly the snapshots it writes, in date order.
+
+    A dry run rebuilds against a throwaway copy of the ledger (as an import preview does) and
+    keeps its snapshots out of even that copy; prices and FX come from the same market data."""
+    from tempfile import TemporaryDirectory
+
+    from ..db import Store
+    from ..services import Tracker
+
+    def run(target: Tracker, write: bool) -> list[Snapshot]:
+        written: list[Snapshot] = []
+        store = target.store
+        save = store.upsert_snapshots
+
+        def capture(snaps: list[Snapshot]) -> None:
+            written.extend(snaps)
+            if write:
+                save(snaps)
+
+        store.upsert_snapshots = capture  # type: ignore[method-assign]
+        try:
+            target.backfill(progress=progress)
+        finally:
+            del store.upsert_snapshots
+        return sorted(written, key=lambda s: s.date)
+
+    if not dry_run:
+        return run(tr, write=True)
+    with TemporaryDirectory(prefix="marketpulse-backfill-") as tmp:
+        scratch = Store(tr.store.backup(dest=Path(tmp) / "preview.db"))
+        try:
+            return run(Tracker(scratch, tr.market, tr.config), write=False)
+        finally:
+            scratch.close()
 
 
 def _import_default(
@@ -66,6 +143,9 @@ def _import_line(issue: RowIssue) -> str:
     return f"{where}: {issue.reason}"
 
 
+IMPORT_SUMMARIES = ["account", "type", "symbol", "month"]
+
+
 @main.command("import")
 @click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("-a", "--account", default=None, help="Account for rows without an account column.")
@@ -81,8 +161,24 @@ def _import_line(issue: RowIssue) -> str:
 @click.option(
     "--json", "as_json", is_flag=True, help="Full import report as JSON (unmasked, including all row issues)."
 )
+@click.option(
+    "--summary",
+    type=click.Choice(IMPORT_SUMMARIES),
+    help="Count the rows imported (or, with --dry-run, that would be) by this field.",
+)
+@click.option("--exit-code", is_flag=True, help="Exit 1 if any row was skipped (after reporting as usual).")
 @pass_app
-def import_cmd(app: App, path: Path, account, profile, dry_run, no_create_accounts, as_json: bool) -> None:
+def import_cmd(
+    app: App,
+    path: Path,
+    account,
+    profile,
+    dry_run,
+    no_create_accounts,
+    as_json: bool,
+    summary: str | None,
+    exit_code: bool,
+) -> None:
     """Import transactions from a broker or MarketPulse CSV.
 
     \b
@@ -93,23 +189,33 @@ def import_cmd(app: App, path: Path, account, profile, dry_run, no_create_accoun
     """
     from ..csvio import import_transactions
 
+    added: list[Transaction] = []
+    names: dict[int, Account] = {}
     try:
         default = _import_default(app, account, path, profile, create_default=not (dry_run or as_json))
-        result = import_transactions(
-            app.store,
-            path,
-            default_account=default,
-            create_accounts=not no_create_accounts,
-            dry_run=dry_run,
-            profile=profile,
-        )
+        if summary:
+            result, added, names = _import_rows(app.store, path, default, not no_create_accounts, dry_run, profile)
+        else:
+            result = import_transactions(
+                app.store,
+                path,
+                default_account=default,
+                create_accounts=not no_create_accounts,
+                dry_run=dry_run,
+                profile=profile,
+            )
     except (OSError, UnicodeError, ValueError) as e:
         fail(str(e))
+    groups = _import_summary(added, names, summary) if summary else []
     if as_json:
         payload = asdict(result)
         payload["backup"] = str(result.backup) if result.backup is not None else None
         payload["dry_run"] = dry_run
+        if summary:
+            payload["summary"] = groups
         click.echo(json.dumps(payload, ensure_ascii=False))
+        if exit_code and result.issues:
+            raise click.exceptions.Exit(1)
         return
     verb = "Would import" if dry_run else "Imported"
     app.ok(f"{verb} {result.added} transaction(s); {result.duplicates} duplicate(s) skipped. ({result.profile_label})")
@@ -126,21 +232,207 @@ def import_cmd(app: App, path: Path, account, profile, dry_run, no_create_accoun
         app.warn(_import_line(issue))
     if len(result.issues) > 15:
         app.warn(f"…and {len(result.issues) - 15} more skipped rows")
+    if summary:
+        title = "Would import" if dry_run else "Imported"
+        table = render.table(summary.title(), ("Rows", "right"), title=title)
+        for group in groups:
+            table.add_row(Text(str(group["group"]) or "(no symbol)"), Text(str(group["count"])))
+        app.console.print(table)
+    if exit_code and result.issues:
+        raise click.exceptions.Exit(1)
+
+
+def _import_rows(
+    store: Store, path: Path, default: Account | None, create_accounts: bool, dry_run: bool, profile: str
+) -> tuple[ImportResult, list[Transaction], dict[int, Account]]:
+    """Import (or preview) and return the result, the rows it added and the accounts naming them.
+
+    A preview is still the real import against a throwaway copy of the ledger, exactly as
+    `import_transactions(dry_run=True)` runs it; the copy just stays open long enough to read
+    back the rows the import added."""
+    from tempfile import TemporaryDirectory
+
+    from ..csvio import import_transactions
+    from ..db import Store
+
+    def run(target: Store) -> tuple[ImportResult, list[Transaction], dict[int, Account]]:
+        before = {t.id for t in target.transactions()}
+        result = import_transactions(
+            target, path, default_account=default, create_accounts=create_accounts, profile=profile
+        )
+        return result, [t for t in target.transactions() if t.id not in before], target.account_map()
+
+    if not dry_run:
+        return run(store)
+    with TemporaryDirectory(prefix="marketpulse-preview-") as tmp:
+        scratch = Store(store.backup(dest=Path(tmp) / "preview.db"))
+        try:
+            result, added, accounts = run(scratch)
+        finally:
+            scratch.close()
+    result.backup = None  # the copy's own pre-import backup, deleted with it
+    return result, added, accounts
+
+
+def _import_summary(added: list[Transaction], accounts: dict[int, Account], field: str) -> list[dict]:
+    def key(t: Transaction) -> str:
+        if field == "account":
+            return accounts[t.account_id].name if t.account_id in accounts else str(t.account_id)
+        if field == "type":
+            return t.type.value
+        if field == "month":
+            return t.date[:7]
+        return t.symbol
+
+    return [{"group": group, "count": count} for group, count in sorted(Counter(key(t) for t in added).items())]
+
+
+EXPORT_TYPES = [t.value for t in TxnType]
 
 
 @main.command("export")
 @click.argument("path", type=click.Path(dir_okay=False, path_type=Path), required=False)
+@click.option(
+    "-a",
+    "--account",
+    "account_refs",
+    multiple=True,
+    help="Only rows recorded in this account (name, id or type; archived ones too); repeat for several.",
+)
+@click.option("-s", "--symbol", "symbols", multiple=True, help="Only this exact symbol, ignoring case; repeat.")
+@click.option(
+    "--type",
+    "types",
+    multiple=True,
+    type=click.Choice(EXPORT_TYPES, case_sensitive=False),
+    help="Only this transaction type; repeat for several.",
+)
+@click.option("--since", callback=date_callback, help="Only rows dated on or after this date.")
+@click.option("--until", callback=date_callback, help="Only rows dated on or before this date.")
+@click.option("--columns", help="Comma-separated columns to write, in this order (default: all, for re-import).")
+@click.option("--count", "count_only", is_flag=True, help="Print the number of matching rows instead of exporting.")
+@click.option("--jsonl", is_flag=True, help="Write one JSON object per row (JSON Lines) instead of CSV.")
 @pass_app
-def export_cmd(app: App, path: Path | None) -> None:
-    """Export the ledger as CSV (stdout if no PATH)."""
+def export_cmd(
+    app: App,
+    path: Path | None,
+    account_refs: tuple[str, ...],
+    symbols: tuple[str, ...],
+    types: tuple[str, ...],
+    since: str | None,
+    until: str | None,
+    columns: str | None,
+    count_only: bool,
+    jsonl: bool,
+) -> None:
+    """Export the ledger as CSV (stdout if no PATH).
+
+    Filters keep rows of the full export, in its order, so a filtered CSV re-imports like any
+    other MarketPulse CSV (a file without some columns may not)."""
     from ..csvio import export_transactions
 
+    if not (account_refs or symbols or types or since or until or columns is not None or count_only or jsonl):
+        if path is None:
+            export_transactions(app.store, sys.stdout)
+            return
+        with path.open("w", newline="", encoding="utf-8") as f:
+            n = export_transactions(app.store, f)
+        app.ok(f"Exported {n} transactions to {path}")
+        return
+    if since and until and since > until:
+        raise click.UsageError("--since must be on or before --until.")
+    if count_only and (path is not None or jsonl or columns is not None):
+        raise click.UsageError("--count prints a number; it takes no PATH, --jsonl or --columns.")
+    wanted = {value.strip().upper() for value in symbols}
+    if "" in wanted:
+        raise click.UsageError("--symbol cannot be blank.")
+    chosen = _export_columns(columns)
+    store = app.store
+    account_ids = set()
+    for ref in account_refs:
+        acct = store.get_account(ref)
+        if acct is None:
+            fail(f"No account '{ref}'.")
+        account_ids.add(acct.saved_id)
+    accounts = store.account_map()
+    txns = [
+        t
+        for t in store.transactions()
+        if (not account_ids or t.account_id in account_ids)
+        and (not wanted or t.symbol in wanted)
+        and (not types or t.type.value in types)
+        and (not since or t.date >= since)
+        and (not until or t.date <= until)
+    ]
+    if count_only:
+        click.echo(len(txns))
+        return
     if path is None:
-        export_transactions(app.store, sys.stdout)
+        _write_export(sys.stdout, txns, accounts, chosen, jsonl)
         return
     with path.open("w", newline="", encoding="utf-8") as f:
-        n = export_transactions(app.store, f)
+        n = _write_export(f, txns, accounts, chosen, jsonl)
     app.ok(f"Exported {n} transactions to {path}")
+
+
+def _export_columns(columns: str | None) -> list[str]:
+    from ..csvio import EXPORT_COLUMNS
+
+    if columns is None:
+        return list(EXPORT_COLUMNS)
+    chosen = [name.strip().lower() for name in columns.split(",")]
+    unknown = [name for name in chosen if name not in EXPORT_COLUMNS]
+    if unknown:
+        raise click.UsageError(f"Unknown column '{unknown[0]}'. Columns: {', '.join(EXPORT_COLUMNS)}.")
+    if len(set(chosen)) != len(chosen):
+        raise click.UsageError("--columns names a column more than once.")
+    return chosen
+
+
+def _write_export(
+    out: TextIO, txns: list[Transaction], accounts: dict[int, Account], columns: list[str], jsonl: bool
+) -> int:
+    """Write rows formatted exactly as `csvio.export_transactions` writes them (CSV), or with
+    raw values (JSON Lines: numbers as numbers, no transfer target as null)."""
+    writer = csv.writer(out)
+    if not jsonl:
+        writer.writerow(columns)
+    for t in txns:
+        target = accounts.get(t.target_account_id) if t.target_account_id else None
+        account: str | int = accounts[t.account_id].name if t.account_id in accounts else t.account_id
+        if jsonl:
+            raw: dict[str, object] = {
+                "date": t.date,
+                "account": account,
+                "type": t.type.value,
+                "symbol": t.symbol,
+                "quantity": t.quantity,
+                "price": t.price,
+                "amount": t.amount,
+                "fees": t.fees,
+                "currency": t.currency,
+                "note": t.note,
+                "ratio": t.ratio,
+                "target_account": target.name if target else None,
+            }
+            out.write(json.dumps({name: raw[name] for name in columns}, ensure_ascii=False) + "\n")
+            continue
+        row = {
+            "date": t.date,
+            "account": account,
+            "type": t.type.value,
+            "symbol": t.symbol,
+            "quantity": f"{t.quantity:g}" if t.quantity else "",
+            "price": f"{t.price:g}" if t.price else "",
+            "amount": f"{t.amount:g}" if t.amount else "",
+            "fees": f"{t.fees:g}" if t.fees else "",
+            "currency": t.currency,
+            "note": t.note,
+            "ratio": f"{t.ratio:g}" if t.ratio else "",
+            "target_account": target.name if target else "",
+        }
+        writer.writerow([row[name] for name in columns])
+    return len(txns)
 
 
 @main.group(invoke_without_command=True)

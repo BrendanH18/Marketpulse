@@ -7,13 +7,14 @@ import io
 import json
 import math
 from collections import Counter
-from dataclasses import asdict, fields
+from dataclasses import asdict, fields, replace
 from datetime import date
 
 import click
 from rich.text import Text
 
 from .. import fmt, render
+from ..ledger import replay, sort_key
 from ..models import Account, AccountType, Transaction, TxnType
 from .base import App, date_callback, fail, pass_app
 from .root import main
@@ -366,22 +367,111 @@ def _transaction_json(t: Transaction, accounts: dict[int, Account], generation: 
 
 @main.command()
 @click.option("-y", "--yes", is_flag=True)
+@click.option(
+    "-a", "--account", default=None, help="Undo the latest entry in this active account (either end of a transfer)."
+)
+@click.option("-s", "--symbol", default=None, help="Undo the latest entry for this exact symbol.")
+@click.option("--dry-run", is_flag=True, help="Show the entry undo would delete and whether it can; change nothing.")
+@click.option(
+    "--json", "as_json", is_flag=True, help="Print the raw, unmasked entry and outcome; needs --yes or --dry-run."
+)
 @pass_app
-def undo(app: App, yes: bool) -> None:
-    """Delete the most recently recorded transaction."""
+def undo(app: App, yes: bool, account: str | None, symbol: str | None, dry_run: bool, as_json: bool) -> None:
+    """Delete the most recently recorded transaction.
+
+    With -a or -s, the most recently recorded matching entry in an active account."""
+    if as_json and not (yes or dry_run):
+        raise click.UsageError("--json needs --yes or --dry-run, since it can't ask for confirmation.")
+    if symbol is not None and not symbol.strip():
+        raise click.UsageError("--symbol cannot be blank.")
     restore_id = app.store.restore_id
     txns = app.store.transactions()
     if not txns:
         fail("Nothing to undo.")
-    last = max(txns, key=lambda t: t.id or 0)
+    candidates = txns
+    if account is not None or symbol is not None:
+        accounts = app.store.account_map()
+        acct = _active_account(app, account) if account is not None else None
+        wanted = symbol.strip().upper() if symbol is not None else None
+        candidates = [
+            t
+            for t in txns
+            if _visible(t, accounts)
+            and (acct is None or acct.id in (t.account_id, t.target_account_id))
+            and (wanted is None or t.symbol == wanted)
+        ]
+        if not candidates:
+            fail("No matching transaction to undo.")
+    last = max(candidates, key=lambda t: t.id or 0)
     seen = last.revision(restore_id)  # the entry as shown; refused if it changes before the delete
-    app.console.print(render.activity_table([last], app.store.account_map()))
+    if not as_json:
+        app.console.print(render.activity_table([last], app.store.account_map()))
+    if dry_run:
+        problem = _deletion_problem(app, [last.saved_id], seen)
+        if as_json:
+            _undo_json(app, last, restore_id, dry_run=True, error=problem)
+        else:
+            _finish_dry_run(app, problem, f"would delete transaction #{last.id}")
+        return
     if yes or click.confirm("Delete this transaction?"):
         try:
             app.tracker.delete_transaction(last.saved_id, restore_id=restore_id, revision=seen)
         except ValueError as e:
+            if as_json:
+                _undo_json(app, last, restore_id, dry_run=False, error=str(e))
             fail(str(e))
+        if as_json:
+            _undo_json(app, last, restore_id, dry_run=False, error=None)
+            return
         app.ok(f"Deleted transaction #{last.id}.")
+
+
+def _undo_json(app: App, t: Transaction, generation: str, *, dry_run: bool, error: str | None) -> None:
+    payload = {
+        "dry_run": dry_run,
+        "ok": error is None,
+        "deleted": error is None and not dry_run,
+        "error": error,
+        "transaction": _transaction_json(t, app.store.account_map(), generation),
+    }
+    click.echo(json.dumps(payload, ensure_ascii=False))
+    if error is not None:
+        raise click.exceptions.Exit(1)
+
+
+def _active_account(app: App, ref: str) -> Account:
+    found = app.store.get_account(ref)
+    if found is None or found.archived:
+        fail(f"No active account '{ref}'.")
+    return found
+
+
+def _refusal(app: App, before: list[Transaction], after: list[Transaction], changed_id: int, verb: str) -> str | None:
+    """Why the ledger would refuse turning `before` into `after`: the message a real save or
+    delete gives, from the same replay check, or None if it would be accepted."""
+    try:
+        app.tracker._refuse_new_issues(before, after, changed_id, verb)
+    except ValueError as e:
+        return str(e)
+    return None
+
+
+def _deletion_problem(app: App, ids: list[int], revision: str | None = None) -> str | None:
+    """Why deleting all of `ids` together would be refused, or None."""
+    try:
+        before = app.tracker._stored(ids[0], revision)
+    except ValueError as e:
+        return str(e)
+    gone = set(ids)
+    return _refusal(app, before, [t for t in before if t.id not in gone], ids[0], "deleted")
+
+
+def _finish_dry_run(app: App, problem: str | None, would: str) -> None:
+    if problem is None:
+        app.ok(f"Dry run: {would}. Nothing was changed.")
+        return
+    app.warn(problem)
+    raise click.exceptions.Exit(1)
 
 
 @main.group()
@@ -390,37 +480,149 @@ def txn() -> None:
 
 
 @txn.command("show")
-@click.argument("txn_id", type=click.IntRange(min=1))
+@click.argument("txn_ids", nargs=-1, required=True, type=click.IntRange(min=1), metavar="TXN_ID...")
 @click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked fields and the edit revision as JSON.")
+@click.option(
+    "--with-effect",
+    is_flag=True,
+    help="Also show each holding and cash balance the entry changes, before and after it (a ledger replay).",
+)
 @pass_app
-def txn_show(app: App, txn_id: int, as_json: bool) -> None:
-    """Inspect one transaction, including its full note and revision."""
+def txn_show(app: App, txn_ids: tuple[int, ...], as_json: bool, with_effect: bool) -> None:
+    """Inspect one or more transactions, including full notes and revisions.
+
+    JSON is one object for one id and a list, in the order given, for several."""
     generation = app.store.restore_id
     accounts = app.store.account_map()
-    t = next((t for t in app.store.transactions() if t.id == txn_id and _visible(t, accounts)), None)
-    if t is None:
-        fail(f"No active transaction #{txn_id}.")
-    payload = _transaction_json(t, accounts, generation)
+    txns = app.store.transactions()
+    by_id = {t.id: t for t in txns if _visible(t, accounts)}
+    ids = list(dict.fromkeys(txn_ids))
+    missing = next((txn_id for txn_id in ids if txn_id not in by_id), None)
+    if missing is not None:
+        fail(f"No active transaction #{missing}.")
+    payloads = []
+    for txn_id in ids:
+        payload = _transaction_json(by_id[txn_id], accounts, generation)
+        if with_effect:
+            payload["effect"] = _effect(by_id[txn_id], txns, accounts)
+        payloads.append(payload)
     if as_json:
-        click.echo(json.dumps(payload, ensure_ascii=False))
+        click.echo(json.dumps(payloads if len(ids) > 1 else payloads[0], ensure_ascii=False))
         return
-    table = render.table("Field", "Value", title=f"Transaction #{txn_id}")
-    for field, value in payload.items():
-        if app.privacy and field in ("quantity", "price", "amount", "fees", "ratio"):
-            shown = fmt.MASK
-        else:
-            shown = "—" if value is None else str(value)
-        table.add_row(Text(field), Text(shown))
+    for txn_id, payload in zip(ids, payloads, strict=True):
+        effect = payload.pop("effect", None)
+        table = render.table("Field", "Value", title=f"Transaction #{txn_id}")
+        for field, value in payload.items():
+            if app.privacy and field in ("quantity", "price", "amount", "fees", "ratio"):
+                shown = fmt.MASK
+            else:
+                shown = "—" if value is None else str(value)
+            table.add_row(Text(field), Text(shown))
+        app.console.print(table)
+        if effect is not None:
+            _print_effect(app, txn_id, effect)
+
+
+def _effect(t: Transaction, txns: list[Transaction], accounts: dict[int, Account]) -> list[dict]:
+    """Holdings and tracked cash balances of the entry's account(s) that it changes, from replaying
+    the ledger up to just before it and up to and including it (in replay order)."""
+    key = sort_key(t)
+    earlier = [x for x in txns if sort_key(x) < key]
+    before, after = replay(earlier, accounts), replay([*earlier, t], accounts)
+    touched = {t.account_id, t.target_account_id}
+
+    def name(account_id: int) -> str:
+        return accounts[account_id].name if account_id in accounts else str(account_id)
+
+    rows: list[dict] = []
+    for account_id, symbol in sorted(set(before.holdings) | set(after.holdings)):
+        if account_id not in touched:
+            continue
+        old, new = before.holdings.get((account_id, symbol)), after.holdings.get((account_id, symbol))
+        was = (old.quantity, old.book) if old else (0.0, 0.0)
+        now = (new.quantity, new.book) if new else (0.0, 0.0)
+        if all(math.isclose(a, b, abs_tol=1e-9) for a, b in zip(was, now, strict=True)):
+            continue
+        holding = new or old
+        assert holding is not None  # the key came from one of the two states
+        rows.append(
+            {
+                "kind": "holding",
+                "account_id": account_id,
+                "account": name(account_id),
+                "symbol": symbol,
+                "currency": holding.currency,
+                "before": {"quantity": was[0], "book": was[1]},
+                "after": {"quantity": now[0], "book": now[1]},
+            }
+        )
+    for account_id, currency in sorted(set(before.cash) | set(after.cash)):
+        if account_id not in touched or not (account_id in accounts and accounts[account_id].track_cash):
+            continue
+        was_cash, now_cash = before.cash.get((account_id, currency), 0.0), after.cash.get((account_id, currency), 0.0)
+        if math.isclose(was_cash, now_cash, abs_tol=1e-9):
+            continue
+        rows.append(
+            {
+                "kind": "cash",
+                "account_id": account_id,
+                "account": name(account_id),
+                "currency": currency,
+                "before": {"balance": was_cash},
+                "after": {"balance": now_cash},
+            }
+        )
+    return rows
+
+
+def _print_effect(app: App, txn_id: int, effect: list[dict]) -> None:
+    if not effect:
+        app.console.print(Text(f"#{txn_id} changes no holding or tracked cash balance.", style="muted"))
+        return
+    table = render.table("Account", "Item", ("Before", "right"), ("After", "right"), title=f"Effect of #{txn_id}")
+
+    def amount(value: float, currency: str) -> str:
+        return fmt.money(value, currency, privacy=app.privacy)
+
+    for row in effect:
+        account = Text(row["account"])
+        if row["kind"] == "cash":
+            ccy = row["currency"]
+            balances = (amount(row["before"]["balance"], ccy), amount(row["after"]["balance"], ccy))
+            table.add_row(account, Text(f"Cash ({ccy})"), *map(Text, balances))
+            continue
+        before, after = row["before"], row["after"]
+        units = [fmt.MASK if app.privacy else fmt.qty(side["quantity"]) for side in (before, after)]
+        table.add_row(account, Text(f"{row['symbol']} units"), *map(Text, units))
+        books = [amount(side["book"], row["currency"]) for side in (before, after)]
+        table.add_row(Text(""), Text(f"{row['symbol']} ACB ({row['currency']})"), *map(Text, books))
     app.console.print(table)
 
 
 @txn.command("check")
 @click.option("--json", "as_json", is_flag=True, help="Print raw diagnostics as JSON; exit 1 if issues exist.")
+@click.option(
+    "--code",
+    "codes",
+    multiple=True,
+    help="Only issues with this code (e.g. sell_exceeds_held), ignoring case; repeat for several.",
+)
+@click.option(
+    "-a", "--account", default=None, help="Only issues on entries in this active account (either end of a transfer)."
+)
 @pass_app
-def txn_check(app: App, as_json: bool) -> None:
-    """Check the full ledger offline. Exit 1 if any inconsistencies are found."""
+def txn_check(app: App, as_json: bool, codes: tuple[str, ...], account: str | None) -> None:
+    """Check the full ledger offline. Exit 1 if any inconsistencies are found.
+
+    The whole ledger is always replayed; --code and -a only choose which issues to report
+    (and so whether the command exits 1)."""
+    wanted = {code.strip().casefold() for code in codes}
+    if "" in wanted:
+        raise click.UsageError("--code cannot be blank.")
     accounts = app.store.account_map()
-    visible = {t.id for t in app.store.transactions() if _visible(t, accounts)}
+    acct = _active_account(app, account) if account is not None else None
+    txns = {t.id: t for t in app.store.transactions()}
+    visible = {i for i, t in txns.items() if _visible(t, accounts)}
     issues = [
         asdict(issue)
         if issue.txn_id in visible
@@ -433,10 +635,20 @@ def txn_check(app: App, as_json: bool) -> None:
         }
         for issue in app.store.ledger().issues
     ]
+    filtered = bool(wanted) or acct is not None
+    if wanted:
+        issues = [issue for issue in issues if str(issue["code"]).casefold() in wanted]
+    if acct is not None:
+        issues = [
+            issue
+            for issue in issues
+            if issue["txn_id"] is not None
+            and acct.id in (txns[issue["txn_id"]].account_id, txns[issue["txn_id"]].target_account_id)
+        ]
     if as_json:
         click.echo(json.dumps({"ok": not issues, "issues": issues}, ensure_ascii=False))
     elif not issues:
-        app.ok("Ledger is consistent.")
+        app.ok("No matching ledger issues." if filtered else "Ledger is consistent.")
     else:
         app.warn(f"{len(issues)} ledger issue(s).")
         for issue in issues:
@@ -451,25 +663,63 @@ REVISION_HELP = "Refuse unless the entry is unchanged since it had this revision
 
 
 @txn.command("delete")
-@click.argument("txn_id", type=int)
+@click.argument("txn_ids", nargs=-1, required=True, type=int, metavar="TXN_ID...")
 @click.option("-y", "--yes", is_flag=True)
 @click.option("--revision", help=REVISION_HELP)
+@click.option("--dry-run", is_flag=True, help="Show the entries and whether they can be deleted; change nothing.")
 @pass_app
-def txn_delete(app: App, txn_id: int, yes: bool, revision: str | None) -> None:
-    """Delete a transaction. Refused if a later entry depends on it (a sale of the shares it bought)."""
+def txn_delete(app: App, txn_ids: tuple[int, ...], yes: bool, revision: str | None, dry_run: bool) -> None:
+    """Delete transactions. Refused if a later entry depends on one (a sale of the shares it bought).
+
+    Several ids are confirmed once and checked together first, so either all are deleted
+    or none is; they are then deleted newest first."""
+    ids = list(dict.fromkeys(txn_ids))
+    if revision is not None and len(ids) > 1:
+        raise click.UsageError("--revision needs a single transaction id.")
     restore_id = app.store.restore_id
-    match = [t for t in app.store.transactions() if t.id == txn_id]
-    if not match:
-        fail(f"No transaction #{txn_id}.")
-    if revision is None:
+    txns = app.store.transactions()
+    by_id = {t.id: t for t in txns}
+    missing = next((txn_id for txn_id in ids if txn_id not in by_id), None)
+    if missing is not None:
+        fail(f"No transaction #{missing}.")
+    match = [by_id[txn_id] for txn_id in ids]
+    if revision is None and len(ids) == 1:
         revision = match[0].revision(restore_id)  # the entry as shown; refused if it changes meanwhile
     app.console.print(render.activity_table(match, app.store.account_map()))
-    if yes or click.confirm("Delete?"):
+    if dry_run:
+        _finish_dry_run(app, _deletion_problem(app, ids, revision), "would delete " + _id_list(ids))
+        return
+    if len(ids) == 1:
+        txn_id = ids[0]
+        if yes or click.confirm("Delete?"):
+            try:
+                app.tracker.delete_transaction(txn_id, restore_id=restore_id, revision=revision)
+            except ValueError as e:
+                fail(str(e))
+            app.ok(f"Deleted #{txn_id}.")
+        return
+    if not (yes or click.confirm(f"Delete these {len(ids)} transactions?")):
+        return
+    seen = {t.saved_id: t.revision(restore_id) for t in match}
+    # One transaction: the same combined check as the dry run, then every delete, so either all
+    # go or none does (checking each delete on its own can refuse one after another went).
+    with app.store.atomic():
         try:
-            app.tracker.delete_transaction(txn_id, restore_id=restore_id, revision=revision)
+            app.tracker._refuse_if_restored(restore_id, "deleted", "try again")
+            for t in match:
+                app.tracker._stored(t.saved_id, seen[t.saved_id])
         except ValueError as e:
-            fail(str(e))
-        app.ok(f"Deleted #{txn_id}.")
+            fail(f"{e} Nothing was deleted.")
+        problem = _deletion_problem(app, ids)
+        if problem is not None:
+            fail(f"{problem} Nothing was deleted.")
+        for t in sorted(match, key=sort_key, reverse=True):
+            app.store.delete_transaction(t.saved_id)
+    app.ok(f"Deleted {_id_list(ids)}.")
+
+
+def _id_list(ids: list[int]) -> str:
+    return ", ".join(f"#{txn_id}" for txn_id in sorted(ids))
 
 
 @txn.command("edit")
@@ -484,9 +734,10 @@ def txn_delete(app: App, txn_id: int, yes: bool, revision: str | None) -> None:
 @click.option("--currency", help="Blank to use the symbol's listing currency (or the account's for cash).")
 @click.option("--note")
 @click.option("--revision", help=REVISION_HELP)
+@click.option("--dry-run", is_flag=True, help="Show the fields that would change and whether the edit is accepted.")
 @pass_app
 def txn_edit(
-    app: App, txn_id: int, when, account, symbol, quantity, price, amount, fees, currency, note, revision
+    app: App, txn_id: int, when, account, symbol, quantity, price, amount, fees, currency, note, revision, dry_run
 ) -> None:
     """Change a transaction's fields; its type stays the same.
 
@@ -498,6 +749,7 @@ def txn_edit(
     if not match:
         fail(f"No transaction #{txn_id}.")
     t = match[0]
+    original = replace(t)
     if revision is None:
         # Every field of `t` is written back, so an edit made elsewhere since it was read (while a
         # quote is looked up, say) is refused rather than overwritten.
@@ -519,9 +771,51 @@ def txn_edit(
     ):
         if value is not None:
             setattr(t, name, value.strip().upper() if name in ("symbol", "currency") else value)
+    if dry_run:
+        _edit_dry_run(app, original, t, revision)
+        return
     try:
         app.tracker.update_transaction(t, restore_id=restore_id, revision=revision)
     except ValueError as e:
         fail(str(e))
     app.console.print(render.activity_table([t], app.store.account_map()))
     app.ok(f"Updated #{txn_id}.")
+
+
+EDIT_FIELDS = ("date", "account", "symbol", "quantity", "price", "amount", "fees", "currency", "note")
+
+
+def _edit_dry_run(app: App, original: Transaction, edited: Transaction, revision: str) -> None:
+    """Show the changed fields and run the checks `update_transaction` would, without saving."""
+    accounts = app.store.account_map()
+    if not edited.currency and edited.account_id in accounts:
+        # Worked out exactly as the save would (an asset override, the listing, then a suffix guess).
+        edited.currency, _ = app.tracker.resolve_currency(edited.symbol, accounts[edited.account_id])
+    try:
+        edited.validate()
+        before = app.tracker._stored(edited.saved_id, revision)
+    except ValueError as e:
+        problem: str | None = str(e)
+    else:
+        after = [edited if t.id == edited.id else t for t in before]
+        problem = _refusal(app, before, after, edited.saved_id, "saved")
+
+    def value(t: Transaction, field: str) -> str:
+        if field == "account":
+            return accounts[t.account_id].name if t.account_id in accounts else str(t.account_id)
+        if app.privacy and field in ("quantity", "price", "amount", "fees"):
+            return fmt.MASK
+        return str(getattr(t, field))
+
+    def raw(t: Transaction, field: str) -> object:
+        return t.account_id if field == "account" else getattr(t, field)
+
+    changes = [(f, value(original, f), value(edited, f)) for f in EDIT_FIELDS if raw(original, f) != raw(edited, f)]
+    if changes:
+        table = render.table("Field", "Before", "After", title=f"Transaction #{edited.id} (dry run)")
+        for field, old, new in changes:
+            table.add_row(Text(field), Text(old or "—"), Text(new or "—"))
+        app.console.print(table)
+    else:
+        app.console.print(Text("No changes.", style="muted"))
+    _finish_dry_run(app, problem, f"would update #{edited.id}")

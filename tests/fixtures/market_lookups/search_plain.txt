@@ -1,0 +1,9 @@
+                                                               
+ Symbol      Name                        Exchange   Type       
+ ───────────────────────────────────────────────────────────── 
+ MAPL.TO     Maple Leaf Growth ETF       Toronto    ETF        
+ MAPL        Maple Holdings Inc.         NASDAQ     Equity     
+ MAPL.V      Maple Ventures Corp.        TSXV       Equity     
+ MAPLX       Maple Balanced Fund         NAS        MUTUALFUND 
+ MAPL-U.TO   Maple Leaf Growth ETF USD   Toronto    ETF        
+                                                               

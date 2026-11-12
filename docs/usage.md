@@ -20,6 +20,10 @@ For capital gains report filters and exports, allocation targets and drift check
 priced holdings and performance output, see
 [Offline tax, allocation and holdings inspection](cli-portfolio-inspection.md).
 
+For recording previews and checks, ledger maintenance, imports and exports,
+chart, compare and search output, status and income options, and terminal app
+keys, see [One hundred improvements](cli-hundred-improvements.md).
+
 ## Accounts and transactions
 
 Create accounts before recording transactions. Names, IDs, and account types

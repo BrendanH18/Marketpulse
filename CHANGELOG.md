@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- One hundred recording, ledger, lookup, overview and terminal app improvements ([#130](https://github.com/BrendanH18/Marketpulse/issues/130)).
+  See [One hundred improvements](docs/cli-hundred-improvements.md) for the numbered guides.
+  - Recording commands gain `--dry-run`, `--json` receipts with the position and
+    cash afterwards, `--quiet`, `--balance`, `--confirm`, `--once`, and
+    `--check`/`--strict` warnings (archived account, same-day duplicate, weekend
+    trade, negative cash, price far from the cached quote), plus `--total`,
+    `sell`/`transfer`/`withdraw … all`, `dividend`/`roc --per-unit` and split
+    ratios such as `3:1`.
+  - `undo` gains `--dry-run`, `-a`/`--symbol` and `--json`; `txn show` takes
+    several ids and `--with-effect` (holdings and cash before and after);
+    `txn check` gains `--code` and `-a`; `txn edit --dry-run` shows a field
+    diff; `txn delete` takes several ids with one confirmation, plus
+    `--dry-run`.
+  - `export` gains `-a`, `--symbol`, `--type`, `--since`/`--until`,
+    `--columns`, `--count` and `--jsonl`; `import` gains `--summary` and
+    `--exit-code`; `backfill` gains `--dry-run` and `--json`.
+  - `chart` gains `--json`, `--csv`, `--stats`, `--from`/`--to`, `--last`,
+    `--normalize`, `--width` and `--no-card`; `compare` gains `--json`, `--csv`,
+    `--sort`/`--reverse`, `--base`, `--top` and `--no-chart`; `search` gains
+    `--json`/`--csv`, `--type`/`--exchange`, `--limit` and `--first`; `quote`
+    gains `--field` and `--strict`. Each reuses the plain command's request.
+  - `status` gains `--field`, `--format`, `--exit-code`, `--accounts` and `-a`;
+    `summary` gains `--json`, `--section`, `--top`, `--months` and
+    `--allocation-by`; `income` gains `--json`, `--csv`, `--months`, `--year`,
+    `-a`, `--symbol`, `--kind`, `--by`, `--top` and `--forecast-only`.
+    `status --json` and `--waybar` are unchanged.
+  - The terminal app adds `backspace` for the previous workspace, `{`/`}`,
+    `j`/`k` and `<`/`>` to move around, `F` to filter holdings and `escape` to
+    clear filters, `o`/`O` to sort, `y`/`Y` to copy, `v` to chart, `T` for a
+    symbol's transactions, `N` to pick any transaction type, `z` to zoom and
+    `F1` for the current workspace's keys. The footer shows the row position
+    and refresh age, and the command palette lists every key-only action.
+
 - Thirty offline tax, allocation and holdings inspection improvements ([#128](https://github.com/BrendanH18/Marketpulse/issues/128)):
   capital gains report filters, sorting, paging, summaries, issue and room views,
   and JSON/CSV output; allocation target listing, removal, dry runs, drift
@@ -172,6 +205,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `summary` no longer crashes on 29 February when working out the start of its
+  one-year history window.
 - Ordinary CLI activity and transaction inspection hide archived accounts, including
   transfers touching archived accounts. CSV previews no longer create a default
   account in the live ledger when a file omits account names; create an account first.

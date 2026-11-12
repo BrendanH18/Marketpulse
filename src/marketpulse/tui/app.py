@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from rich.text import Text
 from rich.theme import Theme as RichTheme
 from textual import on, work
@@ -24,7 +26,7 @@ from ..themes import (
     theme_names,
 )
 from ..valuation import PortfolioView
-from . import actions, chart, records, workspaces
+from . import actions, chart, navigation, records, workspaces
 from .commands import PortfolioCommands
 from .constants import HINTS, HOLDING_COLUMNS
 from .widgets import WORKSPACES, Canvas, ChartView, Tile, TopBar, pane
@@ -82,6 +84,10 @@ class MarketPulseApp(App):
     #chart-periods { width: 1fr; padding: 1 2; }
     #chart-info { height: 1; padding: 0 1; }
     #activity-filter { margin-bottom: 0; }
+    #holdings-filter { display: none; height: 1; border: none; padding: 0 1; }
+    #holdings-filter.-shown { display: block; }
+    App.-zoom .detail { display: none; }
+    App.-zoom #dash-side { display: none; }
 
     ModalScreen { align: center middle; background: $background 70%; }
     .modal {
@@ -141,6 +147,25 @@ class MarketPulseApp(App):
         Binding("G", "add_asset", show=False),
         Binding("V", "value_asset", show=False),
         Binding("space", "toggle_alert", show=False),
+        # Keyboard navigation and productivity (#130); none of these keys had a binding before.
+        Binding("backspace", "previous_workspace", show=False),
+        Binding("left_curly_bracket", "cycle_workspace(-1)", show=False),
+        Binding("right_curly_bracket", "cycle_workspace(1)", show=False),
+        Binding("j", "row(1)", show=False),
+        Binding("k", "row(-1)", show=False),
+        Binding("less_than_sign", "row_edge(False)", show=False),
+        Binding("greater_than_sign", "row_edge(True)", show=False),
+        Binding("F", "filter_holdings", show=False),
+        Binding("escape", "clear_filter", show=False),
+        Binding("o", "sort", show=False),
+        Binding("O", "sort_reverse", show=False),
+        Binding("y", "copy_symbol", show=False),
+        Binding("Y", "copy_row", show=False),
+        Binding("v", "chart_selected", show=False),
+        Binding("T", "symbol_activity", show=False),
+        Binding("N", "pick_txn", show=False),
+        Binding("z", "zoom", show=False),
+        Binding("f1", "workspace_keys", show=False),
     ]
 
     def __init__(self, config: Config, tracker: Tracker | None = None):
@@ -172,6 +197,9 @@ class MarketPulseApp(App):
         self._income_forecast: list | None = None
         self._tax: tuple | None = None
         self._last_error = ""
+        self.last_workspace: str | None = None
+        self.table_sort: dict[str, tuple[str, bool]] = {}
+        self.refreshed_at: float | None = None
         for name in theme_names():
             self.register_theme(textual_theme(palette_from_colors(name, OMARCHY_PALETTES[name])))
         if self.palette.name not in OMARCHY_PALETTES:
@@ -236,7 +264,13 @@ class MarketPulseApp(App):
                         yield pane(Static(id="movers"), title="movers", id="pane-movers")
                         yield pane(Static(id="perf"), title="returns", id="pane-perf")
             with Horizontal(id="holdings"):
-                yield pane(DataTable(id="holdings-table"), title="holdings", id="pane-holdings", classes="col-main")
+                yield pane(
+                    Input(placeholder="filter holdings by symbol, name or account…", id="holdings-filter"),
+                    DataTable(id="holdings-table"),
+                    title="holdings",
+                    id="pane-holdings",
+                    classes="col-main",
+                )
                 yield pane(VerticalScroll(Static(id="holding-detail")), title="position", classes="col-side detail")
             with Horizontal(id="watchlist"):
                 yield pane(DataTable(id="watch-table"), title="watchlist", id="pane-watch", classes="col-main")
@@ -299,6 +333,7 @@ class MarketPulseApp(App):
         # Shutdown removes widgets before stopping the app's timers.
         if self.is_running:
             self.query_one(TopBar).refresh()
+            self._render_hints(self.workspace)
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
@@ -375,6 +410,9 @@ class MarketPulseApp(App):
         self.set_workspace(name)
 
     def set_workspace(self, name: str) -> None:
+        current = self.query_one("#workspaces", ContentSwitcher).current
+        if current and current != name:
+            self.last_workspace = current
         self.query_one("#workspaces", ContentSwitcher).current = name
         bar = self.query_one(TopBar)
         bar.active = name
@@ -413,6 +451,9 @@ class MarketPulseApp(App):
         tail.append("? ", style=f"bold {p.accent}")
         tail.append("help ", style=p.muted)
         width = self.size.width
+        status = navigation.footer_status(self)  # row position and refresh age, only when they fit
+        if width - t.cell_len - tail.cell_len - status.cell_len > 1:
+            tail = status.append_text(tail)
         gap = width - t.cell_len - tail.cell_len
         if gap > 1:
             t.append(" " * gap)
@@ -457,6 +498,7 @@ class MarketPulseApp(App):
             if s in self._prev_prices and abs(price - self._prev_prices[s]) > 1e-9
         }
         self._prev_prices = prices
+        self.refreshed_at = time.monotonic()
         self.view, self.perf, self.strip = view, perf, strip
         self.watch_symbols, self.watch_quotes, self.watch_errors = symbols, quotes, errors
         for alert in fired:
@@ -632,6 +674,19 @@ class MarketPulseApp(App):
     def _activity_filter_done(self) -> None:
         self.query_one("#activity-table", DataTable).focus()
 
+    @on(DataTable.RowHighlighted)
+    def _row_position_changed(self) -> None:
+        self._render_hints(self.workspace)
+
+    @on(Input.Changed, "#holdings-filter")
+    def _holdings_filter(self) -> None:
+        self._detail_key = None
+        self.render_holdings()
+
+    @on(Input.Submitted, "#holdings-filter")
+    def _holdings_filter_done(self) -> None:
+        navigation.holdings_filter_done(self)
+
     # ── chart ─────────────────────────────────────────────────────────────────
 
     def open_chart(self, symbol: str, *, compare: list[str] | None = None) -> None:
@@ -759,3 +814,50 @@ class MarketPulseApp(App):
 
     def notify_desktop(self, title: str, message: str) -> None:
         actions.notify_desktop(self, title, message)
+
+    # ── actions: keyboard navigation and productivity ─────────────────────────
+
+    def action_previous_workspace(self) -> None:
+        navigation.previous_workspace(self)
+
+    def action_cycle_workspace(self, delta: int) -> None:
+        navigation.cycle_workspace(self, delta)
+
+    def action_row(self, delta: int) -> None:
+        navigation.move_cursor(self, delta)
+
+    def action_row_edge(self, last: bool) -> None:
+        navigation.jump_row(self, last)
+
+    def action_filter_holdings(self) -> None:
+        navigation.show_holdings_filter(self)
+
+    def action_clear_filter(self) -> None:
+        navigation.clear_filter(self)
+
+    def action_sort(self) -> None:
+        navigation.cycle_sort(self)
+
+    def action_sort_reverse(self) -> None:
+        navigation.reverse_sort(self)
+
+    def action_copy_symbol(self) -> None:
+        navigation.copy_symbol(self)
+
+    def action_copy_row(self) -> None:
+        navigation.copy_row(self)
+
+    def action_chart_selected(self) -> None:
+        navigation.chart_selected(self)
+
+    def action_symbol_activity(self) -> None:
+        navigation.symbol_activity(self)
+
+    def action_pick_txn(self) -> None:
+        navigation.pick_transaction(self)
+
+    def action_workspace_keys(self) -> None:
+        navigation.workspace_keys(self)
+
+    def action_zoom(self) -> None:
+        navigation.toggle_zoom(self)
