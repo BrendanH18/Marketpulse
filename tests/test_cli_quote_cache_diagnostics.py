@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import shutil
 import time
 
 import pytest
@@ -18,6 +19,11 @@ def cli(store, tracker, fake, monkeypatch):
     monkeypatch.setattr("marketpulse.services.Tracker.open", classmethod(lambda cls, config=None: tracker))
     monkeypatch.setattr("marketpulse.cli.base.Config.load", lambda: tracker.config)
     monkeypatch.setenv("COLUMNS", "160")
+    # doctor's macOS-only `swift` check must not depend on the host toolchain.
+    which = shutil.which
+    monkeypatch.setattr(
+        shutil, "which", lambda name, *a, **k: "/usr/bin/swift" if name == "swift" else which(name, *a, **k)
+    )
 
     def invoke(*args):
         return CliRunner().invoke(main, list(args), catch_exceptions=False)
