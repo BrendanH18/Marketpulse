@@ -125,6 +125,7 @@ def test_cache_age_filters(cache):
 def test_sort_by_symbol_age_and_change(cache):
     assert symbols(cache, "--all", "--sort", "symbol", "--descending") == ["ZZZ", "NOAGE", "MOON", "MAPL.TO"]
     assert symbols(cache, "--all", "--sort", "age") == ["MOON", "MAPL.TO", "ZZZ", "NOAGE"]
+    assert symbols(cache, "--all", "--sort", "age", "--descending") == ["ZZZ", "MAPL.TO", "MOON", "NOAGE"]
     assert symbols(cache, "--all", "--sort", "change") == ["ZZZ", "MOON", "MAPL.TO", "NOAGE"]
     assert symbols(cache, "--all", "--sort", "change", "--descending") == ["NOAGE", "MAPL.TO", "MOON", "ZZZ"]
 
@@ -291,3 +292,16 @@ def test_doctor_install_checks_do_not_open_the_ledger(monkeypatch):
     result = CliRunner().invoke(main, ["doctor", "--only", "version", "--only", "cli-path", "--json"])
     assert result.exit_code == 0, result.output
     assert [c["check"] for c in json.loads(result.output)["checks"]] == ["version", "cli path"]
+
+
+def test_filtered_out_cache_still_warns_about_missing_symbols(cache):
+    result = cache("quote", "--cached", "MOON", "MISSING", "--currency", "CAD")
+    assert result.exit_code == 1
+    assert "MISSING: not in the offline cache" in result.output
+    assert "No cached quotes match the filters." in result.output
+
+
+def test_new_csv_outputs_use_newline_endings(cli, store):
+    store.backup(reason="manual")
+    for args in (("backup", "list", "--csv"), ("config", "--csv")):
+        assert "\r" not in cli(*args).stdout_bytes.decode()

@@ -196,7 +196,7 @@ def _plain(value: object) -> str:
 def _print_settings(app: App, values: dict, as_json: bool, as_csv: bool = False) -> None:
     if as_csv:
         stream = io.StringIO(newline="")
-        writer = csv.writer(stream)
+        writer = csv.writer(stream, lineterminator="\n")
         writer.writerow(["key", "value"])
         writer.writerows([key, _plain(value)] for key, value in values.items())
         click.echo(stream.getvalue(), nl=False)

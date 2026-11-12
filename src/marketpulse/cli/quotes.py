@@ -190,6 +190,9 @@ def _cached_quotes(
     order = list(quotes) if all_cached else syms
     if sort:
         selected.sort(key=_cache_sort_key(sort, now), reverse=descending)
+        if sort == "age":
+            # Unknown cache times stay last in both directions (the sort is stable).
+            selected.sort(key=lambda q: q.age(now) is None)
         order = [q.symbol for q in selected] + list(errors)
     else:
         kept = {q.symbol for q in selected}
@@ -213,6 +216,9 @@ def _cached_quotes(
         if not quotes and all_cached:
             fail("The offline quote cache is empty. Run `marketpulse quote` online to fill it.")
         if quotes:
+            for s in order:
+                if s in errors:
+                    app.warn(f"{s}: {errors[s]}")
             fail("No cached quotes match the filters.")
         fail("No cached quotes for " + ", ".join(syms) + ". Run `marketpulse quote` online to fill the cache.")
     app.console.print(_cached_table(order, shown))

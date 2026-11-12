@@ -222,7 +222,7 @@ def _backup_reasons(option: str, values: tuple[str, ...]) -> set[str]:
 
 def _backup_csv(records: list[dict], fieldnames: list[str]) -> None:
     stream = io.StringIO(newline="")
-    writer = csv.DictWriter(stream, fieldnames=fieldnames)
+    writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     writer.writerows({k: "" if v is None else v for k, v in record.items()} for record in records)
     click.echo(stream.getvalue(), nl=False)
