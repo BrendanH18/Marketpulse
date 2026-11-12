@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Composable offline reports through `marketpulse report SOURCE`: 25 saved datasets
+  with 20 shared query and export operations each (500 dataset/operation
+  capabilities), schema discovery, and atomic file output without overwriting.
+  See the [capability inventory](docs/cli-composable-reports.md) ([#136](https://github.com/BrendanH18/Marketpulse/issues/136)).
+
 - One hundred more offline CLI inspection improvements ([#134](https://github.com/BrendanH18/Marketpulse/issues/134)):
   realized gains and payout selection, asset metadata filters and exports,
   snapshot and backup inventory tools, saved allocation target inspection,

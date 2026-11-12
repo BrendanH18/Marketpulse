@@ -18,6 +18,7 @@ from . import (  # noqa: F401  (importing a module registers its commands)
     quotes,
     realized,
     recording,
+    reports,
     settings,
     snapshots,
     taxes,
