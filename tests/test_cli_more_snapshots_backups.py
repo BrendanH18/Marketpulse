@@ -78,7 +78,7 @@ def test_snapshot_jsonl_dates_and_field_projection(browse):
     result = browse("snapshots", "--csv", "--on", "2023-12-31", "--fields", "change,date")
     assert list(csv.DictReader(io.StringIO(result.output))) == [{"change": "", "date": "2023-12-31"}]
     empty = browse("snapshots", "--csv", "--since", "2030-01-01", "--fields", "date,currency")
-    assert empty.output == "date,currency\n"
+    assert list(csv.reader(io.StringIO(empty.output))) == [["date", "currency"]]
     assert browse("snapshots", "--jsonl", "--since", "2030-01-01").output == ""
 
 

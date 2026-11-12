@@ -157,7 +157,8 @@ def test_symbol_lines_and_projected_list_exports(assets_cli):
     assert csv_result.output.splitlines()[0] == "rate,symbol"
     page = json.loads(assets_cli(*options, "--json", "--page-info").output)
     assert page["items"] == [{"rate": 4.25, "symbol": "FIC-A"}] and page["total"] == 1
-    assert assets_cli("list", "--symbol", "missing", "--fields", "symbol", "--csv").output == "symbol\n"
+    empty = assets_cli("list", "--symbol", "missing", "--fields", "symbol", "--csv")
+    assert list(csv.reader(io.StringIO(empty.output))) == [["symbol"]]
 
 
 def test_show_csv_projection_raw_values_and_existence(assets_cli, monkeypatch):
