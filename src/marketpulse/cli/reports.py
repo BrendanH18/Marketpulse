@@ -7,6 +7,7 @@ import io
 import json
 import os
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -105,7 +106,8 @@ def _emit(text: str, output: Path | None) -> None:
         raise click.ClickException(f"Cannot write report: {exc}") from exc
     finally:
         if temporary is not None:
-            os.unlink(temporary)
+            with suppress(OSError):
+                os.unlink(temporary)
 
 
 @main.command("report")

@@ -229,3 +229,24 @@ def test_mixed_config_sort_keeps_type_groups(monkeypatch, descending):
     assert values[:2] == ([10, 2] if descending else [2, 10])
     assert values[2:5] == (["z", "a", ["x"]] if descending else [["x"], "a", "z"])
     assert all(value is None or value == "" for value in values[-2:])
+
+
+def test_cleanup_failure_does_not_mask_publication_error(monkeypatch, tmp_path, rows):
+    target = tmp_path / "cleanup.json"
+    unlink = reports.os.unlink
+
+    def fail_link(*args):
+        raise OSError("hard links unavailable")
+
+    def fail_cleanup(*args):
+        raise OSError("cleanup unavailable")
+
+    monkeypatch.setattr(reports.os, "link", fail_link)
+    monkeypatch.setattr(reports.os, "unlink", fail_cleanup)
+    result = CliRunner().invoke(main, ["report", "config", "--output", str(target)])
+    assert result.exit_code == 1
+    assert "Cannot write report: hard links unavailable" in result.output
+    assert "cleanup unavailable" not in result.output
+    assert not target.exists()
+    for path in tmp_path.iterdir():
+        unlink(path)

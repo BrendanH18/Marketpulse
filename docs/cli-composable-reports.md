@@ -35,7 +35,12 @@ marketpulse report config-keys --format markdown
 
 `--describe` and the shared `--output PATH` file destination are additional
 conveniences, excluded from the 500-capability count. Output files are written
-atomically and an existing destination is never overwritten.
+atomically and an existing destination is never overwritten. Atomic publication
+requires a filesystem supporting hard links (for example, NTFS, APFS or ext4).
+Unsupported filesystems return an error instead of exposing a partial file.
+On POSIX systems, exported files retain owner-only permissions because they
+can contain financial records. A failed temporary-file cleanup does not mask
+the report result or an earlier error.
 
 ## Twenty operations on every source
 
@@ -128,4 +133,11 @@ selection, and capability 500 is compounding pagination metadata.
 Portfolio transaction, position, cash, realized and payout sources exclude
 archived accounts. Snapshot and backup sources describe stored history and files;
 they do not rebuild those records. There is no live quote lookup, telemetry,
-provider test, or setting mutation in this command.
+provider test, or setting mutation in the query pipeline.
+
+Sources that need saved data use the same tracker startup as existing CLI
+commands. Startup may create the database, update metadata, run schema or legacy
+migrations, and create or prune automatic backups. These reports are offline
+queries, not a filesystem read-only inspection mode; they require the normal
+writable data directory. The no-write adapter tests begin after tracker startup.
+`--describe` and catalog sources other than `providers` do not open the tracker.
