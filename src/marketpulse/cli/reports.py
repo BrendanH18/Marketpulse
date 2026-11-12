@@ -60,7 +60,7 @@ def _serialize(rows: list[dict[str, Any]], fields: list[str], output_format: str
         return "".join(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n" for row in rows)
     if output_format in ("csv", "tsv"):
         stream = io.StringIO(newline="")
-        writer = csv.writer(stream, delimiter="\t" if output_format == "tsv" else ",", lineterminator="\n")
+        writer = csv.writer(stream, delimiter="\t" if output_format == "tsv" else ",", lineterminator="\r\n")
         writer.writerow(fields)
         writer.writerows([_text(row[field]) for field in fields] for row in rows)
         return stream.getvalue()
@@ -238,7 +238,7 @@ def report(
                 distinct.append(row)
         rows = distinct
     for field in reversed(sort):
-        # JSON schemas have fixed per-field types; nested values order by canonical JSON.
+        # Nested values order by canonical JSON; keep numeric and missing groups fixed in both directions.
         rows.sort(
             key=lambda row: (
                 0 if isinstance(row[field], (int, float)) else 1,
@@ -246,7 +246,7 @@ def report(
             ),
             reverse=descending,
         )
-        rows.sort(key=lambda row: row[field] is None or row[field] == "")
+        rows.sort(key=lambda row: (row[field] is None or row[field] == "", not isinstance(row[field], (int, float))))
     total = len(rows)
     if count:
         _emit(str(total) + "\n", output)

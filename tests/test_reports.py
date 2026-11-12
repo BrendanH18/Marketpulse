@@ -208,3 +208,24 @@ def test_output_publish_race_preserves_winner(monkeypatch, tmp_path, rows):
     result = CliRunner().invoke(main, ["report", "config", "--output", str(target)])
     assert result.exit_code == 1 and target.read_text() == "winner"
     assert list(tmp_path.iterdir()) == [target]
+
+
+@pytest.mark.parametrize("output_format", ["csv", "tsv"])
+def test_carriage_return_round_trip(output_format):
+    text = reports._serialize([{"note": "first\rsecond"}], ["note"], output_format, None)
+    parsed = list(csv.DictReader(io.StringIO(text, newline=""), delimiter="\t" if output_format == "tsv" else ","))
+    assert parsed == [{"note": "first\rsecond"}]
+
+
+@pytest.mark.parametrize("descending", [False, True])
+def test_mixed_config_sort_keeps_type_groups(monkeypatch, descending):
+    data = [{"key": str(i), "value": value} for i, value in enumerate(["z", 2, None, "a", 10, ["x"], ""])]
+    monkeypatch.setattr(reports, "load_source", lambda *args: data)
+    result = CliRunner().invoke(
+        main, ["report", "config", "--sort", "value", *(["--descending"] if descending else [])]
+    )
+    assert result.exit_code == 0, result.output
+    values = [row["value"] for row in json.loads(result.output)]
+    assert values[:2] == ([10, 2] if descending else [2, 10])
+    assert values[2:5] == (["z", "a", ["x"]] if descending else [["x"], "a", "z"])
+    assert all(value is None or value == "" for value in values[-2:])
