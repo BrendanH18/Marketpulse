@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
+import re
+import time
 from datetime import datetime
 
 import click
@@ -15,21 +19,125 @@ from ..models import Quote, parse_symbols
 from .base import App, fail, pass_app
 from .root import main
 
+DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+CACHE_SORTS = ("symbol", "age", "change")
+QUOTE_FIELDS = [
+    "symbol",
+    "name",
+    "price",
+    "prev_close",
+    "change",
+    "change_pct",
+    "currency",
+    "stale",
+    "fetched_at",
+    "source",
+    "error",
+]
+
+
+def _duration_callback(ctx, param, value: str | None) -> float | None:
+    """Parse a cache age such as `90s`, `30m`, `2h`, `3d` or `1w` into seconds."""
+    if value is None:
+        return None
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([smhdw])\s*", value.lower())
+    if not m or float(m.group(1)) <= 0:
+        raise click.BadParameter("use a positive number with a unit: s, m, h, d or w (e.g. 30m, 2h, 3d).")
+    return float(m.group(1)) * DURATION_UNITS[m.group(2)]
+
+
+def _cache_sort_key(sort: str, now: float):
+    def key(q: Quote) -> tuple:
+        if sort == "age":
+            age = q.age(now)
+            return (age is None, age or 0.0, q.symbol)
+        if sort == "change":
+            return (q.change_pct, q.symbol)
+        return (q.symbol,)
+
+    return key
+
 
 @main.command()
-@click.argument("symbols", nargs=-1, required=True)
+@click.argument("symbols", nargs=-1)
 @click.option("--cached", is_flag=True, help="Show the saved offline quote cache; no network request.")
 @click.option("--json", "as_json", is_flag=True, help="Print machine-readable quotes, with per-symbol errors.")
+@click.option("--all", "all_cached", is_flag=True, help="With --cached: every cached symbol, no symbols needed.")
+@click.option("--currency", "currencies", multiple=True, help="With --cached: only this quote currency (repeatable).")
+@click.option("--search", help="With --cached: symbol or name contains this text (ignores case).")
+@click.option(
+    "--older-than", callback=_duration_callback, help="With --cached: cached at least this long ago (30m, 2h, 3d, 1w)."
+)
+@click.option(
+    "--newer-than", callback=_duration_callback, help="With --cached: cached less than this long ago (30m, 2h, 3d, 1w)."
+)
+@click.option("--sort", type=click.Choice(CACHE_SORTS), help="With --cached: order by symbol, cache age or % change.")
+@click.option("--descending", is_flag=True, help="With --cached --sort: reverse the order.")
+@click.option("--csv", "as_csv", is_flag=True, help="With --cached: print cached quotes as CSV to stdout.")
 @pass_app
-def quote(app: App, symbols: tuple[str, ...], cached: bool, as_json: bool) -> None:
-    """Live quotes. One symbol shows a detail card."""
-    syms = parse_symbols(" ".join(symbols))
-    if not syms:
-        raise click.UsageError("Give at least one symbol.")
+def quote(
+    app: App,
+    symbols: tuple[str, ...],
+    cached: bool,
+    as_json: bool,
+    all_cached: bool,
+    currencies: tuple[str, ...],
+    search: str | None,
+    older_than: float | None,
+    newer_than: float | None,
+    sort: str | None,
+    descending: bool,
+    as_csv: bool,
+) -> None:
+    """Live quotes. One symbol shows a detail card.
+
+    With --cached, read only the saved offline cache; --all, --currency, --search,
+    --older-than, --newer-than, --sort, --descending and --csv refine that view.
+    """
+    cache_opts = {
+        "--all": all_cached,
+        "--currency": bool(currencies),
+        "--search": search is not None,
+        "--older-than": older_than is not None,
+        "--newer-than": newer_than is not None,
+        "--sort": sort is not None,
+        "--descending": descending,
+        "--csv": as_csv,
+    }
+    used = [name for name, on in cache_opts.items() if on]
+    if used and not cached:
+        raise click.UsageError(f"{', '.join(used)} require{'s' if len(used) == 1 else ''} --cached.")
+    if all_cached and symbols:
+        raise click.UsageError("Give symbols or --all, not both.")
+    syms = [] if all_cached else parse_symbols(" ".join(symbols))
+    if not syms and not all_cached:
+        raise click.UsageError("Give at least one symbol" + (", or use --all." if cached else "."))
+    if as_json and as_csv:
+        raise click.UsageError("Choose one output format: --json or --csv.")
+    if descending and sort is None:
+        raise click.UsageError("--descending requires --sort.")
+    if search is not None and not search.strip():
+        raise click.UsageError("--search cannot be blank.")
+    if any(not c.strip() for c in currencies):
+        raise click.UsageError("--currency cannot be blank.")
+    if older_than is not None and newer_than is not None and older_than >= newer_than:
+        raise click.UsageError("--older-than must be shorter than --newer-than.")
     if cached:
-        quotes = app.store.cached_quotes(syms)
-        errors = {s: "not in the offline cache" for s in syms if s not in quotes}
-    elif as_json:
+        _cached_quotes(
+            app,
+            syms,
+            all_cached=all_cached,
+            currencies={c.strip().upper() for c in currencies},
+            search=search.strip().lower() if search else None,
+            older_than=older_than,
+            newer_than=newer_than,
+            sort=sort,
+            descending=descending,
+            as_json=as_json,
+            as_csv=as_csv,
+        )
+        return
+    if as_json:
         quotes, errors = app.tracker.market.quotes(syms)
     else:
         with app.busy("Fetching quotes…"):
@@ -40,14 +148,6 @@ def quote(app: App, symbols: tuple[str, ...], cached: bool, as_json: bool) -> No
         if not found:
             click.get_current_context().exit(1)
         return
-    if cached:
-        if not found:
-            fail("No cached quotes for " + ", ".join(syms) + ". Run `marketpulse quote` online to fill the cache.")
-        app.console.print(_cached_table(syms, quotes))
-        for s in syms:
-            if s not in quotes:
-                app.warn(f"{s}: {errors[s]}")
-        return
     if len(syms) == 1:
         q = quotes.get(syms[0])
         if q is None:
@@ -55,6 +155,76 @@ def quote(app: App, symbols: tuple[str, ...], cached: bool, as_json: bool) -> No
         app.console.print(render.quote_card(q))
         return
     app.console.print(render.quotes_table(syms, quotes, errors, width=app.console.width))
+
+
+def _cached_quotes(
+    app: App,
+    syms: list[str],
+    *,
+    all_cached: bool,
+    currencies: set[str],
+    search: str | None,
+    older_than: float | None,
+    newer_than: float | None,
+    sort: str | None,
+    descending: bool,
+    as_json: bool,
+    as_csv: bool,
+) -> None:
+    """Render the offline cache: strictly reads `quote_cache`, never the network."""
+    quotes = app.store.all_cached_quotes() if all_cached else app.store.cached_quotes(syms)
+    errors = {s: "not in the offline cache" for s in syms if s not in quotes}
+    now = time.time()
+
+    def keep(q: Quote) -> bool:
+        age = q.age(now)
+        return (
+            (not currencies or q.currency.upper() in currencies)
+            and (search is None or search in q.symbol.lower() or search in (q.name or "").lower())
+            and (older_than is None or (age is not None and age >= older_than))
+            and (newer_than is None or (age is not None and age < newer_than))
+        )
+
+    selected = [q for q in quotes.values() if keep(q)]
+    # Named symbols keep their given order (missing ones in place); otherwise the cache is A–Z.
+    order = list(quotes) if all_cached else syms
+    if sort:
+        selected.sort(key=_cache_sort_key(sort, now), reverse=descending)
+        if sort == "age":
+            # Unknown cache times stay last in both directions (the sort is stable).
+            selected.sort(key=lambda q: q.age(now) is None)
+        order = [q.symbol for q in selected] + list(errors)
+    else:
+        kept = {q.symbol for q in selected}
+        order = [s for s in order if s in kept or s in errors]
+    shown = {q.symbol: q for q in selected}
+    found = bool(shown)
+    if as_json or as_csv:
+        rows = [_quote_json(s, shown.get(s), errors) for s in order]
+        if as_json:
+            click.echo(json.dumps(rows, ensure_ascii=False))
+        else:
+            stream = io.StringIO()
+            writer = csv.DictWriter(stream, fieldnames=QUOTE_FIELDS, lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(rows)
+            click.echo(stream.getvalue(), nl=False)
+        if not found:
+            click.get_current_context().exit(1)
+        return
+    if not found:
+        if not quotes and all_cached:
+            fail("The offline quote cache is empty. Run `marketpulse quote` online to fill it.")
+        if quotes:
+            for s in order:
+                if s in errors:
+                    app.warn(f"{s}: {errors[s]}")
+            fail("No cached quotes match the filters.")
+        fail("No cached quotes for " + ", ".join(syms) + ". Run `marketpulse quote` online to fill the cache.")
+    app.console.print(_cached_table(order, shown))
+    for s in order:
+        if s in errors:
+            app.warn(f"{s}: {errors[s]}")
 
 
 def _iso(epoch: float | None) -> str | None:

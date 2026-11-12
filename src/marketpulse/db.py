@@ -930,6 +930,15 @@ class Store:
             out[q.symbol] = q
         return out
 
+    def all_cached_quotes(self) -> dict[str, Quote]:
+        """Every cached quote by symbol (A–Z), marked stale; read-only."""
+        out = {}
+        for r in self._query("SELECT data FROM quote_cache ORDER BY symbol"):
+            q = Quote(**json.loads(r["data"]))
+            q.stale = True
+            out[q.symbol] = q
+        return out
+
 
 # ── Legacy JSON migration ─────────────────────────────────────────────────────
 

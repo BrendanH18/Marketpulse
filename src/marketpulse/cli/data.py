@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
+import math
+import re
 import sys
+from collections import Counter
 from dataclasses import asdict
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,6 +25,7 @@ from .root import main
 
 if TYPE_CHECKING:
     from ..csvio import RowIssue
+    from ..db import Store
 
 
 @main.command()
@@ -177,35 +183,249 @@ def _backup_metadata(path: Path) -> dict:
     }
 
 
+BACKUP_FIELDS = ["file", "path", "reason", "size_bytes", "taken_at"]
+
+
+def _backup_month_callback(ctx, param, value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}", value):
+        raise click.BadParameter("Use YYYY-MM.")
+    try:
+        date.fromisoformat(value + "-01")
+    except ValueError as exc:
+        raise click.BadParameter("Use a valid calendar month (YYYY-MM).") from exc
+    return value
+
+
+def _backup_dates_callback(ctx, param, values: tuple[str, ...]) -> tuple[str, ...]:
+    dates = []
+    for value in values:
+        normalized = date_callback(ctx, param, value)
+        assert normalized is not None  # Click supplies strings for a repeatable option.
+        dates.append(normalized)
+    return tuple(dates)
+
+
+def _backup_size_callback(ctx, param, value: float | None) -> float | None:
+    if value is not None and not math.isfinite(value):
+        raise click.BadParameter("Must be a finite number of KB.")
+    return value
+
+
+def _backup_reasons(option: str, values: tuple[str, ...]) -> set[str]:
+    reasons = {value.strip().casefold() for value in values}
+    if "" in reasons:
+        raise click.UsageError(f"{option} cannot be blank.")
+    return reasons
+
+
+def _backup_csv(records: list[dict], fieldnames: list[str]) -> None:
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows({k: "" if v is None else v for k, v in record.items()} for record in records)
+    click.echo(stream.getvalue(), nl=False)
+
+
+def _backup_summary(app: App, payload: list[dict], group: str, as_json: bool, as_csv: bool) -> None:
+    def key(item: dict) -> str:
+        if group == "reason":
+            return item["reason"]
+        taken = item["taken_at"]
+        if taken is None:
+            return "unknown"
+        return taken[:4] if group == "year" else taken[:7]
+
+    records = [{"group": value, "count": count} for value, count in sorted(Counter(key(i) for i in payload).items())]
+    if as_json:
+        click.echo(json.dumps(records, ensure_ascii=False))
+    elif as_csv:
+        _backup_csv(records, ["group", "count"])
+    else:
+        table = render.table(group.title(), ("Backups", "right"), title="Matching backups")
+        for record in records:
+            table.add_row(Text(str(record["group"])), Text(str(record["count"])))
+        app.console.print(table)
+
+
+def _backup_sort_key(field: str):
+    if field == "size":
+        return lambda item: (item["size_bytes"], item["file"])
+    if field == "name":
+        return lambda item: (item["file"].casefold(), item["file"])
+    if field == "reason":
+        return lambda item: (item["reason"].casefold(), item["taken_at"] or "", item["file"])
+    # Files without a recognized timestamp sort before dated ones.
+    return lambda item: (item["taken_at"] or "", item["file"])
+
+
 @backup.command("list")
 @click.option("--json", "as_json", is_flag=True, help="Backup paths, reasons, sizes and timestamps as JSON.")
-@click.option("--reason", help="Exact backup reason, ignoring case.")
+@click.option(
+    "--reason",
+    "reasons",
+    multiple=True,
+    help="Exact backup reason, ignoring case; repeat to include several reasons.",
+)
 @click.option("--since", callback=date_callback, help="Taken on or after this date (from the filename).")
 @click.option("--until", callback=date_callback, help="Taken on or before this date (from the filename).")
 @click.option("--limit", type=click.IntRange(min=1), help="Maximum number of matching backups.")
-@click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip matching backups before listing.")
+@click.option("--offset", type=click.IntRange(min=0), help="Skip matching backups before listing.")
 @click.option("--oldest-first", is_flag=True, help="Reverse the default newest-first filename order.")
 @click.option("--search", default="", help="Find backup filenames containing this text, ignoring case.")
+@click.option("--count", "count_only", is_flag=True, help="Print the number of matching backups.")
+@click.option("--csv", "as_csv", is_flag=True, help="Print matching backup metadata as CSV to stdout.")
+@click.option("--page-info", is_flag=True, help="With --json, include total and paging metadata.")
+@click.option(
+    "--exclude-reason",
+    "excluded_reasons",
+    multiple=True,
+    help="Leave out this backup reason, ignoring case; repeat for several.",
+)
+@click.option(
+    "--min-size",
+    type=click.FloatRange(min=0),
+    callback=_backup_size_callback,
+    help="Inclusive minimum file size in KB (1 KB = 1024 bytes).",
+)
+@click.option(
+    "--max-size",
+    type=click.FloatRange(min=0),
+    callback=_backup_size_callback,
+    help="Inclusive maximum file size in KB (1 KB = 1024 bytes).",
+)
+@click.option(
+    "--sort",
+    "sort_by",
+    type=click.Choice(["date", "size", "name", "reason"]),
+    help="Order matching backups by this field, ascending.",
+)
+@click.option("--descending", is_flag=True, help="Reverse the selected order (default: date).")
+@click.option("--year", type=click.IntRange(min=1, max=9999), help="Only backups taken in this calendar year.")
+@click.option("--month", callback=_backup_month_callback, help="Only backups taken in this month (YYYY-MM).")
+@click.option(
+    "--on",
+    "on_dates",
+    multiple=True,
+    callback=_backup_dates_callback,
+    help="Only backups taken on this date; repeat for several dates.",
+)
+@click.option("--latest", is_flag=True, help="Show only the newest matching backup.")
+@click.option("--earliest", is_flag=True, help="Show only the oldest matching backup.")
+@click.option(
+    "--summary",
+    type=click.Choice(["reason", "year", "month"]),
+    help="Count matching backups by this field.",
+)
 @pass_app
-def backup_list(app: App, as_json: bool, reason, since, until, limit, offset, oldest_first, search) -> None:
-    """List backups, newest first. Filters apply before pagination."""
+def backup_list(
+    app: App,
+    as_json: bool,
+    reasons: tuple[str, ...],
+    since: str | None,
+    until: str | None,
+    limit: int | None,
+    offset: int | None,
+    oldest_first: bool,
+    search: str,
+    count_only: bool,
+    as_csv: bool,
+    page_info: bool,
+    excluded_reasons: tuple[str, ...],
+    min_size: float | None,
+    max_size: float | None,
+    sort_by: str | None,
+    descending: bool,
+    year: int | None,
+    month: str | None,
+    on_dates: tuple[str, ...],
+    latest: bool,
+    earliest: bool,
+    summary: str | None,
+) -> None:
+    """List backups, newest first. Filters apply before sorting, counting and pagination.
+
+    Reads file names and sizes only; never opens, changes or deletes a backup.
+    """
     if since and until and since > until:
         raise click.UsageError("--since must be on or before --until.")
+    if as_json and as_csv:
+        raise click.UsageError("Choose one output format: --json or --csv.")
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
+    if min_size is not None and max_size is not None and min_size > max_size:
+        raise click.UsageError("--min-size must be at most --max-size.")
+    if year is not None and month is not None and month[:4] != f"{year:04d}":
+        raise click.UsageError("--year and --month must refer to the same year.")
+    if oldest_first and (sort_by is not None or descending):
+        raise click.UsageError("--oldest-first cannot be combined with --sort or --descending.")
+    if latest and earliest:
+        raise click.UsageError("Choose one of --earliest or --latest.")
+    ordering = sort_by is not None or descending or oldest_first
+    paging = limit is not None or offset is not None or page_info
+    if summary and (count_only or latest or earliest or ordering or paging):
+        raise click.UsageError(
+            "--summary cannot be combined with counting, single-row, ordering or pagination options."
+        )
+    if (latest or earliest) and (count_only or ordering or paging):
+        option = "--latest" if latest else "--earliest"
+        raise click.UsageError(f"{option} cannot be combined with counting, ordering or pagination options.")
+    if count_only and (as_json or as_csv or ordering or paging):
+        raise click.UsageError("--count cannot be combined with --json, --csv, ordering or pagination options.")
+    included = _backup_reasons("--reason", reasons)
+    excluded = _backup_reasons("--exclude-reason", excluded_reasons)
+    on = set(on_dates)
+
     items = app.store.backups()
-    if oldest_first:
-        items.reverse()
-    payload = [_backup_metadata(path) for path in items]
     payload = [
         item
-        for item in payload
-        if (not reason or item["reason"].casefold() == reason.casefold())
+        for item in (_backup_metadata(path) for path in items)
+        if (not included or item["reason"].casefold() in included)
+        and item["reason"].casefold() not in excluded
         and search.casefold() in item["file"].casefold()
         and (not since or (item["taken_at"] is not None and item["taken_at"][:10] >= since))
         and (not until or (item["taken_at"] is not None and item["taken_at"][:10] <= until))
+        and (year is None or (item["taken_at"] is not None and item["taken_at"][:4] == f"{year:04d}"))
+        and (month is None or (item["taken_at"] is not None and item["taken_at"][:7] == month))
+        and (not on or (item["taken_at"] is not None and item["taken_at"][:10] in on))
+        and (min_size is None or item["size_bytes"] >= min_size * 1024)
+        and (max_size is None or item["size_bytes"] <= max_size * 1024)
     ]
-    payload = payload[offset:] if limit is None else payload[offset : offset + limit]
+    if summary:
+        _backup_summary(app, payload, summary, as_json, as_csv)
+        return
+    if count_only:
+        click.echo(len(payload))
+        return
+    if latest or earliest:
+        if not payload:
+            fail("No matching backups." if items else f"No backups yet in {app.store.backup_dir}")
+        payload = payload[:1] if latest else payload[-1:]
+    elif sort_by is not None or descending:
+        payload.sort(key=_backup_sort_key(sort_by or "date"), reverse=descending)
+    elif oldest_first:
+        payload.reverse()
+    total = len(payload)
+    start = offset or 0
+    payload = payload[start:] if limit is None else payload[start : start + limit]
     if as_json:
-        click.echo(json.dumps(payload, ensure_ascii=False))
+        result = (
+            {
+                "total": total,
+                "offset": start,
+                "limit": limit,
+                "returned": len(payload),
+                "next_offset": start + len(payload) if start + len(payload) < total else None,
+                "items": payload,
+            }
+            if page_info
+            else (payload[0] if latest or earliest else payload)
+        )
+        click.echo(json.dumps(result, ensure_ascii=False))
+        return
+    if as_csv:
+        _backup_csv(payload, BACKUP_FIELDS)
         return
     if not payload:
         if not items:
@@ -250,13 +470,15 @@ def backup_show(app: App, path: str, as_json: bool) -> None:
 
 
 @backup.command("verify")
-@click.argument("path", type=click.Path(dir_okay=False))
+@click.argument("paths", nargs=-1, type=click.Path(dir_okay=False))
 @click.option("--json", "as_json", is_flag=True, help="Print validation status as JSON; invalid files exit 1.")
+@click.option("--latest", is_flag=True, help="Verify the backup `backup restore --latest` would restore.")
 @pass_app
-def backup_verify(app: App, path: str, as_json: bool) -> None:
+def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool) -> None:
     """Check integrity and schema compatibility without replacing the ledger.
 
-    Uses the restore preflight with a temporary copy; the source is opened read-only.
+    Give one or more PATHS (or file names from `backup list`), or --latest.
+    Uses the restore preflight with a temporary copy; each source is opened read-only.
     Does not check financial correctness or restore the backup.
     """
     import sqlite3
@@ -264,21 +486,50 @@ def backup_verify(app: App, path: str, as_json: bool) -> None:
 
     from ..db import RestoreError, _stage_restore
 
-    source = _backup_source(app, path)
-    error = None
-    try:
-        with TemporaryDirectory(prefix="marketpulse-verify-") as scratch:
-            _stage_restore(source, Path(scratch) / "checked.db")
-    except (RestoreError, OSError, sqlite3.Error) as problem:
-        error = str(problem)
-    if as_json:
-        click.echo(json.dumps({"ok": error is None, "path": str(source.resolve()), "error": error}, ensure_ascii=False))
-    elif error is None:
-        app.ok(f"Backup verified: {source.name}")
+    if latest == bool(paths):
+        raise click.UsageError("Give one or more backups to verify, or --latest.")
+    if latest:
+        started = datetime.now().replace(microsecond=0)
+        candidates = _restore_candidates(app.store, started)
+        if not candidates:
+            fail(f"No backups to verify in {app.store.backup_dir}")
+        sources = candidates[:1]
     else:
-        app.warn(error)
-    if error is not None:
+        sources = [_backup_source(app, path) for path in paths]
+    results: list[dict] = []
+    for source in sources:
+        error = None
+        try:
+            with TemporaryDirectory(prefix="marketpulse-verify-") as scratch:
+                _stage_restore(source, Path(scratch) / "checked.db")
+        except (RestoreError, OSError, sqlite3.Error) as problem:
+            error = str(problem)
+        results.append({"ok": error is None, "path": str(source.resolve()), "error": error})
+    several = len(paths) > 1
+    if as_json:
+        click.echo(json.dumps(results if several else results[0], ensure_ascii=False))
+    else:
+        for source, result in zip(sources, results, strict=True):
+            if result["ok"]:
+                app.ok(f"Backup verified: {source.name}")
+            else:
+                app.warn(f"{source.name}: {result['error']}" if several else result["error"])
+    if any(not result["ok"] for result in results):
         raise click.exceptions.Exit(1)
+
+
+def _restore_candidates(store: Store, started: datetime) -> list[Path]:
+    """Backups `restore --latest` may pick, newest first.
+
+    Neither a daily backup taken since `started` (a copy of the ledger as it is now) nor a
+    pre-restore one (the ledger a restore replaced) is what "go back to my latest backup" means.
+    """
+
+    def is_copy_of_current(p: Path) -> bool:
+        reason = store.backup_reason(p)
+        return reason == "pre-restore" or (reason == "daily" and (store.backup_time(p) or started) >= started)
+
+    return [p for p in store.backups() if not is_copy_of_current(p)]
 
 
 @backup.command("restore")
@@ -305,13 +556,7 @@ def backup_restore(app: App, path: str | None, latest: bool, yes: bool) -> None:
     started = datetime.now().replace(microsecond=0)
     store = app.store
     if latest:
-        # Neither that daily backup nor a pre-restore one (the ledger a restore replaced) is what
-        # "go back to my latest backup" means.
-        def is_copy_of_current(p: Path) -> bool:
-            reason = store.backup_reason(p)
-            return reason == "pre-restore" or (reason == "daily" and (store.backup_time(p) or started) >= started)
-
-        candidates = [p for p in store.backups() if not is_copy_of_current(p)]
+        candidates = _restore_candidates(store, started)
         if not candidates:
             fail(f"No backups to restore in {store.backup_dir}")
         source = candidates[0]
