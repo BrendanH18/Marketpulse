@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Forty additional operations across 25 offline report datasets: 1,000 new
+  dataset/operation combinations, including numeric and typed filters, text/JSON
+  output transformations, column aliases, constants, row numbering, case-insensitive
+  sorting and row windows. See the [capability inventory](docs/cli-report-improvements.md)
+  ([#138](https://github.com/BrendanH18/Marketpulse/issues/138)).
+
 - Composable offline reports through `marketpulse report SOURCE`: 25 saved datasets
   with 20 shared query and export operations each (500 dataset/operation
   capabilities), schema discovery, and atomic file output without overwriting.
