@@ -259,8 +259,15 @@ def position_cells(p: PositionView, base: str, *, privacy: bool = False, show_ac
 
 
 def holdings_table(
-    view: PortfolioView, *, privacy: bool = False, title: str | None = None, width: int | None = None
+    view: PortfolioView,
+    *,
+    privacy: bool = False,
+    title: str | None = None,
+    width: int | None = None,
+    positions: Sequence[PositionView] | None = None,
 ) -> Table:
+    """Every position (by account, largest first) and cash balance, or with `positions`
+    exactly those rows in the given order and no cash rows."""
     # Narrow terminals drop Name, Avg cost and Weight rather than truncating numbers
     drop = {2, 4, 10} if width is not None and width < NARROW_WIDTH else set()
     if width is not None and width < 90:
@@ -270,6 +277,10 @@ def holdings_table(
         return [c for i, c in enumerate(cells) if i not in drop]
 
     t = table(*keep(POSITION_HEADERS), title=title)
+    if positions is not None:
+        for p in positions:
+            t.add_row(*keep(position_cells(p, view.base, privacy=privacy)))
+        return t
     for p in sorted(view.positions, key=lambda p: (p.account.name, -(p.value_base or 0))):
         t.add_row(*keep(position_cells(p, view.base, privacy=privacy)))
     for c in view.cash:
@@ -333,12 +344,22 @@ def summary(view: PortfolioView, perf: Performance | None = None, *, privacy: bo
 
 
 def allocation(
-    breakdown: Sequence[Breakdown], palette: Palette, *, width: int = 60, privacy: bool = False, base: str = ""
+    breakdown: Sequence[Breakdown],
+    palette: Palette,
+    *,
+    width: int = 60,
+    privacy: bool = False,
+    base: str = "",
+    hidden: float = 0.0,
 ) -> RenderableType:
+    """Allocation bar and legend; `hidden` is the value of groups left out, drawn as a dim segment."""
     if not breakdown:
         return Text("Nothing to allocate yet.", style="muted")
     colors = [palette.series[i % len(palette.series)] for i in range(len(breakdown))]
-    bar = charts.stacked_bar([(b.value, c) for b, c in zip(breakdown, colors, strict=True)], width)
+    segments = [(b.value, c) for b, c in zip(breakdown, colors, strict=True)]
+    if hidden > 0:
+        segments.append((hidden, "dim"))
+    bar = charts.stacked_bar(segments, width)
     legend = Table.grid(padding=(0, 2))
     for _ in range(3):
         legend.add_column()
@@ -745,49 +766,54 @@ def tax_group(
             w.append(f"   {issue.date} {issue.message}\n", style="muted")
         parts.append(w)
     if rooms:
-        # Only FHSA room can be forfeited (carry-forward and lifetime caps), so
-        # the column appears only when it has something to say.
-        capped = any(status.forfeited > 0.005 for status, _ in rooms)
-        headers: list[Column] = [
-            "Type",
-            ("Since", "right"),
-            ("Start", "right"),
-            ("+ Limits", "right"),
-            ("+ Back", "right"),
-            ("− Contrib.", "right"),
+        parts += [Text(""), room_table(rooms, privacy=privacy)]
+    return Group(*parts)
+
+
+def room_table(rooms: Sequence[tuple[RoomStatus, list[Account]]], *, privacy: bool = False) -> Table:
+    """Contribution room per account type (`marketpulse tax`, `tax --room`)."""
+    # Only FHSA room can be forfeited (carry-forward and lifetime caps), so
+    # the column appears only when it has something to say.
+    capped = any(status.forfeited > 0.005 for status, _ in rooms)
+    headers: list[Column] = [
+        "Type",
+        ("Since", "right"),
+        ("Start", "right"),
+        ("+ Limits", "right"),
+        ("+ Back", "right"),
+        ("− Contrib.", "right"),
+    ]
+    if capped:
+        headers.append(("− Capped", "right"))
+    headers.append(("Remaining", "right"))
+    t = table(*headers, title="Contribution room")
+    for status, members in rooms:
+        label = Text(status.account_type, style="bright")
+        others = [a.name for a in members if a.name.upper() != status.account_type]
+        if others:
+            label.append(f"  {', '.join(others)}", style="muted")
+        cells = [
+            label,
+            Text(str(status.as_of_year), style="muted"),
+            Text(fmt.money(status.starting_room, privacy=privacy)),
+            Text(fmt.money(status.new_limits, privacy=privacy), style="muted"),
+            Text(fmt.money(status.withdrawals_added_back, privacy=privacy), style="muted"),
+            Text(fmt.money(status.contributions, privacy=privacy)),
         ]
         if capped:
-            headers.append(("− Capped", "right"))
-        headers.append(("Remaining", "right"))
-        room_table = table(*headers, title="Contribution room")
-        for status, members in rooms:
-            label = Text(status.account_type, style="bright")
-            others = [a.name for a in members if a.name.upper() != status.account_type]
-            if others:
-                label.append(f"  {', '.join(others)}", style="muted")
-            cells = [
-                label,
-                Text(str(status.as_of_year), style="muted"),
-                Text(fmt.money(status.starting_room, privacy=privacy)),
-                Text(fmt.money(status.new_limits, privacy=privacy), style="muted"),
-                Text(fmt.money(status.withdrawals_added_back, privacy=privacy), style="muted"),
-                Text(fmt.money(status.contributions, privacy=privacy)),
-            ]
-            if capped:
-                cells.append(
-                    Text(fmt.money(status.forfeited, privacy=privacy), style="warn")
-                    if status.forfeited > 0.005
-                    else Text("—", style="muted")
-                )
             cells.append(
-                Text(
-                    fmt.money(status.remaining, privacy=privacy),
-                    style="down bold" if status.remaining < 0 else "up bold",
-                )
+                Text(fmt.money(status.forfeited, privacy=privacy), style="warn")
+                if status.forfeited > 0.005
+                else Text("—", style="muted")
             )
-            room_table.add_row(*cells)
-        parts += [Text(""), room_table]
-    return Group(*parts)
+        cells.append(
+            Text(
+                fmt.money(status.remaining, privacy=privacy),
+                style="down bold" if status.remaining < 0 else "up bold",
+            )
+        )
+        t.add_row(*cells)
+    return t
 
 
 def rebalance_table(rows: Sequence[RebalanceRow], base: str, *, privacy: bool = False) -> Table:

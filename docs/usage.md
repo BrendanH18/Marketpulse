@@ -16,6 +16,10 @@ For more account inventory, income report, and snapshot history controls, see
 For backup inventories, configuration inspection, the offline quote cache and
 selective diagnostics, see [Offline maintenance and diagnostics](cli-maintenance-diagnostics.md).
 
+For capital gains report filters and exports, allocation targets and drift checks, and
+priced holdings and performance output, see
+[Offline tax, allocation and holdings inspection](cli-portfolio-inspection.md).
+
 ## Accounts and transactions
 
 Create accounts before recording transactions. Names, IDs, and account types

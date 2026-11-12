@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Thirty offline tax, allocation and holdings inspection improvements ([#128](https://github.com/BrendanH18/Marketpulse/issues/128)):
+  capital gains report filters, sorting, paging, summaries, issue and room views,
+  and JSON/CSV output; allocation target listing, removal, dry runs, drift
+  thresholds with exit codes, and JSON/CSV output; and priced holdings filters,
+  sorting, JSON/CSV, stale and excluded listings, plus `perf --json` and
+  `perf --metric`. `tax --csv -` now prints to stdout instead of writing a file
+  named `-`, and allocation targets must be from 0 to 100. See
+  [Offline tax, allocation and holdings inspection](docs/cli-portfolio-inspection.md).
+
 - Thirty offline maintenance and diagnostics improvements ([#126](https://github.com/BrendanH18/Marketpulse/issues/126))
   for backup inventories, configuration and theme inspection, the offline quote
   cache, and selective `doctor` checks. See

@@ -294,6 +294,41 @@ BACKEND_STRINGS: tuple[str, ...] = (
 )
 
 
+def disposition_row(r: Disposition, accounts: dict[int, Account]) -> dict:
+    """One disposition for the Tax workspace and `marketpulse tax --json`. A row missing an FX
+    rate has no amounts (they aren't known); an archived account is named only as archived."""
+
+    def amount(value: float) -> float | None:
+        return value if r.complete else None
+
+    acct = accounts.get(r.account_id)
+    return {
+        "date": r.date,
+        "account_id": r.account_id,
+        "account": acct.name if acct and not acct.archived else None,
+        "account_type": acct.type.value if acct else None,
+        "archived": bool(acct and acct.archived),
+        "symbol": r.symbol,
+        "quantity": r.quantity,
+        "currency": r.currency,
+        "fx": r.fx,
+        "kind": r.kind,
+        "complete": r.complete,
+        "proceeds": amount(r.proceeds),
+        "acb": amount(r.acb),
+        "gain": amount(r.gain),
+        "denied": amount(r.denied),
+        "allowed_gain": amount(r.allowed_gain),
+        "denied_reason": r.denied_reason,
+        "superficial": r.superficial,
+        "acquired_in_window": r.acquired_in_window,
+        "held_after_window": r.held_after_window,
+        "window_open": r.window_open,
+        "note": disposition_note(r),
+        "transaction_id": r.txn_id,
+    }
+
+
 def tax_report(tracker: Tracker) -> dict:
     """Capital gains for every year, as `marketpulse tax` computes them, for the app's Tax workspace.
 
@@ -303,19 +338,6 @@ def tax_report(tracker: Tracker) -> dict:
     """
     years, report = tracker.tax_years()
     accounts = tracker.store.account_map()
-
-    def amount(r: Disposition, value: float) -> float | None:
-        return value if r.complete else None
-
-    def account(account_id: int) -> dict:
-        acct = accounts.get(account_id)
-        return {
-            "account_id": account_id,
-            "account": acct.name if acct and not acct.archived else None,
-            "account_type": acct.type.value if acct else None,
-            "archived": bool(acct and acct.archived),
-        }
-
     return {
         "version": 1,
         "demo": False,
@@ -347,30 +369,7 @@ def tax_report(tracker: Tracker) -> dict:
                     for s in y.by_symbol()
                 ],
                 "rows": [
-                    {
-                        "id": f"{r.date}:{r.txn_id}:{i}",
-                        "date": r.date,
-                        **account(r.account_id),
-                        "symbol": r.symbol,
-                        "quantity": r.quantity,
-                        "currency": r.currency,
-                        "fx": r.fx,
-                        "kind": r.kind,
-                        "complete": r.complete,
-                        "proceeds": amount(r, r.proceeds),
-                        "acb": amount(r, r.acb),
-                        "gain": amount(r, r.gain),
-                        "denied": amount(r, r.denied),
-                        "allowed_gain": amount(r, r.allowed_gain),
-                        "denied_reason": r.denied_reason,
-                        "superficial": r.superficial,
-                        "acquired_in_window": r.acquired_in_window,
-                        "held_after_window": r.held_after_window,
-                        "window_open": r.window_open,
-                        "note": disposition_note(r),
-                        "transaction_id": r.txn_id,
-                    }
-                    for i, r in enumerate(y.rows)
+                    {"id": f"{r.date}:{r.txn_id}:{i}", **disposition_row(r, accounts)} for i, r in enumerate(y.rows)
                 ],
             }
             for y in years
