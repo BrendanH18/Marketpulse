@@ -1022,9 +1022,10 @@ def _print_income_groups(
             Text(fmt.money(g["amount"], base, privacy=app.privacy), style="up"),
         )
     app.console.print(table)
+    noun = "payout" if payouts == 1 else "payouts"
     app.console.print(
         Text(
-            f"{fmt.money(total, base, privacy=app.privacy)} {base} from {payouts} payouts in the {_window_text(sel)}, "
+            f"{fmt.money(total, base, privacy=app.privacy)} {base} from {payouts} {noun} in the {_window_text(sel)}, "
             "converted at today's rates.",
             style="muted",
         )
@@ -1125,4 +1126,6 @@ def _forecast_only(
 def _warn_unconverted(app: App, base: str, missing: list[dict[str, Any]]) -> None:
     if missing:
         currencies = ", ".join(sorted({m["currency"] for m in missing}))
-        app.warn(f"{len(missing)} payouts in {currencies} have no FX rate to {base} and are left out.")
+        n = len(missing)
+        noun, verb = ("payout", "has") if n == 1 else ("payouts", "have")
+        app.warn(f"{n} {noun} in {currencies} {verb} no FX rate to {base} and {'is' if n == 1 else 'are'} left out.")
