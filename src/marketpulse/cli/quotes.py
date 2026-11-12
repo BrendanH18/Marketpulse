@@ -608,7 +608,7 @@ def _compare_row(symbol: str, bars: list[Bar], period: str) -> dict:
     }
 
 
-def _order_compare(rows: list[dict], sort: str | None, reverse: bool) -> list[dict]:
+def _order_compare(rows: list[dict], sort: str | None, reverse: bool, *, measured_first: bool = False) -> list[dict]:
     if sort == "drawdown":
         rows = sorted(rows, key=lambda r: r["max_drawdown_pct"], reverse=True)  # shallowest first
     elif sort == "volatility":
@@ -622,6 +622,9 @@ def _order_compare(rows: list[dict], sort: str | None, reverse: bool) -> list[di
     if sort == "volatility":
         # Too few bars to measure stays last either way (the sort is stable).
         rows.sort(key=lambda r: r["volatility_pct"] is None)
+    elif measured_first and sort in (None, "return"):
+        # Plain `compare` ranks an unmeasured return as 0; when ordering is asked for, it goes last.
+        rows.sort(key=lambda r: r["return_pct"] is None)
     return rows
 
 
@@ -686,7 +689,12 @@ def compare(
     data = {k: v for k, v in data.items() if v}
     if not data:
         fail("No data retrieved.")
-    rows = _order_compare([_compare_row(s, bars, period) for s, bars in data.items()], sort, reverse)
+    rows = _order_compare(
+        [_compare_row(s, bars, period) for s, bars in data.items()],
+        sort,
+        reverse,
+        measured_first=sort is not None or reverse or top is not None,
+    )
     if base_sym is not None:
         base_row = next((r for r in rows if r["symbol"] == base_sym), None)
         if base_row is None:

@@ -13,7 +13,7 @@ fictional prices.
 42. `chart AAPL -p 1mo --vs VFV.TO --csv` prints the same bars as CSV (`symbol,date,time,open,high,low,close,volume`), the charted symbol first and then each `--vs` symbol, with `\n` line endings.
 43. `chart AAPL -p 1mo --stats` prints one row per symbol instead of a chart: first and last close, change, % change, high, low, max drawdown and annualized volatility, titled with the date range and bar count (`1mo statistics · 2025-03-03 to 2025-03-21 · 15 bars`). The figures come from the same helpers as the chart footer and `compare`. `--stats --json` and `--stats --csv` add `period`, `interval`, `from`, `to`, `bars`, `high_date` and `low_date`: `[{"symbol": "AAPL", "first": 100.0, "last": 109.0, "change": 9.0, "change_pct": 9.0, "high": 110.0, "high_date": "2025-03-20", "low": 97.0, "low_date": "2025-03-11", "max_drawdown_pct": -6.73, "volatility_pct": 95.03, …}]`.
 44. `chart AAPL -p 1y --from 2025-03-10 --to 2025-03-14` keeps only the fetched bars between two exchange dates, inclusive, in the chart, JSON, CSV and statistics. Dates take the same forms as elsewhere (`2025-03-10`, `yesterday`, `-30d`). Pick a `--period` that covers the range; trimming never fetches more history. `--from` after `--to` is a usage error, and a range with no bars fails with `No AAPL 1y bars in the selected range.`
-45. `chart AAPL -p 1mo --last 5` keeps only the last five fetched bars (at least 2). It applies after `--from`/`--to`, so `--to 2025-03-14 --last 2` is the two sessions ending 14 March.
+45. `chart AAPL -p 1mo --last 5` keeps only the last five fetched bars (at least 2). It applies after `--from`/`--to`, so `--to 2025-03-14 --last 2` is the last two fetched bars on or before 14 March. They are bars, not sessions: a period with intraday bars keeps the last two of those.
 46. `chart AAPL --normalize` draws the symbol as % change from its first bar, with a `━━ AAPL +9.00%` legend, the way a `--vs` overlay is drawn. With `--vs` the chart is already in % change, so the flag changes nothing.
 47. `chart AAPL --width 60` draws the chart 60 columns wide (at least 20) instead of filling the terminal; combine it with `-H` for a compact chart.
 48. `chart AAPL --no-card` leaves out the quote card above the chart. The quote is still fetched as before, so a one-day chart keeps its previous-close line.
@@ -24,7 +24,7 @@ fictional prices.
 
 - `--json` and `--csv` are exclusive. `--normalize`, `--width` and `--no-card` change only the drawn chart, so they can't be combined with `--json`, `--csv` or `--stats`.
 - `--field` reads live quotes and can't be combined with `--cached` or `--json`. `--strict` applies to live quotes, not `--cached`.
-- A symbol with no history fails exactly as plain `chart` does, in every output format.
+- A symbol that can't be fetched fails exactly as plain `chart` does, in every output format. A symbol whose history comes back empty is not an error: `--json` and `--stats` report `bars: 0`.
 
 ## What stays the same
 

@@ -189,11 +189,12 @@ def _extras() -> Extras:
 
 
 def _account(app: App, ref: str | None) -> Account:
-    """`app.account`, except that a dry run never creates the first account."""
+    """`app.account`, except that a preview (--dry-run, --confirm) never creates the first account."""
     store, default = app.store, app.config.default_account
     creates = not ref and not (default and store.get_account(default)) and not store.accounts()
-    if creates and _extras().dry_run:
-        fail("No accounts yet, and a dry run doesn't create one. Add one with `marketpulse accounts add`.")
+    ex = _extras()
+    if creates and (ex.dry_run or ex.confirm):
+        fail("No accounts yet, and a preview doesn't create one. Add one with `marketpulse accounts add`.")
     return app.account(ref)
 
 

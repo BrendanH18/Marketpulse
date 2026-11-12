@@ -28,6 +28,6 @@ endpoint: market lookups reuse the plain command's request and filter or format
 the result locally, and recording checks read only the offline quote cache.
 
 Human output still masks amounts in privacy mode. JSON, CSV and single-value
-outputs for scripts are raw and unmasked, as in earlier batches. The new
-options leave archived accounts out of totals. No existing terminal app key was
-rebound.
+outputs for scripts are raw and unmasked, as in earlier batches. New totals
+leave archived accounts out; `export` options select from the full ledger file,
+which has always included them. No existing terminal app key was rebound.

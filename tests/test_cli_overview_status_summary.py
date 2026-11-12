@@ -87,7 +87,7 @@ def expected_summary(tracker, store) -> str:
     perf = tracker.performance(view)
     strip = tracker.market_strip()
     today = date.today()
-    snaps = [s for s in store.snapshots(today.replace(year=today.year - 1).isoformat()) if s.currency == view.base]
+    snaps = [s for s in store.snapshots(_months_before(today, 12).isoformat()) if s.currency == view.base]
     c = console()
     palette = resolve_palette("auto")
     c.print(render.strip_text(strip), render.market_state_text(view.market_state))

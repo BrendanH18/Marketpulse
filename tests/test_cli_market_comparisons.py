@@ -156,6 +156,17 @@ def test_53_volatility_unknown_stays_last(cli, market_data):
         assert [r["symbol"] for r in out] == ["AAPL", "SHORT.TO"] and out[1]["volatility_pct"] is None
 
 
+def test_53_unmeasured_return_goes_last_when_ordering_is_asked_for(cli, market_data):
+    market_data.set_history("ONE.TO", {"2025-03-21": 10}, currency="CAD")  # one bar: no return
+    market_data.set_history("DOWN.TO", {"2025-03-20": 10, "2025-03-21": 9}, currency="CAD")
+    args = ("compare", "ONE.TO", "DOWN.TO", "-p", "1mo", "--json")
+    for extra in (["--sort", "return"], ["--reverse"], ["--top", "2"]):
+        out = json.loads(ok(cli(*args, *extra)))
+        assert [r["symbol"] for r in out] == ["DOWN.TO", "ONE.TO"] and out[1]["return_pct"] is None
+    plain = json.loads(ok(cli(*args)))  # no ordering option: the order compare has always used
+    assert [r["symbol"] for r in plain] == ["ONE.TO", "DOWN.TO"]
+
+
 # 54 ── compare --base
 
 

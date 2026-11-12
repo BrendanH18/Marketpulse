@@ -70,9 +70,10 @@ def test_dry_run_previews_every_command_without_saving(cli, store, maple, args):
 
 
 def test_dry_run_never_creates_the_first_account(cli, store):
-    result = cli("deposit", "100", "--dry-run")
-    assert result.exit_code == 1 and "a dry run doesn't create one" in result.output
-    assert store.accounts() == [] and store.transactions() == []
+    for flag in ("--dry-run", "--confirm"):
+        result = cli("deposit", "100", flag, input="n\n")
+        assert result.exit_code == 1 and "a preview doesn't create one" in result.output
+        assert store.accounts() == [] and store.transactions() == []
 
 
 def test_dry_run_uses_a_configured_default_account(cli, store, tracker):
