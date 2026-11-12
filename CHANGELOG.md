@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- One hundred more offline CLI inspection improvements ([#134](https://github.com/BrendanH18/Marketpulse/issues/134)):
+  realized gains and payout selection, asset metadata filters and exports,
+  snapshot and backup inventory tools, saved allocation target inspection,
+  and command discovery selectors. See the
+  [numbered inventory](docs/cli-more-hundred-improvements.md) for all 100.
+
 - One hundred offline CLI workflow improvements ([#132](https://github.com/BrendanH18/Marketpulse/issues/132)):
   ledger selection and exports, position/cash/account inspection, watchlist and
   alert filters, theme discovery, configuration receipts and previews, a
@@ -210,6 +216,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   revision values stay the same. See [refresh measurements](docs/performance.md).
 
 ### Fixed
+
+- Backup filenames without recognized timestamps no longer interrupt startup
+  or prevent offline backup inspection on a populated ledger.
 
 - `summary` no longer crashes on 29 February when working out the start of its
   one-year history window.

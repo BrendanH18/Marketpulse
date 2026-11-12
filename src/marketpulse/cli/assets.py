@@ -6,7 +6,8 @@ import csv
 import io
 import json
 import math
-from dataclasses import asdict, fields
+from collections import Counter
+from dataclasses import fields
 
 import click
 from rich.text import Text
@@ -17,6 +18,36 @@ from ..requests import record_once
 from .base import App, date_callback, fail, pass_app, retryable
 from .recording import record
 from .root import main
+
+ASSET_FIELDS = tuple(field.name for field in fields(Asset))
+
+
+def _asset_csv(rows: list[dict], field_names: tuple[str, ...]) -> None:
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=field_names)
+    writer.writeheader()
+    writer.writerows(rows)
+    click.echo(stream.getvalue(), nl=False)
+
+
+def _asset_summary(app: App, items: list[Asset], group: str, as_json: bool, as_csv: bool) -> None:
+    def key(a: Asset) -> str:
+        if group == "class":
+            return a.asset_class.value if a.asset_class is not None else "(unclassified)"
+        if group == "compounding":
+            return a.compounding if a.kind is AssetKind.FIXED_INCOME else "(not applicable)"
+        return a.kind.value if group == "kind" else a.currency.strip() or "(unspecified)"
+
+    rows = [{"group": value, "count": count} for value, count in sorted(Counter(key(a) for a in items).items())]
+    if as_json:
+        click.echo(json.dumps(rows, ensure_ascii=False))
+    elif as_csv:
+        _asset_csv(rows, ("group", "count"))
+    else:
+        table = render.table(group.title(), ("Assets", "right"), title="Matching asset metadata")
+        for row in rows:
+            table.add_row(Text(str(row["group"])), Text(str(row["count"])))
+        app.console.print(table)
 
 
 @main.group()
@@ -66,10 +97,59 @@ def _create_asset(app: App, asset: Asset, txn: Transaction, *, new_symbol: bool)
     type=click.Choice(["annual", "semiannual", "quarterly", "monthly", "simple"], case_sensitive=False),
     help="Match a fixed-income compounding schedule.",
 )
-@click.option("--sort", "sort_by", type=click.Choice(["symbol", "name", "kind", "currency", "rate", "maturity-date"]))
+@click.option(
+    "--sort",
+    "sort_by",
+    type=click.Choice(
+        ["symbol", "name", "kind", "currency", "rate", "maturity-date", "start-date", "class", "compounding"]
+    ),
+)
 @click.option("--descending", is_flag=True, help="Reverse the selected order (default: stored order).")
 @click.option("--limit", type=click.IntRange(min=1), help="Show at most this many matching assets.")
 @click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip this many matching assets.")
+@click.option("--symbols", multiple=True, help="Include exact symbols, ignoring case; repeat for several.")
+@click.option("--exclude-currency", "excluded_currencies", multiple=True, help="Exclude configured currencies; repeat.")
+@click.option(
+    "--exclude-kind",
+    "excluded_kinds",
+    multiple=True,
+    type=click.Choice([k.value for k in AssetKind], case_sensitive=False),
+    help="Exclude configured asset kinds; repeat.",
+)
+@click.option(
+    "--exclude-class",
+    "excluded_classes",
+    multiple=True,
+    type=click.Choice([c.value for c in AssetClass], case_sensitive=False),
+    help="Exclude explicit asset classes; repeat.",
+)
+@click.option("--name", help="Match text only in the configured name, ignoring case.")
+@click.option("--symbol-prefix", help="Match a symbol prefix, ignoring case.")
+@click.option("--symbol-suffix", help="Match a symbol suffix, ignoring case.")
+@click.option("--has-name/--no-name", default=None, help="Match metadata with or without a nonblank name.")
+@click.option(
+    "--has-currency/--no-currency", default=None, help="Match metadata with or without a configured currency."
+)
+@click.option("--classified", is_flag=True, help="Only assets with an explicit asset class.")
+@click.option(
+    "--has-start-date/--no-start-date", default=None, help="Match metadata with or without a saved start date."
+)
+@click.option(
+    "--has-maturity-date/--no-maturity-date",
+    default=None,
+    help="Match metadata with or without a saved maturity date.",
+)
+@click.option(
+    "--summary", type=click.Choice(["kind", "currency", "class", "compounding"]), help="Count matches by metadata."
+)
+@click.option("--symbols-only", is_flag=True, help="Print matching symbols one per line for scripts.")
+@click.option(
+    "--fields",
+    "selected_fields",
+    multiple=True,
+    type=click.Choice(ASSET_FIELDS),
+    help="Select JSON/CSV fields; repeat.",
+)
 @pass_app
 def asset_list(
     app: App,
@@ -95,12 +175,56 @@ def asset_list(
     matures_since: str | None,
     matures_until: str | None,
     compounding: str | None,
+    symbols: tuple[str, ...],
+    excluded_currencies: tuple[str, ...],
+    excluded_kinds: tuple[str, ...],
+    excluded_classes: tuple[str, ...],
+    name: str | None,
+    symbol_prefix: str | None,
+    symbol_suffix: str | None,
+    has_name: bool | None,
+    has_currency: bool | None,
+    classified: bool,
+    has_start_date: bool | None,
+    has_maturity_date: bool | None,
+    summary: str | None,
+    symbols_only: bool,
+    selected_fields: tuple[str, ...],
 ) -> None:
     """List configured asset metadata without fetching prices."""
-    if sum((as_json, as_csv, count_only)) > 1:
-        raise click.UsageError("Choose one of --json, --csv, or --count.")
+    if sum((as_json, as_csv, count_only, symbols_only)) > 1:
+        raise click.UsageError("Choose one of --json, --csv, --count, or --symbols-only.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
+    if classified and unclassified:
+        raise click.UsageError("Choose one of --classified or --unclassified.")
+    if summary and (
+        count_only
+        or symbols_only
+        or page_info
+        or limit is not None
+        or offset
+        or sort_by
+        or descending
+        or selected_fields
+    ):
+        raise click.UsageError(
+            "--summary cannot combine with counting, symbol output, projection, ordering or pagination."
+        )
+    if selected_fields and not (as_json or as_csv):
+        raise click.UsageError("--fields requires --json or --csv.")
+    included_symbols = {value.strip().upper() for value in symbols}
+    omitted_currencies = {value.strip().upper() for value in excluded_currencies}
+    for option, values in (("--symbols", included_symbols), ("--exclude-currency", omitted_currencies)):
+        if "" in values:
+            raise click.UsageError(f"{option} cannot be blank.")
+    for option, text_value in (
+        ("--name", name),
+        ("--symbol-prefix", symbol_prefix),
+        ("--symbol-suffix", symbol_suffix),
+    ):
+        if text_value is not None and not text_value.strip():
+            raise click.UsageError(f"{option} cannot be blank.")
     excluded = {value.strip().upper() for value in excluded_symbols}
     if "" in excluded:
         raise click.UsageError("--exclude-symbol cannot be blank.")
@@ -132,6 +256,27 @@ def asset_list(
         ]
     filtered = any(value is not None for value in (kind, asset_class, currency, search, limit)) or offset > 0
     filtered = filtered or symbol is not None or unclassified or bool(excluded) or fixed_filters
+    filtered = filtered or bool(symbols or excluded_currencies or excluded_kinds or excluded_classes or classified)
+    filtered = filtered or any(
+        value is not None
+        for value in (name, symbol_prefix, symbol_suffix, has_name, has_currency, has_start_date, has_maturity_date)
+    )
+    items = [
+        a
+        for a in items
+        if (not included_symbols or a.symbol in included_symbols)
+        and a.currency.strip().upper() not in omitted_currencies
+        and a.kind.value not in excluded_kinds
+        and (a.asset_class is None or a.asset_class.value not in excluded_classes)
+        and (name is None or name.strip().casefold() in a.name.casefold())
+        and (symbol_prefix is None or a.symbol.casefold().startswith(symbol_prefix.strip().casefold()))
+        and (symbol_suffix is None or a.symbol.casefold().endswith(symbol_suffix.strip().casefold()))
+        and (has_name is None or bool(a.name.strip()) == has_name)
+        and (has_currency is None or bool(a.currency.strip()) == has_currency)
+        and (not classified or a.asset_class is not None)
+        and (has_start_date is None or bool(a.start_date.strip()) == has_start_date)
+        and (has_maturity_date is None or bool(a.maturity_date.strip()) == has_maturity_date)
+    ]
     if symbol is not None:
         items = [a for a in items if a.symbol == symbol.strip().upper()]
     if unclassified:
@@ -144,15 +289,19 @@ def asset_list(
         items = [a for a in items if a.currency == currency.strip().upper()]
     if search is not None:
         items = [a for a in items if search.casefold() in a.symbol.casefold() or search.casefold() in a.name.casefold()]
-    if sort_by in ("rate", "maturity-date"):
+    if summary:
+        _asset_summary(app, items, summary, as_json, as_csv)
+        return
+    if sort_by in ("rate", "maturity-date", "start-date", "compounding", "class"):
+        field_name = {"class": "asset_class"}.get(sort_by, sort_by.replace("-", "_"))
         known = [
             a
             for a in items
-            if a.kind is AssetKind.FIXED_INCOME
-            and (math.isfinite(a.rate) if sort_by == "rate" else bool(a.maturity_date))
+            if (a.asset_class is not None if sort_by == "class" else a.kind is AssetKind.FIXED_INCOME)
+            and (math.isfinite(a.rate) if sort_by == "rate" else bool(getattr(a, field_name)))
         ]
         unknown = [a for a in items if a not in known]
-        known.sort(key=lambda a: (a.rate if sort_by == "rate" else a.maturity_date, a.symbol), reverse=descending)
+        known.sort(key=lambda a: (getattr(a, field_name), a.symbol), reverse=descending)
         unknown.sort(key=lambda a: a.symbol, reverse=descending)
         items = known + unknown
     else:
@@ -165,15 +314,16 @@ def asset_list(
         click.echo(total)
         return
     items = items[offset:] if limit is None else items[offset : offset + limit]
+    if symbols_only:
+        for item in items:
+            click.echo(item.symbol)
+        return
+    field_names = tuple(dict.fromkeys(selected_fields)) or ASSET_FIELDS
     if as_csv:
-        stream = io.StringIO(newline="")
-        writer = csv.DictWriter(stream, fieldnames=[field.name for field in fields(Asset)])
-        writer.writeheader()
-        writer.writerows(asdict(a) for a in items)
-        click.echo(stream.getvalue(), nl=False)
+        _asset_csv([{field: getattr(a, field) for field in field_names} for a in items], field_names)
         return
     if as_json:
-        rows = [asdict(a) for a in items]
+        rows = [{field: getattr(a, field) for field in field_names} for a in items]
         payload = (
             {
                 "total": total,
@@ -210,13 +360,45 @@ def asset_list(
 @asset.command("show")
 @click.argument("symbol")
 @click.option("--json", "as_json", is_flag=True, help="Print unmasked asset metadata as JSON.")
+@click.option("--csv", "as_csv", is_flag=True, help="Print raw metadata as a one-row CSV.")
+@click.option(
+    "--fields",
+    "selected_fields",
+    multiple=True,
+    type=click.Choice(ASSET_FIELDS),
+    help="Select displayed fields; repeat.",
+)
+@click.option("--value", "value_field", type=click.Choice(ASSET_FIELDS), help="Print one raw field value for scripts.")
+@click.option("--exists", is_flag=True, help="Print nothing; exit 0 if configured, 1 otherwise.")
 @pass_app
-def asset_show(app: App, symbol: str, as_json: bool) -> None:
+def asset_show(
+    app: App,
+    symbol: str,
+    as_json: bool,
+    as_csv: bool,
+    selected_fields: tuple[str, ...],
+    value_field: str | None,
+    exists: bool,
+) -> None:
     """Inspect a configured asset without fetching prices or creating metadata."""
+    if sum((as_json, as_csv, value_field is not None, exists)) > 1:
+        raise click.UsageError("Choose one of --json, --csv, --value or --exists.")
+    if selected_fields and (value_field is not None or exists):
+        raise click.UsageError("--fields cannot combine with --value or --exists.")
     definition = app.store.assets().get(symbol.strip().upper())
+    if exists:
+        raise click.exceptions.Exit(0 if definition is not None else 1)
     if definition is None:
         fail(f"No configured asset '{symbol}'.")
-    payload = asdict(definition)
+    field_names = tuple(dict.fromkeys(selected_fields)) or ASSET_FIELDS
+    payload = {field: getattr(definition, field) for field in field_names}
+    if value_field is not None:
+        value = getattr(definition, value_field)
+        click.echo("" if value is None else str(value))
+        return
+    if as_csv:
+        _asset_csv([payload], field_names)
+        return
     if as_json:
         click.echo(json.dumps(payload, ensure_ascii=False))
         return

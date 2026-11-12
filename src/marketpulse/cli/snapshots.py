@@ -7,6 +7,7 @@ import io
 import json
 import math
 import re
+from calendar import monthrange
 from collections import Counter
 from datetime import date
 
@@ -85,12 +86,21 @@ def _quarter_callback(ctx, param, value: str | None) -> str | None:
     return value
 
 
-def _snapshot_summary(app: App, rows: list[Snapshot], group: str, as_json: bool, as_csv: bool) -> None:
+def _snapshot_summary(
+    app: App, rows: list[Snapshot], group: str, as_json: bool, as_csv: bool, changes: dict[str, float | None]
+) -> None:
     def key(snapshot: Snapshot) -> str:
         if group == "currency":
             return snapshot.currency
         if group == "quarter":
             return _quarter(snapshot.date)
+        if group == "weekday":
+            return WEEKDAYS[date.fromisoformat(snapshot.date).weekday()]
+        if group == "change-direction":
+            change = changes[snapshot.date]
+            return (
+                "unknown" if change is None else "increase" if change > 0 else "decrease" if change < 0 else "unchanged"
+            )
         return snapshot.date[:4] if group == "year" else snapshot.date[:7]
 
     records = [{"group": value, "count": count} for value, count in sorted(Counter(key(s) for s in rows).items())]
@@ -183,9 +193,19 @@ def _snapshot_summary(app: App, rows: list[Snapshot], group: str, as_json: bool,
 @click.option("--earliest", is_flag=True, help="Show only the earliest matching snapshot.")
 @click.option(
     "--summary",
-    type=click.Choice(["year", "month", "quarter", "currency"]),
+    type=click.Choice(["year", "month", "quarter", "currency", "weekday", "change-direction"]),
     help="Count all matching snapshots by this field, offline.",
 )
+@click.option("--jsonl", is_flag=True, help="Print one raw snapshot JSON object per line.")
+@click.option("--dates", "dates_only", is_flag=True, help="Print only matching dates, one per line.")
+@click.option("--fields", help="Comma-separated fields in order; requires --json, --csv or --jsonl.")
+@click.option(
+    "--exclude-weekday", "excluded_weekdays", multiple=True, type=click.Choice(WEEKDAYS, case_sensitive=False)
+)
+@click.option("--weekdays-only", is_flag=True, help="Only Monday through Friday snapshots.")
+@click.option("--weekends-only", is_flag=True, help="Only Saturday and Sunday snapshots.")
+@click.option("--month-start-only", is_flag=True, help="Only snapshots recorded on the first calendar day of a month.")
+@click.option("--month-end-only", is_flag=True, help="Only snapshots recorded on the final calendar day of a month.")
 @pass_app
 def snapshots(
     app: App,
@@ -224,12 +244,31 @@ def snapshots(
     known_change_only: bool,
     earliest: bool,
     summary: str | None,
+    jsonl: bool,
+    dates_only: bool,
+    fields: str | None,
+    excluded_weekdays: tuple[str, ...],
+    weekdays_only: bool,
+    weekends_only: bool,
+    month_start_only: bool,
+    month_end_only: bool,
 ) -> None:
     """Recorded daily net-worth snapshots, oldest first. Offline: no prices are fetched."""
     if since and until and since > until:
         raise click.UsageError("--since must be on or before --until.")
-    if as_json and as_csv:
-        raise click.UsageError("Choose one output format: --json or --csv.")
+    if sum((as_json, as_csv, jsonl, dates_only, count_only)) > 1:
+        raise click.UsageError("Choose one of --json, --csv, --jsonl, --dates or --count.")
+    if fields is not None and (not (as_json or as_csv or jsonl) or summary):
+        raise click.UsageError("--fields requires --json, --csv or --jsonl, without --summary.")
+    chosen_fields = SNAPSHOT_FIELDS if fields is None else [field.strip() for field in fields.split(",")]
+    if any(field not in SNAPSHOT_FIELDS for field in chosen_fields) or len(set(chosen_fields)) != len(chosen_fields):
+        raise click.UsageError(f"--fields must name distinct fields from: {', '.join(SNAPSHOT_FIELDS)}.")
+    if summary and (jsonl or dates_only):
+        raise click.UsageError("--summary cannot be combined with --jsonl or --dates.")
+    if weekdays_only and weekends_only:
+        raise click.UsageError("Choose one of --weekdays-only or --weekends-only.")
+    if month_start_only and month_end_only:
+        raise click.UsageError("Choose one of --month-start-only or --month-end-only.")
     if earliest and latest:
         raise click.UsageError("Choose one of --earliest or --latest.")
     if earliest and (
@@ -316,9 +355,14 @@ def snapshots(
         and (not included_dates or s.date in included_dates)
         and s.currency.upper() not in omitted_currencies
         and (not known_change_only or changes[s.date] is not None)
+        and (not excluded_weekdays or WEEKDAYS[date.fromisoformat(s.date).weekday()] not in excluded_weekdays)
+        and (not weekdays_only or date.fromisoformat(s.date).weekday() < 5)
+        and (not weekends_only or date.fromisoformat(s.date).weekday() >= 5)
+        and (not month_start_only or s.date[8:10] == "01")
+        and (not month_end_only or int(s.date[8:10]) == monthrange(int(s.date[:4]), int(s.date[5:7]))[1])
     ]
     if summary:
-        _snapshot_summary(app, rows, summary, as_json, as_csv)
+        _snapshot_summary(app, rows, summary, as_json, as_csv, changes)
         return
     if count_only:
         click.echo(len(rows))
@@ -342,8 +386,18 @@ def snapshots(
     elif limit is not None and not forward_page:
         rows = rows[-limit:]
 
+    records = [_record(s, changes[s.date]) for s in rows]
+    if fields is not None:
+        records = [{field: record[field] for field in chosen_fields} for record in records]
+    if dates_only:
+        for snapshot in rows:
+            click.echo(snapshot.date)
+        return
+    if jsonl:
+        for record in records:
+            click.echo(json.dumps(record, ensure_ascii=False))
+        return
     if as_json:
-        records = [_record(s, changes[s.date]) for s in rows]
         payload = (
             {"rows": records, "total": total, "offset": offset or 0, "limit": limit}
             if page_info
@@ -353,10 +407,9 @@ def snapshots(
         return
     if as_csv:
         stream = io.StringIO(newline="")
-        writer = csv.DictWriter(stream, fieldnames=SNAPSHOT_FIELDS)
+        writer = csv.DictWriter(stream, fieldnames=chosen_fields)
         writer.writeheader()
-        for s in rows:
-            record = _record(s, changes[s.date])
+        for record in records:
             writer.writerow({k: "" if v is None else v for k, v in record.items()})
         click.echo(stream.getvalue(), nl=False)
         return

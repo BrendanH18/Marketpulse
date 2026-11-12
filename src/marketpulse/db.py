@@ -392,11 +392,13 @@ class Store:
         `max_age_hours`. Skipped for an empty ledger (nothing to lose yet)."""
         if not self._query("SELECT 1 FROM transactions LIMIT 1"):
             return None
-        newest = next(iter(self.backups()), None)
-        if newest is not None:
-            taken = datetime.strptime(newest.name[12:27], "%Y%m%d-%H%M%S")
+        for newest in self.backups():
+            taken = self.backup_time(newest)
+            if taken is None:
+                continue
             if (datetime.now() - taken).total_seconds() < max_age_hours * 3600:
                 return None
+            break
         return self.backup(reason="daily")
 
     @staticmethod

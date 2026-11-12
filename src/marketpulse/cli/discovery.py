@@ -61,6 +61,17 @@ def _catalog(group: click.Group, prefix: str = "", depth: int = 1) -> list[dict[
 @click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip matching rows.")
 @click.option("--descending", is_flag=True, help="Reverse alphabetical command order.")
 @click.option("--details", is_flag=True, help="Include parameter names, flags, types and help.")
+@click.option("--exact", help="Select one complete command path, ignoring case and extra spaces.")
+@click.option("--prefix", help="Match a command path prefix, ignoring case.")
+@click.option("--exclude-group", "excluded_groups", multiple=True, help="Exclude a group and its descendants; repeat.")
+@click.option("--min-depth", type=click.IntRange(min=1), help="Minimum command nesting depth.")
+@click.option(
+    "--has-arguments/--no-arguments", default=None, help="Select commands with or without positional arguments."
+)
+@click.option("--has-required/--no-required", default=None, help="Select commands with or without required parameters.")
+@click.option("--parameter-search", help="Find parameter names, flags, types or help containing this text.")
+@click.option("--page-info", is_flag=True, help="With --json, include total, offset and limit before pagination.")
+@click.option("--paths", is_flag=True, help="Print only command paths, one per line, for scripts.")
 def commands(
     group_name,
     search,
@@ -76,18 +87,48 @@ def commands(
     offset,
     descending,
     details,
+    exact,
+    prefix,
+    excluded_groups,
+    min_depth,
+    has_arguments,
+    has_required,
+    parameter_search,
+    page_info,
+    paths,
 ) -> None:
     """Browse commands and options without opening the ledger or contacting providers."""
-    if sum((as_json, as_csv, markdown, count)) > 1:
-        raise click.UsageError("Choose one of --json, --csv, --markdown or --count.")
+    if sum((as_json, as_csv, markdown, count, paths)) > 1:
+        raise click.UsageError("Choose one of --json, --csv, --markdown, --count or --paths.")
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
+    if paths and details:
+        raise click.UsageError("--paths cannot be combined with --details.")
+    if min_depth is not None and depth is not None and min_depth > depth:
+        raise click.UsageError("--min-depth must be at most --depth.")
     if leaves and groups:
         raise click.UsageError("Choose --leaves or --groups.")
     if count and (limit is not None or offset):
         raise click.UsageError("--count cannot be combined with pagination.")
     rows = _catalog(main)
+    for label, value in (("--exact", exact), ("--prefix", prefix), ("--parameter-search", parameter_search)):
+        if value is not None and not value.strip():
+            raise click.BadParameter("Cannot be blank.", param_hint=label)
+    excluded = {" ".join(value.split()) for value in excluded_groups}
+    valid_groups = {r["command"] for r in rows if r["group"]}
+    if excluded - valid_groups:
+        raise click.BadParameter("Unknown command group.", param_hint="--exclude-group")
+    if excluded:
+        rows = [r for r in rows if not any(r["command"] == g or r["command"].startswith(g + " ") for g in excluded)]
+    if exact is not None:
+        wanted = " ".join(exact.split()).casefold()
+        rows = [r for r in rows if r["command"].casefold() == wanted]
+    if prefix is not None:
+        wanted = " ".join(prefix.split()).casefold()
+        rows = [r for r in rows if r["command"].casefold().startswith(wanted)]
     if group_name:
         group_name = " ".join(group_name.split())
-        if not any(r["command"] == group_name and r["group"] for r in rows):
+        if group_name not in valid_groups:
             raise click.BadParameter("Unknown command group.", param_hint="--group")
         rows = [r for r in rows if r["command"] == group_name or r["command"].startswith(group_name + " ")]
     if search:
@@ -98,17 +139,36 @@ def commands(
     rows = [
         r
         for r in rows
-        if (not leaves or not r["group"]) and (not groups or r["group"]) and (depth is None or r["depth"] <= depth)
+        if (not leaves or not r["group"])
+        and (not groups or r["group"])
+        and (depth is None or r["depth"] <= depth)
+        and (min_depth is None or r["depth"] >= min_depth)
+        and (has_arguments is None or any(p["kind"] == "argument" for p in r["parameters"]) == has_arguments)
+        and (has_required is None or any(p["required"] for p in r["parameters"]) == has_required)
+        and (
+            parameter_search is None
+            or any(
+                parameter_search.strip().casefold()
+                in " ".join([p["name"] or "", *p["flags"], p["type"], p["help"] or ""]).casefold()
+                for p in r["parameters"]
+            )
+        )
     ]
     if count:
         click.echo(len(rows))
         return
     rows.sort(key=lambda r: r["command"], reverse=descending)
+    total = len(rows)
     rows = rows[offset:][:limit]
+    if paths:
+        for row in rows:
+            click.echo(row["command"])
+        return
     if not details:
         rows = [{k: v for k, v in r.items() if k != "parameters"} for r in rows]
     if as_json:
-        click.echo(json.dumps(rows, ensure_ascii=False))
+        payload = {"rows": rows, "total": total, "offset": offset, "limit": limit} if page_info else rows
+        click.echo(json.dumps(payload, ensure_ascii=False))
     elif as_csv:
         stream = io.StringIO(newline="")
         writer = csv.DictWriter(
