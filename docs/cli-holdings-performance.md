@@ -70,3 +70,6 @@ when prices are stale or something is excluded. Weights stay a share of the whol
 portfolio (or of the account with `-a`). Human output respects privacy mode; JSON,
 CSV, `--count` and `--metric` are raw. Conflicting output options are usage errors
 (exit 2).
+
+With any of these options, `-a` takes only active accounts: an archived account
+fails like an unknown one, by name or id.

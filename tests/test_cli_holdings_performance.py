@@ -146,6 +146,23 @@ def test_gainers_losers_and_min_weight(priced, store):
     assert "GONE" in symbols(priced)
 
 
+def test_gainers_and_losers_leave_out_positions_missing_fx(priced, store, fake):
+    fake.set_quote("EURO.DE", 12.0, 11.0, "EUR", "Fictional Euro Fund", "ETF")  # no EURCAD rate
+    income = store.get_account("Fictional Income")
+    store.add_transaction(Transaction(income.saved_id, TxnType.BUY, "2024-02-01", "EURO.DE", 5, 10, 0, currency="EUR"))
+    assert "EURO.DE" in symbols(priced)
+    assert "EURO.DE" not in symbols(priced, "--gainers") + symbols(priced, "--losers")
+
+
+@pytest.mark.parametrize("ref", ["Fictional Hidden", "3"])
+def test_inspection_options_reject_archived_accounts_by_name_or_id(priced, store, ref):
+    unpriced_extra(store)
+    assert store.get_account("Fictional Hidden").id == 3
+    for extra in (["--json"], ["--count"], ["--excluded"], ["--sort", "symbol"]):
+        result = priced("holdings", "-a", ref, *extra)
+        assert result.exit_code == 1 and f"No active account '{ref}'" in result.output, result.output
+
+
 def test_limit_offset_and_count(priced):
     base = ("--sort", "value", "--descending")
     assert symbols(priced, *base, "--limit", "1") == ["XEQT.TO"]

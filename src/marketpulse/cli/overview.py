@@ -16,7 +16,7 @@ from rich.text import Text
 
 from .. import fmt, render
 from ..valuation import PortfolioView, PositionView
-from .base import App, pass_app
+from .base import App, fail, pass_app
 from .root import main
 
 HOLDING_FIELDS = [
@@ -325,6 +325,8 @@ def holdings(
         raise click.UsageError("--excluded combines only with -a/--account and --json.")
     machine = as_json or as_csv or count_only
     acct = app.account(account) if account else None
+    if acct is not None and acct.archived and (machine or filtered or paged or sort_by is not None or show_excluded):
+        fail(f"No active account '{account}'.")  # archived accounts are reported exactly like unknown ones
     # The same valuation (and snapshot) as the plain table: options only choose what is shown.
     with contextlib.nullcontext() if machine else app.busy("Pricing holdings…"):
         view = app.tracker.valuation(account_id=acct.id if acct else None)
@@ -347,8 +349,8 @@ def holdings(
         for p in view.positions
         if (needle is None or needle in p.symbol.casefold())
         and (wanted is None or p.currency.upper() == wanted)
-        and (not gainers or (p.gain is not None and p.gain > 0))
-        and (not losers or (p.gain is not None and p.gain < 0))
+        and (not gainers or (p.priced and p.gain is not None and p.gain > 0))
+        and (not losers or (p.priced and p.gain is not None and p.gain < 0))
         and (min_weight is None or (p.priced and p.weight >= min_weight))
         and (not stale_only or p.stale)
     ]
