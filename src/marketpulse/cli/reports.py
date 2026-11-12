@@ -13,7 +13,7 @@ from typing import Any
 
 import click
 
-from . import report_catalog, report_portfolio
+from . import report_catalog, report_filters, report_output, report_portfolio
 from .base import App, pass_app
 from .root import main
 
@@ -110,7 +110,68 @@ def _emit(text: str, output: Path | None) -> None:
                 os.unlink(temporary)
 
 
+# The option groups share a pipeline; their implementation modules do not open data sources.
+FILTER_HELP = {
+    "ieq": "Keep FIELD=TEXT equality matches, ignoring case.",
+    "ine": "Exclude FIELD=TEXT equality matches, ignoring case.",
+    "not_contains": "Exclude FIELD=TEXT substring matches, ignoring case.",
+    "not_prefix": "Exclude FIELD=TEXT prefix matches, ignoring case.",
+    "not_suffix": "Exclude FIELD=TEXT suffix matches, ignoring case.",
+    "gt": "Keep numeric FIELD=VALUE strictly greater than VALUE.",
+    "ge": "Keep numeric FIELD=VALUE greater than or equal to VALUE.",
+    "lt": "Keep numeric FIELD=VALUE strictly less than VALUE.",
+    "le": "Keep numeric FIELD=VALUE less than or equal to VALUE.",
+    "between": "Keep numeric FIELD=LOW,HIGH inside inclusive bounds.",
+    "outside": "Keep numeric FIELD=LOW,HIGH outside inclusive bounds.",
+    "in_values": "Keep typed FIELD=JSON_ARRAY membership matches.",
+    "not_in": "Exclude typed FIELD=JSON_ARRAY membership matches.",
+    "empty": "Keep empty FIELD values (null, empty string, array or object).",
+    "nonempty": "Keep nonempty FIELD values; zero and false are nonempty.",
+    "is_type": "Keep FIELD=TYPE (string, number, boolean, array, object, null).",
+    "length": "Keep string/array/object FIELD=N with exactly N elements.",
+    "min_length": "Keep string/array/object FIELD=N with at least N elements.",
+    "max_length": "Keep string/array/object FIELD=N with at most N elements.",
+    "glob": "Keep case-sensitive FIELD=PATTERN shell wildcard matches.",
+}
+OUTPUT_HELP = {
+    "lower": "Lowercase string FIELD for output.",
+    "upper": "Uppercase string FIELD for output.",
+    "strip": "Strip whitespace from both ends of string FIELD.",
+    "lstrip": "Strip leading whitespace from string FIELD.",
+    "rstrip": "Strip trailing whitespace from string FIELD.",
+    "replace": 'Replace in string FIELD=["old","new"] (JSON array).',
+    "fill": "Replace null FIELD=JSON values for output.",
+    "null_if": "Replace typed FIELD=JSON matches with null for output.",
+    "stringify": "Convert FIELD to report text for output (null becomes empty).",
+    "encode_json": "Serialize FIELD to a JSON string for output.",
+    "decode_json": "Parse JSON strings in FIELD for output; invalid JSON is an error.",
+    "length_of": "Replace FIELD with its string/array/object length, otherwise null.",
+    "round_values": "Round numeric FIELD=DIGITS (0–15) for output only.",
+    "rename": "Rename output FIELD=NAME; aliases apply simultaneously.",
+    "constant": "Append output NAME=JSON constant column.",
+}
+
+
+def _advanced_options(command):
+    specs = {**FILTER_HELP, **OUTPUT_HELP}
+    for name, help_text in reversed(tuple(specs.items())):
+        spelling = {"in_values": "in", "round_values": "round"}.get(name, name.replace("_", "-"))
+        command = click.option("--" + spelling, name, multiple=True, help=help_text)(command)
+    command = click.option("--sort-ci", multiple=True, help="Sort by FIELD ignoring case; repeat for tie breakers.")(
+        command
+    )
+    command = click.option("--reverse-rows", is_flag=True, help="Reverse rows after sorting.")(command)
+    command = click.option("--tail", type=click.IntRange(min=1), help="Keep the last N rows before pagination.")(
+        command
+    )
+    command = click.option(
+        "--every", type=click.IntRange(min=1), default=1, help="Keep every Nth row before pagination."
+    )(command)
+    return click.option("--row-number", help="Append a NAME column with 1-based positions before pagination.")(command)
+
+
 @main.command("report")
+@_advanced_options
 @click.argument("source", type=click.Choice(sorted(SOURCES)))
 @click.option("--fields", help="Comma-separated columns to retain, in order.")
 @click.option("--omit", help="Comma-separated columns to remove.")
@@ -164,15 +225,20 @@ def report(
     page_info,
     describe,
     output,
+    **advanced,
 ) -> None:
     """Query saved datasets offline. Script output is raw and unmasked; configuration secrets stay redacted.
 
-    Filters combine with AND; processing is filter, unique, sort, pagination,
-    projection, export. No quotes are fetched or snapshots recorded.
+    Filters combine with AND; processing is filter, unique, sort, row windows,
+    pagination, output transformations, projection, export. No quotes are fetched or snapshots recorded.
     """
     schema = SOURCES[source]
-    selected = _fields(fields, schema) or list(schema)
-    omitted = _fields(omit, schema)
+    filter_options = {name: advanced[name] for name in FILTER_HELP}
+    matches = report_filters.compile_filters(schema, filter_options)
+    output_options = {name: advanced[name] for name in (*OUTPUT_HELP, "row_number")}
+    output_plan = report_output.OutputPlan(schema, output_options)
+    selected = _fields(fields, output_plan.schema) or list(output_plan.schema)
+    omitted = _fields(omit, output_plan.schema)
     if fields is not None and omit is not None:
         raise click.UsageError("Choose --fields or --omit.")
     selected = [field for field in selected if field not in omitted]
@@ -181,17 +247,23 @@ def report(
     conditions = [
         [_condition(value, schema) for value in values] for values in (where, not_values, contains, prefix, suffix)
     ]
-    for field in (*present, *missing, *sort, *unique):
+    sort_ci = advanced["sort_ci"]
+    for field in (*present, *missing, *sort, *sort_ci, *unique):
         if field not in schema:
             raise click.UsageError(f"Unknown field '{field}'. Choose from: {', '.join(schema)}.")
-    if descending and not sort:
-        raise click.UsageError("--descending requires --sort.")
+    if sort and sort_ci:
+        raise click.UsageError("Choose --sort or --sort-ci.")
+    if descending and not (sort or sort_ci):
+        raise click.UsageError("--descending requires --sort or --sort-ci.")
+    if count and any(output_options.values()):
+        raise click.UsageError("--count cannot combine with output transformations.")
     if page_info and (output_format != "json" or count):
         raise click.UsageError("--page-info requires JSON row output.")
     if count and (offset or limit is not None or fields is not None or omit is not None or output_format != "json"):
         raise click.UsageError("--count cannot combine with pagination, projection or alternate formats.")
+    advanced_active = any(value != 1 if name == "every" else bool(value) for name, value in advanced.items())
     if describe:
-        if any(
+        if advanced_active or any(
             (
                 fields is not None,
                 omit is not None,
@@ -222,7 +294,8 @@ def report(
     rows = [
         row
         for row in rows
-        if all(_text(row[field]) == value for field, value in exact)
+        if matches(row)
+        and all(_text(row[field]) == value for field, value in exact)
         and all(_text(row[field]) != value for field, value in excluded)
         and all(value.casefold() in _text(row[field]).casefold() for field, value in substrings)
         and all(_text(row[field]).casefold().startswith(value.casefold()) for field, value in prefixes)
@@ -239,20 +312,28 @@ def report(
                 seen.add(key)
                 distinct.append(row)
         rows = distinct
-    for field in reversed(sort):
+    for field in reversed(sort or sort_ci):
         # Nested values order by canonical JSON; keep numeric and missing groups fixed in both directions.
         rows.sort(
             key=lambda row: (
                 0 if isinstance(row[field], (int, float)) else 1,
-                row[field] if isinstance(row[field], (int, float)) else _text(row[field]),
+                row[field]
+                if isinstance(row[field], (int, float))
+                else (_text(row[field]).casefold() if sort_ci else _text(row[field])),
             ),
             reverse=descending,
         )
         rows.sort(key=lambda row: (row[field] is None or row[field] == "", not isinstance(row[field], (int, float))))
+    if advanced["reverse_rows"]:
+        rows = rows[::-1]
+    if advanced["tail"] is not None:
+        rows = rows[-advanced["tail"] :]
+    rows = rows[:: advanced["every"]]
     total = len(rows)
     if count:
         _emit(str(total) + "\n", output)
         return
-    rows = [{field: row[field] for field in selected} for row in rows[offset:][:limit]]
+    rows = output_plan.apply(rows[offset:][:limit], start=offset)
+    rows = [{field: row[field] for field in selected} for row in rows]
     envelope = {"source": source, "total": total, "offset": offset, "limit": limit} if page_info else None
     _emit(_serialize(rows, selected, output_format, envelope), output)

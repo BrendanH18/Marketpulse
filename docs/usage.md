@@ -31,7 +31,8 @@ extend realized gains, payouts, asset metadata, snapshots and backup browsing,
 and add saved target inspection (`marketpulse targets`) and command selectors.
 
 For a shared offline query and export interface across 25 saved datasets, see
-[Composable offline reports](cli-composable-reports.md) (`marketpulse report SOURCE`).
+[Composable offline reports](cli-composable-reports.md) (`marketpulse report SOURCE`),
+including [1,000 more filtering and output capabilities](cli-report-improvements.md).
 
 ## Accounts and transactions
 

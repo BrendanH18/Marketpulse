@@ -13,6 +13,11 @@ dataset, not 500 unrelated features. Some operations were already available on
 individual commands; this interface makes their spelling and composition
 consistent across all sources.
 
+An additional [40 shared query and output operations](cli-report-improvements.md)
+add 1,000 more dataset/operation combinations, including numeric filters, typed
+membership, output transformations and row windows. The inventory below records
+the original batch.
+
 ## Start with the schema
 
 Run `marketpulse report SOURCE --describe` to see the source's ordered field
@@ -71,8 +76,9 @@ may be combined unless a validation error explains an incompatible combination.
 | 19 | `--format markdown` | Emit a Markdown table. |
 | 20 | `--page-info` | Wrap default JSON output with pagination metadata. |
 
-The operation order is filtering, deduplication, sorting, counting or pagination,
-column selection, then serialization. Thus `--unique` keeps the first matching
+The original operation order is filtering, deduplication, sorting, counting or pagination,
+column selection, then serialization. When using the added operations, see the
+[extended processing order](cli-report-improvements.md#processing-and-composition). Thus `--unique` keeps the first matching
 row in source order before sorting. `--count` counts deduplicated matches before
 pagination. Missing sort values remain last in either direction. Unknown field
 names and invalid option values are rejected before loading source data.
