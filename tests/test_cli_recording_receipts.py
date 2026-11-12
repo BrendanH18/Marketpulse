@@ -1,6 +1,7 @@
 """Recording previews, receipts and shortcuts (#130, items 1–10) on a fictional ledger."""
 
 import json
+from dataclasses import replace
 
 import pytest
 from click.testing import CliRunner
@@ -238,6 +239,26 @@ def test_once_skips_an_identical_entry(cli, store, maple):
     # A different note is a different entry.
     cli("dividend", "XEQT.TO", "2.5", "-a", "Maple Cash", "-d", "2025-01-31", "-m", "Q1", "--once")
     assert len(store.transactions()) == 4
+
+
+def test_once_checks_again_under_the_write_lock(cli, store, maple, monkeypatch):
+    """Another run saves the same entry just after the first check: it is still saved once."""
+    from marketpulse.cli import recording
+
+    real = recording._same
+    calls = []
+
+    def racing(app, txn):
+        calls.append(1)
+        if len(calls) == 1:
+            store.add_transaction(replace(txn, id=None))  # the other run wins the race
+            return None
+        return real(app, txn)
+
+    monkeypatch.setattr(recording, "_same", racing)
+    result = cli("dividend", "XEQT.TO", "2.5", "-a", "Maple Cash", "-d", "2025-01-31", "--once")
+    assert result.output == f"✓ Already recorded (#{store.transactions()[-1].id}); nothing saved.\n"
+    assert len(store.transactions()) == 3
 
 
 # 8. --total

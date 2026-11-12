@@ -9,7 +9,7 @@ report converts them. For native-currency payout lists with no conversion, use
 `marketpulse payouts`. The examples use fictional accounts.
 
 71. `income --json` prints the report as raw, unmasked JSON: `base_currency`, `window_months`, `year`, `months` (`month`, `amount`), `window_total`, `sources_year`, `sources` (`source`, `amount`), `sources_total`, `forecast` (rows of `symbol`, `name`, `quantity`, `per_share_ttm`, `currency`, `annual`, `base_currency`, `annual_base`, `yield_pct`, `yield_on_cost_pct`; `null` with `--no-forecast`), `forecast_total` and `unconverted`, the payouts left out because no FX rate converts them.
-72. `income --csv` prints the monthly totals as `month,amount,base_currency` rows with `\n` line endings (with `--by`, the groups; with `--forecast-only`, the forecast rows). CSV never fetches distribution history.
+72. `income --csv` prints the monthly totals as `month,amount,base_currency` rows with `\n` line endings (with `--by`, the groups; with `--forecast-only`, the forecast rows). CSV never fetches distribution history. Payouts left out for want of an FX rate are named on stderr, so the CSV on stdout stays clean.
 73. `income --months 36` widens the monthly history to the last 36 months (1–120; 12 by default). The header reads `LAST 36 MONTHS`, and the chart shows as many of the most recent months as fit the terminal; JSON and CSV have them all.
 74. `income --year 2024` charts January to December 2024 and lists that year's sources. It can't be combined with `--months`.
 75. `income -a "Fictional Income"` keeps one active account's income (name, id or type); the forward estimate covers that account's holdings. Archived accounts fail like unknown ones.

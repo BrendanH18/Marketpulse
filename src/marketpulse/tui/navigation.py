@@ -254,7 +254,7 @@ def symbol_activity(app: MarketPulseApp) -> None:
     if not symbol:
         app.notify("Select a row with a symbol first", timeout=3)
         return
-    app.query_one("#activity-filter", Input).value = symbol
+    app.query_one("#activity-filter", Input).value = f"={symbol}"  # exact: A doesn't match AAPL
     app.set_workspace("activity")
     app.render_activity()
 

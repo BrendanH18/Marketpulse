@@ -156,6 +156,8 @@ def test_holdings_filter_and_escape_clears(tracker, store):
             await pilot.pause()
             assert table.row_count == 0
             assert "no match" in app.query_one("#pane-holdings").border_subtitle
+            detail = app.query_one("#holding-detail", Static)
+            assert str(detail.render()) == "Select a holding."  # not the last holding shown
             await pilot.press("escape")  # 87
             await pilot.pause()
             assert box.value == "" and not box.display and table.has_focus and table.row_count == 3
@@ -261,11 +263,18 @@ def test_chart_selected_and_symbol_transactions(tracker, store):
             await pilot.press("T")  # 85: the chart's symbol, in activity
             await pilot.pause()
             assert app.workspace == "activity"
-            assert app.query_one("#activity-filter", Input).value == "AAPL"
+            box = app.query_one("#activity-filter", Input)
+            assert box.value == "=AAPL"
+            assert app.query_one("#activity-table", DataTable).row_count == 2
+            box.value = "=AAP"  # exact: a prefix of the symbol matches nothing…
+            await pilot.pause()
+            assert app.query_one("#activity-table", DataTable).row_count == 0
+            box.value = "aap"  # …while plain text still matches anywhere
+            await pilot.pause()
             assert app.query_one("#activity-table", DataTable).row_count == 2
             await pilot.press("2", "T")
             await pilot.pause()
-            assert app.query_one("#activity-filter", Input).value == "XEQT.TO"
+            assert app.query_one("#activity-filter", Input).value == "=XEQT.TO"
             assert app.query_one("#activity-table", DataTable).row_count == 2
             await pilot.press("7", "v", "T")  # accounts have no symbol
             assert app.workspace == "tax"

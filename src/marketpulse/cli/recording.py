@@ -424,16 +424,9 @@ def _finish(app: App, txn: Transaction, accounts: list[Account], describe: Descr
         return
     if ex.once:
         _normalize(app, txn)
-        same = next((t for t in app.store.transactions() if replace(t, id=None) == replace(txn, id=None)), None)
+        same = _same(app, txn)
         if same is not None:
-            if ex.json:
-                existing = _outcome(app, same, accounts, describe)
-                existing.message = f"Already recorded (#{same.id})."
-                click.echo(json.dumps(_receipt(app, existing, dry_run=False, duplicate=True), ensure_ascii=False))
-            elif ex.quiet:
-                click.echo(str(same.id))
-            else:
-                app.ok(f"Already recorded (#{same.id}); nothing saved.")
+            _report_duplicate(app, same, accounts, describe, ex)
             return
     if ex.probes:
         preview = _probe(app, txn, accounts, describe)
@@ -446,8 +439,34 @@ def _finish(app: App, txn: Transaction, accounts: list[Account], describe: Descr
             _show(app, preview, replace(ex, balance=False), dry_run=True)
             if not click.confirm("Record it?", default=False):
                 fail("Not recorded.")
-    saved = record(app, txn)
+    if not ex.once:
+        saved = record(app, txn)
+    else:
+        # Checked again with the save under one write lock, so overlapping runs save it once.
+        with app.store.atomic():
+            same = _same(app, txn)
+            if same is None:
+                saved = record(app, txn)
+        if same is not None:
+            _report_duplicate(app, same, accounts, describe, ex)
+            return
     _report(app, _outcome(app, saved, accounts, describe), ex, dry_run=False)
+
+
+def _same(app: App, txn: Transaction) -> Transaction | None:
+    """A saved entry identical to `txn` (apart from its id), for --once."""
+    return next((t for t in app.store.transactions() if replace(t, id=None) == replace(txn, id=None)), None)
+
+
+def _report_duplicate(app: App, same: Transaction, accounts: list[Account], describe: Describe, ex: Extras) -> None:
+    if ex.json:
+        existing = _outcome(app, same, accounts, describe)
+        existing.message = f"Already recorded (#{same.id})."
+        click.echo(json.dumps(_receipt(app, existing, dry_run=False, duplicate=True), ensure_ascii=False))
+    elif ex.quiet:
+        click.echo(str(same.id))
+    else:
+        app.ok(f"Already recorded (#{same.id}); nothing saved.")
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────

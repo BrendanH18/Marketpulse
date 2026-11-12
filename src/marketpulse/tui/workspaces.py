@@ -274,10 +274,12 @@ def render_holdings(app: MarketPulseApp) -> None:
     if order:
         subtitle += f" · {order}"
     app.query_one("#pane-holdings").border_subtitle = subtitle
-    if app._detail_key is None and positions:
-        first = app._selected_key(table)
+    if app._detail_key is None:
+        first = app._selected_key(table) if positions else None
         if first and not first.startswith("cash:"):
             app._show_position(first)
+        else:
+            app.render_position_detail()  # nothing selected (a filter matched no holding): clear the pane
 
 
 def render_watchlist(app: MarketPulseApp) -> None:
@@ -312,9 +314,13 @@ def render_activity(app: MarketPulseApp) -> None:
     needle = app.query_one("#activity-filter", Input).value.strip().lower()
     txns = navigation.sort_transactions(app, store.transactions(), accounts)
     shown = 0
+    exact = needle[1:].strip().upper() if needle.startswith("=") else None  # "=SYM": that symbol only
     for t in txns:
         cells = render.activity_cells(t, accounts, privacy=app.privacy)
-        if needle and needle not in " ".join(c.plain.lower() for c in cells):
+        if exact is not None:
+            if t.symbol != exact:
+                continue
+        elif needle and needle not in " ".join(c.plain.lower() for c in cells):
             continue
         table.add_row(*app._justify(cells, (0, 5, 6, 7, 8)), key=str(t.id))
         shown += 1

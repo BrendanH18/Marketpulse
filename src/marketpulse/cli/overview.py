@@ -360,10 +360,12 @@ def _template_values(view: PortfolioView, privacy: bool) -> dict[str, str]:
 def _check_template(template: str) -> None:
     """Allow only the known placeholders (no attribute or index access) and well-formed braces."""
     try:
-        names = [name for _, name, _, _ in string.Formatter().parse(template) if name is not None]
+        fields = [(name, spec, conv) for _, name, spec, conv in string.Formatter().parse(template) if name is not None]
     except ValueError as e:
         raise click.UsageError(f"Invalid --format template: {e}.") from None
-    for name in names:
+    for name, spec, conv in fields:
+        if spec or conv:
+            raise click.UsageError(f"Placeholders take no format spec or conversion: {{{name}}} is already formatted.")
         if name not in TEMPLATE_PLACEHOLDERS:
             known = ", ".join("{" + a + "}" for a in TEMPLATE_PLACEHOLDERS)
             raise click.UsageError(f"Unknown placeholder {{{name}}}. Use: {known}.")
@@ -899,6 +901,7 @@ def _selected_income(
             groups = [g for g in groups if id(g) in keep]
         if as_csv:
             _echo_rows(["group", "label", "count", "amount", "base_currency"], groups, view.base)
+            _warn_unconverted(app, view.base, missing, stderr=True)
         elif as_json:
             payload = {
                 "base_currency": view.base,
@@ -920,6 +923,7 @@ def _selected_income(
         sources = sources[: sel.top]
     if as_csv:
         _echo_rows(["month", "amount", "base_currency"], [{"month": m, "amount": a} for m, a in months], view.base)
+        _warn_unconverted(app, view.base, missing, stderr=True)
         return
     if as_json:
         payload = {
@@ -1123,9 +1127,14 @@ def _forecast_only(
     app.console.print(_forecast_table(forecast, view.base, app.privacy))
 
 
-def _warn_unconverted(app: App, base: str, missing: list[dict[str, Any]]) -> None:
+def _warn_unconverted(app: App, base: str, missing: list[dict[str, Any]], *, stderr: bool = False) -> None:
+    """Name payouts left out for want of an FX rate; on stderr when stdout is CSV for a script."""
     if missing:
         currencies = ", ".join(sorted({m["currency"] for m in missing}))
         n = len(missing)
         noun, verb = ("payout", "has") if n == 1 else ("payouts", "have")
-        app.warn(f"{n} {noun} in {currencies} {verb} no FX rate to {base} and {'is' if n == 1 else 'are'} left out.")
+        message = f"{n} {noun} in {currencies} {verb} no FX rate to {base} and {'is' if n == 1 else 'are'} left out."
+        if stderr:
+            click.echo(f"! {message}", err=True)
+        else:
+            app.warn(message)

@@ -160,6 +160,12 @@ def test_status_format_rejects_unknown_placeholders_and_bad_braces(cli, template
     assert result.exit_code == 2 and ("Unknown placeholder" in result.output or "Invalid --format" in result.output)
 
 
+@pytest.mark.parametrize("template", ["{net_worth:>{width}}", "{net_worth:.2f}", "{net_worth!r}"])
+def test_status_format_rejects_format_specs_and_conversions(cli, template):
+    result = cli("status", "--format", template)
+    assert result.exit_code == 2 and "take no format spec or conversion" in result.output
+
+
 # ── 63 status --exit-code ─────────────────────────────────────────────────────
 
 

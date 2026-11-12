@@ -150,6 +150,11 @@ def test_unconverted_payouts_are_listed_not_counted_as_zero(cli, store):
     assert len(report(cli, "--months", "36", "--by", "month")["unconverted"]) == 2
     human = cli("income", "--no-forecast", "--months", "12")
     assert "1 payout in EUR has no FX rate to CAD and is left out." in human.output
+    csv_out = cli("income", "--no-forecast", "--months", "12", "--csv")
+    assert "! 1 payout in EUR has no FX rate to CAD and is left out." in csv_out.stderr
+    assert csv_out.stdout.startswith("month,amount,base_currency\n") and "EUR" not in csv_out.stdout
+    by_month = cli("income", "--by", "month", "--months", "12", "--csv")
+    assert "! 1 payout in EUR" in by_month.stderr and "!" not in by_month.stdout
 
 
 # ── 72 income --csv ───────────────────────────────────────────────────────────
