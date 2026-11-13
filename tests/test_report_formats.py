@@ -1338,13 +1338,13 @@ def test_non_finite_config_value_does_not_crash(output_format):
 
 @pytest.mark.parametrize("output_format", NEW_FORMATS)
 def test_output_of_a_value_utf8_cannot_encode_fails_cleanly(monkeypatch, tmp_path, output_format):
-    # A data path that is not valid UTF-8 reaches Python as a lone surrogate (surrogateescape).
-    monkeypatch.setenv("MARKETPULSE_DATA", str(tmp_path / "fic\udcfftional"))
+    # A non-UTF-8 path, such as a data directory on Linux, reaches Python as a lone surrogate
+    # (surrogateescape). Serve one directly: macOS file systems refuse to create such a path.
     folder = tmp_path / "exports"
     folder.mkdir()
     target = folder / "paths.out"
-    arguments = ["report", "paths", "--where", "name=data", "--fields", "path", "--format", output_format]
-    result = CliRunner().invoke(main, [*arguments, "--output", str(target)])
+    arguments = ["report", "config", "--fields", "key", "--format", output_format, "--output", str(target)]
+    result = run(monkeypatch, [{"key": "/fictional/fic\udcfftional", "value": None}], *arguments)
     assert result.exception is None or isinstance(result.exception, SystemExit), repr(result.exception)
     assert result.exit_code == 1 and "Cannot write report" in result.output
     assert list(folder.iterdir()) == []
