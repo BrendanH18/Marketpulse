@@ -27,6 +27,22 @@ SOURCES: dict[str, tuple[str, ...]] = {
     "compounding": ("value", "periods_per_year"),
 }
 
+GROUP = "catalog"
+DESCRIPTIONS: dict[str, str] = {
+    "config": "Current settings with secrets redacted.",
+    "config-defaults": "Default settings with secrets redacted.",
+    "config-diff": "Settings differing from their defaults, with secrets redacted.",
+    "config-keys": "Available configuration keys.",
+    "themes": "Embedded theme metadata.",
+    "commands": "Registered CLI command metadata.",
+    "providers": "Provider status without a quote request.",
+    "account-types": "Supported account types.",
+    "transaction-types": "Supported transaction types.",
+    "asset-kinds": "Supported asset kinds.",
+    "asset-classes": "Supported asset classes.",
+    "compounding": "Supported compounding schedules.",
+}
+
 
 def load_source(name: str, app: App) -> list[dict[str, Any]]:
     """Read one named catalog, retaining native JSON values and redacting API keys.

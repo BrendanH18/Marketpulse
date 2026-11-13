@@ -12,7 +12,7 @@ from typing import Any
 
 import click
 
-from . import report_filters, report_metrics, reports
+from . import report_derive, report_filters, report_metrics, reports
 from .base import App, pass_app
 from .root import main
 
@@ -106,6 +106,11 @@ def _filter_options(command):
 @main.command("summarize")
 @_filter_options
 @click.argument("source", type=click.Choice(sorted(reports.SOURCES)))
+@click.option(
+    "--derive",
+    multiple=True,
+    help="Add a computed NAME=FUNCTION:FIELD[:ARGUMENT] source field; list functions with `report derive-functions`.",
+)
 @click.option("--metric", multiple=True, help="Append NAME=OP[:FIELD]; repeat for multiple summaries.")
 @click.option("--group-by", multiple=True, help="Group on source FIELD; repeat for a composite key.")
 @click.option("--where", multiple=True, help="Keep exact source FIELD=VALUE text matches; repeat for AND.")
@@ -127,6 +132,7 @@ def _filter_options(command):
 def summarize(
     app: App,
     source: str,
+    derive: tuple[str, ...],
     metric: tuple[str, ...],
     group_by: tuple[str, ...],
     where: tuple[str, ...],
@@ -142,13 +148,17 @@ def summarize(
 ) -> None:
     """Summarize saved rows offline, without fetching quotes or recording snapshots.
 
-    Source filters run before grouping; group summaries run before sorting and pagination.
+    Derived fields are computed first; source filters run before grouping; group summaries
+    run before sorting and pagination.
     Script output is raw and unmasked; configuration secrets remain redacted.
     """
-    schema = reports.SOURCES[source]
+    # Derived fields join the schema first, so filters, grouping and metrics can name them.
+    derived = report_derive.DerivePlan(reports.SOURCES[source], derive)
+    schema = derived.schema
     if describe:
         if any(
             (
+                derive,
                 metric,
                 group_by,
                 where,
@@ -185,7 +195,7 @@ def summarize(
         raise click.UsageError("--output must name a new file; refusing to overwrite.")
     rows = [
         row
-        for row in reports.load_source(source, app)
+        for row in derived.apply(reports.load_source(source, app))
         if matches(row) and all(reports._text(row[field]) == value for field, value in exact)
     ]
     summaries = _summarize(rows, group_by, metrics)

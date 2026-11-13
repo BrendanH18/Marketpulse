@@ -13,11 +13,24 @@ from typing import Any
 
 import click
 
-from . import report_catalog, report_filters, report_output, report_portfolio
+from . import (
+    report_catalog,
+    report_derive,
+    report_filters,
+    report_ledger,
+    report_output,
+    report_portfolio,
+    report_reference,
+    report_system,
+)
 from .base import App, pass_app
 from .root import main
 
-SOURCES = {**report_portfolio.SOURCES, **report_catalog.SOURCES}
+# Each module owns its adapters: SOURCES (ordered field schemas), DESCRIPTIONS, GROUP and load_source.
+SOURCE_MODULES = (report_portfolio, report_catalog, report_ledger, report_system, report_reference)
+SOURCES: dict[str, tuple[str, ...]] = {
+    name: schema for module in SOURCE_MODULES for name, schema in module.SOURCES.items()
+}
 
 
 def _text(value: Any) -> str:
@@ -45,8 +58,10 @@ def _condition(value: str, schema: tuple[str, ...]) -> tuple[str, str]:
 
 
 def load_source(source: str, app: App) -> list[dict[str, Any]]:
-    module = report_portfolio if source in report_portfolio.SOURCES else report_catalog
-    return module.load_source(source, app)
+    for module in SOURCE_MODULES:
+        if source in module.SOURCES:
+            return module.load_source(source, app)
+    raise KeyError(source)
 
 
 def _serialize(rows: list[dict[str, Any]], fields: list[str], output_format: str, envelope: dict | None) -> str:
@@ -173,6 +188,11 @@ def _advanced_options(command):
 @main.command("report")
 @_advanced_options
 @click.argument("source", type=click.Choice(sorted(SOURCES)))
+@click.option(
+    "--derive",
+    multiple=True,
+    help="Add a computed NAME=FUNCTION:FIELD[:ARGUMENT] column; list functions with `report derive-functions`.",
+)
 @click.option("--fields", help="Comma-separated columns to retain, in order.")
 @click.option("--omit", help="Comma-separated columns to remove.")
 @click.option("--where", multiple=True, help="Keep FIELD=VALUE exact matches; repeat for AND.")
@@ -206,6 +226,7 @@ def _advanced_options(command):
 def report(
     app: App,
     source,
+    derive,
     fields,
     omit,
     where,
@@ -229,10 +250,12 @@ def report(
 ) -> None:
     """Query saved datasets offline. Script output is raw and unmasked; configuration secrets stay redacted.
 
-    Filters combine with AND; processing is filter, unique, sort, row windows,
+    Filters combine with AND; processing is derived columns, filter, unique, sort, row windows,
     pagination, output transformations, projection, export. No quotes are fetched or snapshots recorded.
     """
-    schema = SOURCES[source]
+    # Derived columns join the schema first, so every later option can name them like source fields.
+    derived = report_derive.DerivePlan(SOURCES[source], derive)
+    schema = derived.schema
     filter_options = {name: advanced[name] for name in FILTER_HELP}
     matches = report_filters.compile_filters(schema, filter_options)
     output_options = {name: advanced[name] for name in (*OUTPUT_HELP, "row_number")}
@@ -265,6 +288,7 @@ def report(
     if describe:
         if advanced_active or any(
             (
+                derive,
                 fields is not None,
                 omit is not None,
                 where,
@@ -289,7 +313,7 @@ def report(
         return
     if output is not None and os.path.lexists(output):
         raise click.UsageError("--output must name a new file; refusing to overwrite.")
-    rows = load_source(source, app)
+    rows = derived.apply(load_source(source, app))
     exact, excluded, substrings, prefixes, suffixes = conditions
     rows = [
         row

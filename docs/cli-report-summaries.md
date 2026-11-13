@@ -6,7 +6,9 @@
 `marketpulse summarize SOURCE` adds **40 summary operations on each of 25 saved
 datasets = 1,000 new dataset/operation combinations**. These are shared operations
 across datasets; the count does not mean 1,000 unrelated features. The existing
-`report` command continues to return individual rows.
+`report` command continues to return individual rows. The operations also apply
+to the [25 datasets added later](cli-report-derived-datasets.md), and `--derive`
+fields can be grouped and summarized like source fields.
 
 Summaries use the same offline source adapters as `report`. They do not request
 quotes or historical prices, record snapshots, or change the ledger. Configuration

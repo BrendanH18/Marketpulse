@@ -8,6 +8,8 @@ saved datasets = 1,000 new dataset/operation capabilities**. The count describes
 shared operations available on different datasets, not 1,000 unrelated features.
 These extend the original 20 operations (500 combinations) from #136.
 No new sources, network requests or financial calculations are introduced.
+The operations also apply to the [25 datasets and derived fields added
+later](cli-report-derived-datasets.md).
 
 ## New operations
 
