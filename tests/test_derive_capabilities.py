@@ -220,6 +220,14 @@ def test_every_function_feeds_summaries(monkeypatch, case):
     assert json.dumps(json.loads(result.output)) == json.dumps([{"result": expected}])
 
 
+def _documented_sources():
+    """The 50 datasets #142 documents; datasets added later extend the matrices but not that inventory."""
+    from marketpulse.cli import report_catalog, report_ledger, report_portfolio, report_reference, report_system
+
+    modules = (report_portfolio, report_catalog, report_ledger, report_system, report_reference)
+    return [name for module in modules for name in module.SOURCES]
+
+
 def test_inventory_matches_documented_five_thousand():
     from marketpulse.cli import report_ledger, report_reference, report_system
     from marketpulse.cli.report_metrics import OPERATIONS
@@ -227,12 +235,13 @@ def test_inventory_matches_documented_five_thousand():
     new_sources = {**report_ledger.SOURCES, **report_system.SOURCES, **report_reference.SOURCES}
     functions = [function.name for function in report_derive.FUNCTIONS]
     assert len(new_sources) == 25
-    assert len(reports.SOURCES) == 50
+    assert len(_documented_sources()) == 50
+    assert set(_documented_sources()) <= set(reports.SOURCES)
     # 20 base and 40 added report operations plus 40 summary operations reach every new dataset.
     assert len(new_sources) * (20 + 40 + len(OPERATIONS)) == 2500
     assert [case[0] for case in CASES] == functions
     assert len(set(functions)) == 50
-    assert len(functions) * len(reports.SOURCES) == 2500
+    assert len(functions) * len(_documented_sources()) == 2500
     assert all("derived_value" not in schema and len(schema) >= 2 for schema in reports.SOURCES.values())
 
 
@@ -262,4 +271,4 @@ def test_documented_inventory_matches_the_code():
     existing = sorted(block for block in blocks if block[0][1] <= 2500)
     derived = sorted(block for block in blocks if block[0][0] > 2500)
     assert existing == [((100 * i + 1, 100 * i + 100), name) for i, (name, _, _) in enumerate(new_sources)]
-    assert derived == [((2500 + 50 * i + 1, 2500 + 50 * i + 50), name) for i, name in enumerate(reports.SOURCES)]
+    assert derived == [((2500 + 50 * i + 1, 2500 + 50 * i + 50), name) for i, name in enumerate(_documented_sources())]

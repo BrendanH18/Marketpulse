@@ -32,12 +32,12 @@ from marketpulse.themes import OMARCHY_PALETTES, Palette, resolve_palette
 RESULTS = {
     "integer": "count present missing empty nonempty distinct duplicates mode-count number-count number-distinct "
     "positive-count negative-count zero-count true-count false-count string-count array-count object-count "
-    "length-sum length-min length-max",
+    "length-sum length-min length-max date-count date-span",
     "decimal": "number-sum number-min number-max number-mean number-median number-range positive-sum negative-sum "
-    "absolute-sum length-mean",
+    "absolute-sum length-mean number-variance number-stdev number-q1 number-q3",
     "value": "first last first-present last-present mode",
-    "list": "values distinct-values",
-    "string": "text-min text-max",
+    "list": "values distinct-values value-counts repeated-values",
+    "string": "text-min text-max date-min date-max",
 }
 ROLES = "background surface panel selection border foreground bright muted accent up down warn info".split()
 
@@ -108,14 +108,15 @@ def test_cli_serves_each_catalog_through_the_registry(name, app):
 
 def test_registry_is_consistent_across_every_source_module():
     modules = reports.SOURCE_MODULES
-    assert len(modules) == 5
+    # #143 added report_history and report_interface after the five earlier modules.
+    assert len(modules) == 7
     assert {report_ledger, report_system, report_reference} <= set(modules)
     for module in modules:
         assert isinstance(module.GROUP, str) and module.GROUP
         assert set(module.DESCRIPTIONS) == set(module.SOURCES)
         assert all(text and text.endswith(".") for text in module.DESCRIPTIONS.values())
     names = [name for module in modules for name in module.SOURCES]
-    assert len(names) == len(set(names)) == 50
+    assert len(names) == len(set(names)) == 57
     assert sum(len(module.SOURCES) for module in (report_ledger, report_system, report_reference)) == 25
     assert set(reports.SOURCES) == set(names)
 
@@ -123,16 +124,16 @@ def test_registry_is_consistent_across_every_source_module():
 def test_sources_lists_every_dataset_by_name(app):
     rows = load_source("sources", app)
     names = [row["source"] for row in rows]
-    assert len(rows) == 50
+    assert len(rows) == 57
     assert names == sorted(names) == sorted(reports.SOURCES)
     assert all(row["fields"] == list(reports.SOURCES[row["source"]]) for row in rows)
     assert all(row["field_count"] == len(row["fields"]) for row in rows)
     assert Counter(row["group"] for row in rows) == {
         "portfolio": 13,
         "catalog": 12,
-        "ledger": 9,
+        "ledger": 11,
         "system": 5,
-        "reference": 11,
+        "reference": 16,
     }
     by_name = {row["source"]: row for row in rows}
     assert by_name["sources"] == {
@@ -158,15 +159,15 @@ def test_sources_lists_every_dataset_by_name(app):
             assert (by_name[name]["group"], by_name[name]["description"]) == (module.GROUP, description)
 
 
-def test_summary_operations_classify_all_forty_in_documented_order(app):
+def test_summary_operations_classify_all_fifty_in_documented_order(app):
     rows = load_source("summary-operations", app)
-    assert [row["position"] for row in rows] == list(range(1, 41))
-    assert [row["operation"] for row in rows] == list(report_metrics.OPERATIONS)
+    assert [row["position"] for row in rows] == list(range(1, 51))
+    assert [row["operation"] for row in rows] == list(report_metrics.ALL_OPERATIONS)
     assert [row["operation"] for row in rows if not row["takes_field"]] == ["count"]
     expected = {operation: result for result, operations in RESULTS.items() for operation in operations.split()}
     assert {row["operation"]: row["result"] for row in rows} == expected
     # A classification for an operation that no longer exists would be as wrong as a missing one.
-    assert set(report_reference._OPERATION_RESULTS) == set(report_metrics.OPERATIONS)
+    assert set(report_reference._OPERATION_RESULTS) == set(report_metrics.ALL_OPERATIONS)
     # Numbered as in the Operations table of docs/cli-report-summaries.md.
     assert rows[0] == {"position": 1, "operation": "count", "takes_field": False, "result": "integer"}
     assert rows[11] == {"position": 12, "operation": "mode", "takes_field": True, "result": "value"}
@@ -177,7 +178,8 @@ def test_summary_operations_classify_all_forty_in_documented_order(app):
 
 
 def test_summary_operation_results_are_what_the_operations_return(app):
-    cells = [3, 1.5, "alpha", "beta", [1, 2], {"k": 1}, False]
+    # A date, so the date summaries have one to return.
+    cells = [3, 1.5, "alpha", "beta", [1, 2], {"k": 1}, False, "2024-01-02"]
     holds = {
         "integer": lambda result: type(result) is int,
         "decimal": lambda result: type(result) is str and Decimal(result).is_finite(),
@@ -191,7 +193,7 @@ def test_summary_operation_results_are_what_the_operations_return(app):
 
 
 def test_an_unclassified_summary_operation_fails_loudly(app, monkeypatch):
-    monkeypatch.setattr(report_metrics, "OPERATIONS", (*report_metrics.OPERATIONS, "fictional-operation"))
+    monkeypatch.setattr(report_metrics, "ALL_OPERATIONS", (*report_metrics.ALL_OPERATIONS, "fictional-operation"))
     with pytest.raises(KeyError, match="fictional-operation"):
         load_source("summary-operations", app)
 
@@ -386,12 +388,14 @@ def test_cli_report_filters_and_exports_reference_rows():
     assert tsv_text.splitlines() == ["suffix\tcurrency", ".TO\tCAD", ".V\tCAD", ".NE\tCAD", ".CN\tCAD"]
     markdown = _cli("report", "sources", "--fields", "source,group,description", "--format", "markdown").splitlines()
     assert markdown[:2] == ["| source | group | description |", "| --- | --- | --- |"]
-    assert len(markdown) == 52
+    assert len(markdown) == 59
     assert "| sources | reference | Every report dataset with its group, fields and description. |" in markdown
-    assert _cli("report", "sources", "--where", "group=reference", "--count") == "11\n"
+    assert _cli("report", "sources", "--where", "group=reference", "--count") == "16\n"
     assert json.loads(_cli("report", "summary-operations", "--where", "result=list", "--fields", "operation")) == [
         {"operation": "values"},
         {"operation": "distinct-values"},
+        {"operation": "value-counts"},
+        {"operation": "repeated-values"},
     ]
     assert json.loads(_cli("report", "market-strip", "--where", "symbol=GC=F", "--omit", "position")) == [
         {"symbol": "GC=F", "label": "Gold", "default": True}
@@ -407,10 +411,10 @@ def test_cli_summarize_groups_reference_rows():
     ]
     by_result = ["summarize", "summary-operations", "--group-by", "result", "--metric", "operations=count"]
     assert json.loads(_cli(*by_result, "--sort", "operations", "--descending")) == [
-        {"result": "integer", "operations": 21},
-        {"result": "decimal", "operations": 10},
+        {"result": "integer", "operations": 23},
+        {"result": "decimal", "operations": 14},
         {"result": "value", "operations": 5},
-        {"result": "list", "operations": 2},
-        {"result": "string", "operations": 2},
+        {"result": "list", "operations": 4},
+        {"result": "string", "operations": 4},
     ]
     assert json.loads(_cli("summarize", "theme-colors", "--metric", "roles=distinct:role")) == [{"roles": 13}]
