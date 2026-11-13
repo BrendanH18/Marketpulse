@@ -32,7 +32,9 @@ and add saved target inspection (`marketpulse targets`) and command selectors.
 
 For a shared offline query and export interface across 25 saved datasets, see
 [Composable offline reports](cli-composable-reports.md) (`marketpulse report SOURCE`),
-including [1,000 more filtering and output capabilities](cli-report-improvements.md).
+including [1,000 more filtering and output capabilities](cli-report-improvements.md)
+and [1,000 grouped-summary capabilities](cli-report-summaries.md)
+(`marketpulse summarize SOURCE`).
 
 ## Accounts and transactions
 
