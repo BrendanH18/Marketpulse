@@ -335,6 +335,8 @@ def test_numbers_use_exact_decimals_and_json_types():
     assert _column(("n=floor:value",), ["1e20", -0.5, "-1e-400"]) == [1e20, -1, -1]
     assert _column(("n=ceil:value",), [0.5, -0.5, "1e-400"]) == [1, 0, 1]
     assert _column(("n=multiply:value:1e300",), ["1e300", 2]) == [None, 2e300]
+    # Beyond the decimal exponent range as well as a double's.
+    assert _column(("n=multiply:value:10",), ["9e999999"]) == [None]
 
 
 def test_rounding_and_buckets():
@@ -352,6 +354,8 @@ def test_rounding_and_buckets():
     assert _column(("n=bin:value:0.1",), [0.3, 0.25, -0.05, "0.999"]) == [0.3, 0.2, -0.1, 0.9]
     assert _column(("n=bin:value:2.5",), [5, 4.99, 7.5, -0.01]) == [5, 2.5, 7.5, -2.5]
     assert _column(("n=bin:value:1e400",), [1]) == [0]
+    # A quotient just below a bucket edge is not rounded up into the next bucket.
+    assert _column(("n=bin:value:0.10000000000000000000000000000000001",), [1, -1, "0.9"]) == [0.9, -1, 0.8]
 
 
 def test_two_field_arithmetic():

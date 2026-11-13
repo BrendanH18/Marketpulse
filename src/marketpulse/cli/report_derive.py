@@ -176,18 +176,11 @@ def _number(value: Any) -> Decimal | None:
 
 
 def _json_number(value: Decimal) -> int | float | None:
-    """A JSON number for an exact decimal result, or None when no finite double can hold it."""
-    if not value.is_finite():
-        return None
+    """A JSON number for a finite decimal result, or None when no finite double can hold it."""
     if value.copy_abs() < _INTEGER_LIMIT and value == value.to_integral_value():
         return int(value)
-    try:
-        result = float(value)
-    except (OverflowError, ValueError):
-        return None
-    if not math.isfinite(result):
-        return None
-    return result or 0
+    result = float(value)
+    return (result or 0) if math.isfinite(result) else None
 
 
 def _rounded(value: Decimal, digits: int) -> Decimal:
@@ -196,6 +189,18 @@ def _rounded(value: Decimal, digits: int) -> Decimal:
     # Enough working digits to keep every retained place, whatever the caller's context.
     with localcontext(Context(prec=max(28, value.adjusted() + digits + 3))):
         return value.quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_EVEN)
+
+
+def _bin(value: Decimal, width: Decimal) -> Decimal:
+    """The largest multiple of width at or below value.
+
+    The quotient is rounded toward minus infinity, never up into the next bucket, so its whole
+    part is exact whenever it fits in the working digits.
+    """
+    with localcontext() as context:
+        context.rounding = ROUND_FLOOR
+        whole = (value / width).to_integral_value()
+    return whole * width
 
 
 _UNARY_NUMBERS: dict[str, Callable[[Decimal], Decimal | int]] = {
@@ -208,7 +213,7 @@ _UNARY_NUMBERS: dict[str, Callable[[Decimal], Decimal | int]] = {
 }
 _BINARY_NUMBERS: dict[str, Callable[[Decimal, Decimal], Decimal | None]] = {
     "round": lambda value, digits: _rounded(value, int(digits)),
-    "bin": lambda value, width: (value / width).to_integral_value(rounding=ROUND_FLOOR) * width,
+    "bin": _bin,
     "add": lambda value, other: value + other,
     "multiply": lambda value, other: value * other,
     "add-field": lambda value, other: value + other,
