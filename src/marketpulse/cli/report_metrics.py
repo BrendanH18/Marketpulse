@@ -7,8 +7,6 @@ from typing import Any
 
 import click
 
-from .report_filters import _typed_equal
-
 OPERATIONS = (
     "count",
     "present",
@@ -51,6 +49,21 @@ OPERATIONS = (
     "text-min",
     "text-max",
 )
+
+
+def _typed_key(value: Any) -> tuple:
+    """Hash JSON by typed value, matching 1 with 1.0 while separating true from 1."""
+    if value is None:
+        return ("null",)
+    if isinstance(value, bool):
+        return ("boolean", value)
+    if isinstance(value, (int, float)):
+        return ("number", value)
+    if isinstance(value, str):
+        return ("string", value)
+    if isinstance(value, list):
+        return ("array", tuple(_typed_key(item) for item in value))
+    return ("object", tuple((key, _typed_key(item)) for key, item in sorted(value.items())))
 
 
 def _missing(value: Any) -> bool:
@@ -170,14 +183,16 @@ def summarize_values(operation: str, values: list[Any]) -> Any:
     if operation in ("distinct", "duplicates", "distinct-values", "mode", "mode-count"):
         distinct: list[Any] = []
         counts: list[int] = []
+        indices: dict[tuple, int] = {}
         for value in values:
-            for index, previous in enumerate(distinct):
-                if _typed_equal(previous, value):
-                    counts[index] += 1
-                    break
-            else:
+            key = _typed_key(value)
+            index = indices.get(key)
+            if index is None:
+                indices[key] = len(distinct)
                 distinct.append(value)
                 counts.append(1)
+            else:
+                counts[index] += 1
         if operation == "distinct":
             return len(distinct)
         if operation == "duplicates":

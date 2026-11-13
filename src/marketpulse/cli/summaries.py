@@ -60,25 +60,10 @@ def _metrics(values: tuple[str, ...], schema: tuple[str, ...], groups: tuple[str
     return result
 
 
-def _typed_key(value: Any) -> tuple:
-    """Hash JSON by typed value, matching 1 with 1.0 while separating true from 1."""
-    if value is None:
-        return ("null",)
-    if isinstance(value, bool):
-        return ("boolean", value)
-    if isinstance(value, (int, float)):
-        return ("number", value)
-    if isinstance(value, str):
-        return ("string", value)
-    if isinstance(value, list):
-        return ("array", tuple(_typed_key(item) for item in value))
-    return ("object", tuple((key, _typed_key(item)) for key, item in sorted(value.items())))
-
-
 def _summarize(rows: list[dict[str, Any]], groups: tuple[str, ...], metrics: list[Metric]) -> list[dict[str, Any]]:
     buckets: dict[tuple, list[dict[str, Any]]] = {} if groups else {(): []}
     for row in rows:
-        key = tuple(_typed_key(row[field]) for field in groups)
+        key = tuple(report_metrics._typed_key(row[field]) for field in groups)
         buckets.setdefault(key, []).append(row)
     result = []
     for bucket in buckets.values():
