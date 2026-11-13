@@ -17,6 +17,9 @@ from . import (
     report_catalog,
     report_derive,
     report_filters,
+    report_formats,
+    report_history,
+    report_interface,
     report_ledger,
     report_output,
     report_portfolio,
@@ -27,10 +30,19 @@ from .base import App, pass_app
 from .root import main
 
 # Each module owns its adapters: SOURCES (ordered field schemas), DESCRIPTIONS, GROUP and load_source.
-SOURCE_MODULES = (report_portfolio, report_catalog, report_ledger, report_system, report_reference)
+SOURCE_MODULES = (
+    report_portfolio,
+    report_catalog,
+    report_ledger,
+    report_system,
+    report_reference,
+    report_history,
+    report_interface,
+)
 SOURCES: dict[str, tuple[str, ...]] = {
     name: schema for module in SOURCE_MODULES for name, schema in module.SOURCES.items()
 }
+FORMATS = ("json", "jsonl", "csv", "tsv", "markdown", *report_formats.FORMATS)
 
 
 def _text(value: Any) -> str:
@@ -64,7 +76,13 @@ def load_source(source: str, app: App) -> list[dict[str, Any]]:
     raise KeyError(source)
 
 
+def _row_key(row: dict[str, Any], fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(json.dumps(row[field], sort_keys=True, ensure_ascii=False) for field in fields)
+
+
 def _serialize(rows: list[dict[str, Any]], fields: list[str], output_format: str, envelope: dict | None) -> str:
+    if output_format in report_formats.FORMATS:
+        return report_formats.serialize(rows, fields, output_format)
     if output_format == "json":
         return (
             json.dumps(
@@ -106,7 +124,8 @@ def _serialize(rows: list[dict[str, Any]], fields: list[str], output_format: str
 
 def _emit(text: str, output: Path | None) -> None:
     if output is None:
-        click.echo(text, nl=False)
+        # Script output is raw: without color=True, Click drops escape sequences when stdout is a pipe.
+        click.echo(text, nl=False, color=True)
         return
     # Publish a complete file without replacing an existing destination, including symlinks.
     temporary: str | None = None
@@ -117,7 +136,7 @@ def _emit(text: str, output: Path | None) -> None:
             temporary = stream.name
             stream.write(text)
         os.link(temporary, output)
-    except OSError as exc:
+    except (OSError, UnicodeEncodeError) as exc:
         raise click.ClickException(f"Cannot write report: {exc}") from exc
     finally:
         if temporary is not None:
@@ -148,6 +167,20 @@ FILTER_HELP = {
     "max_length": "Keep string/array/object FIELD=N with at most N elements.",
     "glob": "Keep case-sensitive FIELD=PATTERN shell wildcard matches.",
 }
+EXPANSION_FILTER_HELP = {
+    "regex": "Keep FIELD=PATTERN regular expression matches anywhere in the text.",
+    "not_regex": "Exclude FIELD=PATTERN regular expression matches.",
+    "iglob": "Keep FIELD=PATTERN shell wildcard matches, ignoring case.",
+    "not_glob": "Exclude case-sensitive FIELD=PATTERN shell wildcard matches.",
+    "contains_any": "Keep FIELD=JSON_ARRAY rows containing any listed text, ignoring case.",
+    "contains_all": "Keep FIELD=JSON_ARRAY rows containing every listed text, ignoring case.",
+    "date_from": "Keep FIELD=YYYY-MM-DD dates on or after the day.",
+    "date_to": "Keep FIELD=YYYY-MM-DD dates on or before the day.",
+    "has_item": "Keep array FIELD=JSON values containing the typed item.",
+    "has_key": "Keep object FIELD=KEY values containing the key.",
+}
+# Every FIELD=VALUE filter shared by `report` and `summarize`, in option order.
+ROW_FILTER_HELP = {**FILTER_HELP, **EXPANSION_FILTER_HELP}
 OUTPUT_HELP = {
     "lower": "Lowercase string FIELD for output.",
     "upper": "Uppercase string FIELD for output.",
@@ -168,7 +201,7 @@ OUTPUT_HELP = {
 
 
 def _advanced_options(command):
-    specs = {**FILTER_HELP, **OUTPUT_HELP}
+    specs = {**ROW_FILTER_HELP, **OUTPUT_HELP}
     for name, help_text in reversed(tuple(specs.items())):
         spelling = {"in_values": "in", "round_values": "round"}.get(name, name.replace("_", "-"))
         command = click.option("--" + spelling, name, multiple=True, help=help_text)(command)
@@ -182,7 +215,18 @@ def _advanced_options(command):
     command = click.option(
         "--every", type=click.IntRange(min=1), default=1, help="Keep every Nth row before pagination."
     )(command)
-    return click.option("--row-number", help="Append a NAME column with 1-based positions before pagination.")(command)
+    command = click.option("--row-number", help="Append a NAME column with 1-based positions before pagination.")(
+        command
+    )
+    command = click.option(
+        "--duplicates", multiple=True, help="Keep rows whose FIELD tuple occurs more than once; repeat for more keys."
+    )(command)
+    command = click.option(
+        "--singletons", multiple=True, help="Keep rows whose FIELD tuple occurs exactly once; repeat for more keys."
+    )(command)
+    return click.option(
+        "--unique-last", multiple=True, help="Keep the last row per FIELD tuple; repeat for more keys."
+    )(command)
 
 
 @main.command("report")
@@ -211,7 +255,7 @@ def _advanced_options(command):
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(["json", "jsonl", "csv", "tsv", "markdown"]),
+    type=click.Choice(FORMATS),
     default="json",
     show_default=True,
 )
@@ -250,14 +294,14 @@ def report(
 ) -> None:
     """Query saved datasets offline. Script output is raw and unmasked; configuration secrets stay redacted.
 
-    Filters combine with AND; processing is derived columns, filter, unique, sort, row windows,
+    Filters combine with AND; processing is derived columns, filter, keyed selection, sort, row windows,
     pagination, output transformations, projection, export. No quotes are fetched or snapshots recorded.
     List the datasets with `marketpulse report sources`.
     """
     # Derived columns join the schema first, so every later option can name them like source fields.
     derived = report_derive.DerivePlan(SOURCES[source], derive)
     schema = derived.schema
-    filter_options = {name: advanced[name] for name in FILTER_HELP}
+    filter_options = {name: advanced[name] for name in ROW_FILTER_HELP}
     matches = report_filters.compile_filters(schema, filter_options)
     output_options = {name: advanced[name] for name in (*OUTPUT_HELP, "row_number")}
     output_plan = report_output.OutputPlan(schema, output_options)
@@ -272,9 +316,14 @@ def report(
         [_condition(value, schema) for value in values] for values in (where, not_values, contains, prefix, suffix)
     ]
     sort_ci = advanced["sort_ci"]
-    for field in (*present, *missing, *sort, *sort_ci, *unique):
+    duplicates, singletons, unique_last = advanced["duplicates"], advanced["singletons"], advanced["unique_last"]
+    for field in (*present, *missing, *sort, *sort_ci, *unique, *duplicates, *singletons, *unique_last):
         if field not in schema:
             raise click.UsageError(f"Unknown field '{field}'. Choose from: {', '.join(schema)}.")
+    if duplicates and singletons:
+        raise click.UsageError("Choose --duplicates or --singletons.")
+    if unique and unique_last:
+        raise click.UsageError("Choose --unique or --unique-last.")
     if sort and sort_ci:
         raise click.UsageError("Choose --sort or --sort-ci.")
     if descending and not (sort or sort_ci):
@@ -312,6 +361,7 @@ def report(
             raise click.UsageError("--describe cannot combine with report operations.")
         _emit(json.dumps({"source": source, "fields": list(schema)}) + "\n", output)
         return
+    report_formats.validate(output_format, selected)
     if output is not None and os.path.lexists(output):
         raise click.UsageError("--output must name a new file; refusing to overwrite.")
     rows = derived.apply(load_source(source, app))
@@ -328,15 +378,26 @@ def report(
         and all(row[field] is not None and row[field] != "" for field in present)
         and all(row[field] is None or row[field] == "" for field in missing)
     ]
+    if duplicates or singletons:
+        keyed = duplicates or singletons
+        occurrences: dict[tuple[str, ...], int] = {}
+        for row in rows:
+            key = _row_key(row, keyed)
+            occurrences[key] = occurrences.get(key, 0) + 1
+        rows = [row for row in rows if (occurrences[_row_key(row, keyed)] > 1) is bool(duplicates)]
     if unique:
         seen: set[tuple[str, ...]] = set()
         distinct = []
         for row in rows:
-            key = tuple(json.dumps(row[field], sort_keys=True, ensure_ascii=False) for field in unique)
+            key = _row_key(row, unique)
             if key not in seen:
                 seen.add(key)
                 distinct.append(row)
         rows = distinct
+    if unique_last:
+        # Each key keeps its final row, and the kept rows stay in source order.
+        final = {_row_key(row, unique_last): position for position, row in enumerate(rows)}
+        rows = [row for position, row in enumerate(rows) if final[_row_key(row, unique_last)] == position]
     for field in reversed(sort or sort_ci):
         # Nested values order by canonical JSON; keep numeric and missing groups fixed in both directions.
         rows.sort(

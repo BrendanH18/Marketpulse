@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import math
 from decimal import ROUND_HALF_EVEN, Context, Decimal, DecimalException, Inexact, Underflow, localcontext
 from typing import Any
 
 import click
+
+from .report_dates import date_of
 
 OPERATIONS = (
     "count",
@@ -49,6 +52,20 @@ OPERATIONS = (
     "text-min",
     "text-max",
 )
+# Added under #143. OPERATIONS stays the original forty.
+EXPANSION_OPERATIONS = (
+    "date-min",
+    "date-max",
+    "date-count",
+    "date-span",
+    "number-variance",
+    "number-stdev",
+    "number-q1",
+    "number-q3",
+    "value-counts",
+    "repeated-values",
+)
+ALL_OPERATIONS = OPERATIONS + EXPANSION_OPERATIONS
 
 
 def _typed_key(value: Any) -> tuple:
@@ -157,6 +174,95 @@ def _numeric_summary(operation: str, numbers: list[Decimal]) -> Any:
     return _decimal_text(result)
 
 
+SIGNIFICANT = 28
+# Adjusted exponents of the default decimal context, which bounds the other numeric summaries too.
+EXPONENT_LIMIT = 999_999
+
+
+def _integers(numbers: list[Decimal]) -> tuple[list[int], int]:
+    """The numbers as exact integers on one decimal grid: ``number == integer * 10 ** exponent``."""
+    exponent = min((int(number.as_tuple().exponent) for number in numbers if number), default=0)
+    integers = []
+    for number in numbers:
+        sign, digits, power = number.as_tuple()
+        # int() of a Decimal is exact at any size; int() of a digit string stops at 4,300 digits.
+        magnitude = int(Decimal((0, digits, 0))) * 10 ** (int(power) - exponent) if number else 0
+        integers.append(-magnitude if sign else magnitude)
+    return integers, exponent
+
+
+def _decimal(integer: int, exponent: int) -> Decimal:
+    """``integer * 10 ** exponent`` built exactly, without the caller's decimal context."""
+    result = Decimal((integer < 0, Decimal(abs(integer)).as_tuple().digits, exponent))
+    if result and not -EXPONENT_LIMIT <= result.adjusted() <= EXPONENT_LIMIT:
+        raise click.ClickException("Summary arithmetic exceeds the supported decimal range.")
+    return result
+
+
+def _order(numerator: int, denominator: int) -> int:
+    """floor(log10(numerator / denominator)) for positive integers."""
+    order = Decimal(numerator).adjusted() - Decimal(denominator).adjusted()
+    reached = numerator >= denominator * 10**order if order >= 0 else numerator * 10**-order >= denominator
+    return order if reached else order - 1
+
+
+def _rounded(numerator: int, denominator: int, exponent: int, *, root: bool = False) -> Decimal:
+    """The ratio (or its square root) times ``10 ** exponent``, to 28 significant digits, half even.
+
+    Integer arithmetic keeps a single rounding of the exact value.
+    """
+    if not numerator:
+        return Decimal(0)
+    order = _order(numerator, denominator)
+    if root:
+        order //= 2
+    shift = SIGNIFICANT - 1 - order
+    scale = 2 * shift if root else shift
+    if scale >= 0:
+        numerator *= 10**scale
+    else:
+        denominator *= 10**-scale
+    if root:
+        result = math.isqrt(numerator // denominator)
+        # Compare the root with result + 1/2 by squaring both: 4 * ratio against (2 * result + 1) ** 2.
+        excess = 4 * numerator - denominator * (2 * result + 1) ** 2
+    else:
+        result, remainder = divmod(numerator, denominator)
+        excess = 2 * remainder - denominator
+    if excess > 0 or excess == 0 and result % 2:
+        result += 1
+    return _decimal(result, exponent - shift)
+
+
+def _spread_summary(operation: str, numbers: list[Decimal]) -> str | None:
+    """Population variance and deviation, and inclusive quartiles, as decimal text.
+
+    Quartiles interpolate linearly between the closest ranks and are exact. Variance and
+    deviation are the exact values rounded once to 28 significant digits (half even). The
+    same 10,000-digit working limit as the other numeric summaries applies, and results
+    beyond the supported exponent range fail with a CLI error.
+    """
+    if not numbers:
+        return None
+    _precision(numbers)
+    count = len(numbers)
+    integers, exponent = _integers(numbers)
+    if operation in ("number-q1", "number-q3"):
+        lower, quarters = divmod((count - 1) * (1 if operation == "number-q1" else 3), 4)
+        order = sorted(range(count), key=integers.__getitem__)
+        if not quarters:
+            return _decimal_text(numbers[order[lower]])
+        below, above = integers[order[lower]], integers[order[lower + 1]]
+        # (4 * below + quarters * (above - below)) / 4, written as hundredths to stay exact.
+        return _decimal_text(_decimal(25 * (4 * below + quarters * (above - below)), exponent - 2))
+    total = sum(integers)
+    # count * sum(x^2) - sum(x)^2 is count^2 times the variance on the integer grid, exactly.
+    spread = count * sum(integer * integer for integer in integers) - total * total
+    if operation == "number-stdev":
+        return _decimal_text(_rounded(spread, count * count, exponent, root=True))
+    return _decimal_text(_rounded(spread, count * count, 2 * exponent))
+
+
 def summarize_values(operation: str, values: list[Any]) -> Any:
     """Summarize cells in source order, preserving typed JSON values.
 
@@ -165,7 +271,7 @@ def summarize_values(operation: str, values: list[Any]) -> Any:
     10,000 working digits and means rounded to 28 significant digits (half even).
     Arithmetic uses Decimal's default exponent range, independent of callers.
     """
-    if operation not in OPERATIONS:
+    if operation not in ALL_OPERATIONS:
         raise click.UsageError(f"Unknown summary operation '{operation}'.")
     if operation == "count":
         return len(values)
@@ -180,7 +286,24 @@ def summarize_values(operation: str, values: list[Any]) -> Any:
         return selected[0 if operation.startswith("first") else -1] if selected else None
     if operation == "values":
         return list(values)
-    if operation in ("distinct", "duplicates", "distinct-values", "mode", "mode-count"):
+    if operation.startswith("date-"):
+        dates = [day for value in values if (day := date_of(value)) is not None]
+        if operation == "date-count":
+            return len(dates)
+        if not dates:
+            return None
+        if operation == "date-span":
+            return (max(dates) - min(dates)).days
+        return (min if operation == "date-min" else max)(dates).isoformat()
+    if operation in (
+        "distinct",
+        "duplicates",
+        "distinct-values",
+        "mode",
+        "mode-count",
+        "value-counts",
+        "repeated-values",
+    ):
         distinct: list[Any] = []
         counts: list[int] = []
         indices: dict[tuple, int] = {}
@@ -201,7 +324,14 @@ def summarize_values(operation: str, values: list[Any]) -> Any:
             return distinct
         if operation == "mode-count":
             return max(counts, default=0)
+        if operation == "value-counts":
+            # A stable sort keeps first-encountered order among equally frequent values.
+            return [[distinct[i], counts[i]] for i in sorted(range(len(distinct)), key=lambda i: -counts[i])]
+        if operation == "repeated-values":
+            return [value for value, occurrences in zip(distinct, counts, strict=True) if occurrences > 1]
         return distinct[counts.index(max(counts))] if distinct else None
+    if operation in ("number-variance", "number-stdev", "number-q1", "number-q3"):
+        return _spread_summary(operation, [number for value in values if (number := _number(value)) is not None])
     if operation.startswith("number-") or operation.startswith(("positive-", "negative-", "zero-", "absolute-")):
         return _numeric_summary(operation, [number for value in values if (number := _number(value)) is not None])
     if operation in ("true-count", "false-count"):

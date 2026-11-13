@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 import math
+import re
+import warnings
 from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
-from fnmatch import fnmatchcase
+from fnmatch import fnmatchcase, translate
 from typing import Any
 
 import click
+
+from .report_dates import date_of, parse_date_argument
 
 FILTER_OPTIONS = (
     "ieq",
@@ -32,6 +36,19 @@ FILTER_OPTIONS = (
     "min_length",
     "max_length",
     "glob",
+)
+# Added under #143; every one takes FIELD=VALUE.
+EXPANSION_FILTERS = (
+    "regex",
+    "not_regex",
+    "iglob",
+    "not_glob",
+    "contains_any",
+    "contains_all",
+    "date_from",
+    "date_to",
+    "has_item",
+    "has_key",
 )
 
 Predicate = Callable[[dict[str, Any]], bool]
@@ -77,7 +94,71 @@ def _finite_float(value: str) -> float:
     return result
 
 
+def _spelling(option: str) -> str:
+    """The command-line spelling of a filter option."""
+    return "in" if option == "in_values" else option.replace("_", "-")
+
+
+def _json_argument(text: str, spelling: str, syntax: str) -> Any:
+    try:
+        return json.loads(text, parse_constant=_reject_constant, parse_float=_finite_float)
+    except (ValueError, RecursionError) as exc:
+        raise click.UsageError(f"--{spelling} requires FIELD={syntax} with finite JSON values.") from exc
+
+
+def _expansion_condition(option: str, field: str, text: str) -> Predicate:
+    spelling = _spelling(option)
+    if option in ("regex", "not_regex"):
+        try:
+            with warnings.catch_warnings():
+                # A valid pattern such as "[[" can warn about future syntax; the warning is not for users.
+                warnings.simplefilter("ignore", FutureWarning)
+                pattern = re.compile(text)
+        except (re.error, RecursionError, OverflowError) as exc:
+            raise click.UsageError(
+                f"--{spelling} requires FIELD=PATTERN with a valid regular expression: {exc}."
+            ) from exc
+        wanted = option == "regex"
+        return lambda row: (pattern.search(_text(row[field])) is not None) is wanted
+    if option == "iglob":
+        # Case is ignored per character, so ? still matches one character and [ß] only ß or ẞ.
+        glob = re.compile(translate(text), re.IGNORECASE)
+        return lambda row: glob.match(_text(row[field])) is not None
+    if option == "not_glob":
+        return lambda row: not fnmatchcase(_text(row[field]), text)
+    if option in ("contains_any", "contains_all"):
+        members = _json_argument(text, spelling, "JSON_ARRAY")
+        if not isinstance(members, list) or not all(isinstance(member, str) for member in members):
+            raise click.UsageError(f"--{spelling} requires FIELD=JSON_ARRAY of strings.")
+        needles = [member.casefold() for member in members]
+        combine = any if option == "contains_any" else all
+
+        def text_members(row: dict[str, Any]) -> bool:
+            actual = _text(row[field]).casefold()
+            return combine(needle in actual for needle in needles)
+
+        return text_members
+    if option in ("date_from", "date_to"):
+        bound = parse_date_argument(text)
+        if bound is None:
+            raise click.UsageError(f"--{spelling} requires FIELD=YYYY-MM-DD with a valid calendar date.")
+
+        def date_match(row: dict[str, Any]) -> bool:
+            actual = date_of(row[field])
+            if actual is None:
+                return False
+            return actual >= bound if option == "date_from" else actual <= bound
+
+        return date_match
+    if option == "has_item":
+        wanted_item = _json_argument(text, spelling, "JSON")
+        return lambda row: isinstance(row[field], list) and any(_typed_equal(item, wanted_item) for item in row[field])
+    return lambda row: isinstance(row[field], dict) and text in row[field]
+
+
 def _condition(option: str, field: str, text: str) -> Predicate:
+    if option in EXPANSION_FILTERS:
+        return _expansion_condition(option, field, text)
     if option in ("ieq", "ine", "not_contains", "not_prefix", "not_suffix"):
         expected = text.casefold()
 
@@ -190,10 +271,11 @@ def compile_filters(schema: tuple[str, ...], options: dict[str, tuple[str, ...]]
 
     Numbers accept finite numeric strings as well as JSON numbers, but exclude
     booleans. Text predicates use the report's existing JSON-text convention.
+    Date predicates read strings that start with a valid ``YYYY-MM-DD`` date.
     """
     predicates: list[Predicate] = []
     for option, values in options.items():
-        if option not in FILTER_OPTIONS:
+        if option not in FILTER_OPTIONS and option not in EXPANSION_FILTERS:
             raise click.UsageError(f"Unknown report filter '{option}'.")
         for value in values:
             if option in ("empty", "nonempty"):
@@ -201,7 +283,7 @@ def compile_filters(schema: tuple[str, ...], options: dict[str, tuple[str, ...]]
             else:
                 field, separator, text = value.partition("=")
                 if not separator:
-                    raise click.UsageError(f"--{option.replace('_', '-')} requires FIELD=VALUE.")
+                    raise click.UsageError(f"--{_spelling(option)} requires FIELD=VALUE.")
             if field not in schema:
                 raise click.UsageError(f"Unknown field '{field}'. Choose from: {', '.join(schema)}.")
             predicates.append(_condition(option, field, text))

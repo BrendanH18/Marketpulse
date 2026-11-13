@@ -84,6 +84,16 @@ _OPERATION_RESULTS = {
     "length-mean": "decimal",
     "text-min": "string",
     "text-max": "string",
+    "date-min": "string",
+    "date-max": "string",
+    "date-count": "integer",
+    "date-span": "integer",
+    "number-variance": "decimal",
+    "number-stdev": "decimal",
+    "number-q1": "decimal",
+    "number-q3": "decimal",
+    "value-counts": "list",
+    "repeated-values": "list",
 }
 
 # The single colors of a palette, in display order; its name, mode and chart series are left out.
@@ -135,7 +145,7 @@ def load_source(name: str, app: App) -> list[dict[str, Any]]:
                 "takes_field": operation != "count",
                 "result": _OPERATION_RESULTS[operation],
             }
-            for position, operation in enumerate(report_metrics.OPERATIONS, 1)
+            for position, operation in enumerate(report_metrics.ALL_OPERATIONS, 1)
         ]
     if name == "derive-functions":
         return [

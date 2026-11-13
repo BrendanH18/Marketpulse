@@ -30,13 +30,16 @@ Another [100 offline inspection improvements](cli-more-hundred-improvements.md)
 extend realized gains, payouts, asset metadata, snapshots and backup browsing,
 and add saved target inspection (`marketpulse targets`) and command selectors.
 
-For a shared offline query and export interface across 50 saved datasets, see
+For a shared offline query and export interface across 57 saved datasets, see
 [Composable offline reports](cli-composable-reports.md) (`marketpulse report SOURCE`),
 including [1,000 more filtering and output capabilities](cli-report-improvements.md)
 and [1,000 grouped-summary capabilities](cli-report-summaries.md)
 (`marketpulse summarize SOURCE`). [25 more datasets and 50 derived-field
 functions](cli-report-derived-datasets.md) (`--derive`) add calendar periods, decimal
-arithmetic and text helpers to both commands: 5,000 more combinations.
+arithmetic and text helpers to both commands: 5,000 more combinations. [7 more
+datasets and 30 operations](cli-report-expansion.md) add regular-expression, date and
+JSON filters, duplicate selection, date and spread summaries, `--having`, `--totals`
+and HTML, text, records, lines and column exports: 2,760 more combinations.
 
 ## Accounts and transactions
 

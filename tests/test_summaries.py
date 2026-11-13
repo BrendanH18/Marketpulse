@@ -7,7 +7,7 @@ import json
 import pytest
 from click.testing import CliRunner
 
-from marketpulse.cli import main, reports
+from marketpulse.cli import main, report_metrics, reports
 from marketpulse.cli.base import App
 from marketpulse.models import Account, AccountType, Transaction, TxnType
 
@@ -223,7 +223,9 @@ def test_describe_without_source_access(monkeypatch):
     payload = json.loads(result.output)
     assert payload["source"] == "accounts"
     assert payload["fields"] == list(reports.SOURCES["accounts"])
-    assert len(payload["operations"]) == 40 and payload["operations"][0] == "count"
+    # The original forty come first; #143 appended ten more.
+    assert payload["operations"][:40] == list(report_metrics.OPERATIONS)
+    assert payload["operations"] == list(report_metrics.ALL_OPERATIONS) and len(payload["operations"]) == 50
 
 
 def test_new_file_exports_and_no_overwrite(monkeypatch, tmp_path):

@@ -12,7 +12,7 @@ from typing import Any
 
 import click
 
-from . import report_derive, report_filters, report_metrics, reports
+from . import report_derive, report_filters, report_formats, report_metrics, reports
 from .base import App, pass_app
 from .root import main
 
@@ -35,6 +35,10 @@ class Metric:
             "distinct-values",
             "text-min",
             "text-max",
+            "date-min",
+            "date-max",
+            "value-counts",
+            "repeated-values",
         }
 
 
@@ -48,7 +52,7 @@ def _metrics(values: tuple[str, ...], schema: tuple[str, ...], groups: tuple[str
             raise click.UsageError("--metric requires NAME=OP[:FIELD], with an ASCII identifier NAME.")
         if name in names:
             raise click.UsageError(f"Metric name '{name}' duplicates a metric or grouping field.")
-        if operation not in report_metrics.OPERATIONS:
+        if operation not in report_metrics.ALL_OPERATIONS:
             raise click.UsageError(f"Unknown summary operation '{operation}'. Use --describe to list operations.")
         if operation == "count":
             if colon:
@@ -60,19 +64,38 @@ def _metrics(values: tuple[str, ...], schema: tuple[str, ...], groups: tuple[str
     return result
 
 
+def _measure(rows: list[dict[str, Any]], metrics: list[Metric]) -> dict[str, Any]:
+    return {
+        metric.name: report_metrics.summarize_values(
+            metric.operation, [row[metric.field] if metric.field is not None else None for row in rows]
+        )
+        for metric in metrics
+    }
+
+
 def _summarize(rows: list[dict[str, Any]], groups: tuple[str, ...], metrics: list[Metric]) -> list[dict[str, Any]]:
     buckets: dict[tuple, list[dict[str, Any]]] = {} if groups else {(): []}
     for row in rows:
         key = tuple(report_metrics._typed_key(row[field]) for field in groups)
         buckets.setdefault(key, []).append(row)
-    result = []
-    for bucket in buckets.values():
-        summary = {field: bucket[0][field] for field in groups}
-        for metric in metrics:
-            values = [row[metric.field] if metric.field is not None else None for row in bucket]
-            summary[metric.name] = report_metrics.summarize_values(metric.operation, values)
-        result.append(summary)
-    return result
+    return [
+        {**{field: bucket[0][field] for field in groups}, **_measure(bucket, metrics)} for bucket in buckets.values()
+    ]
+
+
+def _having(values: tuple[str, ...], fields: tuple[str, ...]) -> report_filters.Predicate:
+    """Compile ``FILTER:NAME=VALUE`` conditions on summary columns, combined with AND."""
+    spellings = {("in" if name == "in_values" else name.replace("_", "-")): name for name in reports.ROW_FILTER_HELP}
+    predicates = []
+    for value in values:
+        spelling, separator, condition = value.partition(":")
+        if not separator or spelling not in spellings:
+            raise click.UsageError(f"--having requires FILTER:NAME=VALUE with a filter from: {', '.join(spellings)}.")
+        try:
+            predicates.append(report_filters.compile_filters(fields, {spellings[spelling]: (condition,)}))
+        except click.UsageError as exc:
+            raise click.UsageError(f"--having {value}: {exc.message}") from exc
+    return lambda row: all(predicate(row) for predicate in predicates)
 
 
 def _sort(rows: list[dict[str, Any]], fields: tuple[str, ...], numeric: set[str], descending: bool) -> None:
@@ -97,7 +120,7 @@ def _sort(rows: list[dict[str, Any]], fields: tuple[str, ...], numeric: set[str]
 
 
 def _filter_options(command):
-    for name, help_text in reversed(tuple(reports.FILTER_HELP.items())):
+    for name, help_text in reversed(tuple(reports.ROW_FILTER_HELP.items())):
         spelling = "in" if name == "in_values" else name.replace("_", "-")
         command = click.option("--" + spelling, name, multiple=True, help=help_text)(command)
     return command
@@ -114,6 +137,8 @@ def _filter_options(command):
 @click.option("--metric", multiple=True, help="Append NAME=OP[:FIELD]; repeat for multiple summaries.")
 @click.option("--group-by", multiple=True, help="Group on source FIELD; repeat for a composite key.")
 @click.option("--where", multiple=True, help="Keep exact source FIELD=VALUE text matches; repeat for AND.")
+@click.option("--having", multiple=True, help="Keep summary rows passing FILTER:NAME=VALUE; repeat for AND.")
+@click.option("--totals", is_flag=True, help="Append a final row summarizing every filtered source row.")
 @click.option("--sort", multiple=True, help="Sort grouping fields or metric names; repeat for tie breakers.")
 @click.option("--descending", is_flag=True, help="Sort in descending order, keeping missing values last.")
 @click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip N summary rows.")
@@ -121,7 +146,7 @@ def _filter_options(command):
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(["json", "jsonl", "csv", "tsv", "markdown"]),
+    type=click.Choice(reports.FORMATS),
     default="json",
     show_default=True,
 )
@@ -136,6 +161,8 @@ def summarize(
     metric: tuple[str, ...],
     group_by: tuple[str, ...],
     where: tuple[str, ...],
+    having: tuple[str, ...],
+    totals: bool,
     sort: tuple[str, ...],
     descending: bool,
     offset: int,
@@ -149,7 +176,7 @@ def summarize(
     """Summarize saved rows offline, without fetching quotes or recording snapshots.
 
     Derived fields are computed first; source filters run before grouping; group summaries
-    run before sorting and pagination.
+    run before --having, sorting and pagination, and --totals closes the page.
     Script output is raw and unmasked; configuration secrets remain redacted.
     List the datasets with `marketpulse report sources`.
     """
@@ -163,6 +190,8 @@ def summarize(
                 metric,
                 group_by,
                 where,
+                having,
+                totals,
                 sort,
                 descending,
                 offset,
@@ -174,7 +203,7 @@ def summarize(
         ):
             raise click.UsageError("--describe cannot combine with summary operations.")
         reports._emit(
-            json.dumps({"source": source, "fields": list(schema), "operations": report_metrics.OPERATIONS}) + "\n",
+            json.dumps({"source": source, "fields": list(schema), "operations": report_metrics.ALL_OPERATIONS}) + "\n",
             output,
         )
         return
@@ -190,8 +219,12 @@ def summarize(
         raise click.UsageError("--descending requires --sort.")
     if page_info and output_format != "json":
         raise click.UsageError("--page-info requires JSON output.")
+    if totals and not group_by:
+        raise click.UsageError("--totals requires --group-by.")
+    report_formats.validate(output_format, fields)
     exact = [reports._condition(value, schema) for value in where]
     matches = report_filters.compile_filters(schema, filters)
+    kept = _having(having, tuple(fields))
     if output is not None and os.path.lexists(output):
         raise click.UsageError("--output must name a new file; refusing to overwrite.")
     rows = [
@@ -199,8 +232,12 @@ def summarize(
         for row in derived.apply(reports.load_source(source, app))
         if matches(row) and all(reports._text(row[field]) == value for field, value in exact)
     ]
-    summaries = _summarize(rows, group_by, metrics)
+    summaries = [summary for summary in _summarize(rows, group_by, metrics) if kept(summary)]
     _sort(summaries, sort, {item.name for item in metrics if item.numeric}, descending)
     total = len(summaries)
+    page = summaries[offset:][:limit]
+    if totals:
+        # The closing row covers every filtered source row, whatever --having and pagination kept.
+        page.append({**dict.fromkeys(group_by), **_measure(rows, metrics)})
     envelope = {"source": source, "total": total, "offset": offset, "limit": limit} if page_info else None
-    reports._emit(reports._serialize(summaries[offset:][:limit], fields, output_format, envelope), output)
+    reports._emit(reports._serialize(page, fields, output_format, envelope), output)
