@@ -356,6 +356,7 @@ def test_rounding_and_buckets():
     assert _column(("n=bin:value:1e400",), [1]) == [0]
     # A quotient just below a bucket edge is not rounded up into the next bucket.
     assert _column(("n=bin:value:0.10000000000000000000000000000000001",), [1, -1, "0.9"]) == [0.9, -1, 0.8]
+    assert _column(("n=bin:value:3",), ["-3.000000000000000000000000001"]) == [-6]  # nor up toward zero
 
 
 def test_two_field_arithmetic():

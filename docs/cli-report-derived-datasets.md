@@ -16,9 +16,12 @@ dataset/operation combinations** in two parts:
 As in the earlier batches, the count describes shared operations available on
 distinct datasets, not 5,000 unrelated features. Everything here reads saved
 data offline: no quotes or historical prices are requested, no snapshot is
-recorded, and no ledger, setting or file is changed. Engine calculations (ACB,
-FX, tax, valuation, contribution room) are unchanged, and reports without
-`--derive` produce the same output as before.
+recorded, and the datasets never change the ledger, settings or files.
+Datasets that read saved data start the tracker like any other command, and
+that startup can create, migrate or back up the database
+([details](cli-composable-reports.md#capability-inventory)). Engine
+calculations (ACB, FX, tax, valuation, contribution room) are unchanged, and
+reports without `--derive` produce the same output as before.
 
 ## New datasets
 
