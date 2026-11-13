@@ -89,7 +89,7 @@ Amounts stay in their native currency and are never converted, so group by
 - `account-activity` has one row per active account, including accounts with
   no transactions. An in-kind transfer between active accounts counts for both
   accounts, as it does in `marketpulse activity -a`.
-- `rooms` lists the saved baselines only. `marketpulse room` computes the
+- `rooms` lists the saved baselines only. `marketpulse accounts room` shows the
   remaining contribution room.
 
 ### Local system (10–14)
@@ -109,8 +109,9 @@ Amounts stay in their native currency and are never converted, so group by
   `XDG_CONFIG_HOME`. An empty variable counts as unset, as it does when
   MarketPulse starts. These hold paths; no secret is read from the environment.
 - `runtime` lists the versions of MarketPulse, Python, SQLite and the installed
-  dependencies, for bug reports. A dependency that is not installed has a null
-  version.
+  dependencies, for bug reports, plus two rows whose `version` holds the Python
+  implementation (such as `CPython`) and the platform (such as `linux`). A
+  dependency that is not installed has a null version.
 
 `environment` and `runtime` do not open the tracker. `schema`, `paths` and
 `data-files` use the same tracker startup as the other saved-data datasets

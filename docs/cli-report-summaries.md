@@ -41,7 +41,7 @@ marketpulse summarize transactions --describe
 ```
 
 Repeat `--metric NAME=OP:FIELD` to add summary columns in order. `count` uses
-`NAME=count` without a field. Other operations require a source field. Names must
+`NAME=count` without a field. Other operations require a source or `--derive` field. Names must
 be ASCII identifiers (`[A-Za-z_][A-Za-z0-9_]*`), distinct from other metric names
 and grouping fields. Repeat `--group-by FIELD` for composite groups. Grouping
 columns appear first, followed by metric columns. Ungrouped queries produce one
