@@ -2,7 +2,7 @@
 
 Every expected output is written out by hand from the specification; no test calls a serializer to build
 an expectation. Click's ``Result.output`` and ``Result.stdout`` fold CRLF into LF, so exact CLI output is
-read from ``stdout_bytes``.
+read from ``stdout_bytes``, undoing only the newline translation of a Windows text stream.
 """
 
 import json
@@ -53,7 +53,13 @@ def forbid_loading(monkeypatch):
 def printed(result):
     """Standard output exactly as written, after a successful run."""
     assert result.exit_code == 0, result.output
-    return result.stdout_bytes.decode("utf-8")
+    return as_written(result.stdout_bytes)
+
+
+def as_written(data):
+    """Printed bytes as the report wrote them: a Windows text stream turns each \\n into os.linesep."""
+    text = data.decode("utf-8")
+    return text.replace(os.linesep, "\n") if os.linesep != "\n" else text
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1178,7 +1184,9 @@ def test_output_writes_a_new_utf8_file_exactly_as_printed_and_never_overwrites(m
     written = run(monkeypatch, OUTPUT_ROWS, *arguments, "--output", str(target))
     assert written.exit_code == 0, written.output
     assert written.stdout_bytes == b""
-    assert target.read_bytes() == shown.stdout_bytes == WRITTEN[output_format].encode("utf-8")
+    assert (
+        target.read_bytes() == as_written(shown.stdout_bytes).encode("utf-8") == WRITTEN[output_format].encode("utf-8")
+    )
 
     forbid_loading(monkeypatch)
     again = CliRunner().invoke(main, [*arguments, "--output", str(target)])

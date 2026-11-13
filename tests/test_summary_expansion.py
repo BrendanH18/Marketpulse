@@ -9,6 +9,7 @@ import copy
 import csv
 import io
 import json
+import os
 
 import pytest
 from click.testing import CliRunner
@@ -24,6 +25,12 @@ HAVING_FILTERS = (
     "has-item has-key"
 ).split()
 UNKNOWN_FILTER = f"--having requires FILTER:NAME=VALUE with a filter from: {', '.join(HAVING_FILTERS)}."
+
+
+def printed(result):
+    """Printed text as the report wrote it: a Windows text stream turns each \\n into os.linesep."""
+    text = result.stdout_bytes.decode("utf-8")
+    return text.replace(os.linesep, "\n") if os.linesep != "\n" else text
 
 
 def invoke(*arguments):
@@ -444,7 +451,7 @@ def test_having_that_removes_every_group(serve):
     }
     result = invoke(*query, "--format", "csv")
     assert result.exit_code == 0, result.output
-    assert list(csv.reader(io.StringIO(result.stdout_bytes.decode(), newline=""))) == [["key", "n"]]
+    assert list(csv.reader(io.StringIO(printed(result), newline=""))) == [["key", "n"]]
     # The closing row still counts all five rows.
     assert output(invoke(*query, "--totals")) == [{"key": None, "n": 5}]
 
@@ -879,7 +886,7 @@ def test_totals_in_every_output_format(serve, output_format):
     serve(FORMAT_ROWS)
     result = invoke(*FORMAT_QUERY, "--format", output_format)
     assert result.exit_code == 0, result.output
-    text = result.stdout_bytes.decode("utf-8")
+    text = printed(result)
     if output_format == "json":
         assert typed(json.loads(text)) == typed(FORMAT_JSON)
     elif output_format == "jsonl":
