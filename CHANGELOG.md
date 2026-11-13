@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Seven more offline report datasets (57 in total) and 30 shared operations for
+  `marketpulse report` and `marketpulse summarize`: 2,760 new dataset/operation
+  combinations. New datasets cover remaining contribution room, saved snapshot
+  asset-class breakdowns, alert conditions, chart periods, terminal app keys and
+  workspaces, and the catalog of all 180 shared operations. New operations add
+  regular-expression, case-insensitive wildcard, any/all text, date-range, array
+  item and object key filters; `--duplicates`, `--singletons` and `--unique-last`;
+  date, variance, deviation, quartile and value-count summaries; `--having` and
+  `--totals`; and `html`, `text`, `records`, `lines` and `json-columns` formats.
+  Printed reports now keep escape sequences when piped, and `--output` reports text
+  UTF-8 cannot encode as a clean error. See the
+  [capability inventory](docs/cli-report-expansion.md)
+  ([#143](https://github.com/BrendanH18/Marketpulse/issues/143)).
+
 - Twenty-five more offline report datasets (50 in total) and 50 derived-field
   functions for `marketpulse report` and `marketpulse summarize`: 5,000 new
   dataset/operation combinations. New datasets cover pooled holdings, closed

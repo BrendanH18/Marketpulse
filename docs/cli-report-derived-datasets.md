@@ -23,6 +23,9 @@ that startup can create, migrate or back up the database
 calculations (ACB, FX, tax, valuation, contribution room) are unchanged, and
 reports without `--derive` produce the same output as before.
 
+Issue #143 later added 7 more datasets and 30 more operations; see
+[Offline report filters, selections, summaries and formats](cli-report-expansion.md).
+
 ## New datasets
 
 Run `marketpulse report sources` to list every dataset, or

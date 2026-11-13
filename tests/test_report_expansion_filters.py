@@ -355,10 +355,10 @@ DATES = [
     "2024-03-05T00:00:00Z",  # 2: 2024-03-05
     "2024-03-04T23:59:59",  # 3: 2024-03-04
     "2024-03-05 18:30",  # 4: 2024-03-05
-    "2024-03-06 ",  # 5: 2024-03-06, a space and then nothing
-    "2024-03-06T",  # 6: 2024-03-06, a T and then nothing
-    "2024-03-06T99:99",  # 7: 2024-03-06, anything may follow the T
-    "2024-12-31T10:00\nnote",  # 8: 2024-12-31, even a line break
+    "2024-03-06 09:15",  # 5: 2024-03-06, a space and a time
+    "2024-03-06T00:00:00.5",  # 6: 2024-03-06, fractional seconds
+    "2024-03-06T23:59+01:00",  # 7: 2024-03-06, an offset
+    "2024-12-31T10:00:59Z",  # 8: 2024-12-31, UTC
     "2025-01-01",  # 9: 2025-01-01
     "2024-03-04T23:00:00-05:00",  # 10: 2024-03-04, the first ten characters whatever the offset
     "2024-02-30",  # 11 onwards: not date-like
@@ -371,6 +371,12 @@ DATES = [
     "2024-03-05\t10:00",
     "2024-03-05\n",
     " 2024-03-05",
+    # Only a valid time may follow the date, as for the --derive date functions.
+    "2024-03-06 ",
+    "2024-03-06T",
+    "2024-03-06T99:99",
+    "2024-12-31T10:00\nnote",
+    "2024-03-05 lunch",
     "２０２４-０３-０５",  # full-width digits
     "",
     None,
