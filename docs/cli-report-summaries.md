@@ -6,7 +6,9 @@
 `marketpulse summarize SOURCE` adds **40 summary operations on each of 25 saved
 datasets = 1,000 new dataset/operation combinations**. These are shared operations
 across datasets; the count does not mean 1,000 unrelated features. The existing
-`report` command continues to return individual rows.
+`report` command continues to return individual rows. The operations also apply
+to the [25 datasets added later](cli-report-derived-datasets.md), and `--derive`
+fields can be grouped and summarized like source fields.
 
 Summaries use the same offline source adapters as `report`. They do not request
 quotes or historical prices, record snapshots, or change the ledger. Configuration
@@ -39,7 +41,7 @@ marketpulse summarize transactions --describe
 ```
 
 Repeat `--metric NAME=OP:FIELD` to add summary columns in order. `count` uses
-`NAME=count` without a field. Other operations require a source field. Names must
+`NAME=count` without a field. Other operations require a source or `--derive` field. Names must
 be ASCII identifiers (`[A-Za-z_][A-Za-z0-9_]*`), distinct from other metric names
 and grouping fields. Repeat `--group-by FIELD` for composite groups. Grouping
 columns appear first, followed by metric columns. Ungrouped queries produce one
@@ -48,7 +50,8 @@ summary row, including for an empty source; grouped empty sources produce no row
 `--where FIELD=TEXT` compares the source's report text exactly; repeat it for AND.
 All 20 [advanced report filters](cli-report-improvements.md#new-operations), from
 `--ieq` through `--glob`, are also available and combine with AND before grouping.
-Field names always refer to the original source schema in filters and metrics.
+Field names always refer to the original source schema in filters and metrics,
+or to a field added earlier with [`--derive`](cli-report-derived-datasets.md#derived-fields).
 
 Groups retain their first-encountered order unless sorted. Repeat `--sort FIELD`
 for tie breakers on output columns, with optional `--descending`. Numeric summary

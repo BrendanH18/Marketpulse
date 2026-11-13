@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Twenty-five more offline report datasets (50 in total) and 50 derived-field
+  functions for `marketpulse report` and `marketpulse summarize`: 5,000 new
+  dataset/operation combinations. New datasets cover pooled holdings, closed
+  positions, cash flows, fees, ledger warnings, symbol and currency usage,
+  account activity, contribution-room baselines, the local database schema,
+  paths, data files, environment overrides, runtime versions and reference
+  catalogs. `--derive NAME=FUNCTION:FIELD[:ARGUMENT]` adds calendar periods,
+  decimal arithmetic, buckets and text or JSON helpers that can be filtered,
+  sorted, grouped and exported like saved fields. See the
+  [capability inventory](docs/cli-report-derived-datasets.md)
+  ([#142](https://github.com/BrendanH18/Marketpulse/issues/142)).
+
 - Offline grouped summaries through `marketpulse summarize SOURCE`: 40 summary
   operations across 25 saved datasets (1,000 dataset/operation combinations),
   typed grouping, filtering, sorting, pagination and atomic file exports.

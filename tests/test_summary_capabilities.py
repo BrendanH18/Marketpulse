@@ -74,9 +74,11 @@ def test_thousand_summary_capabilities(monkeypatch, source, case):
 
 
 def test_inventory_matches_documented_thousand():
+    from marketpulse.cli import report_catalog, report_portfolio
     from marketpulse.cli.report_metrics import OPERATIONS
 
-    assert len(reports.SOURCES) == 25
+    # The documented thousand are the 25 original datasets; datasets added later extend the matrix.
+    assert len({**report_portfolio.SOURCES, **report_catalog.SOURCES}) == 25
     assert len(CASES) == len(OPERATIONS) == 40
     assert {case[0] for case in CASES} == set(OPERATIONS)
 

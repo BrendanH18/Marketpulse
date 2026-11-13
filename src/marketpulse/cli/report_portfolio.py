@@ -30,6 +30,23 @@ SOURCES: dict[str, tuple[str, ...]] = {
     "backups": tuple(BACKUP_FIELDS),
 }
 
+GROUP = "portfolio"
+DESCRIPTIONS: dict[str, str] = {
+    "accounts": "Active account metadata.",
+    "assets": "Saved asset definitions.",
+    "transactions": "Ledger transaction records for active accounts.",
+    "positions": "Open ledger positions without market prices.",
+    "cash": "Ledger cash balances without currency conversion.",
+    "snapshots": "Previously recorded net-worth snapshots.",
+    "cached-quotes": "Quotes already saved in the offline cache.",
+    "alerts": "Saved alert definitions.",
+    "watchlist": "Saved watched symbols.",
+    "targets": "Saved allocation targets.",
+    "realized": "Ledger-derived realized events.",
+    "payouts": "Ledger-derived income events.",
+    "backups": "Local backup inventory metadata.",
+}
+
 
 def load_source(name: str, app: App) -> list[dict[str, Any]]:
     """Return raw script rows without pricing holdings, recording snapshots or contacting providers."""

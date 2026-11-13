@@ -18,6 +18,10 @@ add 1,000 more dataset/operation combinations, including numeric filters, typed
 membership, output transformations and row windows. The inventory below records
 the original batch.
 
+[Twenty-five more datasets and 50 derived-field functions](cli-report-derived-datasets.md)
+bring the interface to 50 datasets. Every operation described here also works on
+the newer datasets; `marketpulse report sources` lists them all.
+
 ## Start with the schema
 
 Run `marketpulse report SOURCE --describe` to see the source's ordered field
