@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from marketpulse.cli import main, reports
 from marketpulse.cli.base import App
 from marketpulse.cli.report_derive import FUNCTIONS, DerivePlan
+from marketpulse.config import Config
 from marketpulse.models import Account, Transaction, TxnType
 
 SCHEMA = reports.SOURCES["transactions"]
@@ -491,3 +492,20 @@ def test_real_sources_derive_offline_without_writes(fictional_ledger, fake):
     assert store._conn.total_changes == changes
     assert store.snapshots() == snapshots
     assert store.backups() == backups
+
+
+@pytest.mark.parametrize("source", sorted(reports.SOURCES))
+def test_no_dataset_or_derived_field_reveals_the_api_key(fictional_ledger, source):
+    secret = "fictional-key-that-must-not-appear"
+    config = Config.load()
+    config.quote_api_key = secret
+    config.save()  # to the isolated configuration file every command below loads
+    assert Config.load().quote_api_key == secret
+    first = reports.SOURCES[source][0]
+    for arguments in (
+        [],
+        ["--derive", f"derived_text=text:{first}"],
+        ["--derive", f"derived_type=type:{first}", "--format", "csv"],
+    ):
+        assert secret not in _run("report", source, *arguments)
+    assert secret not in _run("summarize", source, "--metric", f"all=values:{first}")
