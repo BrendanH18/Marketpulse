@@ -263,9 +263,10 @@ def _usage(function: Function, problem: str) -> click.UsageError:
 
 
 def _whole(function: Function, argument: str, minimum: int | None) -> int:
+    # Nine digits are more than any text or array holds, and keep int() far from its digit limit.
     if not re.fullmatch(r"-?[0-9]{1,9}", argument) or (minimum is not None and int(argument) < minimum):
-        expected = "a whole number" if minimum is None else f"a whole number of at least {minimum}"
-        raise _usage(function, f"requires {expected} for N")
+        lowest = "-999999999" if minimum is None else str(minimum)
+        raise _usage(function, f"requires a whole number N from {lowest} to 999999999")
     return int(argument)
 
 
@@ -314,9 +315,9 @@ def _compile(function: Function, field: str, argument: str | None, schema: tuple
 
             return two_fields
         if name == "round":
-            if not re.fullmatch(r"[0-9]{1,2}", argument) or int(argument) > 15:
+            if not re.fullmatch(r"0*[0-9]{1,2}", argument) or int(argument.lstrip("0") or "0") > 15:
                 raise _usage(function, "requires DIGITS from 0 to 15")
-            constant = Decimal(int(argument))
+            constant = Decimal(int(argument.lstrip("0") or "0"))
         else:
             parsed = _number(argument)
             if parsed is None or (name == "bin" and parsed <= 0):

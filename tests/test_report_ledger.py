@@ -138,7 +138,7 @@ EXPECTED: dict[str, list[tuple]] = {
     # account_id, account, type, currency, transactions, first_date, last_date, open_positions, symbols
     "account-activity": [
         (1, "Fictional Cash", "TFSA", "CAD", 6, "2024-01-02", "2024-02-01", 1, 2),
-        (3, "Fictional Invested", "NONREG", "USD", 7, "2024-01-02", "2024-02-05", 2, 4),
+        (3, "Fictional Invested", "NONREG", "USD", 8, "2024-01-02", "2024-02-05", 2, 4),  # with transfer #4 in
         (4, "Fictional Empty", "RRSP", "CAD", 0, None, None, 0, 0),
     ],
     # account_type, as_of_year, amount
@@ -249,6 +249,9 @@ def test_sale_fee_is_in_the_currency_of_the_position_sold(app):
         Transaction(account, TxnType.DRIP, "2024-01-07", "FICUS", 0.5, 50, fees=0.25, currency="USD"),
         # A purchase is charged in its own currency, here the account's, even into a USD position.
         Transaction(account, TxnType.BUY, "2024-01-08", "FICUS", 1, 50, fees=1),
+        # Sold before anything was held: the USD position opened later had nothing to do with it.
+        Transaction(account, TxnType.SELL, "2024-01-09", "FICLATE", 1, 5, fees=6),
+        Transaction(account, TxnType.BUY, "2024-01-10", "FICLATE", 2, 5, currency="USD"),
     ):
         store.add_transaction(txn)
     assert [(row["type"], row["symbol"], row["fee"], row["currency"]) for row in load_source("fees", app)] == [
@@ -258,9 +261,34 @@ def test_sale_fee_is_in_the_currency_of_the_position_sold(app):
         ("SELL", "NEVER.TO", 5, "CAD"),
         ("DRIP", "FICUS", 0.25, "USD"),
         ("BUY", "FICUS", 1, "CAD"),
+        ("SELL", "FICLATE", 6, "CAD"),
     ]
     # The engine agrees on each currency. It skips a sale of nothing, fee included, which the report still lists.
     assert dict(store.ledger().fees) == {"USD": 5.25, "CAD": 1}
+
+
+def test_an_in_kind_transfer_counts_for_both_active_accounts(app):
+    store = app.store
+    rrsp = store.add_account(Account("Fictional RRSP", AccountType.RRSP)).saved_id
+    rrif = store.add_account(Account("Fictional RRIF", AccountType.RRIF)).saved_id
+    store.add_transaction(Transaction(rrsp, TxnType.BUY, "2024-01-02", "FIC.TO", 10, 20))
+    store.add_transaction(Transaction(rrsp, TxnType.TRANSFER, "2025-12-31", "FIC.TO", 10, target_account_id=rrif))
+    # As `activity -a` and `accounts list --has-transactions` count it: once in each account.
+    assert [
+        (
+            row["account"],
+            row["transactions"],
+            row["first_date"],
+            row["last_date"],
+            row["open_positions"],
+            row["symbols"],
+        )
+        for row in load_source("account-activity", app)
+    ] == [
+        ("Fictional RRSP", 2, "2024-01-02", "2025-12-31", 0, 1),
+        ("Fictional RRIF", 1, "2025-12-31", "2025-12-31", 1, 1),
+    ]
+    assert len(store.transactions(account_id=rrif)) == 1
 
 
 def test_holdings_pool_a_symbol_separately_in_each_currency(app):

@@ -79,14 +79,16 @@ Amounts stay in their native currency and are never converted, so group by
   currency of the position sold.
 - `ledger-issues` lists replay warnings such as a sale exceeding the quantity
   held, with the stable `code` and the values behind the message in `details`.
-- `symbols` has one row per symbol found in active-account transactions, saved
-  assets, the watchlist, alerts or the offline quote cache. `asset_kind` is
-  null when no asset is saved for the symbol.
+- `symbols` has one row per symbol found in active-account transactions or
+  positions (including positions received by transfer), saved assets, the
+  watchlist, alerts or the offline quote cache. `asset_kind` is null when no
+  asset is saved for the symbol.
 - `currencies` has one row per currency found in active accounts, their
   transactions, open positions, cash balances or cached quotes, and always
   lists the base currency.
 - `account-activity` has one row per active account, including accounts with
-  no transactions.
+  no transactions. An in-kind transfer between active accounts counts for both
+  accounts, as it does in `marketpulse activity -a`.
 - `rooms` lists the saved baselines only. `marketpulse room` computes the
   remaining contribution room.
 
@@ -213,7 +215,7 @@ Rules:
 | 37 | `lower` | — | Lowercase text. |
 | 38 | `upper` | — | Uppercase text. |
 | 39 | `trim` | — | Text without leading or trailing whitespace. |
-| 40 | `left` | `N` | The first `N` characters (`N` at least 1). |
+| 40 | `left` | `N` | The first `N` characters (`N` from 1 to 999,999,999). |
 | 41 | `before` | `TEXT` | Text before the first `TEXT`; the whole text when `TEXT` is absent. |
 | 42 | `after-last` | `TEXT` | Text after the last `TEXT`; empty when `TEXT` is absent. |
 | 43 | `length` | — | Characters in text, elements in an array or keys in an object. |
@@ -222,7 +224,7 @@ Rules:
 | 46 | `is-missing` | — | True for null or empty text, otherwise false. |
 | 47 | `coalesce` | `JSON` | The value, or the `JSON` argument when the value is null. |
 | 48 | `equals` | `JSON` | True when the value equals the `JSON` argument, comparing JSON types. |
-| 49 | `item` | `N` | Element `N` of an array, counting from 0; negative `N` counts from the end. |
+| 49 | `item` | `N` | Element `N` of an array, counting from 0; negative `N` counts from the end. `N` has at most nine digits. |
 | 50 | `key` | `NAME` | Member `NAME` of an object. |
 
 **Dates (1–22)** read ISO date text: `YYYY-MM-DD`, alone or followed by `T`

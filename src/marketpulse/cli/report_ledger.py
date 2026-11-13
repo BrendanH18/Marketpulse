@@ -121,6 +121,8 @@ def _closed_positions(
 
 
 def _fees(state: LedgerState, accounts: dict[int, Account], transactions: list[Transaction]) -> list[dict[str, Any]]:
+    # The engine charges a sale's fee in the currency of the position it sold, as it records the sale.
+    charged = {gain.txn_id: gain.currency for gain in state.realized}
     rows = []
     for txn in sorted(transactions, key=sort_key):
         if txn.type is TxnType.FEE:
@@ -131,8 +133,6 @@ def _fees(state: LedgerState, accounts: dict[int, Account], transactions: list[T
             continue  # the ledger ignores `fees` on every other type
         if fee <= 0:
             continue
-        # The ledger charges a sale's fee in the currency of the position sold, whatever the sale says.
-        sold = state.holdings.get((txn.account_id, txn.symbol)) if txn.type is TxnType.SELL else None
         rows.append(
             {
                 "transaction_id": txn.id,
@@ -142,7 +142,7 @@ def _fees(state: LedgerState, accounts: dict[int, Account], transactions: list[T
                 "type": txn.type.value,
                 "symbol": txn.symbol,
                 "fee": _finite(fee),
-                "currency": sold.currency if sold is not None else transaction_currency(txn, accounts),
+                "currency": charged[txn.id] if txn.id in charged else transaction_currency(txn, accounts),
             }
         )
     return rows
@@ -240,7 +240,9 @@ def _account_activity(
 ) -> list[dict[str, Any]]:
     own: dict[int, list[Transaction]] = {account_id: [] for account_id in accounts}
     for txn in transactions:
-        own[txn.account_id].append(txn)
+        # A transfer belongs to both accounts, as in `activity -a` and `accounts list`.
+        for account_id in own.keys() & {txn.account_id, txn.target_account_id}:
+            own[account_id].append(txn)
     open_positions = Counter(h.account_id for h in state.open_holdings())
     rows = []
     for account_id, account in accounts.items():

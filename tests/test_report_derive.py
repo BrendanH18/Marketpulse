@@ -183,6 +183,7 @@ def test_summarize_groups_filters_and_measures_derived_fields(ledger):
         ("x=days-from:date:2024-01-01T00:00", "valid DATE as YYYY-MM-DD"),
         ("x=round:amount", "'round' requires FIELD:DIGITS"),
         ("x=round:amount:16", "DIGITS from 0 to 15"),
+        ("x=round:amount:016", "DIGITS from 0 to 15"),
         ("x=round:amount:-1", "DIGITS from 0 to 15"),
         ("x=round:amount:1.5", "DIGITS from 0 to 15"),
         ("x=round:amount:" + "9" * 5000, "DIGITS from 0 to 15"),
@@ -194,10 +195,10 @@ def test_summarize_groups_filters_and_measures_derived_fields(ledger):
         ("x=multiply:amount:true", "requires a NUMBER"),
         ("x=add-field:amount:nope", "requires a second field from"),
         ("x=divide-field:amount", "'divide-field' requires FIELD:FIELD"),
-        ("x=left:symbol:0", "whole number of at least 1"),
-        ("x=left:symbol:two", "whole number of at least 1"),
-        ("x=left:symbol:" + "9" * 5000, "whole number of at least 1"),
-        ("x=item:note:1.0", "requires a whole number for N"),
+        ("x=left:symbol:0", "whole number N from 1 to 999999999"),
+        ("x=left:symbol:two", "whole number N from 1 to 999999999"),
+        ("x=left:symbol:" + "9" * 5000, "whole number N from 1 to 999999999"),
+        ("x=item:note:1.0", "whole number N from -999999999 to 999999999"),
         ("x=before:symbol:", "requires nonempty TEXT"),
         ("x=after-last:symbol:", "requires nonempty TEXT"),
         ("x=coalesce:note:{bad", "requires finite JSON"),
@@ -347,6 +348,7 @@ def test_rounding_and_buckets():
         1e30,
         1.2345678901234567e19,
     ]
+    assert _column(("n=round:value:002",), [1.125]) == [1.12]  # leading zeros, as in 015
     assert _column(("n=round:value:15",), ["0.12345678901234565", "1.00000000000000049"]) == [
         0.123456789012346,
         1,
