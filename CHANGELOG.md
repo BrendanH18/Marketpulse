@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Offline grouped summaries through `marketpulse summarize SOURCE`: 40 summary
+  operations across 25 saved datasets (1,000 dataset/operation combinations),
+  typed grouping, filtering, sorting, pagination and atomic file exports.
+  See the [capability inventory](docs/cli-report-summaries.md)
+  ([#140](https://github.com/BrendanH18/Marketpulse/issues/140)).
+
 - Forty additional operations across 25 offline report datasets: 1,000 new
   dataset/operation combinations, including numeric and typed filters, text/JSON
   output transformations, column aliases, constants, row numbering, case-insensitive

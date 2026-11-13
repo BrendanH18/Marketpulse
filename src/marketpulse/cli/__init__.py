@@ -21,6 +21,7 @@ from . import (  # noqa: F401  (importing a module registers its commands)
     reports,
     settings,
     snapshots,
+    summaries,
     taxes,
     watchlist,
 )
