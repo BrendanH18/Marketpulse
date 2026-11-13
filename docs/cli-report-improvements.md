@@ -14,7 +14,8 @@ later](cli-report-derived-datasets.md).
 ## New operations
 
 All field names in filters, sorting, deduplication and cell transformations refer
-to the original source schema (`report SOURCE --describe`). Filters repeat with
+to the original source schema (`report SOURCE --describe`), or to a field added
+earlier with [`--derive`](cli-report-derived-datasets.md#derived-fields). Filters repeat with
 AND, including across old and new filter options. Cell transformations affect
 output only; they never change saved values or the values used to filter/sort.
 They can be repeated for multiple fields.

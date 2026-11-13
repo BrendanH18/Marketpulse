@@ -105,7 +105,7 @@ def _filter_options(command):
 
 @main.command("summarize")
 @_filter_options
-@click.argument("source", type=click.Choice(sorted(reports.SOURCES)))
+@click.argument("source", type=click.Choice(sorted(reports.SOURCES)), metavar="SOURCE")
 @click.option(
     "--derive",
     multiple=True,
@@ -151,6 +151,7 @@ def summarize(
     Derived fields are computed first; source filters run before grouping; group summaries
     run before sorting and pagination.
     Script output is raw and unmasked; configuration secrets remain redacted.
+    List the datasets with `marketpulse report sources`.
     """
     # Derived fields join the schema first, so filters, grouping and metrics can name them.
     derived = report_derive.DerivePlan(reports.SOURCES[source], derive)

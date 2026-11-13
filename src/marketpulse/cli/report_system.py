@@ -39,7 +39,7 @@ _ENVIRONMENT = (
     ("XDG_CONFIG_HOME", "Base configuration directory, instead of ~/.config, when MARKETPULSE_CONFIG is not set."),
 )
 # Dependencies reported after the interpreter, by distribution name.
-_DISTRIBUTIONS = ("click", "rich", "textual", "curl_cffi")
+_DISTRIBUTIONS = ("click", "rich", "textual", "curl_cffi", "tzdata")  # tzdata is installed on Windows only
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 

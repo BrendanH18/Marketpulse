@@ -155,7 +155,8 @@ def load_source(name: str, app: App) -> list[dict[str, Any]]:
                 "name": profile.name,
                 "label": profile.label,
                 "required_headers": sorted(profile.headers),
-                "has_accounts": profile.has_accounts,
+                # The generic profile decides per file, by whether an account column is present.
+                "has_accounts": profile.has_accounts if profile.convert is not None else None,
                 "limits": profile.limits,
             }
             for profile in PROFILES

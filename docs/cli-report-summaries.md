@@ -50,7 +50,8 @@ summary row, including for an empty source; grouped empty sources produce no row
 `--where FIELD=TEXT` compares the source's report text exactly; repeat it for AND.
 All 20 [advanced report filters](cli-report-improvements.md#new-operations), from
 `--ieq` through `--glob`, are also available and combine with AND before grouping.
-Field names always refer to the original source schema in filters and metrics.
+Field names always refer to the original source schema in filters and metrics,
+or to a field added earlier with [`--derive`](cli-report-derived-datasets.md#derived-fields).
 
 Groups retain their first-encountered order unless sorted. Repeat `--sort FIELD`
 for tie breakers on output columns, with optional `--descending`. Numeric summary

@@ -103,8 +103,8 @@ Amounts stay in their native currency and are never converted, so group by
   `directory`, `file`, `other` or `missing`.
 - `data-files` lists the entries directly inside the data directory without
   following symbolic links. `size_bytes` is null except for regular files, and
-  `modified_at` is a UTC timestamp. SQLite's temporary companion files can
-  appear and disappear between runs.
+  `modified_at` is a UTC timestamp, or null for a time outside the years 1 to
+  9999. SQLite's temporary companion files can appear and disappear between runs.
 - `environment` lists `MARKETPULSE_DATA`, `MARKETPULSE_CONFIG` and
   `XDG_CONFIG_HOME`. An empty variable counts as unset, as it does when
   MarketPulse starts. These hold paths; no secret is read from the environment.
@@ -125,6 +125,10 @@ reads the current configuration; the others are fixed tables. `sources`,
 `summary-operations` and `derive-functions` document this interface, so scripts
 can discover datasets, summary operations and derived-field functions without
 parsing help text.
+In `broker-profiles`, `has_accounts` is null for the generic profile, which
+decides per file by whether an account column is present. `tfsa-limits` lists
+the published limits; contribution room assumes the latest one for later years
+until MarketPulse is updated.
 
 ## Derived fields
 

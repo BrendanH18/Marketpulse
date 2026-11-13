@@ -241,7 +241,7 @@ def test_broker_profiles_list_detection_headers(app):
         "name": "generic",
         "label": "Generic CSV",
         "required_headers": [],
-        "has_accounts": False,
+        "has_accounts": None,  # decided per file, by whether an account column is present
         "limits": "Common column names and transaction words; anything ambiguous is skipped.",
     }
     # A file with exactly a profile's required headers is detected as that profile.

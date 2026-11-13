@@ -187,7 +187,7 @@ def _advanced_options(command):
 
 @main.command("report")
 @_advanced_options
-@click.argument("source", type=click.Choice(sorted(SOURCES)))
+@click.argument("source", type=click.Choice(sorted(SOURCES)), metavar="SOURCE")
 @click.option(
     "--derive",
     multiple=True,
@@ -252,6 +252,7 @@ def report(
 
     Filters combine with AND; processing is derived columns, filter, unique, sort, row windows,
     pagination, output transformations, projection, export. No quotes are fetched or snapshots recorded.
+    List the datasets with `marketpulse report sources`.
     """
     # Derived columns join the schema first, so every later option can name them like source fields.
     derived = report_derive.DerivePlan(SOURCES[source], derive)

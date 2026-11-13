@@ -42,7 +42,18 @@ BASELINE_COLUMNS = [
     ("transactions", 13, "target_account_id", "INTEGER", False, None, False),
 ]
 VARIABLES = ["MARKETPULSE_DATA", "MARKETPULSE_CONFIG", "XDG_CONFIG_HOME"]
-COMPONENTS = ["marketpulse", "python", "implementation", "platform", "sqlite", "click", "rich", "textual", "curl_cffi"]
+COMPONENTS = [
+    "marketpulse",
+    "python",
+    "implementation",
+    "platform",
+    "sqlite",
+    "click",
+    "rich",
+    "textual",
+    "curl_cffi",
+    "tzdata",
+]
 UTC_SECONDS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00")
 needs_symlinks = pytest.mark.skipif(sys.platform == "win32", reason="creating a symlink needs a privilege on Windows")
 
@@ -444,8 +455,11 @@ def test_runtime_reports_versions_in_order(detached):
     assert versions["implementation"] == platform.python_implementation()
     assert versions["platform"] == sys.platform
     assert versions["sqlite"] == sqlite3.sqlite_version
-    # The dependencies are installed wherever the tests run, so each has a dotted version number.
+    # The dependencies are installed wherever the tests run, so each has a dotted version number;
+    # tzdata only where the project declares it, on Windows.
     for distribution in COMPONENTS[5:]:
+        if distribution == "tzdata" and sys.platform != "win32" and versions[distribution] is None:
+            continue
         assert re.match(r"\d+\.\d+", versions[distribution]), distribution
 
 
@@ -460,7 +474,7 @@ def test_runtime_reports_null_for_a_distribution_that_is_not_installed(detached,
     monkeypatch.setattr(metadata, "version", without_textual)
     rows = load_source("runtime", detached)
     assert [row["component"] for row in rows] == COMPONENTS
-    assert [row["component"] for row in rows if row["version"] is None] == ["textual"]
+    assert [row["component"] for row in rows if row["version"] is None and row["component"] != "tzdata"] == ["textual"]
     assert _json(rows[7]) == '{"component": "textual", "version": null}'
 
 
@@ -562,7 +576,18 @@ def test_commands_read_environment_and_runtime_without_the_tracker(detached, tmp
     assert result.exit_code == 0, result.output
     assert _json(json.loads(result.output)) == _json([{"set": True, "value": str(tmp_path / "fictional xdg")}])
     result = CliRunner().invoke(
-        main, ["summarize", "runtime", "--metric", "components=count", "--metric", "known=present:version"]
+        # tzdata is left out: it is installed on Windows only.
+        main,
+        [
+            "summarize",
+            "runtime",
+            "--ine",
+            "component=tzdata",
+            "--metric",
+            "components=count",
+            "--metric",
+            "known=present:version",
+        ],
     )
     assert result.exit_code == 0, result.output
     assert _json(json.loads(result.output)) == _json([{"components": 9, "known": 9}])
