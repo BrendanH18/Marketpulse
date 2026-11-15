@@ -39,7 +39,7 @@ below are either verified or explicitly left out of the release.
 | Mac accessibility | [#47](https://github.com/BrendanH18/Marketpulse/issues/47) | Accessibility Inspector audit and a spoken VoiceOver walkthrough. The code merged in #83. |
 | Windows app QA | [#52](https://github.com/BrendanH18/Marketpulse/issues/52) | QA items W1–W11 on a real Windows desktop: tray, Narrator, scaling, file pickers. The code merged in #92. |
 | Windows installer QA | [#53](https://github.com/BrendanH18/Marketpulse/issues/53) | QA items W12–W16 on a fresh Windows 11 account, against a tagged release. The code merged in #93. |
-| Report crash on NaN or infinity | [#145](https://github.com/BrendanH18/Marketpulse/issues/145) | Fix before the report commands ship; strict expected-failure tests mark the cases. |
+| Report crash on NaN or infinity | [#145](https://github.com/BrendanH18/Marketpulse/issues/145) | Fix in review: [#147](https://github.com/BrendanH18/Marketpulse/pull/147). It must merge before the report commands ship. |
 | Tag, publish, check the README installers | [#32](https://github.com/BrendanH18/Marketpulse/issues/32) | Maintainer release checklist in [CONTRIBUTING](../CONTRIBUTING.md). |
 
 Broad feature batches wait until this milestone is published.
