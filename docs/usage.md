@@ -220,8 +220,9 @@ account didn't hold yet is skipped (`2024-02-01: Sell of 10.0000 XEQT.TO exceeds
 (`transaction #12 on 2024-03-01 would no longer add up (…)`) or another row of
 the file short (`line 7 on …`). A row that doesn't add up in date order is tried
 again after the others, so a transfer in later in the file can still cover it.
-The file's row order doesn't matter, each symbol is checked on its own, and
-problems already in the ledger don't block an import. Rows that match
+Row order only matters between entries of the same type on the same day, which
+are applied in file order. Each symbol is checked on its own, and problems
+already in the ledger don't block an import. Rows that match
 a transaction already in the ledger are counted as duplicates, with the first
 few shown, so importing the same export twice adds nothing. Always preview and
 review the summary first.

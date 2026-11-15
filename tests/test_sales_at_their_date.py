@@ -286,12 +286,12 @@ def test_a_sale_from_shares_a_skipped_transfer_would_have_brought_is_skipped_too
     ]
 
 
-def test_a_row_that_would_leave_another_row_of_the_file_short_names_its_line(store, acct, tfsa):
+def test_with_a_transfer_covering_an_earlier_sale_the_later_sale_that_falls_short_is_skipped(store, acct, tfsa):
     store.add_transaction(trade(acct, TxnType.BUY, "2026-01-01", 10))
     store.add_transaction(trade(acct, TxnType.SELL, "2026-03-01", 10))
     store.add_transaction(trade(tfsa, TxnType.BUY, "2026-01-01", 5))
     text = TRANSFER_HEADER + (
-        "2026-02-01,SELL,QAA,5,11,Fictional Taxable,\n"  # waits for the transfer, then breaks line 4
+        "2026-02-01,SELL,QAA,5,11,Fictional Taxable,\n"
         "2026-02-15,TRANSFER,QAA,5,12,Fictional TFSA,Fictional Taxable\n"
         "2026-03-05,SELL,QAA,5,13,Fictional Taxable,\n"
     )
@@ -299,10 +299,21 @@ def test_a_row_that_would_leave_another_row_of_the_file_short_names_its_line(sto
     done = import_transactions(store, io.StringIO(text))
     assert (preview.added, preview.skipped, preview.issues) == (done.added, done.skipped, done.issues)
     assert done.added == 2
-    assert done.skipped == [(2, "line 4 on 2026-03-05 would no longer add up (Sell of 5.0000 QAA exceeds 0.0000 held)")]
-    [issue] = done.issues
-    assert issue.code == "breaks_later_row"
-    assert issue.args == {
+    assert done.skipped == [(4, "2026-03-05: Sell of 5.0000 QAA exceeds 0.0000 held")]
+    assert store.ledger().issues == []
+
+
+def test_a_row_that_would_leave_another_row_of_the_file_short_names_its_line():
+    from marketpulse.csvio import _short_row_issue
+    from marketpulse.ledger import LedgerIssue
+
+    probe = Transaction(id=8, account_id=1, type=TxnType.SELL, date="2026-02-01", symbol="QAA", quantity=5)
+    issue = LedgerIssue(9, "2026-03-05", "Sell of 5.0000 QAA exceeds 0.0000 held", "sell_exceeds_held",
+                        {"symbol": "QAA", "quantity": 5.0, "held": 0.0})  # fmt: skip
+    row = _short_row_issue(2, probe, issue, {8: 2, 9: 4})
+    assert (row.line, row.code) == (2, "breaks_later_row")
+    assert row.reason == "line 4 on 2026-03-05 would no longer add up (Sell of 5.0000 QAA exceeds 0.0000 held)"
+    assert row.args == {
         "symbol": "QAA",
         "quantity": 5.0,
         "held": 0.0,
@@ -310,7 +321,6 @@ def test_a_row_that_would_leave_another_row_of_the_file_short_names_its_line(sto
         "issue_code": "sell_exceeds_held",
         "line": "4",
     }
-    assert store.ledger().issues == []
 
 
 def test_two_backdated_sales_that_together_break_a_recorded_sale_are_both_skipped(store, acct):
@@ -320,4 +330,63 @@ def test_two_backdated_sales_that_together_break_a_recorded_sale_are_both_skippe
         store, "2026-02-01,SELL,QAA,3,11,Fictional Taxable\n2026-02-02,SELL,QAA,3,11,Fictional Taxable\n"
     )
     assert result.added == 1 and [line for line, _ in result.skipped] == [3]
+    assert store.ledger().issues == []
+
+
+def test_transfers_that_only_add_up_together_survive_an_unrelated_bad_row(store, acct, tfsa):
+    # Each transfer alone leaves a recorded sale short; together they add up. An invalid sale of
+    # the same symbol from an account that never held it mustn't take them down with it.
+    margin = store.add_account(Account(name="Fictional Margin"))
+    store.add_transaction(trade(acct, TxnType.BUY, "2026-01-01", 10))
+    store.add_transaction(trade(acct, TxnType.SELL, "2026-04-01", 10))
+    store.add_transaction(trade(tfsa, TxnType.BUY, "2026-01-01", 10))
+    store.add_transaction(trade(tfsa, TxnType.SELL, "2026-03-01", 10))
+    text = TRANSFER_HEADER + (
+        "2026-02-01,TRANSFER,QAA,5,12,Fictional Taxable,Fictional TFSA\n"
+        "2026-02-10,TRANSFER,QAA,5,12,Fictional TFSA,Fictional Taxable\n"
+        f"2026-05-01,SELL,QAA,1,13,{margin.name},\n"
+    )
+    preview = import_transactions(store, io.StringIO(text), dry_run=True)
+    done = import_transactions(store, io.StringIO(text))
+    assert (preview.added, preview.skipped) == (done.added, done.skipped)
+    assert done.added == 2
+    assert done.skipped == [(4, "2026-05-01: Sell of 1.0000 QAA exceeds 0.0000 held")]
+    assert store.ledger().issues == []
+
+
+def test_a_transfer_out_and_back_survives_a_bad_row_when_the_shares_are_sold_later(store, acct, tfsa):
+    store.add_transaction(trade(acct, TxnType.BUY, "2026-01-01", 10))
+    store.add_transaction(trade(acct, TxnType.SELL, "2026-04-01", 10))
+    text = TRANSFER_HEADER + (
+        "2026-02-01,TRANSFER,QAA,10,12,Fictional Taxable,Fictional TFSA\n"
+        "2026-03-01,TRANSFER,QAA,10,12,Fictional TFSA,Fictional Taxable\n"
+        "2026-05-01,SELL,QAA,1,13,Fictional TFSA,\n"
+    )
+    done = import_transactions(store, io.StringIO(text))
+    assert done.added == 2 and [line for line, _ in done.skipped] == [4]
+    assert store.ledger().issues == []
+
+
+def test_a_row_breaking_a_recorded_sale_in_an_unlinked_account_leaves_a_transfer_pair_alone(store, acct, tfsa):
+    # The margin row leaves the margin account's recorded sale short. No transfer links that
+    # account to the other two, so the pair between them is judged on its own and kept.
+    margin = store.add_account(Account(name="Fictional Margin"))
+    store.add_transaction(trade(acct, TxnType.BUY, "2026-01-01", 10))
+    store.add_transaction(trade(acct, TxnType.SELL, "2026-04-01", 10))
+    store.add_transaction(trade(tfsa, TxnType.BUY, "2026-01-01", 10))
+    store.add_transaction(trade(tfsa, TxnType.SELL, "2026-03-01", 10))
+    store.add_transaction(trade(margin, TxnType.BUY, "2026-01-01", 1))
+    later = store.add_transaction(trade(margin, TxnType.SELL, "2026-04-01", 1))
+    text = TRANSFER_HEADER + (
+        "2026-02-01,TRANSFER,QAA,5,12,Fictional Taxable,Fictional TFSA\n"
+        "2026-02-10,TRANSFER,QAA,5,12,Fictional TFSA,Fictional Taxable\n"
+        "2026-03-01,SELL,QAA,1,13,Fictional Margin,\n"
+    )
+    preview = import_transactions(store, io.StringIO(text), dry_run=True)
+    done = import_transactions(store, io.StringIO(text))
+    assert (preview.added, preview.skipped) == (done.added, done.skipped)
+    assert done.added == 2
+    assert done.skipped == [
+        (4, f"transaction #{later.id} on 2026-04-01 would no longer add up (Sell of 1.0000 QAA exceeds 0.0000 held)")
+    ]
     assert store.ledger().issues == []

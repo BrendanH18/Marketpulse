@@ -268,3 +268,12 @@ def test_generic_import_reports_the_field_and_value_of_each_bad_row(store):
     assert result.skipped == [(i.line, i.reason) for i in result.issues]
     again = import_transactions(store, io.StringIO(text), default_account=acct)
     assert again.duplicate_rows == [DuplicateRow(2, "2024-01-05 BUY 10 AAPL @ 150 CAD · Main")]
+
+
+def test_a_sale_in_the_file_does_not_make_a_listing_count_as_held(store):
+    # The sale is skipped (nothing held), so the dividend can't tell which listing it is for.
+    acct = store.add_account(Account(name="WS"))
+    sale = '2025-01-05,SELL,"XEQT - iShares: Sold 5.0000 shares (executed at 2025-01-05)",150.00,0,CAD\n'
+    result = import_transactions(store, io.StringIO(WS_HEADER + sale + ws_dividend("XEQT")), default_account=acct)
+    assert result.added == 0
+    assert [(i.line, i.code) for i in result.issues] == [(2, "sell_exceeds_held"), (3, "ambiguous_listing_neither")]

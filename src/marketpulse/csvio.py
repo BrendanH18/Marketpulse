@@ -516,7 +516,8 @@ def _import(
             continue
         pending.append(txn)
         lines.append(line_no)
-        held.update({(txn.account_id, txn.symbol), (txn.target_account_id, txn.symbol)})
+        if txn.type is not TxnType.SELL:  # a sale never brings a listing into an account
+            held.update({(txn.account_id, txn.symbol), (txn.target_account_id, txn.symbol)})
 
     # Each sale, transfer and split is judged at its own date, as recording it by hand is.
     kept, short = _short_rows(stored, list(zip(lines, pending, strict=True)), store.account_map())
@@ -557,18 +558,40 @@ def _short_rows(
     first_id = max((t.id or 0 for t in stored), default=0) + 1
     # The ids the rows will be stored under, so same-day entries sort as replay will sort them.
     probes = [(line, replace(t, id=first_id + n)) for n, (line, t) in enumerate(rows)]
-    symbols = {t.symbol for _, t in probes if t.type in _CHECKED_TYPES}
-    # A holding's problems only involve entries for its symbol (a transfer keeps its symbol), so
-    # each symbol is judged on its own entries: cheaper, and unrelated rows can't change the result.
+    # A holding's problems only involve entries for its symbol in its account and the accounts
+    # transfers of that symbol link it to. Each such group is judged on its own entries: cheaper,
+    # and a row in an unrelated account can't change what happens to another account's rows.
+    groups: dict[tuple[str, int], tuple[list[Transaction], list[tuple[int, Transaction]]]] = {}
+    for symbol in sorted({t.symbol for _, t in probes if t.type in _CHECKED_TYPES}):
+        mine = [t for t in stored if t.symbol == symbol]
+        rows_of = [(line, t) for line, t in probes if t.symbol == symbol]
+        group = _linked_accounts([*mine, *(t for _, t in rows_of)])
+        for t in mine:
+            groups.setdefault((symbol, group(t.account_id)), ([], []))[0].append(t)
+        for line, t in rows_of:
+            groups.setdefault((symbol, group(t.account_id)), ([], []))[1].append((line, t))
     left_out: dict[int | None, RowIssue] = {}
-    for symbol in sorted(symbols):
-        left_out |= _short_rows_of(
-            [t for t in stored if t.symbol == symbol],
-            [(line, t) for line, t in probes if t.symbol == symbol],
-            accounts,
-        )
+    for mine, rows_of in groups.values():
+        if any(t.type in _CHECKED_TYPES for _, t in rows_of):
+            left_out |= _short_rows_of(mine, rows_of, accounts)
     kept = [row for row, (_, probe) in zip(rows, probes, strict=True) if probe.id not in left_out]
     return kept, sorted(left_out.values(), key=lambda i: i.line)
+
+
+def _linked_accounts(entries: list[Transaction]) -> Callable[[int], int]:
+    """For one symbol's entries: a function giving each account a representative of the accounts
+    transfers link it to, directly or through others."""
+    parent: dict[int, int] = {}
+
+    def find(account: int) -> int:
+        while parent.setdefault(account, account) != account:
+            account = parent[account]
+        return account
+
+    for t in entries:
+        if t.type is TxnType.TRANSFER and t.target_account_id is not None:
+            parent[find(t.account_id)] = find(t.target_account_id)
+    return find
 
 
 def _short_rows_of(
@@ -580,23 +603,44 @@ def _short_rows_of(
     def problems(entries: list[Transaction]) -> list[LedgerIssue]:
         return [i for i in replay(entries, accounts).issues if i.txn_id not in known]
 
-    if not problems([*stored, *(t for _, t in probes)]):
+    kept = list(probes)
+    new = problems([*stored, *(t for _, t in kept)])
+    if not new:
         return {}  # the usual case: every row adds up
     lines = {t.id: line for line, t in probes}
-    accepted = [t for _, t in probes if t.type not in _CHECKED_TYPES]  # can't leave anything short
-    waiting = sorted((p for p in probes if p[1].type in _CHECKED_TYPES), key=lambda p: sort_key(p[1]))
     found: dict[int | None, LedgerIssue] = {}
-    # In date order, then again for the rows that didn't add up, in case a row accepted since (a
-    # transfer in, say) covers them; until a round accepts nothing. Every accepted row leaves
-    # every entry adding up, so the import never adds a problem to the ledger.
+    left: list[tuple[int, Transaction]] = []
+    # 1. With every other row in place, leave out the earliest row that falls short itself, until
+    # none does. Rows that only add up together (a transfer out and back) are kept together.
+    while new and new[0].txn_id in lines:
+        row = next(r for r in kept if r[1].id == new[0].txn_id)
+        found[row[1].id] = new[0]
+        kept.remove(row)
+        left.append(row)
+        new = problems([*stored, *(t for _, t in kept)])
+    if new:
+        # 2. An entry already in the ledger falls short. Judge the sales, transfers and splits in
+        # date order, each with the rows accepted before it, as recording them by hand would.
+        accepted = [r for r in kept if r[1].type not in _CHECKED_TYPES]  # can't leave anything short
+        for row in sorted((r for r in kept if r[1].type in _CHECKED_TYPES), key=lambda r: sort_key(r[1])):
+            if issues := problems([*stored, *(t for _, t in accepted), row[1]]):
+                found[row[1].id] = issues[0]
+                left.append(row)
+            else:
+                accepted.append(row)
+        kept = accepted
+    # 3. Try the rows left out again, in date order, in case a row they waited on was left out
+    # too; until a round accepts nothing. Each accepted row leaves every entry adding up, so the
+    # import never adds a problem to the ledger.
+    waiting = sorted(left, key=lambda r: sort_key(r[1]))
     while waiting:
         still: list[tuple[int, Transaction]] = []
-        for line, probe in waiting:
-            if new := problems([*stored, *accepted, probe]):
-                found[probe.id] = new[0]
-                still.append((line, probe))
+        for row in waiting:
+            if issues := problems([*stored, *(t for _, t in kept), row[1]]):
+                found[row[1].id] = issues[0]
+                still.append(row)
             else:
-                accepted.append(probe)
+                kept.append(row)
         if len(still) == len(waiting):
             break
         waiting = still
