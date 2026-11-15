@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -101,22 +103,22 @@ def _having(values: tuple[str, ...], fields: tuple[str, ...]) -> report_filters.
 def _sort(rows: list[dict[str, Any]], fields: tuple[str, ...], numeric: set[str], descending: bool) -> None:
     for field in reversed(fields):
 
-        def key(row: dict[str, Any], field: str = field) -> tuple:
+        def number(value: Any, field: str = field) -> bool:
+            if isinstance(value, float) and not math.isfinite(value):
+                return False  # NaN has no order and Decimal refuses to compare it, so these sort as text.
+            return field in numeric or isinstance(value, (int, float)) and not isinstance(value, bool)
+
+        def key(row: dict[str, Any], field: str = field, number: Callable[[Any], bool] = number) -> tuple:
             value = row[field]
             if value is None or value == "":
                 return (2, "")
-            if field in numeric or isinstance(value, (int, float)) and not isinstance(value, bool):
+            if number(value):
                 return (0, Decimal(str(value)))
             return (1, reports._text(value))
 
         rows.sort(key=key, reverse=descending)
         # Keep numeric/text groups fixed in either direction, with missing values last.
-        rows.sort(
-            key=lambda row: (
-                row[field] is None or row[field] == "",
-                not (field in numeric or isinstance(row[field], (int, float)) and not isinstance(row[field], bool)),
-            )
-        )
+        rows.sort(key=lambda row: (row[field] is None or row[field] == "", not number(row[field])))
 
 
 def _filter_options(command):

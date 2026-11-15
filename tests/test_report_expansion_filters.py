@@ -665,14 +665,6 @@ def test_missing_equals_or_unknown_field_is_rejected_when_compiled(option):
     rejected(name, "=" + VALID[option])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ValueError,
-    reason=(
-        "#145: the report text convention is json.dumps(value, ensure_ascii=False, sort_keys=True), which writes "
-        "NaN and Infinity, but the text filters serialize with allow_nan=False and raise ValueError (a traceback)"
-    ),
-)
 def test_text_filters_read_non_finite_floats_by_the_report_text_convention():
     # JSON has no NaN, so saved data should never hold one; if a cell does, filters must not crash.
     values = [math.nan, math.inf, -math.inf, "x"]

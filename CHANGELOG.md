@@ -260,6 +260,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `marketpulse report` and `marketpulse summarize` no longer end in a traceback when
+  saved data holds a NaN or infinity, such as `capital_gains_inclusion = nan` in
+  `config.toml`. Text formats print `NaN`, `Infinity` or `-Infinity`; JSON formats,
+  which cannot represent them, stop with an error naming the field; and sorting a
+  summary on such a column no longer fails
+  ([#145](https://github.com/BrendanH18/Marketpulse/issues/145)).
+
 - Backup filenames without recognized timestamps no longer interrupt startup
   or prevent offline backup inspection on a populated ledger.
 

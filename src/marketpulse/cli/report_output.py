@@ -10,6 +10,8 @@ from typing import Any
 
 import click
 
+from . import report_formats
+
 CELL_OPTIONS = (
     "lower",
     "upper",
@@ -70,7 +72,8 @@ def _text(value: Any) -> str:
         return ""
     if isinstance(value, str):
         return value
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
+    # NaN and Infinity are report text, not JSON: a text column shows what the cell holds.
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 def _name(value: str) -> str:
@@ -191,6 +194,7 @@ class OutputPlan:
         elif operation == "encode_json":
 
             def encode(item: Any) -> str:
+                report_formats.require_json_values(field, (item,))
                 return json.dumps(item, ensure_ascii=False, sort_keys=True, allow_nan=False)
 
             transform = encode
