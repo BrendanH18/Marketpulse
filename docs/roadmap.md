@@ -49,14 +49,15 @@ Broad feature batches wait until this milestone is published.
 | Issue | Question |
 | --- | --- |
 | [#48](https://github.com/BrendanH18/Marketpulse/issues/48) | Persistent backend process. The measurements are done ([performance](performance.md)) and recommend deferring it. |
+| [#149](https://github.com/BrendanH18/Marketpulse/issues/149) | Whether, and when, to check new and imported sales at their date. |
 
 ## After the release
 
-- **Check new sales and imports against the ledger at their date.** Edits and
+- **Check new sales and imports against the ledger at their date**
+  ([#149](https://github.com/BrendanH18/Marketpulse/issues/149)). Edits and
   deletes already replay the ledger; a new backdated sale is only compared with
-  current holdings, and imports skip the check. See
-  [project review §2](project-review.md). No issue yet; this is financial
-  validation, so it needs one before any work starts.
+  current holdings, and imports skip the check. It changes ledger validation, so
+  it waits for the maintainer's go-ahead.
 - Choose further work from what people run into when using the released app.
 
 ## Later
