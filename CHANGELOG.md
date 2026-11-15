@@ -21,8 +21,9 @@ can't be reached.
 MarketPulse supports macOS (the app, CLI and TUI) and Linux (CLI and TUI); there is no
 Windows build ([ADR 0002](docs/adr/0002-no-windows-build.md)). Version 2.2.0 was prepared
 but never published, so this release includes its changes. Major bump for the app: the
-CLI and `status --json` stay backward compatible (see **Changed** for stricter checks),
-and the database needs no migration (see **Upgrade notes** before rolling back).
+CLI and `status --json` keep their commands and structure (see **Changed** for stricter
+checks and for archived accounts leaving the totals), and the database needs no
+migration (see **Upgrade notes** before rolling back).
 
 ### Added
 
@@ -464,7 +465,9 @@ and the database needs no migration (see **Upgrade notes** before rolling back).
 2. **No database migration.** The schema is unchanged from 2.1.0. To roll back,
    restore the backup from step 1 before running 2.1.0: this version caches quotes
    with a field 2.1.0 doesn't know, so 2.1.0 on an upgraded ledger fails when it
-   falls back to cached prices.
+   falls back to cached prices. Entries made after step 1 are not in that backup;
+   `marketpulse backup restore`, run while this version is installed, keeps the
+   ledger it replaces as a `pre-restore` backup.
 3. **Mac app.** Install it with the one-line command or the DMG in the
    [install guide](docs/install.md). It shares `~/.marketpulse` with the CLI and TUI.
    A companion installed from a checkout (`MarketPulse Bar.app`) is a separate app; if you
