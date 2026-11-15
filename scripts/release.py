@@ -1,7 +1,7 @@
 """Package, verify, and describe a MarketPulse release. Used by .github/workflows/release.yml.
 
-    uv run --locked python scripts/release.py check-tag v2.2.0       # the tag must match __version__
-    uv run --locked python scripts/release.py notes 2.2.0 > notes.md   # that version's CHANGELOG section
+    uv run --locked python scripts/release.py check-tag v3.0.0       # the tag must match __version__
+    uv run --locked python scripts/release.py notes 3.0.0 > notes.md   # that version's CHANGELOG section
     uv run --locked python scripts/release.py package --apps dist/app --python-dist dist/python --out dist/release
     uv run --locked python scripts/release.py verify dist/release --require-smoke arm64
 

@@ -5,7 +5,7 @@
 `MarketPulse.app` runs on macOS 14 (Sonoma) or later, on Apple silicon and Intel Macs. It
 carries its own copy of the MarketPulse engine, so you don't need Python, Homebrew, or
 developer tools. Each [GitHub Release](https://github.com/BrendanH18/Marketpulse/releases)
-from 2.2.0 has the app for both kinds of Mac.
+from 3.0.0 has the app for both kinds of Mac.
 
 ## Install with one command (recommended)
 
@@ -29,10 +29,10 @@ If MarketPulse is open, the script waits for you to quit it. Your portfolio in
 `~/.marketpulse` is never touched; installing or upgrading replaces only the app.
 
 To install a particular version, take the script from that release and name the version
-(replace `v2.2.0` with the one you want):
+(replace `v3.0.0` with the one you want):
 
 ```bash
-curl -fsSL https://github.com/BrendanH18/Marketpulse/releases/download/v2.2.0/install.sh | bash -s -- --version v2.2.0
+curl -fsSL https://github.com/BrendanH18/Marketpulse/releases/download/v3.0.0/install.sh | bash -s -- --version v3.0.0
 ```
 
 Other options: `--dir FOLDER` installs somewhere else (for example `--dir /Applications`,

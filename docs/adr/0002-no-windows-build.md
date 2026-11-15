@@ -30,7 +30,7 @@ release jobs are removed. The code remains in Git history up to
 
 ## Consequences
 
-- Releases contain the macOS files and one `SHA256SUMS`, as 2.2.0 was prepared.
+- Releases contain the macOS files and one `SHA256SUMS`, as 2.2.0 was prepared (it was never published; 3.0.0 is the first release with the app).
 - CI no longer runs the Python tests on Windows, so the CLI and TUI are untested
   there. Portability code in the engine (explicit UTF-8, the `tzdata` dependency
   on Windows) stays, because it is harmless and removing it gains nothing.
