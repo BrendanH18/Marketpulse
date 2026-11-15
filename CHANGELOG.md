@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `alerts rm` and `asset remove` report an error for an alert or symbol that
   doesn't exist instead of reporting a removal.
 - `backup now PATH` refuses to back up the database onto itself.
+- Editing a transaction in the terminal app no longer rounds unchanged numbers to six
+  significant digits when it is saved (123.456789 shares were saved as 123.457).
 - A lone `=` in the terminal app's activity filter no longer hides every entry
   with a symbol.
 - The chart keys `[`, `]`, `c` and `C` explain what to do outside the chart

@@ -138,7 +138,8 @@ class TransactionForm(BaseForm):
         title = f"Edit transaction #{t.id}" if t and t.id is not None else "New transaction"
 
         def val(v: float) -> str:
-            return f"{v:g}" if v else ""
+            # repr round-trips exactly: saving an untouched field keeps every digit (`:g` kept six).
+            return repr(v).removesuffix(".0") if v else ""
 
         account_options = [(f"{a.name}  ·  {a.type.label}", a.id) for a in self.accounts]
         with Vertical(classes="modal"):

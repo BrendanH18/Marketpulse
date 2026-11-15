@@ -208,6 +208,44 @@ def test_duplicate_transaction_prefills_a_new_entry_dated_today(tracker, store):
     assert copy.date == date.today().isoformat()
 
 
+def test_duplicate_and_edit_keep_every_digit_of_the_saved_numbers(tracker, store):
+    birch = store.add_account(Account(name="Birch TFSA", type=AccountType.TFSA, track_cash=True))
+    deposit = store.add_transaction(Transaction(birch.saved_id, TxnType.DEPOSIT, "2024-01-01", amount=12345.67))
+    buy = store.add_transaction(
+        Transaction(birch.saved_id, TxnType.BUY, "2024-01-02", "XEQT.TO", 123.456789, 30.123456, fees=9.99)
+    )
+
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        async with app.run_test(size=SIZE) as pilot:
+            await started(app, pilot)
+            await pilot.press("5")
+            for txn in (buy, deposit):
+                select(app.query_one("#activity-table", DataTable), str(txn.id))
+                await pilot.press("d")
+                await pilot.pause()
+                form = app.screen
+                assert isinstance(form, TransactionForm)
+                form.action_save()
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+            select(app.query_one("#activity-table", DataTable), str(buy.id))
+            await pilot.press("e")
+            await pilot.pause()
+            form = app.screen
+            assert isinstance(form, TransactionForm)
+            assert form.query_one("#f-quantity", Input).value == "123.456789"
+            assert form.query_one("#f-price", Input).value == "30.123456"
+            assert form.query_one("#f-fees", Input).value == "9.99"
+
+    run(scenario())
+    buys = [t for t in store.transactions() if t.type is TxnType.BUY]
+    deposits = [t for t in store.transactions() if t.type is TxnType.DEPOSIT]
+    assert sorted((t.quantity, t.price, t.fees) for t in buys) == [(123.456789, 30.123456, 9.99)] * 2
+    assert [t.amount for t in deposits] == [12345.67, 12345.67]
+
+
 # 5 ─ problems overlay ────────────────────────────────────────────────────────
 
 
