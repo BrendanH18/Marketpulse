@@ -76,7 +76,7 @@ Broad feature batches wait until this milestone is published.
 | Quote resilience and a second provider | #23, #49 |
 | CLI and TUI module splits | #24 |
 | Mac app: Phases 1 and 2 of the plan, and French (Canada) | #31, #33–#46, #55 |
-| Offline CLI inspection, `report` and `summarize` (57 datasets, 180 shared operations) | 20 issues from #104 to #143, and #145 |
+| Offline CLI inspection, `report` and `summarize` (57 datasets, 197 shared operations) | 20 issues from #104 to #143, and #145 |
 
 ## Dropped
 

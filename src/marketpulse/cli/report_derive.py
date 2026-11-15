@@ -25,7 +25,8 @@ class Function:
     description: str
 
 
-# The documented order; `report derive-functions` and the capability inventory number these 1-50.
+# The documented order; `report derive-functions` and the capability inventory number these 1-60.
+# Functions 1-50 shipped with #142 and 51-60 with #153; new functions append, so numbers never move.
 FUNCTIONS: tuple[Function, ...] = (
     Function("year", "date", None, "integer", "Calendar year."),
     Function("quarter", "date", None, "integer", "Calendar quarter, 1 to 4."),
@@ -77,6 +78,18 @@ FUNCTIONS: tuple[Function, ...] = (
     Function("equals", "value", "JSON", "boolean", "True when the value equals JSON, comparing JSON types."),
     Function("item", "value", "N", "value", "Array element N from 0; negative N counts from the end."),
     Function("key", "value", "NAME", "value", "Object member NAME."),
+    Function("add-days", "date", "N", "string", "Date N days later; negative N counts back."),
+    Function(
+        "add-months", "date", "N", "string", "Date N calendar months later, using the last day of a shorter month."
+    ),
+    Function("divide", "number", "NUMBER", "number", "Value divided by a nonzero NUMBER."),
+    Function("at-least", "number", "NUMBER", "number", "The larger of the value and NUMBER."),
+    Function("at-most", "number", "NUMBER", "number", "The smaller of the value and NUMBER."),
+    Function("percent-of-field", "number", "FIELD", "number", "Value as a percentage of another, nonzero field."),
+    Function("right", "text", "N", "string", "Last N characters."),
+    Function("contains", "text", "TEXT", "boolean", "True when the text contains TEXT, matching case."),
+    Function("starts-with", "text", "TEXT", "boolean", "True when the text starts with TEXT, matching case."),
+    Function("ends-with", "text", "TEXT", "boolean", "True when the text ends with TEXT, matching case."),
 )
 _BY_NAME = {function.name: function for function in FUNCTIONS}
 
@@ -220,6 +233,10 @@ _BINARY_NUMBERS: dict[str, Callable[[Decimal, Decimal], Decimal | None]] = {
     "subtract-field": lambda value, other: value - other,
     "multiply-field": lambda value, other: value * other,
     "divide-field": lambda value, other: value / other if other else None,
+    "divide": lambda value, other: value / other,  # NUMBER is checked nonzero before loading
+    "at-least": lambda value, other: value if value >= other else other,
+    "at-most": lambda value, other: value if value <= other else other,
+    "percent-of-field": lambda value, other: value * 100 / other if other else None,
 }
 
 
@@ -255,6 +272,29 @@ _VALUES: dict[str, Callable[[Any], Any]] = {
     "text": _text,
     "type": _type,
     "is-missing": lambda value: value is None or isinstance(value, str) and value == "",
+}
+
+
+def _add_months(day: date, months: int) -> date | None:
+    """The same day ``months`` later, clamped to the month's length; None outside years 1 to 9999."""
+    year, month = divmod(day.year * 12 + day.month - 1 + months, 12)
+    if not 1 <= year <= 9999:
+        return None
+    return date(year, month + 1, min(day.day, calendar.monthrange(year, month + 1)[1]))
+
+
+def _add_days(day: date, days: int) -> date | None:
+    try:
+        return day + timedelta(days=days)
+    except OverflowError:
+        return None
+
+
+_DATE_SHIFTS: dict[str, Callable[[date, int], date | None]] = {"add-days": _add_days, "add-months": _add_months}
+_TEXT_TESTS: dict[str, Callable[[str, str], bool]] = {
+    "contains": lambda value, text: text in value,
+    "starts-with": str.startswith,
+    "ends-with": str.endswith,
 }
 
 
@@ -303,6 +343,15 @@ def _compile(function: Function, field: str, argument: str | None, schema: tuple
             return None if day is None else (day - origin).days
 
         return days_from
+    if name in _DATE_SHIFTS:
+        shift, amount = _DATE_SHIFTS[name], _whole(function, argument, None)
+
+        def shifted(row: dict[str, Any]) -> str | None:
+            day = _date(row[field])
+            moved = None if day is None else shift(day, amount)
+            return None if moved is None else moved.isoformat()
+
+        return shifted
     if name in _BINARY_NUMBERS:
         binary = _BINARY_NUMBERS[name]
         if function.argument == "FIELD":
@@ -322,6 +371,8 @@ def _compile(function: Function, field: str, argument: str | None, schema: tuple
             parsed = _number(argument)
             if parsed is None or (name == "bin" and parsed <= 0):
                 raise _usage(function, "requires a finite WIDTH above zero" if name == "bin" else "requires a NUMBER")
+            if name == "divide" and not parsed:
+                raise _usage(function, "requires a nonzero NUMBER")
             constant = parsed
 
         def with_constant(row: dict[str, Any]) -> int | float | None:
@@ -332,9 +383,15 @@ def _compile(function: Function, field: str, argument: str | None, schema: tuple
     if name == "left":
         count = _whole(function, argument, 1)
         return lambda row: row[field][:count] if isinstance(row[field], str) else None
-    if name in ("before", "after-last"):
+    if name == "right":
+        count = _whole(function, argument, 1)
+        return lambda row: row[field][-count:] if isinstance(row[field], str) else None
+    if name in ("before", "after-last", *_TEXT_TESTS):
         if not argument:
             raise _usage(function, "requires nonempty TEXT")
+        if name in _TEXT_TESTS:
+            test = _TEXT_TESTS[name]
+            return lambda row: test(row[field], argument) if isinstance(row[field], str) else None
         if name == "before":
             return lambda row: row[field].partition(argument)[0] if isinstance(row[field], str) else None
 

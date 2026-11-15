@@ -37,7 +37,7 @@ What stays the same:
   [fixes](#fixes-and-known-limitations) listed at the end. The catalogs that
   describe the interface grow with it: `report sources` lists 57 datasets, and
   `report summary-operations` and `summarize SOURCE --describe` list 50 summary
-  operations.
+  operations (57 since #153).
 
 ## Seven new datasets
 
@@ -90,9 +90,10 @@ tracker.
 - `workspaces` lists the eight terminal app workspaces in order, with their key
   hint, the id of their main table (null when there is none) and the columns that
   table can be sorted by (`[]` when it has no sort modes).
-- `report-operations` lists all 180 shared operations in catalog order. Numbers
+- `report-operations` lists all 197 shared operations in catalog order. Numbers
   1–20 come from #136, 21–60 from #138, 61–100 from #140, 101–150 are the derive
-  functions of #142, and 151–180 are operations 1–30 of this guide. `commands` is
+  functions of #142, 151–180 are operations 1–30 of this guide, 181–190 are
+  derive functions 51–60 and 191–197 are summary operations, both added by #153. `commands` is
   an array of the commands that accept the operation (`report`, `summarize` or
   both) and `issue` is the issue number that added it.
 
@@ -470,7 +471,7 @@ marketpulse report chart-periods --where interval=1d --fields period,bars_per_ye
 # The syntax of every operation this guide adds.
 marketpulse report report-operations --where issue=143 --fields number,syntax --format text
 
-# Shared operations per issue, with a total of 180.
+# Shared operations per issue, with a total of 197.
 marketpulse summarize report-operations --group-by issue --metric operations=count --totals --format text
 ```
 
@@ -591,7 +592,7 @@ on `account-activity`, and 2,760 is `--format json-columns` on `workspaces`.
 | 2,701–2,730 | `watchlist` | #136 |
 | 2,731–2,760 | `workspaces` | #143 |
 
-`marketpulse report report-operations` lists all 180 shared operations offline, in
+`marketpulse report report-operations` lists all 197 shared operations offline, in
 catalog order: numbers 151–180 are operations 1–30 of this guide.
 
 ## Verification
