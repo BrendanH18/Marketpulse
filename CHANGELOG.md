@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-14
+
+The first release with the standalone Mac app (App 1.0): `MarketPulse.app` for Apple
+silicon and Intel, with its own copy of the engine, installed with one command or from a
+DMG. The app covers everyday work without a terminal: onboarding, editing transactions and
+accounts, every transaction type, broker CSV imports, the tax workspace, GICs and manually
+valued assets, allocation targets, backups and restore, settings, an update check, keyboard
+and VoiceOver support, and French (Canada). The CLI gains offline `report` and `summarize`
+commands over 57 saved datasets, and quotes fall back to a second provider when Yahoo
+can't be reached.
+
+MarketPulse supports macOS (the app, CLI and TUI) and Linux (CLI and TUI); there is no
+Windows build ([ADR 0002](docs/adr/0002-no-windows-build.md)). Version 2.2.0 was prepared
+but never published, so this release includes its changes. Major bump for the app: the
+CLI and `status --json` keep their commands and structure (see **Changed** for stricter
+checks and for archived accounts leaving the totals), and the database needs no
+migration (see **Upgrade notes** before rolling back).
+
 ### Added
 
 - Seven more offline report datasets (57 in total) and 30 shared operations for
@@ -210,59 +228,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `stale_since`, each position's `quote_source` and `quote_age_seconds`, and the provider
   fields in `settings`.
 
-### Removed
-
-- The Windows app, its installer and PowerShell install script, and the bundled Windows
-  backend. They were built after 2.2.0 and never shipped in a release. MarketPulse now
-  targets macOS (the app, CLI and TUI) and Linux (CLI and TUI); see
-  [ADR 0002](docs/adr/0002-no-windows-build.md)
-  ([#150](https://github.com/BrendanH18/Marketpulse/issues/150)).
-
-### Changed
-
-- Desktop refreshes reuse transaction rows and revision hashes within each snapshot,
-  reducing repeated ledger reads and serialization. The desktop JSON payload and edit
-  revision values stay the same. See [refresh measurements](docs/performance.md).
-
-### Fixed
-
-- `marketpulse report` and `marketpulse summarize` no longer end in a traceback when
-  saved data holds a NaN or infinity, such as `capital_gains_inclusion = nan` in
-  `config.toml`. Text formats print `NaN`, `Infinity` or `-Infinity`; JSON formats,
-  which cannot represent them, stop with an error naming the field; and sorting a
-  summary on such a column no longer fails
-  ([#145](https://github.com/BrendanH18/Marketpulse/issues/145)).
-
-- Backup filenames without recognized timestamps no longer interrupt startup
-  or prevent offline backup inspection on a populated ledger.
-
-- `summary` no longer crashes on 29 February when working out the start of its
-  one-year history window.
-- Ordinary CLI activity and transaction inspection hide archived accounts, including
-  transfers touching archived accounts. CSV previews no longer create a default
-  account in the live ledger when a file omits account names; create an account first.
-- An alert check already fetching prices no longer overwrites an alert paused or
-  edited during that fetch, or fires the paused alert from its stale state.
-
-- Configuration and CSV file exports use UTF-8 explicitly, preserving non-ASCII
-  account names on Windows. Saving a provider key no longer calls Unix-only
-  permission APIs on Windows.
-- `marketpulse doctor` said "Yahoo reachable" even when Yahoo couldn't be reached and
-  prices came from the offline cache. It now reports the failure, and the fallback
-  provider's status.
-
-## [2.2.0] - 2026-11-03
-
-The first release with the standalone Mac app (App 1.0 for macOS): `MarketPulse.app`
-for Apple silicon and Intel, with its own copy of the engine, installed with one command
-or from a DMG. The app now covers everyday work without a terminal: onboarding, editing
-transactions and accounts, every transaction type, broker CSV imports, the tax workspace,
-GICs and manually valued assets, allocation targets, backups and restore, settings, an
-update check, and keyboard and VoiceOver support. Minor bump: the CLI, `status --json`, and
-the database stay backward compatible (see **Changed** for stricter checks).
-
-### Added
-
 - Keyboard and VoiceOver support in the Mac app. A new **Workspace** menu opens each
   workspace with ⌘1 to ⌘9, and ⇧⌘H hides or shows amounts. VoiceOver names every
   icon-only button (in the window and the menu bar popover), summarizes each chart in
@@ -407,29 +372,11 @@ the database stay backward compatible (see **Changed** for stricter checks).
   DMGs with `SHA256SUMS`, verifies and runs every app, and opens a draft GitHub Release
   with that version's changelog section. A manual run is a dry run with no release.
 
-### Fixed
-
-- `allocation --clear-targets --target …` no longer clears the saved targets when one of
-  the new ones is rejected.
-- CSV import no longer reads an unreadable number (such as `2x` in a price or fees
-  column) as zero; the row is skipped and reported with the column and value.
-- Contribution room still counts deposits to archived accounts. Archiving a TFSA, RRSP
-  or FHSA used to drop its contributions, overstating the room left. Archived accounts
-  stay out of the room table's account list.
-- `accounts edit` reports a clear error instead of a traceback when the new name is
-  taken, and refuses a blank name (the TUI's account form too).
-- Native transaction saves use durable request receipts: a confirmation failure or timeout
-  can be recovered or retried without recording the transaction twice.
-- The native window reopens from the Dock and shows its toolbar on macOS 14.
-- Opening the TUI in Terminal or iTerm from the app works when the CLI's path contains spaces.
-- Transaction validation rejects NaN/infinity; alerts require a finite positive threshold.
-- CSV previews (`--dry-run`) run the real import against a temporary copy of the
-  ledger, so they always match the import exactly. Imports are all-or-nothing, and
-  the app's import refuses to run if the file or ledger changed since its preview.
-- macOS installation preserves configuration overrides and clears obsolete paths.
-- Native CLI subprocesses time out instead of leaving refresh stuck indefinitely.
-
 ### Changed
+
+- Desktop refreshes reuse transaction rows and revision hashes within each snapshot,
+  reducing repeated ledger reads and serialization. The desktop JSON payload and edit
+  revision values stay the same. See [refresh measurements](docs/performance.md).
 
 - Recording a transfer or a split (in the CLI, TUI, or app) is checked against what the
   account held on its date, and refused with the reason if it moves more shares than
@@ -464,12 +411,63 @@ the database stay backward compatible (see **Changed** for stricter checks).
   warned, and daily snapshots and history rebuilds (`backfill`) wait until it's resolved.
 - CSV imports skip rows that name an archived account, with that reason.
 
+### Fixed
+
+- `marketpulse report` and `marketpulse summarize` no longer end in a traceback when
+  saved data holds a NaN or infinity, such as `capital_gains_inclusion = nan` in
+  `config.toml`. Text formats print `NaN`, `Infinity` or `-Infinity`; JSON formats,
+  which cannot represent them, stop with an error naming the field; and sorting a
+  summary on such a column no longer fails
+  ([#145](https://github.com/BrendanH18/Marketpulse/issues/145)).
+
+- Backup filenames without recognized timestamps no longer interrupt startup
+  or prevent offline backup inspection on a populated ledger.
+
+- `summary` no longer crashes on 29 February when working out the start of its
+  one-year history window.
+- Ordinary CLI activity and transaction inspection hide archived accounts, including
+  transfers touching archived accounts. CSV previews no longer create a default
+  account in the live ledger when a file omits account names; create an account first.
+- An alert check already fetching prices no longer overwrites an alert paused or
+  edited during that fetch, or fires the paused alert from its stale state.
+
+- Configuration and CSV file exports use UTF-8 explicitly, preserving non-ASCII
+  account names on Windows. Saving a provider key no longer calls Unix-only
+  permission APIs on Windows.
+- `marketpulse doctor` said "Yahoo reachable" even when Yahoo couldn't be reached and
+  prices came from the offline cache. It now reports the failure, and the fallback
+  provider's status.
+
+- `allocation --clear-targets --target …` no longer clears the saved targets when one of
+  the new ones is rejected.
+- CSV import no longer reads an unreadable number (such as `2x` in a price or fees
+  column) as zero; the row is skipped and reported with the column and value.
+- Contribution room still counts deposits to archived accounts. Archiving a TFSA, RRSP
+  or FHSA used to drop its contributions, overstating the room left. Archived accounts
+  stay out of the room table's account list.
+- `accounts edit` reports a clear error instead of a traceback when the new name is
+  taken, and refuses a blank name (the TUI's account form too).
+- Native transaction saves use durable request receipts: a confirmation failure or timeout
+  can be recovered or retried without recording the transaction twice.
+- The native window reopens from the Dock and shows its toolbar on macOS 14.
+- Opening the TUI in Terminal or iTerm from the app works when the CLI's path contains spaces.
+- Transaction validation rejects NaN/infinity; alerts require a finite positive threshold.
+- CSV previews (`--dry-run`) run the real import against a temporary copy of the
+  ledger, so they always match the import exactly. Imports are all-or-nothing, and
+  the app's import refuses to run if the file or ledger changed since its preview.
+- macOS installation preserves configuration overrides and clears obsolete paths.
+- Native CLI subprocesses time out instead of leaving refresh stuck indefinitely.
+
 ### Upgrade notes
 
 1. **Back up before upgrading.** Quit the TUI and menu bar companion, then run
    `marketpulse backup` (or copy `~/.marketpulse/` to another disk).
-2. **No database migration.** The schema is unchanged from 2.1.0, so 2.1.0 can
-   still open the ledger if you roll back.
+2. **No database migration.** The schema is unchanged from 2.1.0. To roll back,
+   restore the backup from step 1 before running 2.1.0: this version caches quotes
+   with a field 2.1.0 doesn't know, so 2.1.0 on an upgraded ledger fails when it
+   falls back to cached prices. Entries made after step 1 are not in that backup;
+   `marketpulse backup restore`, run while this version is installed, keeps the
+   ledger it replaces as a `pre-restore` backup.
 3. **Mac app.** Install it with the one-line command or the DMG in the
    [install guide](docs/install.md). It shares `~/.marketpulse` with the CLI and TUI.
    A companion installed from a checkout (`MarketPulse Bar.app`) is a separate app; if you
@@ -478,7 +476,7 @@ the database stay backward compatible (see **Changed** for stricter checks).
 
    ```bash
    marketpulse backup
-   uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v2.2.0
+   uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v3.0.0
    marketpulse --version
    ```
 
@@ -551,7 +549,7 @@ Initial 2.0 overhaul: transaction ledger engine, SQLite store, Yahoo market
 client, Omarchy-styled Textual TUI, and native macOS menu bar companion.
 See PR [#3](https://github.com/BrendanH18/Marketpulse/pull/3).
 
-[Unreleased]: https://github.com/BrendanH18/Marketpulse/compare/v2.2.0...HEAD
-[2.2.0]: https://github.com/BrendanH18/Marketpulse/compare/v2.1.0...v2.2.0
+[Unreleased]: https://github.com/BrendanH18/Marketpulse/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/BrendanH18/Marketpulse/compare/v2.1.0...v3.0.0
 [2.1.0]: https://github.com/BrendanH18/Marketpulse/compare/08b9aff...v2.1.0
 [2.0.0]: https://github.com/BrendanH18/Marketpulse/tree/08b9aff

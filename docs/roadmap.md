@@ -15,8 +15,9 @@ pointer: claim and track work on the issues themselves. The epic is
 The Mac app is built but not yet published.
 
 - **Published:** v2.1.0 (2026-10-06), a CLI and TUI release with no app download.
-- **Next release:** 3.0.0, the first with the Mac app, cut from `main`. 2.2.0 was
-  prepared ([#84](https://github.com/BrendanH18/Marketpulse/pull/84)) but never
+- **Next release:** 3.0.0, the first with the Mac app. `main` is prepared for it
+  (version, changelog section, install docs) but it is not tagged. 2.2.0 was
+  prepared ([#84](https://github.com/BrendanH18/Marketpulse/pull/84)) and never
   tagged, so 3.0.0 carries its changes too. Until it is published, the README's
   one-line installer has nothing to download.
 - **Unreleased on `main`:** the Mac app, a second quote provider, French (Canada)
@@ -37,10 +38,9 @@ developer tools can install from the README on a Mac.
 
 | Work | Issue | What remains |
 | --- | --- | --- |
-| Prepare 3.0.0 | [#32](https://github.com/BrendanH18/Marketpulse/issues/32) | Version bump, the changelog section, install docs and a release dry run on the release branch. |
 | Mac release QA | [#32](https://github.com/BrendanH18/Marketpulse/issues/32) | Run the [QA checklist](qa.md) on the 3.0.0 build. Items no one has observed yet: 1, 10 and 12–26 (table on [#84](https://github.com/BrendanH18/Marketpulse/pull/84)) and the layout check in 27 ([#85](https://github.com/BrendanH18/Marketpulse/pull/85)). Then a fresh install from the published release. These need a person at a Mac. |
 | Mac accessibility | [#47](https://github.com/BrendanH18/Marketpulse/issues/47) | Accessibility Inspector audit and a spoken VoiceOver walkthrough. The code merged in #83. |
-| Tag, publish, check the README installer | [#32](https://github.com/BrendanH18/Marketpulse/issues/32) | Maintainer release checklist in [CONTRIBUTING](../CONTRIBUTING.md). |
+| Tag, publish, check the README installer | [#32](https://github.com/BrendanH18/Marketpulse/issues/32) | Maintainer release checklist in [CONTRIBUTING](../CONTRIBUTING.md), from step 7. If the tag is pushed on another day, change the date of the 3.0.0 changelog section first. |
 
 Broad feature batches wait until this milestone is published.
 

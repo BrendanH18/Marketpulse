@@ -2,7 +2,7 @@
 # Install MarketPulse.app on macOS from a GitHub Release.
 #
 #   curl -fsSL https://github.com/BrendanH18/Marketpulse/releases/latest/download/install.sh | bash
-#   bash install.sh --version v2.2.0
+#   bash install.sh --version v3.0.0
 #
 # The app is ad-hoc signed, not notarized (see docs/install.md). Browsers quarantine what they
 # download and macOS blocks quarantined apps Apple hasn't notarized; curl doesn't quarantine, so
@@ -145,7 +145,7 @@ main() {
     # Only plain version strings reach a URL or a path. ([[ =~ ]] matches the whole string; grep
     # would accept one good line of several.)
     local plain='^[0-9]+\.[0-9]+\.[0-9]+([.+-]?[0-9A-Za-z]+)*$'
-    [[ $version =~ $plain ]] || die "\"$version\" isn't a version like v2.2.0."
+    [[ $version =~ $plain ]] || die "\"$version\" isn't a version like v3.0.0."
     local tag="v$version" zip="MarketPulse-$version-macos-$arch.zip"
 
     trap cleanup EXIT
