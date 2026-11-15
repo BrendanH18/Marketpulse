@@ -14,7 +14,7 @@ uv sync --locked --dev --python 3.11
 uv run --locked python scripts/benchmark_desktop.py > /tmp/desktop-benchmark.json
 ```
 
-On Windows, redirect to a writable scratch path instead of `/tmp`. The script
+The script
 creates a temporary directory, overrides inherited `MARKETPULSE_DATA` and
 `MARKETPULSE_CONFIG` in its workers, and removes its ledger afterwards. It never
 opens your portfolio. All quotes are fixed fictional responses; no requests go
@@ -29,10 +29,10 @@ Run it alone, without tests or a profiler competing for CPU. Use the same host,
 Python version, sample count, and delay when comparing a later change. These are
 observations, not timing thresholds for CI.
 
-### Run on macOS and Windows in Actions
+### Run on macOS in Actions
 
 Open **Actions › CI › Run workflow**, select the branch to measure, and enable
-**Run offline desktop benchmarks on macOS and Windows**. The normal CI checks
+**Run the offline desktop benchmark on macOS**. The normal CI checks
 also run; benchmarks are skipped on ordinary pushes, pull requests, release
 checks, and manual runs with the option disabled. With the GitHub CLI:
 
@@ -40,23 +40,23 @@ checks, and manual runs with the option disabled. With the GitHub CLI:
 gh workflow run ci.yml --ref main -f desktop_benchmark=true
 ```
 
-Each platform runs the unchanged workload above with Python 3.11, seven samples
-per case, and both zero and 100 ms/request simulated waits. The jobs use
-`namespace-profile-macos` and `windows-latest`; the report records the actual
+The job runs the unchanged workload above with Python 3.11, seven samples
+per case, and both zero and 100 ms/request simulated waits. It uses
+`namespace-profile-macos`; the report records the actual
 OS, architecture and Python version, since hosted runner images can change.
 The runner is dedicated to that benchmark job, but hosted infrastructure still
-has scheduling noise. These measure the Python engine on macOS and Windows,
+has scheduling noise. It measures the Python engine on macOS,
 not native app rendering, first-install latency or live quote-service delays.
 
-Download the run's `desktop-benchmark-<OS>-<architecture>-<commit>` artifacts
-within 90 days. Each contains `desktop-benchmark.json`: the complete samples
+Download the run's `desktop-benchmark-<OS>-<architecture>-<commit>` artifact
+within 90 days. It contains `desktop-benchmark.json`: the complete samples
 and summaries, full source commit, whether tracked files were modified, UTC
 start time, run URL and runtime metadata. Copy reports cited in a decision into
 `docs/benchmarks/` so the evidence survives artifact expiry. Compare revisions
 on the same runner type and Python version; don't treat a cross-OS difference
 as a measured optimization.
 
-For a local file, including in Windows PowerShell 5.1, use explicit UTF-8 output:
+For a local file, use explicit UTF-8 output:
 
 ```bash
 uv run --locked python scripts/benchmark_desktop.py --output desktop-benchmark.json
@@ -194,6 +194,10 @@ The remaining snapshot work is still measurable; this result does not establish
 macOS/Windows UI responsiveness or justify a persistent helper.
 
 ## Target-platform engine measurements
+
+These were taken when a Windows app was planned. Windows has since been dropped
+([ADR 0002](adr/0002-no-windows-build.md)) and CI no longer runs the Windows
+benchmark; the Windows numbers stay here as a record of what was measured.
 
 The opt-in jobs both passed in [Actions run 42755689928](https://github.com/BrendanH18/Marketpulse/actions/runs/42755689928),
 measured 2026-11-10 UTC against clean commit
