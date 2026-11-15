@@ -18,10 +18,9 @@ from .analytics import (
 )
 from .config import Config
 from .db import Snapshot, Store
-from .ledger import RoomStatus, contribution_room, replay, replay_by_day, transaction_currency
+from .ledger import RoomStatus, contribution_room, new_issues, replay, replay_by_day, transaction_currency
 from .market import MarketData, MarketError
 from .models import (
-    EPSILON,
     Account,
     AccountType,
     Alert,
@@ -115,18 +114,11 @@ class Tracker:
         # window) can land between them.
         with self.store.atomic():
             self._refuse_if_restored(restore_id)
-            if txn.type.value == "SELL":
-                state = self.store.ledger()
-                h = state.holdings.get((txn.account_id, txn.symbol))
-                held = h.quantity if h else 0.0
-                if txn.quantity > held + EPSILON:
-                    raise ValueError(
-                        f"Cannot sell {fmt.qty(txn.quantity)} {txn.symbol} — only {fmt.qty(held)} held in this account."
-                    )
-            elif txn.type in (TxnType.TRANSFER, TxnType.SPLIT):
-                # Judged at the entry's own date, so a backdated move (or split) of shares that
-                # weren't there yet, or that a later sale needs, is refused. The id it will get
-                # sorts it after entries already on that day, as replay will.
+            if txn.type in (TxnType.SELL, TxnType.TRANSFER, TxnType.SPLIT):
+                # Judged at the entry's own date, so a backdated sale (or move, or split) of shares
+                # that weren't there yet, or that a later sale needs, is refused, and one of shares
+                # held then but sold or consolidated since is accepted. The id it will get sorts it
+                # after entries already on that day, as replay will.
                 before = self.store.transactions()
                 probe_id = max((t.id or 0 for t in before), default=0) + 1
                 self._refuse_new_issues(before, [*before, replace(txn, id=probe_id)], probe_id, "recorded")
@@ -225,12 +217,16 @@ class Tracker:
     ) -> None:
         # Replay judges every entry at its own date, so this also catches a backdated change that
         # breaks a later sale, which a check against today's holdings would miss.
-        accounts = self.store.account_map()
-        known = {i.txn_id for i in replay(before, accounts).issues}
-        new = [i for i in replay(after, accounts).issues if i.txn_id not in known]
+        new = new_issues(before, after, self.store.account_map())
         if not new:
             return
         issue = new[0]
+        if issue.txn_id == changed_id and verb == "recorded" and issue.code == "sell_exceeds_held":
+            held = float(issue.args["held"])
+            raise ValueError(
+                f"Cannot sell {fmt.qty(float(issue.args['quantity']))} {issue.args['symbol']} — "
+                f"only {fmt.qty(held)} held in this account on {issue.date}."
+            )
         if issue.txn_id == changed_id:
             raise ValueError(f"Not {verb}: on {issue.date}, {issue.message[0].lower()}{issue.message[1:]}.")
         raise ValueError(

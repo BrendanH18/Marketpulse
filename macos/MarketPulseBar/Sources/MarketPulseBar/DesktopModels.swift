@@ -1287,8 +1287,22 @@ enum EngineMessage {
       return String(localized: "couldn't read the symbol from the description")
     case "no_shares_in_description":
       return String(localized: "couldn't read the share count from the description")
+    case "breaks_later_entry":
+      // A row that would leave an entry already in the ledger short.
+      guard let id = args["txn_id"]?.text, let date = args["date"]?.text, let inner = args["issue_code"]?.text,
+        let message = issue(inner, args, locale: locale)
+      else { return nil }
+      return String(localized: "transaction #\(id) on \(date) would no longer add up (\(message))")
+    case "breaks_later_row":
+      // A row that would leave another row of the same file short.
+      guard let line = args["line"]?.text, let date = args["date"]?.text, let inner = args["issue_code"]?.text,
+        let message = issue(inner, args, locale: locale)
+      else { return nil }
+      return String(localized: "line \(line) on \(date) would no longer add up (\(message))")
     default:
-      return nil
+      // A row that falls short at its own date: a ledger issue, dated as `warnings` dates it.
+      guard let date = args["date"]?.text, let message = issue(code, args, locale: locale) else { return nil }
+      return String(localized: "\(date): \(message)")
     }
   }
 

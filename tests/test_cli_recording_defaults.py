@@ -68,7 +68,7 @@ EXPECTED_OUTPUT = [
         "Usage: main split [OPTIONS] SYMBOL RATIO\nTry 'main split --help' for help.\n\n"
         "Error: Invalid value for 'RATIO': 'x' is not a valid float.\n",
     ),
-    (1, "Error: Cannot sell 99 XEQT.TO — only 3 held in this account.\n"),
+    (1, "Error: Cannot sell 99 XEQT.TO — only 3 held in this account on TODAY.\n"),
     (
         0,
         "✓ Return of capital 3.00 CAD on VFV.TO in Maple Cash on 2025-02-12\n"

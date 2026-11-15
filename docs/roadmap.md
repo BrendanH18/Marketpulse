@@ -49,15 +49,9 @@ Broad feature batches wait until this milestone is published.
 | Issue | Question |
 | --- | --- |
 | [#48](https://github.com/BrendanH18/Marketpulse/issues/48) | Persistent backend process. The measurements are done ([performance](performance.md)) and recommend deferring it. |
-| [#149](https://github.com/BrendanH18/Marketpulse/issues/149) | Whether, and when, to check new and imported sales at their date. |
 
 ## After the release
 
-- **Check new sales and imports against the ledger at their date**
-  ([#149](https://github.com/BrendanH18/Marketpulse/issues/149)). Edits and
-  deletes already replay the ledger; a new backdated sale is only compared with
-  current holdings, and imports skip the check. It changes ledger validation, so
-  it waits for the maintainer's go-ahead.
 - Choose further work from what people run into when using the released app.
 
 ## Later
@@ -77,6 +71,7 @@ Broad feature batches wait until this milestone is published.
 | CLI and TUI module splits | #24 |
 | Mac app: Phases 1 and 2 of the plan, and French (Canada) | #31, #33–#46, #55 |
 | Offline CLI inspection, `report` and `summarize` (57 datasets, 197 shared operations) | 20 issues from #104 to #143, and #145 |
+| New and imported sales checked at their date | #149 |
 
 ## Dropped
 

@@ -65,12 +65,14 @@ at its date), so a backdated change that breaks a later sale is caught. Problems
 already in the ledger don't block unrelated changes. The CLI (`txn edit`,
 `txn delete`, `undo`), the TUI, and the native app all go through them.
 
-New entries still use the narrower check: `Tracker.add_transaction` compares a
-sale with current holdings. A backdated sale can therefore be accepted using
-shares acquired later, or refused because shares were sold after the date being
-entered. Imported entries bypass the guard entirely. Moving adds and imports to
-the same replay check is the remaining step; cover backdated sales, same-day
-ordering, transfers, and splits when doing it.
+New sales, transfers and splits use the same replay check
+([#149](https://github.com/BrendanH18/Marketpulse/issues/149)), so a sale is judged
+by what was held on its own date: one of shares acquired later is refused, and one
+of shares held then but sold or consolidated since is accepted. CSV imports judge
+their sales, transfers and splits in date order the same way and skip a row that
+fails, with the date and quantity held then; the preview runs the same import, so
+it reports the same rows. Tests cover backdated sales, same-day ordering,
+transfers, and splits.
 
 ### 3. Measure coverage where mistakes are expensive
 

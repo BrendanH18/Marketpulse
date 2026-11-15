@@ -32,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A new sale is checked against what the account held on the sale's date, not today
+  ([#149](https://github.com/BrendanH18/Marketpulse/issues/149)). A sale dated before its
+  shares were bought is refused ("Cannot sell 10 XEQT.TO — only 0 held in this account
+  on 2026-02-01."), as is one that would leave a later sale short. A backdated sale of
+  shares held then is accepted even if they were sold or consolidated since. This applies
+  in the CLI, terminal app and Mac app.
+- CSV imports check sales, transfers and splits in date order against what each account
+  held on that date, and skip a row that fails with the reason, in both the preview and
+  the import. Before, imported sales weren't checked, so a file could leave the ledger
+  with an oversell.
 - `accounts add` and `accounts edit -c` require a 3-letter currency code and trim
   spaces from it. `accounts room` refuses `nan`, infinity and years outside 1957 to
   next year. `asset classify` accepts the class in any case and trims the symbol.
@@ -40,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Mac app's Settings said "Get a Alpha Vantage key"; it now says "Get an API key
+  from Alpha Vantage".
 - `alerts add` trims spaces around the symbol; a padded symbol was saved as-is and
   never matched a quote.
 - `alerts rm` and `asset remove` report an error for an alert or symbol that

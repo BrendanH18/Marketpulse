@@ -202,9 +202,10 @@ or return of capital. For a transfer, split, or return of capital the form says 
 of the symbol the account holds now. A transfer between a registered and a
 non-registered account needs the market price on its date, because tax treats it as a
 sale (or a new cost base); between two accounts of the same kind, shares move at cost
-and no price is needed. A transfer or split is checked against what the account held on
-its date: one of shares it didn't hold, or that a later sale needs, is refused with the
-reason. Use **⌘R** to refresh, **⌘I** to import, and **⌘E**
+and no price is needed. A sale, transfer or split is checked against what the account
+held on its date: one of shares it didn't hold yet, or that a later sale needs, is refused
+with the reason, and a backdated sale of shares held then is accepted even if they've
+been sold or consolidated since. Use **⌘R** to refresh, **⌘I** to import, and **⌘E**
 to export. Import first previews new entries, duplicates, skipped lines, and new
 accounts. The preview runs the real import against a temporary copy of your
 ledger, so it reports exactly what Import will do. The app imports its own copy
@@ -224,7 +225,9 @@ realized gains, contribution room, tax reports, and returns still count it. If a
 account still holds investments or cash, MarketPulse leaves them out of net worth,
 warns you, and pauses daily snapshots and history rebuilds so your history never records a false drop;
 move or sell them, or unarchive the account. CSV rows that name an archived
-account are skipped with that reason, in both the preview and the import.
+account are skipped with that reason, in both the preview and the import. So are rows
+that sell, transfer or split shares the account didn't hold on that date, or that would
+leave another sale short.
 The one exception is **Settings › Data › Archived accounts**, which lists them only so
 you can **Unarchive** one; the Accounts workspace links to it with a count.
 

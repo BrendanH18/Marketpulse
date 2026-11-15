@@ -292,6 +292,18 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
         state.valuations[txn.symbol] = (txn.date, txn.price)
 
 
+def new_issues(
+    before: list[Transaction], after: list[Transaction], accounts: dict[int, Account] | None = None
+) -> list[LedgerIssue]:
+    """The issues `after` has that `before` didn't, in replay order: what a change breaks.
+
+    Replay judges every entry at its own date, so this catches a backdated entry that falls
+    short then, or that leaves a later sale short, which a check against today's holdings would
+    miss. Problems `before` already had don't count, so they never block unrelated changes."""
+    known = {i.txn_id for i in replay(before, accounts).issues}
+    return [i for i in replay(after, accounts).issues if i.txn_id not in known]
+
+
 def replay(
     transactions: list[Transaction],
     accounts: dict[int, Account] | None = None,

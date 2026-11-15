@@ -225,7 +225,7 @@ private struct MarketDataSection: View {
             }
           }
           if let chosen, let url = chosen.signup {
-            Link("Get a \(chosen.label) key", destination: url)
+            Link("Get an API key from \(chosen.label)", destination: url)
           }
         }
         if !saved.isEmpty || keySet {
