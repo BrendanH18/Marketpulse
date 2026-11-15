@@ -40,6 +40,10 @@ arithmetic and text helpers to both commands: 5,000 more combinations. [7 more
 datasets and 30 operations](cli-report-expansion.md) add regular-expression, date and
 JSON filters, duplicate selection, date and spread summaries, `--having`, `--totals`
 and HTML, text, records, lines and column exports: 2,760 more combinations.
+[One thousand more improvements](thousand-improvements.md) add 10 `--derive`
+functions and 7 summary operations on every dataset (969 combinations), plus
+[16 CLI](cli-thousand-improvements.md) and
+[15 terminal app](tui-thousand-improvements.md) improvements.
 
 ## Accounts and transactions
 
