@@ -1,4 +1,8 @@
-"""Independent expected results for all 50 × 50 dataset/derive-function combinations."""
+"""Independent expected results for every derive function on every dataset.
+
+The 50 functions of #142 on its 50 datasets are 2,500 combinations; the 10 functions of #153 on
+all 57 datasets are 570 more.
+"""
 
 import json
 import re
@@ -172,6 +176,59 @@ CASES = [
         None,
         ["FIC.TO", None, None, None, None, None],
     ),
+    # 51-60, added by #153.
+    (
+        "add-days",
+        "-30",
+        ["2024-03-01", "2025-01-14T09:30", "2023-03-03", "0001-01-15", "2024-02-30", 20240301, None],
+        None,
+        ["2024-01-31", "2024-12-15", "2023-02-01", None, None, None, None],
+    ),
+    (
+        "add-months",
+        "1",
+        ["2024-01-31", "2023-01-31", "2024-12-15", "2024-03-31 10:00", "9999-12-01", "2024-13-01", True],
+        None,
+        ["2024-02-29", "2023-02-28", "2025-01-15", "2024-04-30", None, None, None],
+    ),
+    (
+        "divide",
+        "4",
+        [10, "2.5", -1, 0, "1e-3", 10**16, "1e400", True, None],
+        None,
+        [2.5, 0.625, -0.25, 0, 0.00025, 2.5e15, None, None, None],
+    ),
+    (
+        "at-least",
+        "0",
+        [-5, "12.5", 0, "-0.01", "1e20", "x", None, False],
+        None,
+        [0, 12.5, 0, 0, 1e20, None, None, None],
+    ),
+    ("at-most", "100", [250, "99.5", -3, 100, "1e400", [], None], None, [100, 99.5, -3, 100, 100, None, None]),
+    (
+        "percent-of-field",
+        "{other}",
+        [1, "50", 3, 5, None, "x", -2, 1, True],
+        [4, 200, 0, "0.0", 1, 1, 8, 3, 1],
+        [25, 25, None, None, None, None, -25, 33.333333333333336, None],
+    ),
+    ("right", "3", ["XEQT.TO", "ab", "", "日本語テキスト", 12345, None], None, [".TO", "ab", "", "キスト", None, None]),
+    ("contains", "TFSA", ["My TFSA", "tfsa", "TFSA", "", ["TFSA"], None], None, [True, False, True, False, None, None]),
+    (
+        "starts-with",
+        "XE",
+        ["XEQT.TO", "xeqt.to", "XE", "X", "", 1.5, None],
+        None,
+        [True, False, True, False, False, None, None],
+    ),
+    (
+        "ends-with",
+        ".TO",
+        ["XEQT.TO", "RCI.B.TO", "AAPL", "x.to", ".TO", "TO", {"a": 1}],
+        None,
+        [True, True, False, False, True, False, None],
+    ),
 ]
 
 
@@ -240,9 +297,28 @@ def test_inventory_matches_documented_five_thousand():
     # 20 base and 40 added report operations plus 40 summary operations reach every new dataset.
     assert len(new_sources) * (20 + 40 + len(OPERATIONS)) == 2500
     assert [case[0] for case in CASES] == functions
-    assert len(set(functions)) == 50
-    assert len(functions) * len(_documented_sources()) == 2500
+    assert len(set(functions)) == 60
+    assert len(functions[:50]) * len(_documented_sources()) == 2500
     assert all("derived_value" not in schema and len(schema) >= 2 for schema in reports.SOURCES.values())
+
+
+def test_inventory_matches_documented_ten_more_functions():
+    # #153 adds functions 51-60, and the matrix above runs each on all 57 datasets.
+    added = [function.name for function in report_derive.FUNCTIONS[50:]]
+    assert added == [
+        "add-days",
+        "add-months",
+        "divide",
+        "at-least",
+        "at-most",
+        "percent-of-field",
+        "right",
+        "contains",
+        "starts-with",
+        "ends-with",
+    ]
+    assert len(reports.SOURCES) == 57
+    assert len(added) * len(reports.SOURCES) == 570
 
 
 def test_documented_inventory_matches_the_code():

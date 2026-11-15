@@ -205,6 +205,31 @@ def test_summarize_groups_filters_and_measures_derived_fields(ledger):
         ("x=coalesce:note:{bad", "requires finite JSON"),
         ("x=equals:amount:NaN", "requires finite JSON"),
         ("x=key:note", "'key' requires FIELD:NAME"),
+        # The ten functions of #153.
+        ("x=add-days:date", "'add-days' requires FIELD:N"),
+        ("x=add-days:date:1.5", "whole number N from -999999999 to 999999999"),
+        ("x=add-days:date:+30", "whole number N from -999999999 to 999999999"),
+        ("x=add-days:date:" + "9" * 10, "whole number N from -999999999 to 999999999"),
+        ("x=add-days:date:2024-01-01", "whole number N from -999999999 to 999999999"),
+        ("x=add-months:date:twelve", "whole number N from -999999999 to 999999999"),
+        ("x=add-months:date:", "whole number N from -999999999 to 999999999"),
+        ("x=divide:amount", "'divide' requires FIELD:NUMBER"),
+        ("x=divide:amount:0", "requires a nonzero NUMBER"),
+        ("x=divide:amount:-0.000", "requires a nonzero NUMBER"),
+        ("x=divide:amount:NaN", "requires a NUMBER"),
+        ("x=at-least:amount:Infinity", "requires a NUMBER"),
+        ("x=at-least:amount:", "requires a NUMBER"),
+        ("x=at-most:amount:1,000", "requires a NUMBER"),
+        ("x=at-most:amount:false", "requires a NUMBER"),
+        ("x=percent-of-field:amount", "'percent-of-field' requires FIELD:FIELD"),
+        ("x=percent-of-field:amount:total", "requires a second field from"),
+        ("x=right:symbol:0", "whole number N from 1 to 999999999"),
+        ("x=right:symbol:-3", "whole number N from 1 to 999999999"),
+        ("x=right:symbol:" + "9" * 5000, "whole number N from 1 to 999999999"),
+        ("x=contains:symbol", "'contains' requires FIELD:TEXT"),
+        ("x=contains:symbol:", "requires nonempty TEXT"),
+        ("x=starts-with:symbol:", "requires nonempty TEXT"),
+        ("x=ends-with:symbol:", "requires nonempty TEXT"),
     ],
 )
 @pytest.mark.parametrize("command", ["report", "summarize"])
@@ -415,9 +440,83 @@ def test_text_and_value_functions():
     assert _column(("x=length:value",), ["日本語", "é"]) == [3, 2]
 
 
+def test_date_shifts_stay_on_the_calendar():
+    days = ("2024-02-28", "2023-02-28", "2024-12-31", "9999-12-31", "0001-01-01T00:00Z")
+    assert _column(("x=add-days:value:1",), days) == ["2024-02-29", "2023-03-01", "2025-01-01", None, "0001-01-02"]
+    assert _column(("x=add-days:value:-1",), ["0001-01-01", "2024-03-01"]) == [None, "2024-02-29"]
+    assert _column(("x=add-days:value:-0",), ["9999-12-31", "0001-01-01"]) == ["9999-12-31", "0001-01-01"]
+    assert _column(("x=add-days:value:366",), ["2024-01-01"]) == ["2025-01-01"]
+    # The 30 calendar days after a sale, the window the superficial-loss rule looks at.
+    assert _column(("x=add-days:value:30",), ["2024-12-15"]) == ["2025-01-14"]
+    assert _column(("x=add-days:value:999999999",), ["0001-01-01"]) == [None]
+    assert _column(("x=add-days:value:-999999999",), ["9999-12-31"]) == [None]
+    # A day past the end of a shorter month becomes that month's last day.
+    assert _column(("x=add-months:value:-1",), ["2024-03-31", "2024-01-15", "2023-03-29"]) == [
+        "2024-02-29",
+        "2023-12-15",
+        "2023-02-28",
+    ]
+    assert _column(("x=add-months:value:12",), ["2024-02-29", "2023-06-30"]) == ["2025-02-28", "2024-06-30"]
+    assert _column(("x=add-months:value:48",), ["2024-02-29"]) == ["2028-02-29"]
+    assert _column(("x=add-months:value:-24",), ["2024-02-29"]) == ["2022-02-28"]
+    assert _column(("x=add-months:value:0",), ["9999-12-31"]) == ["9999-12-31"]
+    assert _column(("x=add-months:value:-1",), ["0001-01-15"]) == [None]
+    assert _column(("x=add-months:value:1",), ["9999-12-31"]) == [None]
+    assert _column(("x=add-months:value:119987",), ["0001-01-31"]) == ["9999-12-31"]
+    assert _column(("x=add-months:value:119988",), ["0001-01-31"]) == [None]
+    assert _column(("x=add-months:value:999999999",), ["2024-01-01"]) == [None]
+    assert _column(("x=add-months:value:-999999999",), ["2024-01-01"]) == [None]
+    # Shifts keep the date only, like the other date functions.
+    assert _column(("x=add-months:value:1",), ["2024-01-31T23:59:59-05:00", "2024-01-31T24:00", 20240131]) == [
+        "2024-02-29",
+        None,
+        None,
+    ]
+
+
+def test_constant_division_bounds_and_percentages_are_exact_decimals():
+    assert _column(("n=divide:value:3",), [1, "0.3", -0.0]) == [0.3333333333333333, 0.1, 0]
+    assert _column(("n=divide:value:0.1",), [0.3, "1", "x"]) == [3, 10, None]
+    assert _column(("n=divide:value:-2",), [5, "-7"]) == [-2.5, 3.5]
+    assert _column(("n=divide:value:1e-300",), ["1e10", 0]) == [None, 0]
+    assert _column(("n=divide:value:1e-400",), [0, 1]) == [0, None]
+    assert _column(("n=at-least:value:-0.5",), [-1, "-0.25", 0.1, "-0.50"]) == [-0.5, -0.25, 0.1, -0.5]
+    assert _column(("n=at-least:value:2.50",), [2.5, 3]) == [2.5, 3]
+    assert _column(("n=at-most:value:10",), [10.0, "10.000", 9.99]) == [10, 10, 9.99]
+    assert _column(("n=at-most:value:1e400",), ["1e300"]) == [1e300]
+    assert _column(("n=at-least:value:1e400",), [1]) == [None]  # no double holds the bound
+    rows = [(0.3, 0.1), (1, 8), (-1, -4), (2, -8), ("1e300", "1e-300"), (0, 5), (1, 0), (5, None), (None, 5)]
+    assert _column(("n=percent-of-field:value:other",), rows) == [300, 12.5, 25, -25, None, 0, None, None, None]
+    with localcontext(Context(prec=3)):
+        assert _column(("n=divide:value:7",), [1]) == [0.14285714285714285]
+        assert _column(("n=percent-of-field:value:other",), [("123456.789", 1)]) == [12345678.9]
+
+
+def test_text_tests_and_right_count_code_points():
+    assert _column(("x=right:value:2",), ["éa", "a", "", None]) == ["éa", "a", "", None]
+    assert _column(("x=right:value:1",), ["éa", "á"]) == ["a", "́"]
+    assert _column(("x=right:value:999999999",), ["XEQT"]) == ["XEQT"]
+    # The argument is taken literally, colons and spaces included.
+    assert _column(("x=contains:value:a:b",), ["xa:by", "ab", "A:B"]) == [True, False, False]
+    assert _column(("x=starts-with:value: ",), [" x", "x", " "]) == [True, False, True]
+    # Text is compared as written: no case folding or Unicode normalization.
+    assert _column(("x=ends-with:value:é",), ["café", "café", "CAFÉ"]) == [True, False, False]
+    assert _column(("x=contains:value:1",), [1, 10, "10", True, ["1"]]) == [None, None, True, None, None]
+
+
+def test_new_functions_compose_with_filters_and_summaries(ledger):
+    arguments = ["--derive", "window_end=add-days:date:30", "--derive", "tsx=ends-with:symbol:.TO"]
+    rows = json.loads(_run("report", "transactions", *arguments, "--where", "tsx=true", "--fields", "id,window_end"))
+    assert rows == [{"id": 1, "window_end": "2024-02-14"}, {"id": 2, "window_end": "2024-03-01"}]
+    rows = json.loads(
+        _run("summarize", "transactions", "--derive", "capped=at-most:amount:10", "--metric", "total=number-sum:capped")
+    )
+    assert rows == [{"total": "18.5"}]  # 0 + 10 + 0 + 7.5 + 1
+
+
 def test_function_catalog_is_complete_and_well_formed():
     names = [function.name for function in FUNCTIONS]
-    assert len(names) == len(set(names)) == 50
+    assert len(names) == len(set(names)) == 60
     assert {function.family for function in FUNCTIONS} == {"date", "number", "text", "value"}
     assert {function.result for function in FUNCTIONS} == {"integer", "number", "string", "boolean", "value"}
     assert all(function.description.endswith(".") for function in FUNCTIONS)

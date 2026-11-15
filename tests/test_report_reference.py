@@ -198,10 +198,10 @@ def test_an_unclassified_summary_operation_fails_loudly(app, monkeypatch):
         load_source("summary-operations", app)
 
 
-def test_derive_functions_list_all_fifty_in_documented_order(app):
+def test_derive_functions_list_all_sixty_in_documented_order(app):
     rows = load_source("derive-functions", app)
-    assert [row["position"] for row in rows] == list(range(1, 51))
-    assert len({row["function"] for row in rows}) == 50
+    assert [row["position"] for row in rows] == list(range(1, 61))
+    assert len({row["function"] for row in rows}) == 60
     assert [row["function"] for row in rows] == [function.name for function in report_derive.FUNCTIONS]
     assert {row["family"] for row in rows} == {"date", "number", "text", "value"}
     assert all(row["argument"] is None or row["argument"] for row in rows)
@@ -213,13 +213,22 @@ def test_derive_functions_list_all_fifty_in_documented_order(app):
         "result": "integer",
         "description": "Calendar year.",
     }
-    assert rows[-1] == {
+    assert rows[49] == {
         "position": 50,
         "function": "key",
         "family": "value",
         "argument": "NAME",
         "result": "value",
         "description": "Object member NAME.",
+    }
+    # 51-60 came later (#153) and follow the first fifty, so earlier positions never move.
+    assert rows[-1] == {
+        "position": 60,
+        "function": "ends-with",
+        "family": "text",
+        "argument": "TEXT",
+        "result": "boolean",
+        "description": "True when the text ends with TEXT, matching case.",
     }
 
 
@@ -404,9 +413,9 @@ def test_cli_report_filters_and_exports_reference_rows():
 
 def test_cli_summarize_groups_reference_rows():
     assert json.loads(_cli("summarize", "derive-functions", "--group-by", "family", "--metric", "functions=count")) == [
-        {"family": "date", "functions": 22},
-        {"family": "number", "functions": 14},
-        {"family": "text", "functions": 6},
+        {"family": "date", "functions": 24},
+        {"family": "number", "functions": 18},
+        {"family": "text", "functions": 10},
         {"family": "value", "functions": 8},
     ]
     by_result = ["summarize", "summary-operations", "--group-by", "result", "--metric", "operations=count"]

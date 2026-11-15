@@ -70,12 +70,13 @@ LAYOUT = (
     (138, "sort", ("sort-ci",)),
     (138, "window", ("reverse-rows", "tail", "every")),
     (140, "summary", report_metrics.OPERATIONS),
-    (142, "derive", tuple(function.name for function in report_derive.FUNCTIONS)),
+    (142, "derive", tuple(function.name for function in report_derive.FUNCTIONS[:50])),
     (143, "filter", spelled(report_filters.EXPANSION_FILTERS)),
     (143, "selection", ("duplicates", "singletons", "unique-last")),
     (143, "summary", report_metrics.EXPANSION_OPERATIONS),
     (143, "group", ("having", "totals")),
     (143, "format", report_formats.FORMATS),
+    (153, "derive", tuple(function.name for function in report_derive.FUNCTIONS[50:])),
 )
 
 # A fictional argument for every placeholder a syntax uses, so each entry can run on the catalog itself.
@@ -158,12 +159,14 @@ def run(*arguments):
     return result.output
 
 
-def test_catalog_holds_five_batches_of_distinct_operations():
-    assert len(OPERATIONS) == 180
-    assert [item.issue for item in OPERATIONS] == [136] * 20 + [138] * 40 + [140] * 40 + [142] * 50 + [143] * 30
+def test_catalog_holds_six_batches_of_distinct_operations():
+    assert len(OPERATIONS) == 190
+    assert [item.issue for item in OPERATIONS] == [136] * 20 + [138] * 40 + [140] * 40 + [142] * 50 + [143] * 30 + [
+        153
+    ] * 10
     assert {item.family for item in OPERATIONS} == FAMILIES
-    assert len({item.syntax for item in OPERATIONS}) == 180
-    assert len({(item.family, item.operation) for item in OPERATIONS}) == 180
+    assert len({item.syntax for item in OPERATIONS}) == 190
+    assert len({(item.family, item.operation) for item in OPERATIONS}) == 190
 
 
 def test_catalog_follows_the_documented_layout():
@@ -192,7 +195,7 @@ def test_every_summary_is_one_plain_sentence():
 
 def test_rows_number_the_catalog_in_the_source_schema():
     rows = report_operations.rows()
-    assert [row["number"] for row in rows] == list(range(1, 181))
+    assert [row["number"] for row in rows] == list(range(1, 191))
     assert all(tuple(row) == reports.SOURCES["report-operations"] for row in rows)
     assert all(type(row["commands"]) is list for row in rows)
     unnumbered = [{key: value for key, value in row.items() if key != "number"} for row in rows]
@@ -225,7 +228,7 @@ def test_every_syntax_runs_on_each_command_that_lists_it():
 
 def test_report_emits_the_catalog_without_opening_saved_data():
     assert json.loads(run("report", "report-operations")) == report_operations.rows()
-    assert run("report", "report-operations", "--count") == "180\n"
+    assert run("report", "report-operations", "--count") == "190\n"
     assert not os.path.exists(os.environ["MARKETPULSE_DATA"])
 
 
@@ -237,6 +240,7 @@ def test_summarize_counts_each_batch():
         {"issue": 140, "operations": 40},
         {"issue": 142, "operations": 50},
         {"issue": 143, "operations": 30},
+        {"issue": 153, "operations": 10},
     ]
 
 
