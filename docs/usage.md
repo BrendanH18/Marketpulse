@@ -212,7 +212,16 @@ by hand. Broker formats change; if rows you expected are skipped, preview with
 `--profile generic` or rename the columns to MarketPulse's own.
 
 Every skipped row is listed with its line, the field at fault, its value, and
-what was expected (`line 4, date '2024-13-01': Invalid date…`). Rows that match
+what was expected (`line 4, date '2024-13-01': Invalid date…`). Sales, transfers
+and splits are checked in date order against what each account held on that
+date, the same check as recording them by hand: a row that sells shares the
+account didn't hold yet is skipped (`2024-02-01: Sell of 10.0000 XEQT.TO exceeds
+0.0000 held`), and so is one that would leave a sale already in the ledger short
+(`transaction #12 on 2024-03-01 would no longer add up (…)`) or another row of
+the file short (`line 7 on …`). A row that doesn't add up in date order is tried
+again after the others, so a transfer in later in the file can still cover it.
+The file's row order doesn't matter, each symbol is checked on its own, and
+problems already in the ledger don't block an import. Rows that match
 a transaction already in the ledger are counted as duplicates, with the first
 few shown, so importing the same export twice adds nothing. Always preview and
 review the summary first.

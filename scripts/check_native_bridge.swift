@@ -344,7 +344,8 @@ struct NativeBridgeCheck {
     let badRows = try decoder.decode(
       ImportPreview.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[16])))
     let rowIssues = badRows.issues ?? []
-    precondition(rowIssues.count == 10, "Expected 10 skipped rows, got \(rowIssues.map(\.reason))")
+    precondition(rowIssues.count == 12, "Expected 12 skipped rows, got \(rowIssues.map(\.reason))")
+    precondition(rowIssues.contains { $0.code == "sell_exceeds_held" } && rowIssues.contains { $0.code == "breaks_later_entry" })
     precondition(rowIssues.allSatisfy { $0.code?.isEmpty == false }, "Uncoded: \(rowIssues.filter { $0.code?.isEmpty != false }.map(\.reason))")
     for issue in rowIssues + issues {
       precondition(issue.localizedReason(locale: enUS) == issue.reason, "\(issue.localizedReason(locale: enUS)) != \(issue.reason)")

@@ -89,7 +89,7 @@ def test_dry_run_uses_a_configured_default_account(cli, store, tracker):
 def test_dry_run_refuses_what_the_save_would_refuse(cli, store, maple):
     result = cli("sell", "XEQT.TO", "11", "45", "-a", "Maple Cash", "-d", "2025-01-08", "--dry-run")
     assert result.exit_code == 1
-    assert "Cannot sell 11 XEQT.TO — only 10 held in this account." in result.output
+    assert "Cannot sell 11 XEQT.TO — only 10 held in this account on 2025-01-08." in result.output
     future = cli("deposit", "5", "-a", "Maple Cash", "-d", "2999-01-01", "--dry-run")
     assert future.exit_code != 0
     assert len(store.transactions()) == 2

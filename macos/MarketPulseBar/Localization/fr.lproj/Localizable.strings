@@ -556,7 +556,7 @@
 "Replace key" = "Remplacer la clé";
 "Paste your key" = "Collez votre clé";
 "%@ API key" = "Clé d’API %@";
-"Get a %@ key" = "Obtenir une clé %@";
+"Get an API key from %@" = "Obtenir une clé d’API auprès de %@";
 "Remove key" = "Supprimer la clé";
 "Remove the %@ key" = "Supprimer la clé %@";
 "Remove the fallback provider key" = "Supprimer la clé du fournisseur de secours";
@@ -756,6 +756,8 @@
 /* Ledger and tax issues (EngineMessage.issue) */
 "Sell of %@ %@ exceeds %@ held" = "La vente de %@ %@ dépasse les %@ détenus";
 "Transfer of %@ %@ exceeds %@ held" = "Le transfert de %@ %@ dépasse les %@ détenus";
+"transaction #%@ on %@ would no longer add up (%@)" = "l’opération nº %@ du %@ ne serait plus cohérente (%@)";
+"line %@ on %@ would no longer add up (%@)" = "la ligne %@, datée du %@, ne serait plus cohérente (%@)";
 "Split of %@ with nothing held" = "Fractionnement de %@ sans titres détenus";
 "Transfer of %@ with nothing held" = "Transfert de %@ sans titres détenus";
 "Transfer of %@ into a registered account is a deemed sale at market value — add the price per unit to the transfer to include it in the tax report" = "Le transfert de %@ dans un compte enregistré est une disposition réputée à la juste valeur marchande — ajoutez le prix unitaire au transfert pour l’inclure dans le rapport fiscal";

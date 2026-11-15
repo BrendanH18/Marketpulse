@@ -16,7 +16,7 @@ import json
 import re
 from collections import Counter
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, TextIO
 from . import brokers
 from .analytics import disposition_note
 from .brokers import RowError, map_headers, parse_number
+from .ledger import LedgerIssue, replay, sort_key
 from .models import Account, AccountType, CodedError, MessageArgs, Transaction, TxnType, guess_currency, parse_date
 
 if TYPE_CHECKING:
@@ -382,6 +383,7 @@ def _import(
     # Symbols each account has entries for, in the ledger or earlier in this file.
     held = {(t.account_id, t.symbol) for t in stored} | {(t.target_account_id, t.symbol) for t in stored}
     pending: list[Transaction] = []
+    lines: list[int] = []  # each pending row's line in the file
     created: list[Account] = []
 
     def resolve_account(name: str) -> Account | None:
@@ -513,7 +515,18 @@ def _import(
             result.duplicate_rows.append(DuplicateRow(line_no, _summary(txn, acct.name)))
             continue
         pending.append(txn)
+        lines.append(line_no)
         held.update({(txn.account_id, txn.symbol), (txn.target_account_id, txn.symbol)})
+
+    # Each sale, transfer and split is judged at its own date, as recording it by hand is.
+    kept, short = _short_rows(stored, list(zip(lines, pending, strict=True)), store.account_map())
+    if short:
+        pending = [t for _, t in kept]
+        for issue in short:
+            result.skipped.append((issue.line, issue.reason))
+            result.issues.append(issue)
+        result.issues.sort(key=lambda i: i.line)
+        result.skipped.sort(key=lambda s: s[0])
 
     # An account created only for rows that were then skipped would be left empty.
     used = {t.account_id for t in pending} | {t.target_account_id for t in pending}
@@ -526,3 +539,81 @@ def _import(
         store.add_transactions(pending)
     result.added = len(pending)
     return result
+
+
+# Entries that can fall short of what's held on their date.
+_CHECKED_TYPES = (TxnType.SELL, TxnType.TRANSFER, TxnType.SPLIT)
+
+
+def _short_rows(
+    stored: list[Transaction], rows: list[tuple[int, Transaction]], accounts: dict[int, Account]
+) -> tuple[list[tuple[int, Transaction]], list[RowIssue]]:
+    """The file's rows to keep, and an issue for each one left out because it falls short at its
+    date (a sale of shares bought later) or would leave another entry short.
+
+    A sale, transfer or split is kept when, with the rows kept so far, every entry still adds up
+    at its own date: the check recording it by hand makes. Problems the ledger already had are
+    left alone. A preview runs this same import, so it reports the same rows."""
+    first_id = max((t.id or 0 for t in stored), default=0) + 1
+    # The ids the rows will be stored under, so same-day entries sort as replay will sort them.
+    probes = [(line, replace(t, id=first_id + n)) for n, (line, t) in enumerate(rows)]
+    symbols = {t.symbol for _, t in probes if t.type in _CHECKED_TYPES}
+    # A holding's problems only involve entries for its symbol (a transfer keeps its symbol), so
+    # each symbol is judged on its own entries: cheaper, and unrelated rows can't change the result.
+    left_out: dict[int | None, RowIssue] = {}
+    for symbol in sorted(symbols):
+        left_out |= _short_rows_of(
+            [t for t in stored if t.symbol == symbol],
+            [(line, t) for line, t in probes if t.symbol == symbol],
+            accounts,
+        )
+    kept = [row for row, (_, probe) in zip(rows, probes, strict=True) if probe.id not in left_out]
+    return kept, sorted(left_out.values(), key=lambda i: i.line)
+
+
+def _short_rows_of(
+    stored: list[Transaction], probes: list[tuple[int, Transaction]], accounts: dict[int, Account]
+) -> dict[int | None, RowIssue]:
+    """`_short_rows` for one symbol's entries: the rows left out, by the id they'd have had."""
+    known = {i.txn_id for i in replay(stored, accounts).issues}
+
+    def problems(entries: list[Transaction]) -> list[LedgerIssue]:
+        return [i for i in replay(entries, accounts).issues if i.txn_id not in known]
+
+    if not problems([*stored, *(t for _, t in probes)]):
+        return {}  # the usual case: every row adds up
+    lines = {t.id: line for line, t in probes}
+    accepted = [t for _, t in probes if t.type not in _CHECKED_TYPES]  # can't leave anything short
+    waiting = sorted((p for p in probes if p[1].type in _CHECKED_TYPES), key=lambda p: sort_key(p[1]))
+    found: dict[int | None, LedgerIssue] = {}
+    # In date order, then again for the rows that didn't add up, in case a row accepted since (a
+    # transfer in, say) covers them; until a round accepts nothing. Every accepted row leaves
+    # every entry adding up, so the import never adds a problem to the ledger.
+    while waiting:
+        still: list[tuple[int, Transaction]] = []
+        for line, probe in waiting:
+            if new := problems([*stored, *accepted, probe]):
+                found[probe.id] = new[0]
+                still.append((line, probe))
+            else:
+                accepted.append(probe)
+        if len(still) == len(waiting):
+            break
+        waiting = still
+    return {probe.id: _short_row_issue(line, probe, found[probe.id], lines) for line, probe in waiting}
+
+
+def _short_row_issue(line: int, probe: Transaction, issue: LedgerIssue, lines: dict[int | None, int]) -> RowIssue:
+    """Why a row was left out: it falls short at its date, or leaves another entry short."""
+    args: MessageArgs = {**issue.args, "date": issue.date}
+    if issue.txn_id == probe.id:
+        return RowIssue(line, "", "", f"{issue.date}: {issue.message}", issue.code, args)
+    args["issue_code"] = issue.code
+    if issue.txn_id in lines:  # another row of this file, accepted before this one
+        other = lines[issue.txn_id]
+        args["line"] = str(other)
+        reason = f"line {other} on {issue.date} would no longer add up ({issue.message})"
+        return RowIssue(line, "", "", reason, "breaks_later_row", args)
+    args["txn_id"] = str(issue.txn_id)
+    reason = f"transaction #{issue.txn_id} on {issue.date} would no longer add up ({issue.message})"
+    return RowIssue(line, "", "", reason, "breaks_later_entry", args)

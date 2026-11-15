@@ -186,6 +186,8 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
         "2999-01-02,BUY,AAPL,1,10,,,Fictional Cash\n"
         "2025-01-02,SPLIT,AAPL,,,,,Fictional Cash\n"
         "2025-01-02,BUY,AAPL,1,10,,,Fictional Cash\n"
+        "2025-01-01,SELL,QAZ,1,10,,,Fictional Cash\n"
+        "2025-01-04,SELL,MSFT,1,10,,,Fictional Cash\n"
     )
     import_env = {**env, "MARKETPULSE_DATA": str(Path(tmp) / "bad-rows-data")}
     for args in (["accounts", "add", "Fictional Cash"], ["accounts", "add", "Old Fictional"]):
@@ -193,6 +195,18 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     subprocess.run(
         cli + ["accounts", "edit", "--archive", "--", "Old Fictional"], env=import_env, capture_output=True, check=True
     )
+    # A sale the last CSV row would leave short, judged at its date (issue #149).
+    with_sale = Store(Path(tmp) / "bad-rows-data" / "marketpulse.db")
+    fictional_cash = with_sale.get_account("Fictional Cash")
+    assert fictional_cash is not None
+    for kind, day in ((TxnType.BUY, "2025-01-03"), (TxnType.SELL, "2025-01-05")):
+        with_sale.add_transaction(
+            Transaction(
+                account_id=fictional_cash.saved_id, type=kind, date=day, symbol="MSFT", quantity=10, price=10,
+                currency="USD",
+            )
+        )  # fmt: skip
+    with_sale.close()
     bad_preview = Path(tmp) / "bad-rows.json"
     bad_preview.write_bytes(
         subprocess.run(
