@@ -1330,10 +1330,6 @@ def test_printed_output_keeps_escape_characters_in_values(monkeypatch, output_fo
     assert printed(result) == expected
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#145: a nan float from a hand-edited config.toml reaches json.dumps(allow_nan=False): ValueError",
-)
 @pytest.mark.parametrize("output_format", NEW_FORMATS)
 def test_non_finite_config_value_does_not_crash(output_format):
     # nan is valid TOML and the float setting accepts it. Output or a clean CLI error are both acceptable;

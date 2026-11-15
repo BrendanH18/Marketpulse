@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import html
 import json
-from collections.abc import Sequence
+import math
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 import click
@@ -17,7 +18,27 @@ def _text(value: Any) -> str:
         return ""
     if isinstance(value, str):
         return value
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
+    # NaN and Infinity are report text, not JSON: a text column shows what the cell holds.
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _non_finite(value: Any) -> bool:
+    if isinstance(value, float):
+        return not math.isfinite(value)
+    if isinstance(value, list):
+        return any(_non_finite(item) for item in value)
+    if isinstance(value, dict):
+        return any(_non_finite(item) for item in value.values())
+    return False
+
+
+def require_json_values(field: str, values: Iterable[Any]) -> None:
+    """Refuse to write a NaN or infinity as JSON, which has neither, naming the field that holds it."""
+    if any(_non_finite(value) for value in values):
+        raise click.ClickException(
+            f"Field '{field}' holds NaN or infinity, which JSON cannot represent. "
+            "Choose a text format such as --format csv, or leave the field out."
+        )
 
 
 def _line(value: Any) -> str:
@@ -88,7 +109,8 @@ def _lines(rows: list[dict[str, Any]], fields: Sequence[str]) -> str:
 def serialize(rows: list[dict[str, Any]], fields: Sequence[str], output_format: str) -> str:
     """Render already selected rows; cell text follows the report convention.
 
-    Strings are raw, null is empty and other values are canonical JSON. ``html``
+    Strings are raw, null is empty and other values are canonical JSON, with a
+    non-finite number as ``NaN``, ``Infinity`` or ``-Infinity``. ``html``
     is an escaped table fragment, ``text`` an aligned table with numbers on the
     right, ``records`` one ``field: value`` block per row, ``lines`` one raw
     value per line and ``json-columns`` one typed array per column.
@@ -103,5 +125,7 @@ def serialize(rows: list[dict[str, Any]], fields: Sequence[str], output_format: 
         return _lines(rows, fields)
     if output_format == "json-columns":
         columns = {field: [row[field] for row in rows] for field in fields}
+        for field, values in columns.items():
+            require_json_values(field, values)
         return json.dumps(columns, ensure_ascii=False, allow_nan=False) + "\n"
     raise ValueError(f"Unknown report format: {output_format}")

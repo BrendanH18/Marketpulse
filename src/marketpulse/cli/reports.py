@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import tempfile
 from contextlib import suppress
@@ -50,7 +51,13 @@ def _text(value: Any) -> str:
         return ""
     if isinstance(value, str):
         return value
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
+    # NaN and Infinity are report text, not JSON: a text column shows what the cell holds.
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _orders_as_number(value: Any) -> bool:
+    """Whether a sort compares the value as a number. NaN has no order, so non-finite numbers sort as text."""
+    return isinstance(value, (int, float)) and not (isinstance(value, float) and not math.isfinite(value))
 
 
 def _fields(value: str | None, schema: tuple[str, ...]) -> list[str]:
@@ -83,6 +90,9 @@ def _row_key(row: dict[str, Any], fields: tuple[str, ...]) -> tuple[str, ...]:
 def _serialize(rows: list[dict[str, Any]], fields: list[str], output_format: str, envelope: dict | None) -> str:
     if output_format in report_formats.FORMATS:
         return report_formats.serialize(rows, fields, output_format)
+    if output_format in ("json", "jsonl"):
+        for field in fields:
+            report_formats.require_json_values(field, (row[field] for row in rows))
     if output_format == "json":
         return (
             json.dumps(
@@ -402,14 +412,14 @@ def report(
         # Nested values order by canonical JSON; keep numeric and missing groups fixed in both directions.
         rows.sort(
             key=lambda row: (
-                0 if isinstance(row[field], (int, float)) else 1,
+                0 if _orders_as_number(row[field]) else 1,
                 row[field]
-                if isinstance(row[field], (int, float))
+                if _orders_as_number(row[field])
                 else (_text(row[field]).casefold() if sort_ci else _text(row[field])),
             ),
             reverse=descending,
         )
-        rows.sort(key=lambda row: (row[field] is None or row[field] == "", not isinstance(row[field], (int, float))))
+        rows.sort(key=lambda row: (row[field] is None or row[field] == "", not _orders_as_number(row[field])))
     if advanced["reverse_rows"]:
         rows = rows[::-1]
     if advanced["tail"] is not None:

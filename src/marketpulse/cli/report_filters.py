@@ -59,7 +59,8 @@ def _text(value: Any) -> str:
         return ""
     if isinstance(value, str):
         return value
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
+    # NaN and Infinity are report text, not JSON: a text column shows what the cell holds.
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 def _number(value: Any) -> Decimal | None:

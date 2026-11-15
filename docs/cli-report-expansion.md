@@ -111,6 +111,8 @@ The tables rely on these definitions:
   other value is its canonical JSON,
   `json.dumps(value, ensure_ascii=False, sort_keys=True)`, for example `true`, `10`,
   `1.5`, `[1, 2]` or `{"a": 1}`. The older text filters use the same convention.
+  A NaN or infinity, which saved data should never hold, is the text `NaN`,
+  `Infinity` or `-Infinity`.
 - **Date-like value**: the ISO date text the [`--derive` date functions](cli-report-derived-datasets.md)
   read: `YYYY-MM-DD` alone, or followed by `T` or one space and a time (`HH:MM` or
   `HH:MM:SS`, optionally with fractional seconds, then optionally `Z` or a `±HH:MM`
@@ -483,10 +485,16 @@ marketpulse summarize report-operations --group-by issue --metric operations=cou
   creates no file.
 - A missing value for `--in`, as in `--in name`, now gives "--in requires
   FIELD=VALUE." instead of naming another option.
-- Known limitation: a NaN or infinity in report data, such as `nan` for a numeric
-  setting in `config.toml`, still stops `report` and `summarize` with a traceback
-  instead of a clean error. This predates these changes and is tracked in
-  [#145](https://github.com/BrendanH18/Marketpulse/issues/145).
+- A NaN or infinity in report data, such as `nan` for a numeric setting in
+  `config.toml`, no longer stops `report` and `summarize` with a traceback
+  ([#145](https://github.com/BrendanH18/Marketpulse/issues/145)). Text formats
+  (`csv`, `tsv`, `markdown`, `html`, `text`, `records`, `lines`) print it as `NaN`,
+  `Infinity` or `-Infinity`, and text filters match that text. JSON has no such
+  numbers, so `json`, `jsonl`, `json-columns` and `--encode-json` stop with "Field
+  '...' holds NaN or infinity, which JSON cannot represent." (exit code 1) and write
+  no file; choose a text format, leave the field out, or filter the rows out. Number
+  filters and numeric summaries skip these values as before, and sorting places
+  them with text, after the finite numbers.
 
 ## Capability inventory
 
