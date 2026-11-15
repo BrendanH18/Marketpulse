@@ -166,6 +166,11 @@ class MarketPulseApp(App):
         Binding("N", "pick_txn", show=False),
         Binding("z", "zoom", show=False),
         Binding("f1", "workspace_keys", show=False),
+        # #153; none of these keys had a binding before.
+        Binding("ctrl+y", "copy_table", show=False),
+        Binding("dollar_sign", "toggle_cash", show=False),
+        Binding("d", "duplicate", show=False),
+        Binding("exclamation_mark", "problems", show=False),
     ]
 
     def __init__(self, config: Config, tracker: Tracker | None = None):
@@ -200,6 +205,7 @@ class MarketPulseApp(App):
         self.last_workspace: str | None = None
         self.table_sort: dict[str, tuple[str, bool]] = {}
         self.refreshed_at: float | None = None
+        self.hide_cash = False
         for name in theme_names():
             self.register_theme(textual_theme(palette_from_colors(name, OMARCHY_PALETTES[name])))
         if self.palette.name not in OMARCHY_PALETTES:
@@ -402,6 +408,10 @@ class MarketPulseApp(App):
             key = self._selected_key(self.query_one("#holdings-table", DataTable))
             if key and not key.startswith("cash:"):
                 return int(key.split(":", 1)[0])
+        if self.workspace == "activity":
+            txn = records.selected_transaction(self)  # b / s / D / N prefill the selected entry's account
+            if txn is not None:
+                return txn.account_id
         return self.account_filter
 
     # ── workspaces ────────────────────────────────────────────────────────────
@@ -861,3 +871,15 @@ class MarketPulseApp(App):
 
     def action_zoom(self) -> None:
         navigation.toggle_zoom(self)
+
+    def action_copy_table(self) -> None:
+        navigation.copy_table(self)
+
+    def action_toggle_cash(self) -> None:
+        navigation.toggle_cash(self)
+
+    def action_duplicate(self) -> None:
+        records.action_duplicate(self)
+
+    def action_problems(self) -> None:
+        navigation.show_problems(self)

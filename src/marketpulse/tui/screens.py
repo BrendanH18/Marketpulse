@@ -134,7 +134,8 @@ class TransactionForm(BaseForm):
 
     def compose(self) -> ComposeResult:
         t = self.txn
-        title = f"Edit transaction #{t.id}" if t else "New transaction"
+        # A transaction without an id is a prefilled new entry (d duplicates one).
+        title = f"Edit transaction #{t.id}" if t and t.id is not None else "New transaction"
 
         def val(v: float) -> str:
             return f"{v:g}" if v else ""
@@ -784,12 +785,16 @@ HELP = [
             ("< / >", "first / last table row"),
             ("F", "filter holdings as you type"),
             ("escape", "clear a holdings or activity filter"),
-            ("o / O", "sort holdings or activity / reverse"),
+            ("o / O", "sort the current table / reverse"),
             ("y / Y", "copy selected symbol / row"),
+            ("ctrl+y", "copy the whole table with headers"),
             ("v", "chart the selected symbol"),
             ("T", "show the selected symbol's transactions"),
             ("N", "record any transaction type"),
+            ("d", "duplicate a transaction, dated today (activity)"),
+            ("$", "show / hide cash rows in holdings"),
             ("z", "zoom: hide side panes"),
+            ("!", "problems: ledger issues, missing prices"),
             ("F1", "keys for this workspace"),
         ],
     ),
@@ -839,6 +844,34 @@ class WorkspaceKeysScreen(ModalScreen[None]):
         with Vertical(classes="modal"):
             yield Label(self.title_text, classes="modal-title")
             yield VerticalScroll(Static(body, id="ws-keys"))
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class ProblemsScreen(ModalScreen[None]):
+    """!: ledger issues, positions left out of net worth and quotes that failed, in one place."""
+
+    BINDINGS = [Binding("escape,q,exclamation_mark", "close", "Close")]
+
+    def __init__(self, sections: list[tuple[str, list[str]]]):
+        super().__init__()
+        self.sections = sections
+
+    def compose(self) -> ComposeResult:
+        body = Text()
+        found = [(section, lines) for section, lines in self.sections if lines]
+        for section, lines in found:
+            body.append(f"{section} ({len(lines)})\n", style="title")
+            for line in lines:
+                body.append(f"  {line}\n")
+            body.append("\n")
+        if not found:
+            body.append("No problems: the ledger replays cleanly and every position has a price.\n\n", style="up")
+        body.append("Ledger issues name the transaction to fix in activity (5) · e edits it", style="muted")
+        with Vertical(classes="modal"):
+            yield Label("Problems", classes="modal-title")
+            yield VerticalScroll(Static(body, id="problems"))
 
     def action_close(self) -> None:
         self.dismiss(None)

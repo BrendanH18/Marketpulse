@@ -97,15 +97,29 @@ def render_chart_info(app: MarketPulseApp, quote=None) -> None:
     )
 
 
+NO_CHART = "Open a chart first: / searches for a symbol, v charts the selected row"
+
+
+def _chart_ready(app: MarketPulseApp, what: str) -> bool:
+    """True on the chart workspace with a symbol open; otherwise say why the key did nothing."""
+    if app.workspace != "chart":
+        app.notify(f"{what} on the chart workspace (4)", timeout=3)
+        return False
+    if not app.chart_symbol:
+        app.notify(NO_CHART, timeout=3)
+        return False
+    return True
+
+
 def action_period(app: MarketPulseApp, delta: int) -> None:
-    if app.workspace != "chart" or not app.chart_symbol:
+    if not _chart_ready(app, "[ and ] change the period"):
         return
     app.chart_period = PERIODS[(PERIODS.index(app.chart_period) + delta) % len(PERIODS)]
     app.open_chart(app.chart_symbol)
 
 
 def action_compare(app: MarketPulseApp) -> None:
-    if app.workspace != "chart" or not app.chart_symbol:
+    if not _chart_ready(app, "c compares symbols"):
         return
 
     def done(value: str | None) -> None:
@@ -118,3 +132,5 @@ def action_compare(app: MarketPulseApp) -> None:
 def action_clear_compare(app: MarketPulseApp) -> None:
     if app.compare:
         app.open_chart(app.chart_symbol, compare=[])
+    else:
+        app.notify("No comparisons to clear: c adds one on the chart", timeout=3)
