@@ -5,6 +5,7 @@ a preview (`--dry-run`) or a refused command leaves the saved data unchanged.
 """
 
 import json
+import os
 from dataclasses import asdict
 from datetime import date
 
@@ -414,6 +415,15 @@ def test_16_backup_now_refuses_to_back_up_onto_the_live_database(cli, store, led
         assert "is the live database; choose another file" in result.output
     assert not store.backup_dir.exists()
     assert [a.name for a in store.accounts()] == ["Fictional Maple", "Fictional Gull"]
+
+
+def test_16_backup_now_refuses_a_hard_link_to_the_live_database(cli, store, ledger, tmp_path):
+    link = tmp_path / "fictional-link.db"
+    os.link(store.path, link)
+    result = cli("backup", "now", str(link))
+    assert result.exit_code == 1
+    assert "is the live database; choose another file" in result.output
+    assert link.samefile(store.path)
 
 
 def test_16_backup_now_still_writes_to_another_path(cli, store, ledger, tmp_path):

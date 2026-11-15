@@ -246,6 +246,31 @@ def test_duplicate_and_edit_keep_every_digit_of_the_saved_numbers(tracker, store
     assert [t.amount for t in deposits] == [12345.67, 12345.67]
 
 
+def test_duplicate_refuses_a_transfer_to_an_archived_account(tracker, store):
+    birch, cedar, _aspen, _saved = seed(store)
+    move = store.add_transaction(
+        Transaction(
+            birch.saved_id, TxnType.TRANSFER, "2024-05-01", "XEQT.TO", 10, currency="CAD", target_account_id=cedar.id
+        )
+    )
+    cedar.archived = True
+    store.update_account(cedar)
+
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        async with app.run_test(size=SIZE) as pilot:
+            await started(app, pilot)
+            await pilot.press("5")
+            select(app.query_one("#activity-table", DataTable), str(move.id))
+            await pilot.press("d")
+            await pilot.pause()
+            assert not isinstance(app.screen, TransactionForm)
+            assert any("Cedar Margin is archived; unarchive it to copy this transfer" in m for m in messages(app))
+
+    run(scenario())
+    assert len([t for t in store.transactions() if t.type is TxnType.TRANSFER]) == 1
+
+
 # 5 ─ problems overlay ────────────────────────────────────────────────────────
 
 
@@ -280,6 +305,12 @@ def test_problems_overlay_lists_ledger_issues_and_unpriced_positions(tracker, st
             assert "Quotes unavailable (1)\n  ZZZQ: " in body
             await pilot.press("escape")
             assert not isinstance(app.screen, ProblemsScreen)
+
+            await pilot.press("p")  # privacy masks quantities here as the activity table does
+            await pilot.press("exclamation_mark")
+            body = str(app.screen.query_one("#problems", Static).content)
+            assert f"  2024-05-01  #{oversell.id}  Sell of {fmt.MASK} XEQT.TO exceeds {fmt.MASK}" in body
+            assert "50.0000" not in body
 
     run(scenario())
 

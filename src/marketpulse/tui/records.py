@@ -111,6 +111,13 @@ def action_duplicate(app: MarketPulseApp) -> None:
     if acct is None or acct.archived:
         app.notify(f"{acct.name if acct else 'That account'} is archived; unarchive it to add entries", timeout=4)
         return
+    if txn.target_account_id is not None:
+        # The form only offers active accounts, so an archived destination can't be prefilled.
+        target = app.tracker.store.get_account(txn.target_account_id)
+        if target is None or target.archived:
+            name = target.name if target else "Its destination account"
+            app.notify(f"{name} is archived; unarchive it to copy this transfer", timeout=4)
+            return
     copy = replace(txn, id=None, date=today())
     app.push_screen(TransactionForm(app.tracker, txn=copy, symbols=app.known_symbols()), app._txn_done)
 

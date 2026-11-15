@@ -516,7 +516,10 @@ def backup(ctx: click.Context) -> None:
 @pass_app
 def backup_now(app: App, path: Path | None, as_json: bool = False) -> None:
     """Back up now (to PATH, or to the backups directory)."""
-    if path is not None and path.expanduser().resolve() == app.store.path.resolve():
+    target = path.expanduser() if path is not None else None
+    if target is not None and (
+        target.resolve() == app.store.path.resolve() or (target.exists() and target.samefile(app.store.path))
+    ):
         # SQLite would "back up" the live file onto itself and report success with no copy made.
         fail(f"{path} is the live database; choose another file, or omit PATH to use the backups folder.")
     dest = app.store.backup(reason="manual", dest=path)

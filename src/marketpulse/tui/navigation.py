@@ -8,6 +8,7 @@ what the views already show; no figure is computed differently.
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from rich.text import Text
 from textual.widgets import DataTable, Input
 
+from .. import fmt
 from ..market import PERIODS
 from ..models import Transaction
 from ..valuation import PositionView
@@ -288,14 +290,25 @@ def toggle_cash(app: MarketPulseApp) -> None:
     app.notify("Cash rows hidden" if app.hide_cash else "Cash rows shown", timeout=2)
 
 
+# A quantity or amount in an English message, but not part of a symbol (0700.HK) or a date.
+_NUMBER = re.compile(r"(?<![\w.])(?<!\d-)\d[\d,]*(?:\.\d+)?(?!\w|\.\w|-\d)")
+
+
 def problems(app: MarketPulseApp) -> list[tuple[str, list[str]]]:
-    """What needs attention, from the ledger replay and the last refresh; nothing is fetched."""
+    """What needs attention, from the ledger replay and the last refresh; nothing is fetched.
+
+    Privacy mode masks the quantities and amounts in the messages, as the tables do.
+    """
+
+    def shown(text: str) -> str:
+        return _NUMBER.sub(fmt.MASK, text) if app.privacy else text
+
     issues = [
-        "  ".join(part for part in (i.date, f"#{i.txn_id}" if i.txn_id is not None else "", i.message) if part)
+        "  ".join(part for part in (i.date, f"#{i.txn_id}" if i.txn_id is not None else "", shown(i.message)) if part)
         for i in app.tracker.store.ledger().issues
     ]
     v = app.view
-    left_out = list(v.excluded) if v else []
+    left_out = [shown(text) for text in v.excluded] if v else []
     if v is not None:
         left_out += [f"Archived {name} still holds value" for name in v.archived_with_value]
     errors = {**(v.errors if v else {}), **app.watch_errors}
