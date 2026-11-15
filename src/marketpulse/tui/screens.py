@@ -167,7 +167,11 @@ class TransactionForm(BaseForm):
             with Horizontal(classes="field-row"):
                 yield Input(val(t.quantity) if t else "", placeholder="Quantity", id="f-quantity", classes="k-qty")
                 yield Input(
-                    val(t.price) if t else "", placeholder="Price (blank = live)", id="f-price", classes="k-price"
+                    # A zero-price transfer keeps its 0: blank would take today's live price.
+                    ("0" if t.type is TxnType.TRANSFER and not t.price else val(t.price)) if t else "",
+                    placeholder="Price (blank = live)",
+                    id="f-price",
+                    classes="k-price",
                 )
                 yield Input(val(t.amount) if t else "", placeholder="Amount", id="f-amount", classes="k-amount")
                 yield Input(

@@ -388,6 +388,16 @@ def test_14_asset_remove_trims_the_symbol(cli, store):
     assert store.assets() == {}
 
 
+def test_14_asset_remove_still_removes_a_legacy_padded_key(cli, store):
+    store.upsert_asset(Asset(" FICT-A ", AssetKind.MANUAL, "Fictional legacy row"))
+    store.upsert_asset(Asset("FICT-A", AssetKind.MANUAL, "Fictional art"))
+    assert sorted(store.assets()) == [" FICT-A ", "FICT-A"]
+    assert cli("asset", "remove", "FICT-A").exit_code == 0
+    assert list(store.assets()) == [" FICT-A "]
+    assert cli("asset", "remove", " fict-a ").exit_code == 0
+    assert store.assets() == {}
+
+
 # 15 ── watch add/rm --dry-run ──────────────────────────────────────────────────
 
 

@@ -271,6 +271,36 @@ def test_duplicate_refuses_a_transfer_to_an_archived_account(tracker, store):
     assert len([t for t in store.transactions() if t.type is TxnType.TRANSFER]) == 1
 
 
+def test_duplicate_keeps_a_zero_transfer_price_instead_of_the_live_quote(tracker, store):
+    birch, cedar, _aspen, _saved = seed(store)
+    move = store.add_transaction(
+        Transaction(
+            birch.saved_id, TxnType.TRANSFER, "2024-05-01", "XEQT.TO", 10, currency="CAD", target_account_id=cedar.id
+        )
+    )
+
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        async with app.run_test(size=SIZE) as pilot:
+            await started(app, pilot)
+            await pilot.press("5")
+            select(app.query_one("#activity-table", DataTable), str(move.id))
+            await pilot.press("d")
+            await pilot.pause()
+            form = app.screen
+            assert isinstance(form, TransactionForm)
+            assert form.query_one("#f-price", Input).value == "0"
+            form.live_price = 40.0  # XEQT.TO's fake quote, as the symbol lookup would set it
+            form.action_save()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    run(scenario())
+    transfers = [t for t in store.transactions() if t.type is TxnType.TRANSFER]
+    assert len(transfers) == 2 and [t.price for t in transfers] == [0, 0]
+
+
 # 5 ─ problems overlay ────────────────────────────────────────────────────────
 
 

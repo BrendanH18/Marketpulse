@@ -555,8 +555,10 @@ def asset_classify(app: App, symbol, asset_class) -> None:
 @pass_app
 def asset_remove(app: App, symbol) -> None:
     """Remove asset metadata (transactions are kept)."""
-    sym = symbol.strip().upper()
-    if sym not in app.store.assets():
+    stored = app.store.assets()
+    # An exact key first: older versions of `asset classify` could save a symbol with spaces.
+    sym = symbol.upper() if symbol.upper() in stored else symbol.strip().upper()
+    if sym not in stored:
         fail(f"No configured asset '{sym}'; nothing removed. `marketpulse asset list` shows them.")
     app.store.delete_asset(sym)
     app.ok(f"Removed metadata for {sym}.")
