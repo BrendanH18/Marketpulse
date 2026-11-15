@@ -98,7 +98,9 @@ marketpulse backup restore marketpulse-20261019-091500-daily.db
 ```
 
 Backups use SQLite's online backup API, so the copy is consistent even when
-another MarketPulse process has the database open.
+another MarketPulse process has the database open. `backup now PATH` refuses a
+PATH that is the live database itself, since that would leave you with no copy
+at all.
 
 | Reason | When | Retention |
 | --- | --- | --- |

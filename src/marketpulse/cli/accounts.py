@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 from collections import Counter
 from dataclasses import asdict, fields
 
@@ -12,12 +13,14 @@ import click
 from rich.text import Text
 
 from .. import fmt, render
-from ..models import Account, AccountType
+from ..models import Account, AccountType, today
 from ..tax import TaxReport
 from .base import App, fail, pass_app
 from .root import main
 
 ACCOUNT_TYPES = [t.value for t in AccountType]
+# RRSPs date from 1957; no registered account has contribution room before that.
+ROOM_FIRST_YEAR = 1957
 
 
 @main.group(invoke_without_command=True)
@@ -384,6 +387,16 @@ def accounts_show(app: App, ref: str, as_json: bool) -> None:
     app.console.print(table)
 
 
+def _currency_code(value: str) -> str:
+    """Normalize an account currency, refusing anything but a 3-letter code (CAD, USD...)."""
+    code = value.strip().upper()
+    if len(code) != 3 or not code.isascii() or not code.isalpha():
+        raise click.BadParameter(
+            f"{value!r} is not a 3-letter currency code like CAD.", param_hint="'-c' / '--currency'"
+        )
+    return code
+
+
 @accounts.command("add")
 @click.argument("name")
 @click.option(
@@ -394,24 +407,34 @@ def accounts_show(app: App, ref: str, as_json: bool) -> None:
     default="NONREG",
     show_default=True,
 )
-@click.option("-c", "--currency", default=None, help="Default: base currency.")
+@click.option("-c", "--currency", default=None, help="3-letter code. Default: base currency.")
 @click.option("-i", "--institution", default="")
 @click.option("--track-cash", is_flag=True, help="Track a cash balance (buys debit, sells/dividends credit).")
+@click.option("--dry-run", is_flag=True, help="Check the name and preview the account; save nothing.")
+@click.option("--json", "as_json", is_flag=True, help="Print the account's metadata as JSON; supports --dry-run.")
 @pass_app
-def accounts_add(app: App, name, acct_type, currency, institution, track_cash) -> None:
-    try:
-        acct = app.store.add_account(
-            Account(
-                name=name,
-                type=AccountType(acct_type.upper()),
-                currency=(currency or app.config.base_currency).upper(),
-                institution=institution,
-                track_cash=track_cash,
-            )
-        )
-    except ValueError as e:
-        fail(str(e))
-    app.ok(f"Added {acct.name} ({acct.type.label}, {acct.currency}) as #{acct.id}")
+def accounts_add(app: App, name, acct_type, currency, institution, track_cash, dry_run, as_json) -> None:
+    account = Account(
+        name=name.strip(),
+        type=AccountType(acct_type.upper()),
+        currency=_currency_code(currency) if currency is not None else app.config.base_currency.upper(),
+        institution=institution,
+        track_cash=track_cash,
+    )
+    if dry_run:
+        _check_name(app, account)
+        acct = account
+    else:
+        try:
+            acct = app.store.add_account(account)
+        except ValueError as e:
+            fail(str(e))
+    if as_json:
+        click.echo(json.dumps({**asdict(acct), "saved": not dry_run}, ensure_ascii=False))
+    elif dry_run:
+        app.ok(f"Would add {acct.name} ({acct.type.label}, {acct.currency}); nothing saved.")
+    else:
+        app.ok(f"Added {acct.name} ({acct.type.label}, {acct.currency}) as #{acct.id}")
 
 
 @accounts.command("edit")
@@ -425,10 +448,16 @@ def accounts_add(app: App, name, acct_type, currency, institution, track_cash) -
 @click.option(
     "--revision", help="Refuse unless the account is unchanged since it had this revision (from `desktop snapshot`)."
 )
+@click.option("--dry-run", is_flag=True, help="Show each field that would change, old and new; save nothing.")
 @pass_app
-def accounts_edit(app: App, ref, name, acct_type, currency, institution, track_cash, archive, revision) -> None:
+def accounts_edit(
+    app: App, ref, name, acct_type, currency, institution, track_cash, archive, revision, dry_run
+) -> None:
     restore_id = app.store.restore_id
     acct = app.account(ref)
+    before = asdict(acct)
+    if dry_run and revision is not None and acct.revision(restore_id) != revision:
+        fail(f"{acct.name} has changed since it was loaded, perhaps in another window. Check it and try again.")
     if revision is None:
         # Every field is written back, so a change made elsewhere since it was read is refused.
         revision = acct.revision(restore_id)
@@ -437,13 +466,16 @@ def accounts_edit(app: App, ref, name, acct_type, currency, institution, track_c
     if acct_type:
         acct.type = AccountType(acct_type.upper())
     if currency:
-        acct.currency = currency.upper()
+        acct.currency = _currency_code(currency)
     if institution is not None:
         acct.institution = institution
     if track_cash is not None:
         acct.track_cash = track_cash
     if archive is not None:
         acct.archived = archive
+    if dry_run:
+        _preview_account_edit(app, before, acct)
+        return
     try:
         app.tracker.update_account(acct, restore_id=restore_id, revision=revision)
     except ValueError as e:
@@ -451,13 +483,43 @@ def accounts_edit(app: App, ref, name, acct_type, currency, institution, track_c
     app.ok(f"Updated {acct.name}.")
 
 
+def _check_name(app: App, account: Account) -> None:
+    """The store's name checks, for a dry run that never reaches the store."""
+    if not account.name:
+        fail("Account name is required.")
+    # bytes.lower() folds ASCII only, exactly like the name column's COLLATE NOCASE.
+    taken = {a.name.encode().lower() for a in app.store.accounts(include_archived=True) if a.id != account.id}
+    if account.name.encode().lower() in taken:
+        fail(f"An account named '{account.name}' already exists.")
+
+
+def _preview_account_edit(app: App, before: dict, acct: Account) -> None:
+    acct.name = acct.name.strip()
+    _check_name(app, acct)
+    after = asdict(acct)
+    changed = [field for field in after if after[field] != before[field]]
+    if not changed:
+        app.ok(f"No changes to {before['name']}; nothing saved.")
+        return
+    app.ok(f"Would update {before['name']} (#{acct.id}); nothing saved:")
+    for field in changed:
+        app.console.print(Text(f"  {field}: {before[field]} → {after[field]}"))
+
+
 @accounts.command("remove")
 @click.argument("ref")
 @click.option("-y", "--yes", is_flag=True)
+@click.option("--dry-run", is_flag=True, help="Show the account and how many transactions would go; delete nothing.")
 @pass_app
-def accounts_remove(app: App, ref, yes) -> None:
+def accounts_remove(app: App, ref, yes, dry_run) -> None:
     acct = app.account(ref)
     count = len([t for t in app.store.transactions() if t.account_id == acct.id])
+    if dry_run:
+        app.ok(
+            f"Would delete {acct.name} (#{acct.id}) and its {count} transaction(s); nothing deleted."
+            f" `accounts edit {acct.name} --archive` keeps them instead."
+        )
+        return
     if yes or click.confirm(
         f"Delete {acct.name} and its {count} transaction(s)? Consider `accounts edit {acct.name} --archive` instead."
     ):
@@ -481,6 +543,11 @@ def accounts_room(app: App, account_type, year, amount) -> None:
     TFSA and FHSA roll forward automatically with new annual limits.
     """
     if account_type and year is not None and amount is not None:
+        if not math.isfinite(amount):
+            fail("Contribution room must be a finite amount.")
+        latest = int(today()[:4]) + 1
+        if not ROOM_FIRST_YEAR <= year <= latest:
+            fail(f"Year must be between {ROOM_FIRST_YEAR} and {latest}; give all four digits, like 2026.")
         app.store.set_room(account_type.upper(), year, amount)
         app.ok(f"{account_type.upper()} room as of Jan 1 {year}: {fmt.money(amount)}")
     elif account_type:

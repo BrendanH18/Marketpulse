@@ -213,17 +213,31 @@ def watch_move(app: App, symbol: str, position: int) -> None:
 
 @watch.command("add")
 @click.argument("symbols", nargs=-1, required=True)
+@click.option("--dry-run", is_flag=True, help="Show which symbols would be added; save nothing.")
 @pass_app
-def watch_add(app: App, symbols) -> None:
-    added = app.store.add_watch(parse_symbols(" ".join(symbols)))
+def watch_add(app: App, symbols, dry_run: bool) -> None:
+    wanted = parse_symbols(" ".join(symbols))
+    if dry_run:
+        current = app.store.watchlist()
+        new = [s for s in wanted if s not in current]
+        app.ok(f"Would watch {', '.join(new)} (not saved)." if new else "Already on the watchlist.")
+        return
+    added = app.store.add_watch(wanted)
     app.ok(f"Watching {', '.join(added)}" if added else "Already on the watchlist.")
 
 
 @watch.command("rm")
 @click.argument("symbols", nargs=-1, required=True)
+@click.option("--dry-run", is_flag=True, help="Show which symbols would be removed; save nothing.")
 @pass_app
-def watch_rm(app: App, symbols) -> None:
-    removed = app.store.remove_watch(parse_symbols(" ".join(symbols)))
+def watch_rm(app: App, symbols, dry_run: bool) -> None:
+    wanted = parse_symbols(" ".join(symbols))
+    if dry_run:
+        current = app.store.watchlist()
+        gone = [s for s in wanted if s in current]
+        app.ok(f"Would remove {', '.join(gone)} (not saved)." if gone else "Nothing would be removed.")
+        return
+    removed = app.store.remove_watch(wanted)
     app.ok(f"Removed {', '.join(removed)}" if removed else "Nothing removed.")
 
 
@@ -560,8 +574,11 @@ def alerts_show(app: App, alert_id: int, as_json: bool) -> None:
 @click.option("--threshold", type=float, help="New finite, positive threshold.")
 @click.option("--condition", type=click.Choice(ALERT_CONDITIONS, case_sensitive=False))
 @click.option("--note", help="Replace the note; pass an empty string to clear it.")
+@click.option("--dry-run", is_flag=True, help="Validate and show the alert as it would be saved; save nothing.")
 @pass_app
-def alerts_edit(app: App, alert_id: int, threshold: float | None, condition: str | None, note: str | None) -> None:
+def alerts_edit(
+    app: App, alert_id: int, threshold: float | None, condition: str | None, note: str | None, dry_run: bool
+) -> None:
     """Edit saved criteria or notes offline, preserving state and trigger history.
 
     Use `alerts rearm` explicitly to clear the trigger history after an edit.
@@ -582,6 +599,9 @@ def alerts_edit(app: App, alert_id: int, threshold: float | None, condition: str
             alert.validate()
         except ValueError as e:
             fail(str(e))
+        if dry_run:
+            app.ok(f"Would update alert #{alert_id}: {alert.describe()} (not saved).")
+            return
         app.store.update_alert(alert)
     app.ok(f"Updated alert #{alert_id}.")
 
@@ -592,46 +612,67 @@ def _alert_state(alert: Alert) -> str:
     return "triggered" if alert.triggered_at else "armed"
 
 
-def _set_alert_state(app: App, alert_id: int, *, active: bool, rearm: bool = False) -> None:
+def _saved_alerts(app: App, alert_ids: tuple[int, ...]) -> list[Alert]:
+    """The alerts with these ids, in the order given (repeats once); fails before any change if one is missing."""
+    saved = {a.id: a for a in app.store.alerts()}
+    wanted = list(dict.fromkeys(alert_ids))
+    missing = [i for i in wanted if i not in saved]
+    if missing:
+        fail(f"No alert {', '.join(f'#{i}' for i in missing)}; nothing changed.")
+    return [saved[i] for i in wanted]
+
+
+def _alert_ids(chosen: list[Alert]) -> str:
+    noun = "alert" if len(chosen) == 1 else "alerts"
+    return f"{noun} {', '.join(f'#{a.id}' for a in chosen)}"
+
+
+def _set_alert_state(app: App, alert_ids: tuple[int, ...], *, active: bool, rearm: bool = False) -> None:
     with app.store.transaction():
-        alert = next((a for a in app.store.alerts() if a.id == alert_id), None)
-        if alert is None:
-            fail(f"No alert #{alert_id}.")
+        chosen = _saved_alerts(app, alert_ids)
         if active:
-            try:
-                alert.validate()
-            except ValueError as e:
-                fail(str(e))
-        alert.active = active
-        if rearm:
-            alert.triggered_at = ""
-        app.store.update_alert(alert)
+            for alert in chosen:
+                try:
+                    alert.validate()
+                except ValueError as e:
+                    fail(f"Alert #{alert.id}: {e}" if len(chosen) > 1 else str(e))
+        for alert in chosen:
+            alert.active = active
+            if rearm:
+                alert.triggered_at = ""
+            app.store.update_alert(alert)
     verb = "Rearmed" if rearm else ("Resumed" if active else "Paused")
-    app.ok(f"{verb} alert #{alert_id}.")
+    app.ok(f"{verb} {_alert_ids(chosen)}.")
+
+
+_ALERT_IDS = click.argument("alert_ids", nargs=-1, required=True, type=click.IntRange(min=1))
 
 
 @alerts.command("pause")
-@click.argument("alert_id", type=click.IntRange(min=1))
+@_ALERT_IDS
 @pass_app
-def alerts_pause(app: App, alert_id: int) -> None:
-    """Pause an alert without clearing its trigger history."""
-    _set_alert_state(app, alert_id, active=False)
+def alerts_pause(app: App, alert_ids: tuple[int, ...]) -> None:
+    """Pause alerts without clearing their trigger history.
+
+    Several ids are checked first, so either all change or none does.
+    """
+    _set_alert_state(app, alert_ids, active=False)
 
 
 @alerts.command("resume")
-@click.argument("alert_id", type=click.IntRange(min=1))
+@_ALERT_IDS
 @pass_app
-def alerts_resume(app: App, alert_id: int) -> None:
-    """Resume an alert, preserving its trigger history to avoid duplicate notifications."""
-    _set_alert_state(app, alert_id, active=True)
+def alerts_resume(app: App, alert_ids: tuple[int, ...]) -> None:
+    """Resume alerts, preserving their trigger history to avoid duplicate notifications."""
+    _set_alert_state(app, alert_ids, active=True)
 
 
 @alerts.command("rearm")
-@click.argument("alert_id", type=click.IntRange(min=1))
+@_ALERT_IDS
 @pass_app
-def alerts_rearm(app: App, alert_id: int) -> None:
+def alerts_rearm(app: App, alert_ids: tuple[int, ...]) -> None:
     """Activate and clear the trigger history; the next matching fresh price can fire again."""
-    _set_alert_state(app, alert_id, active=True, rearm=True)
+    _set_alert_state(app, alert_ids, active=True, rearm=True)
 
 
 @alerts.command("add")
@@ -639,25 +680,38 @@ def alerts_rearm(app: App, alert_id: int) -> None:
 @click.argument("condition")
 @click.argument("threshold", type=float)
 @click.option("-m", "--note", default="")
+@click.option("--dry-run", is_flag=True, help="Validate and preview the alert; save nothing.")
+@click.option("--json", "as_json", is_flag=True, help="Print the alert's metadata as JSON; supports --dry-run.")
 @pass_app
-def alerts_add(app: App, symbol, condition, threshold, note) -> None:
+def alerts_add(app: App, symbol, condition, threshold, note, dry_run: bool, as_json: bool) -> None:
     """CONDITION: above | below | up_pct | down_pct (or > < up down)."""
     cond = _CONDITION_ALIASES.get(condition.lower(), condition.lower())
     if cond not in ALERT_CONDITIONS:
         fail(f"Condition must be one of: {', '.join(ALERT_CONDITIONS)}")
     try:
-        alert = app.store.add_alert(Alert(symbol=symbol, condition=cond, threshold=threshold, note=note))
+        alert = Alert(symbol=symbol, condition=cond, threshold=threshold, note=note)
+        if not dry_run:
+            alert = app.store.add_alert(alert)
     except ValueError as e:
         fail(str(e))
-    app.ok(f"Alert #{alert.id}: {alert.describe()}")
+    if as_json:
+        click.echo(json.dumps({**_alert_json(alert), "saved": not dry_run}, ensure_ascii=False, allow_nan=False))
+    elif dry_run:
+        app.ok(f"Would add alert: {alert.describe()} (not saved).")
+    else:
+        app.ok(f"Alert #{alert.id}: {alert.describe()}")
 
 
 @alerts.command("rm")
-@click.argument("alert_id", type=int)
+@_ALERT_IDS
 @pass_app
-def alerts_rm(app: App, alert_id: int) -> None:
-    app.store.delete_alert(alert_id)
-    app.ok(f"Removed alert #{alert_id}.")
+def alerts_rm(app: App, alert_ids: tuple[int, ...]) -> None:
+    """Delete alerts. Several ids are checked first, so either all go or none does."""
+    with app.store.transaction():
+        chosen = _saved_alerts(app, alert_ids)
+        for alert in chosen:
+            app.store.delete_alert(alert.saved_id)
+    app.ok(f"Removed {_alert_ids(chosen)}.")
 
 
 @alerts.command("check")
