@@ -41,6 +41,7 @@ class Metric:
             "date-max",
             "value-counts",
             "repeated-values",
+            "longest-text",
         }
 
 

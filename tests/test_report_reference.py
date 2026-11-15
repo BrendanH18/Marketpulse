@@ -32,12 +32,13 @@ from marketpulse.themes import OMARCHY_PALETTES, Palette, resolve_palette
 RESULTS = {
     "integer": "count present missing empty nonempty distinct duplicates mode-count number-count number-distinct "
     "positive-count negative-count zero-count true-count false-count string-count array-count object-count "
-    "length-sum length-min length-max date-count date-span",
+    "length-sum length-min length-max date-count date-span date-distinct",
     "decimal": "number-sum number-min number-max number-mean number-median number-range positive-sum negative-sum "
-    "absolute-sum length-mean number-variance number-stdev number-q1 number-q3",
+    "absolute-sum length-mean number-variance number-stdev number-q1 number-q3 number-p10 number-p90 number-iqr "
+    "number-mean-absolute-deviation present-percent",
     "value": "first last first-present last-present mode",
     "list": "values distinct-values value-counts repeated-values",
-    "string": "text-min text-max date-min date-max",
+    "string": "text-min text-max date-min date-max longest-text",
 }
 ROLES = "background surface panel selection border foreground bright muted accent up down warn info".split()
 
@@ -159,9 +160,9 @@ def test_sources_lists_every_dataset_by_name(app):
             assert (by_name[name]["group"], by_name[name]["description"]) == (module.GROUP, description)
 
 
-def test_summary_operations_classify_all_fifty_in_documented_order(app):
+def test_summary_operations_classify_all_in_documented_order(app):
     rows = load_source("summary-operations", app)
-    assert [row["position"] for row in rows] == list(range(1, 51))
+    assert [row["position"] for row in rows] == list(range(1, 58))
     assert [row["operation"] for row in rows] == list(report_metrics.ALL_OPERATIONS)
     assert [row["operation"] for row in rows if not row["takes_field"]] == ["count"]
     expected = {operation: result for result, operations in RESULTS.items() for operation in operations.split()}
@@ -411,10 +412,10 @@ def test_cli_summarize_groups_reference_rows():
     ]
     by_result = ["summarize", "summary-operations", "--group-by", "result", "--metric", "operations=count"]
     assert json.loads(_cli(*by_result, "--sort", "operations", "--descending")) == [
-        {"result": "integer", "operations": 23},
-        {"result": "decimal", "operations": 14},
+        {"result": "integer", "operations": 24},
+        {"result": "decimal", "operations": 19},
         {"result": "value", "operations": 5},
+        {"result": "string", "operations": 5},
         {"result": "list", "operations": 4},
-        {"result": "string", "operations": 4},
     ]
     assert json.loads(_cli("summarize", "theme-colors", "--metric", "roles=distinct:role")) == [{"roles": 13}]

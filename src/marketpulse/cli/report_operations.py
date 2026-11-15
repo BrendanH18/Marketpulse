@@ -286,6 +286,20 @@ OPERATIONS: tuple[Operation, ...] = (
         ("lines", "Emit one raw value per line from a single column."),
         ("json-columns", "Emit one JSON array per column."),
     ),
+    # 153: seven more summary operations.
+    *_choices(
+        153,
+        "summary",
+        _SUMMARIZE,
+        "--metric NAME={}:FIELD",
+        ("number-p10", "Inclusive 10th percentile of finite numbers, interpolated like the quartiles."),
+        ("number-p90", "Inclusive 90th percentile of finite numbers, interpolated like the quartiles."),
+        ("number-iqr", "Third quartile minus first quartile of finite numbers."),
+        ("number-mean-absolute-deviation", "Mean absolute distance of finite numbers from their mean."),
+        ("present-percent", "Percentage of values that are not null or an empty string."),
+        ("date-distinct", "Number of distinct calendar days among date values."),
+        ("longest-text", "Longest string by character count, the first in source order on ties."),
+    ),
 )
 
 
