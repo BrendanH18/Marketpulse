@@ -1,6 +1,7 @@
 # ADR 0001: Windows app stack
 
-**Status:** accepted by the maintainer on 2026-11-07, before implementing the spike.
+**Status:** superseded on 2026-11-14 by [ADR 0002](0002-no-windows-build.md): there is no Windows build.
+Accepted by the maintainer on 2026-11-07, before implementing the spike.
 **Date:** 2026-11-07
 **Issue:** [#50](https://github.com/BrendanH18/Marketpulse/issues/50)
 
@@ -61,7 +62,8 @@ The spike pins .NET SDK 10.0.403 and Avalonia 12.1.5, with a NuGet dependency lo
 It uses a
 folder publish: bundled Python already requires multiple files. A successful
 spike does not establish the full Windows MVP or installer acceptance criteria.
-Build and verification commands are in [the Windows guide](../windows.md#windows-portfolio-app).
+Build and verification commands were in the Windows guide, removed with the Windows build
+([`docs/windows.md` at `bb393ef`](https://github.com/BrendanH18/Marketpulse/blob/bb393ef/docs/windows.md#windows-portfolio-app)).
 
 ## Consequences
 

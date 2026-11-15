@@ -140,10 +140,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   value, change and ordering controls for snapshot history. See
   [Offline report browsing](docs/cli-report-browsing.md).
 
-- Windows watchlist ordering and alert management ([#114](https://github.com/BrendanH18/Marketpulse/issues/114)):
-  edit thresholds and notes, pause/resume without losing trigger history, explicitly
-  rearm, and filter alerts by state. Unpriced watched symbols remain visible and
-  movable through the additive version-1 `watchlist_symbols` snapshot field.
+- The version-1 desktop snapshot adds `watchlist_symbols`, the saved watchlist order
+  including symbols without a quote, and `storage.restore_revision`, which changes when
+  saved assets, watchlists, alerts or allocation targets change. Both are additive.
 
 - Thirty offline ledger report and diagnostics improvements ([#111](https://github.com/BrendanH18/Marketpulse/issues/111)):
   `positions` and `cash` cost-base views with filters, sorting and an overdraft exit code,
@@ -176,55 +175,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   See [Offline CLI workflows](docs/cli-workflows.md) for the numbered list and examples.
   JSON reports contain unmasked values even in privacy mode.
 
-- A Windows Tax workspace ([#97](https://github.com/BrendanH18/Marketpulse/issues/97))
-  with year selection, capital gains, superficial-loss
-  details, and CSV export for your accountant. Reports use the existing Python
-  engine, load on demand, and respect privacy mode; the fictional demo is read-only.
-
-- Windows custom-asset forms for GICs, bonds and manually valued holdings, with
-  valuation updates and asset-class overrides. The Allocation workspace shows
-  current weights, targets, drift and engine-provided suggestions; targets can
-  be edited or cleared without a terminal. Asset creation checks for symbol
-  collisions in the complete ledger, including archived accounts.
-
-- Windows **Automation** can list and create ledger backups, and restore one after
-  a clear confirmation. The existing engine validates the file and saves a
-  pre-restore copy first; privacy hides backup details and the demo stays read-only.
-  See [Windows backups and restore](docs/windows.md#backups-and-restore).
-  The version-1 snapshot adds `storage.restore_revision` for saved asset,
-  watchlist, alert and allocation-target changes, complementing `ledger_revision`.
-
-- On-demand macOS and Windows desktop benchmarks in the CI workflow, with raw
-  samples, source commit, runtime metadata and a run link retained in the reports.
-  See [desktop refresh measurements](docs/performance.md) for how to run them.
+- An on-demand macOS desktop benchmark in the CI workflow, with raw samples, source
+  commit, runtime metadata and a run link retained in the report.
+  See [desktop refresh measurements](docs/performance.md) for how to run it.
 
 - An offline desktop latency benchmark using a fictional 5,000-transaction ledger.
   [Desktop refresh measurements](docs/performance.md) explains the startup, refresh,
   and edit-plus-refresh boundaries and the evidence for the next performance decision.
 
-- Windows releases ([#53](https://github.com/BrendanH18/Marketpulse/issues/53)): a per-user
-  installer that needs no administrator rights, a portable zip, and a one-line PowerShell
-  install (`irm …/install.ps1 | iex`) that runs the installer only if it matches the release's
-  `SHA256SUMS`. The installer and app aren't code-signed; [Install on Windows](docs/install.md#windows)
-  covers the SmartScreen prompt, checking a download with `Get-FileHash`, updating, and uninstalling,
-  which keeps your portfolio. Each GitHub Release now has the macOS and Windows files with one `SHA256SUMS`.
-
-- A Windows portfolio workspace with holdings, signed activity, accounts, watchlists and
-  alerts, income, automation, transaction entry, CSV preview/import, privacy mode, and
-  system-tray controls ([#52](https://github.com/BrendanH18/Marketpulse/issues/52)).
-  The standalone CI artifact includes the Python backend; installer packaging remains
-  separate. An explicit read-only demo and isolated scratch-ledger QA are available.
-
-- An Avalonia Windows demo showing fictional net worth in a window with a system-tray
-  menu, plus a self-contained CI build and desktop bridge checks
-  ([#50](https://github.com/BrendanH18/Marketpulse/issues/50)). Avalonia with C#/XAML is
-  the chosen Windows UI stack; the full Windows workspace and installer remain separate work.
-- A self-contained Windows x64 backend build, with pinned Python and locked dependencies,
-  plus Windows CI tests and a relocated-bundle smoke test
-  ([#51](https://github.com/BrendanH18/Marketpulse/issues/51)). See
-  [Windows backend builds](docs/windows.md). Windows keeps the existing data/config paths;
-  desktop notifications are currently a no-op. The native Windows interface and installer
-  remain separate work.
 - The Mac app is available in French (Canada)
   ([#46](https://github.com/BrendanH18/Marketpulse/issues/46)). The desktop bridge adds
   stable codes for the engine's messages so the app can word them in French: `warning_items`
@@ -251,6 +209,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Desktop bridge (still version 1, fields added): `providers`, `automation.stale_count` and
   `stale_since`, each position's `quote_source` and `quote_age_seconds`, and the provider
   fields in `settings`.
+
+### Removed
+
+- The Windows app, its installer and PowerShell install script, and the bundled Windows
+  backend. They were built after 2.2.0 and never shipped in a release. MarketPulse now
+  targets macOS (the app, CLI and TUI) and Linux (CLI and TUI); see
+  [ADR 0002](docs/adr/0002-no-windows-build.md)
+  ([#150](https://github.com/BrendanH18/Marketpulse/issues/150)).
 
 ### Changed
 

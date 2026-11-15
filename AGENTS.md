@@ -87,19 +87,18 @@ Python package in `src/marketpulse/` (Python ≥3.11, deps: click, rich, textual
 - **CLI (`cli/`):** one Click group, `main` in `cli/root.py`; each module (`accounts.py`, `recording.py`, `native.py`…) adds one area's commands, and `cli/__init__.py` imports them all. `App` (in `cli/base.py`, with `fail` and the shared options) is the context object; it lazily opens the `Tracker`. Account resolution for `-a` is `Store.get_account` (id, case-insensitive name, or unique account type). Table renderers take `width` and drop low-priority columns under 110 columns.
 - **Offline reports (`cli/reports.py`, `cli/summaries.py`):** `report SOURCE` and `summarize SOURCE` share the dataset adapters registered in `reports.SOURCE_MODULES`; each `report_*` adapter module exposes `GROUP`, `SOURCES` (ordered field schemas), `DESCRIPTIONS` and `load_source`. Adapters are read-only, offline and hide archived accounts. `report_derive.py` computes `--derive` columns after loading and before filters. The dataset × operation matrices in `tests/` parametrize over `reports.SOURCES`, so a new dataset or operation extends them; `docs/cli-report-derived-datasets.md` is checked against the code.
 - **Native app (`macos/MarketPulseBar`, `menubar.py`, `desktop.py`):** the Swift app (menu bar + portfolio window) refreshes with `marketpulse desktop snapshot`, the versioned desktop JSON bridge built in `desktop.py` (decoded with `convertFromSnakeCase` in `DesktopModels.swift`). If that fails, the menu bar falls back to `marketpulse status --json` (`Tracker.status_payload`, `Models.swift`), a separate stable contract. Writes shell out to ordinary CLI commands with user text after `--`. Changing either payload requires updating the Swift models and `scripts/check_native_bridge.*`. `menubar install` builds with SwiftPM, assembles `~/Applications/MarketPulse Bar.app`, and stores the CLI path in `defaults` (`dev.marketpulse.bar cliPath`). Don't use SwiftUI `@State` — the Command Line Tools toolchain lacks the macro plugin; use `ObservableObject` state instead.
-- **Windows backend:** `scripts/build_windows_backend.py` builds a self-contained x64 engine on Windows; CI runs its relocation smoke test. See `docs/windows.md`. Keep data at `~/.marketpulse` and config at `~/.config/marketpulse/config.toml` (environment overrides apply); no AppData migration. Windows notifications currently return `False`. Windows bundles include `tzdata` because the OS has no IANA timezone database. Future native callers should launch the bundled Python with an argument array, isolated mode and UTF-8, as documented in the Windows guide.
-- **Windows interface:** the maintainer chose Avalonia with C#/XAML ([ADR 0001](docs/adr/0001-windows-app-stack.md)). `windows/MarketPulse.Demo/` contains the Windows portfolio app (the directory retains its spike name), using .NET 10 and Avalonia 12. It consumes bridge version 1 without financial calculations in C#. Writes use CLI argument arrays with user positional text after `--`. `--demo` is read-only; QA uses both `--data-dir` and `--config` overrides. Build, bridge checks and scratch-data QA are in `docs/windows.md`; installer packaging remains a separate issue.
-  Tax loads on demand through `desktop tax`, invalidates on the snapshot's `ledger_revision`, and exports through `desktop tax-csv`. Tax includes anonymized archived taxable entries as the engine requires; ordinary portfolio views still hide archived accounts.
+- **Tax in the app:** tax loads on demand through `desktop tax`, invalidates on the snapshot's `ledger_revision`, and exports through `desktop tax-csv`. Tax includes anonymized archived taxable entries as the engine requires; ordinary portfolio views still hide archived accounts.
+- **Platforms:** macOS (app, CLI, TUI) and Linux (CLI, TUI). There is no Windows build ([ADR 0002](docs/adr/0002-no-windows-build.md)); the engine keeps its portability code (explicit UTF-8, `tzdata` on Windows), but nothing is built or tested there.
 - **Legacy migration:** `db.migrate_legacy_json` imports 0.1 `~/.marketpulse/*.json` portfolios once (guarded by a `meta` key), reconciling positions removed without a sell via a zero-gain SELL.
 
 Tests are isolated by autouse fixtures that point `MARKETPULSE_DATA`/`MARKETPULSE_CONFIG` at tmp dirs, disable Omarchy detection, and stub desktop notifications.
 
 ## Rules
 
-- Windows backup/restore UI belongs in `MainWindow.Backups.cs`, with a focused
-  client helper and minimal Automation hooks. Coordinate shared window, client,
-  navigation and documentation edits with parallel feature work; keep their
-  fixtures and features out of the backup/restore change.
+- **No Windows build.** The maintainer dropped Windows on 2026-11-14
+  ([ADR 0002](docs/adr/0002-no-windows-build.md)). Don't add a Windows app,
+  installer, script or CI job, or Windows-only work to an issue, unless the
+  maintainer reverses that decision.
 - **Never touch real financial data.** Use fictional data in tests, docs, fixtures,
   and screenshots. For manual runs set `MARKETPULSE_DATA` and `MARKETPULSE_CONFIG`
   to a scratch directory; never read or write `~/.marketpulse`.

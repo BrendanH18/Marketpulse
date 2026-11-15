@@ -12,8 +12,8 @@ pick up the work without the conversation that produced it.
 
 A free, open-source app that any Canadian investor can download and use without a
 terminal: track TFSA, RRSP, FHSA, and taxable accounts with correct adjusted cost
-base (ACB), privately, on their own computer. macOS first, then Windows. The CLI
-and TUI stay first-class for people who prefer them.
+base (ACB), privately, on their own computer. The app is for macOS; the CLI and TUI
+stay first-class on macOS and Linux for people who prefer them.
 
 ## Decisions
 
@@ -21,20 +21,18 @@ and TUI stay first-class for people who prefer them.
 | --- | --- |
 | Open source (MIT), no paid tier | Maintainer's choice. Keeps scope on usefulness, not billing. |
 | Canadian investors are the audience | Registered accounts, pooled ACB, superficial losses, and contribution room are poorly served by international trackers. |
-| **Unsigned builds** (no Apple Developer ID, no Windows code signing) | Maintainer's choice to avoid the yearly cost. Install docs handle the OS prompts (below). |
-| Bundle the Python engine inside the app | Reuses the tested ledger, tax, and import code on both platforms. Users never install Python. |
-| Native interfaces talk to the engine only through the versioned desktop JSON bridge | One contract for macOS and Windows; each interface stays replaceable. |
-| Windows keeps `~/.marketpulse` data and `~/.config/marketpulse/config.toml` config | Preserves existing CLI installs without an AppData migration. Environment overrides still apply. See [Windows backend builds](windows.md). |
-| Windows interface uses Avalonia with C#/XAML | Maintainer-approved choice; built-in tray and UI Automation support with standard .NET tooling. See [ADR 0001](adr/0001-windows-app-stack.md). |
+| **Unsigned builds** (no Apple Developer ID) | Maintainer's choice to avoid the yearly cost. Install docs handle the OS prompts (below). |
+| Bundle the Python engine inside the app | Reuses the tested ledger, tax, and import code. Users never install Python. |
+| The app talks to the engine only through the versioned desktop JSON bridge | One contract between the interface and the engine; the interface stays replaceable. |
 | Local-first; no broker credentials, ever | Privacy is the product. Canada's open-banking framework has no firm date, and credential scraping is fragile. |
-| Mac first; Windows after the macOS 1.0 milestone | One interface stabilizes the feature set before a second one copies it. |
+| **No Windows build**; macOS and Linux only | Maintainer's choice on 2026-11-14. The Windows app was built but never run on a real Windows desktop, and it was holding up the first release. See [ADR 0002](adr/0002-no-windows-build.md). |
 
 ## Architecture
 
 ```
-SwiftUI app (macOS)  ─┐                         ┌─ ledger, ACB, tax, FX, import (Python)
-                      ├─ desktop JSON bridge ───┤
-Windows app (later)  ─┘   `marketpulse desktop` └─ SQLite in ~/.marketpulse (shared with CLI/TUI)
+                                                ┌─ ledger, ACB, tax, FX, import (Python)
+SwiftUI app (macOS) ───── desktop JSON bridge ──┤
+                          `marketpulse desktop` └─ SQLite in ~/.marketpulse (shared with CLI/TUI)
 ```
 
 - The app runs the bundled `marketpulse` CLI. `desktop snapshot` returns version 1
@@ -65,18 +63,6 @@ with `curl`, checks its SHA-256 against the published `SHA256SUMS`, and installs
 The DMG with Open Anyway instructions is the alternative, and building from the tag
 (`marketpulse desktop install`) remains available. See
 [#35](https://github.com/BrendanH18/Marketpulse/issues/35).
-
-**Windows.** Unsigned installers trigger SmartScreen ("Windows protected your PC" →
-More info → Run anyway), and an unsigned file starts with no reputation on every
-release. MSIX requires signing, so releases ship a per-user Inno Setup installer (no
-administrator rights) and a portable zip. The primary install path is
-`scripts/install.ps1`, which downloads the installer with `Invoke-WebRequest` (which
-doesn't add the Mark of the Web, so SmartScreen doesn't prompt), checks its SHA-256
-against `SHA256SUMS`, installs silently, and checks the installed version. Smart App
-Control, where it is on, blocks unsigned apps outright; only signing would avoid that.
-winget doesn't require signing, but there is no package yet. See
-[#53](https://github.com/BrendanH18/Marketpulse/issues/53) and the
-[Windows install guide](install.md#windows).
 
 **Trust without signatures:** releases are built only by the tag-triggered
 workflow, every artifact has a published SHA-256, and anyone can rebuild from the tag.
@@ -123,14 +109,11 @@ workspace, desktop bridge, review fixes, app icon) merges first.
 | [#48](https://github.com/BrendanH18/Marketpulse/issues/48) | Persistent backend helper, only if measurements justify it |
 | [#20](https://github.com/BrendanH18/Marketpulse/issues/20) | Coverage gates for the financial core |
 
-**Phase 4: Windows** (after the macOS 1.0 milestone)
+**Phase 4: Windows** (dropped)
 
-| Issue | What |
-| --- | --- |
-| [#50](https://github.com/BrendanH18/Marketpulse/issues/50) | Avalonia stack decision and window/tray spike ([ADR](adr/0001-windows-app-stack.md)) |
-| [#51](https://github.com/BrendanH18/Marketpulse/issues/51) | Bundle the backend on Windows (continues [#26](https://github.com/BrendanH18/Marketpulse/issues/26)) |
-| [#52](https://github.com/BrendanH18/Marketpulse/issues/52) | Windows app MVP |
-| [#53](https://github.com/BrendanH18/Marketpulse/issues/53) | Unsigned Windows installer and release job |
+The Windows backend, app and installer (#50–#53) were built and then removed
+before any release: see [ADR 0002](adr/0002-no-windows-build.md) and
+[#150](https://github.com/BrendanH18/Marketpulse/issues/150).
 
 Phases 2 and 3 can run alongside Phase 1 once #31 merges.
 
@@ -146,6 +129,7 @@ Phases 2 and 3 can run alongside Phase 1 once #31 merges.
 - Broker logins or credential-based sync; trading of any kind.
 - Accounts, cloud storage, telemetry, or analytics. The only network calls are quotes, FX, and the opt-out update check.
 - A paid tier.
+- A Windows build ([ADR 0002](adr/0002-no-windows-build.md)).
 
 ## Risks
 
