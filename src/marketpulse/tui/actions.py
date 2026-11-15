@@ -10,7 +10,7 @@ from textual.widgets import DataTable, Input
 
 from ..alerts import notify as desktop_notify
 from ..themes import pretty_name, theme_names
-from .constants import ALLOC_MODES, NW_RANGES
+from .constants import ALLOC_MODES, NW_RANGES, SORT_MODES
 from .screens import AlertForm, HelpScreen, PromptScreen, SearchScreen
 
 if TYPE_CHECKING:
@@ -60,6 +60,9 @@ def action_watch_add(app: MarketPulseApp, prompt: bool = False) -> None:
 
 def action_move_watch(app: MarketPulseApp, delta: int) -> None:
     if app.workspace != "watchlist":
+        return
+    if app.table_sort.get("watchlist", SORT_MODES["watchlist"][0]) != SORT_MODES["watchlist"][0]:
+        app.notify("J / K reorder the list order: press o until the sort is cleared", timeout=3)
         return
     sym = app.context_symbol()
     if sym:

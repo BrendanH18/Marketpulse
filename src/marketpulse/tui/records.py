@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from textual.widgets import DataTable
 
 from .. import fmt, render
 from ..market import MarketError
-from ..models import AssetKind, Transaction, TxnType, parse_date
+from ..models import AssetKind, Transaction, TxnType, parse_date, today
 from .screens import AccountForm, AssetForm, ConfirmScreen, PromptScreen, RoomForm, TransactionForm
 
 if TYPE_CHECKING:
@@ -90,6 +91,28 @@ def action_edit(app: MarketPulseApp) -> None:
         acct = app.tracker.store.get_account(int(key)) if key else None
         if acct:
             app.push_screen(AccountForm(acct, app.tracker.base), app._account_done)
+
+
+def selected_transaction(app: MarketPulseApp) -> Transaction | None:
+    """The activity row under the cursor, or None outside activity or on an empty table."""
+    if app.workspace != "activity":
+        return None
+    key = app._selected_key(app.query_one("#activity-table", DataTable))
+    return next((t for t in app.tracker.store.transactions() if str(t.id) == key), None)
+
+
+def action_duplicate(app: MarketPulseApp) -> None:
+    """d: a new-transaction form prefilled from the selected entry and dated today; nothing is saved until you do."""
+    txn = selected_transaction(app)
+    if txn is None:
+        app.notify("Select a transaction in activity (5) to duplicate it", timeout=3)
+        return
+    acct = app.tracker.store.get_account(txn.account_id)
+    if acct is None or acct.archived:
+        app.notify(f"{acct.name if acct else 'That account'} is archived; unarchive it to add entries", timeout=4)
+        return
+    copy = replace(txn, id=None, date=today())
+    app.push_screen(TransactionForm(app.tracker, txn=copy, symbols=app.known_symbols()), app._txn_done)
 
 
 def action_delete(app: MarketPulseApp) -> None:

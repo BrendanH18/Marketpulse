@@ -1,6 +1,6 @@
 # Terminal app navigation
 
-[User guide](usage.md) · [One hundred improvements](cli-hundred-improvements.md) · [Issue #130](https://github.com/BrendanH18/Marketpulse/issues/130)
+[User guide](usage.md) · [One hundred improvements](cli-hundred-improvements.md) · [Issue #130](https://github.com/BrendanH18/Marketpulse/issues/130) · [Fifteen more improvements](tui-thousand-improvements.md)
 
 These ten additions to the terminal app (`marketpulse` with no subcommand) move
 between workspaces, tables and filters without the mouse. Every key was unbound
@@ -17,7 +17,7 @@ named in brackets. The examples use fictional accounts.
 87. `escape` clears a filter: in holdings it empties and hides the `F` filter; in activity it empties the `/` filter. Either way the cursor goes back to the table. Elsewhere `escape` does what it did before (closing forms, clearing the chart crosshair). (Palette: *Clear filter*.)
 88. The bottom hints line shows the cursor's place in the current table, such as `row 3/12`, and updates as you move. Workspaces without a table don't show it.
 89. The bottom hints line also shows how long ago prices were last refreshed: `updated 12s ago`, `updated 4m ago` or `updated 2h ago`. It is updated every second and resets after each automatic refresh or `r`. Like the other parts of the hints line, both are left out when the terminal is too narrow.
-90. `F1` lists the keys for the current workspace: its usual hints, the additions from this guide and [the productivity guide](tui-productivity.md) that apply there, and the keys that work everywhere. `F1`, `escape` or `q` closes it. `?` still shows the full key list, which now has a *Navigation and productivity* section. (Palette: *Workspace keys*.)
+90. `F1` lists the keys for the current workspace: its usual hints, the additions from this guide, [the productivity guide](tui-productivity.md) and [the fifteen more improvements](tui-thousand-improvements.md) that apply there, and the keys that work everywhere. `F1`, `escape` or `q` closes it. `?` still shows the full key list, which now has a *Navigation and productivity* section. (Palette: *Workspace keys*.)
 
 ## What stays the same
 
