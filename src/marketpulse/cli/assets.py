@@ -537,14 +537,17 @@ def asset_value(app: App, symbol, value, when) -> None:
 
 @asset.command("classify")
 @click.argument("symbol")
-@click.argument("asset_class", type=click.Choice([c.value for c in AssetClass]))
+@click.argument("asset_class", type=click.Choice([c.value for c in AssetClass], case_sensitive=False))
 @pass_app
 def asset_classify(app: App, symbol, asset_class) -> None:
     """Override the asset class of any symbol (affects allocation)."""
-    existing = app.store.assets().get(symbol.upper()) or Asset(symbol=symbol)
-    existing.asset_class = AssetClass(asset_class)
+    sym = symbol.strip().upper()
+    if not sym:
+        raise click.BadParameter("cannot be blank.", param_hint="SYMBOL")
+    existing = app.store.assets().get(sym) or Asset(symbol=sym)
+    existing.asset_class = AssetClass(asset_class.lower())
     app.store.upsert_asset(existing)
-    app.ok(f"{symbol.upper()} → {existing.asset_class.label}")
+    app.ok(f"{sym} → {existing.asset_class.label}")
 
 
 @asset.command("remove")
@@ -552,5 +555,10 @@ def asset_classify(app: App, symbol, asset_class) -> None:
 @pass_app
 def asset_remove(app: App, symbol) -> None:
     """Remove asset metadata (transactions are kept)."""
-    app.store.delete_asset(symbol)
-    app.ok(f"Removed metadata for {symbol.upper()}.")
+    stored = app.store.assets()
+    # An exact key first: older versions of `asset classify` could save a symbol with spaces.
+    sym = symbol.upper() if symbol.upper() in stored else symbol.strip().upper()
+    if sym not in stored:
+        fail(f"No configured asset '{sym}'; nothing removed. `marketpulse asset list` shows them.")
+    app.store.delete_asset(sym)
+    app.ok(f"Removed metadata for {sym}.")

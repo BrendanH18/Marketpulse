@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- One thousand offline improvements
+  ([#153](https://github.com/BrendanH18/Marketpulse/issues/153); see the
+  [inventory](docs/thousand-improvements.md)):
+  - 10 `--derive` functions for `marketpulse report` and `marketpulse summarize`
+    (`add-days`, `add-months`, `divide`, `at-least`, `at-most`, `percent-of-field`,
+    `right`, `contains`, `starts-with`, `ends-with`) and 7 `summarize --metric`
+    operations (`number-p10`, `number-p90`, `number-iqr`,
+    `number-mean-absolute-deviation`, `present-percent`, `date-distinct`,
+    `longest-text`), on all 57 datasets: 969 dataset/operation combinations.
+    `report report-operations` lists 197 shared operations.
+  - 16 CLI improvements: `--dry-run` previews for `accounts add`, `edit` and
+    `remove`, `alerts add` and `edit`, and `watch add` and `rm`; `--json` receipts
+    for `accounts add` and `alerts add`; and several alert ids at once for
+    `alerts pause`, `resume`, `rearm` and `rm`. See the
+    [CLI guide](docs/cli-thousand-improvements.md).
+  - 15 terminal app improvements: sorting for the watchlist, accounts and alerts
+    tables (`o`/`O`), `d` to duplicate a transaction, `!` to list problems,
+    `ctrl+y` to copy a table, `$` to hide cash rows, direct sort commands in the
+    command palette, and fuller pane footers. See the
+    [terminal app guide](docs/tui-thousand-improvements.md).
+
+### Changed
+
+- `accounts add` and `accounts edit -c` require a 3-letter currency code and trim
+  spaces from it. `accounts room` refuses `nan`, infinity and years outside 1957 to
+  next year. `asset classify` accepts the class in any case and trims the symbol.
+- In the terminal app, `b`, `s`, `D` and `N` on the activity workspace start the
+  form in the selected entry's account instead of the first account.
+
+### Fixed
+
+- `alerts add` trims spaces around the symbol; a padded symbol was saved as-is and
+  never matched a quote.
+- `alerts rm` and `asset remove` report an error for an alert or symbol that
+  doesn't exist instead of reporting a removal.
+- `backup now PATH` refuses to back up the database onto itself.
+- Editing a transaction in the terminal app no longer rounds unchanged numbers to six
+  significant digits when it is saved (123.456789 shares were saved as 123.457).
+- A lone `=` in the terminal app's activity filter no longer hides every entry
+  with a symbol.
+- The chart keys `[`, `]`, `c` and `C` explain what to do outside the chart
+  instead of doing nothing.
+
 ## [3.0.0] - 2026-11-14
 
 The first release with the standalone Mac app (App 1.0): `MarketPulse.app` for Apple

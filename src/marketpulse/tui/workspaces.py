@@ -234,7 +234,7 @@ def render_holdings(app: MarketPulseApp) -> None:
             cells[5] = Text(cells[5].plain, style=f"bold {p.background} on {p.up if direction > 0 else p.down}")
         row = app._justify([cells[i] for i in HOLDING_COLUMNS], range(2, 8))
         table.add_row(*row, key=f"{pos.account.id}:{pos.symbol}")
-    for c in v.cash:
+    for c in [] if app.hide_cash else v.cash:
         if app.account_filter is not None and c.account.id != app.account_filter:
             continue
         if not navigation.holdings_match(needle, "cash", c.currency, c.account.name):
@@ -259,7 +259,7 @@ def render_holdings(app: MarketPulseApp) -> None:
         scope = acct.name if acct else scope
     total = sum(x.value_base or 0 for x in positions)
     if table.row_count == 0 and needle:
-        subtitle = f"f ▸ {scope} · no match"
+        subtitle = f"f ▸ {scope} · no match — escape clears"
     elif table.row_count == 0:
         subtitle = "No holdings yet — b to buy" if app.account_filter is None else f"f ▸ {scope} · nothing held"
     else:
@@ -267,9 +267,11 @@ def render_holdings(app: MarketPulseApp) -> None:
         count = f"{len(positions)} of {in_scope}" if needle else str(len(positions))
         subtitle = f"f ▸ {scope} · {count} positions · {money}"
         if v.excluded:
-            subtitle += f" · ⚠ {len(v.excluded)} excluded"
+            subtitle += f" · ⚠ {len(v.excluded)} excluded (! lists them)"
     if needle:
         subtitle += f" · F ▸ “{needle}”"
+    if app.hide_cash:
+        subtitle += " · cash hidden ($)"
     order = navigation.sort_label(app, "holdings")
     if order:
         subtitle += f" · {order}"
@@ -287,8 +289,18 @@ def render_watchlist(app: MarketPulseApp) -> None:
     selected = app._selected_key(table)
     table.clear()
     p = app.palette
-    for sym in app.watch_symbols:
-        q = app.watch_quotes.get(sym)
+    quotes = app.watch_quotes
+
+    def day_pct(sym: str) -> float | None:
+        q = quotes.get(sym)
+        return q.change_pct if q else None
+
+    position = {s: i for i, s in enumerate(app.watch_symbols)}
+    symbols = navigation.sort_items(
+        app, "watchlist", app.watch_symbols, {"list": position.get, "symbol": lambda s: s, "day %": day_pct}
+    )
+    for sym in symbols:
+        q = quotes.get(sym)
         if q is None:
             cells = render.missing_quote_cells(sym, app.watch_errors.get(sym, "loading…"))
         else:
@@ -298,11 +310,22 @@ def render_watchlist(app: MarketPulseApp) -> None:
                 cells[2] = Text(cells[2].plain, style=f"bold {p.background} on {p.up if direction > 0 else p.down}")
         table.add_row(*app._justify(cells, range(2, 5)), key=sym)
     app._restore_cursor(table, selected)
-    app.query_one("#pane-watch").border_subtitle = (
-        f"{len(app.watch_symbols)} symbols" if app.watch_symbols else "Empty — a to add a symbol"
-    )
-    if app._watch_key is None and app.watch_symbols:
-        app._show_watch(app.watch_symbols[0])
+    if symbols:
+        changes = [quotes[s].change for s in symbols if s in quotes]
+        subtitle = f"{len(symbols)} symbol{'' if len(symbols) == 1 else 's'}"
+        if changes:
+            subtitle += f" · {sum(c > 0 for c in changes)} up · {sum(c < 0 for c in changes)} down"
+        missing = sum(s in app.watch_errors and s not in quotes for s in symbols)
+        if missing:
+            subtitle += f" · {missing} unavailable"
+        order = navigation.sort_label(app, "watchlist")
+        if order:
+            subtitle += f" · {order}"
+    else:
+        subtitle = "Empty — a to add a symbol"
+    app.query_one("#pane-watch").border_subtitle = subtitle
+    if app._watch_key is None and symbols:
+        app._show_watch(symbols[0])
 
 
 def render_activity(app: MarketPulseApp) -> None:
@@ -313,8 +336,11 @@ def render_activity(app: MarketPulseApp) -> None:
     accounts = store.account_map()
     needle = app.query_one("#activity-filter", Input).value.strip().lower()
     txns = navigation.sort_transactions(app, store.transactions(), accounts)
-    shown = 0
-    exact = needle[1:].strip().upper() if needle.startswith("=") else None  # "=SYM": that symbol only
+    dates: list[str] = []
+    # "=SYM": that symbol only. A lone "=" (on the way to typing one) doesn't filter yet.
+    exact = needle[1:].strip().upper() if needle.startswith("=") else None
+    if exact == "":
+        exact, needle = None, ""
     for t in txns:
         cells = render.activity_cells(t, accounts, privacy=app.privacy)
         if exact is not None:
@@ -323,12 +349,18 @@ def render_activity(app: MarketPulseApp) -> None:
         elif needle and needle not in " ".join(c.plain.lower() for c in cells):
             continue
         table.add_row(*app._justify(cells, (0, 5, 6, 7, 8)), key=str(t.id))
-        shown += 1
+        dates.append(t.date)
+    shown = len(dates)
     app._restore_cursor(table, selected)
     issues = store.ledger().issues
     subtitle = f"{shown} of {len(txns)} transactions" if txns else "No transactions — n to add one"
+    if dates:
+        first, last = min(dates), max(dates)
+        subtitle += f" · {first}" if first == last else f" · {first} → {last}"
+    elif txns and needle:
+        subtitle += " · no match — escape clears"
     if issues:
-        subtitle += f" · ⚠ {len(issues)} ledger issue(s)"
+        subtitle += f" · ⚠ {len(issues)} ledger issue(s) (! lists them)"
     order = navigation.sort_label(app, "activity")
     if order:
         subtitle += f" · {order}"
@@ -344,12 +376,21 @@ def render_accounts(app: MarketPulseApp) -> None:
     every = app.tracker.store.accounts(include_archived=True)
     archived = sum(a.archived for a in every)
     active = len(every) - archived
+    order = navigation.sort_label(app, "tax")
     app.query_one("#pane-accts").border_subtitle = (
-        f"{active} account{'' if active == 1 else 's'}" + (f" · {archived} archived" if archived else "")
+        f"{active} account{'' if active == 1 else 's'}"
+        + (f" · {archived} archived" if archived else "")
+        + (f" · {order}" if order else "")
         if every
         else "No accounts — n to add one"
     )
-    for a in every:
+
+    def value(a) -> float | None:
+        b = values.get(str(a.id))
+        return b.value if b else None
+
+    keys = {"id": lambda a: a.id, "name": lambda a: a.name.lower(), "type": lambda a: a.type.label, "value": value}
+    for a in navigation.sort_items(app, "tax", every, keys):
         b = values.get(str(a.id))
         # Currency and cash tracking live in the edit form (e) to keep this pane narrow
         cells = [
@@ -368,11 +409,24 @@ def render_alerts(app: MarketPulseApp) -> None:
     selected = app._selected_key(table)
     table.clear()
     quotes = {**(app.view.quotes if app.view else {}), **app.watch_quotes}
-    alerts = app.tracker.store.alerts()
-    app.query_one("#pane-alerts").border_subtitle = (
-        f"{sum(a.active for a in alerts)} armed of {len(alerts)}" if alerts else "No alerts — A to add one"
-    )
-    for a in alerts:
+    alerts = app.tracker.store.alerts()  # by symbol, then id
+    if alerts:
+        subtitle = f"{sum(a.active for a in alerts)} armed of {len(alerts)}"
+        triggered = sum(bool(a.triggered_at) for a in alerts)
+        if triggered:
+            subtitle += f" · {triggered} triggered"
+        order = navigation.sort_label(app, "alerts")
+        if order:
+            subtitle += f" · {order}"
+    else:
+        subtitle = "No alerts — A to add one"
+    app.query_one("#pane-alerts").border_subtitle = subtitle
+
+    def state_rank(a) -> int:  # triggered first, then armed, then paused
+        return 0 if a.triggered_at else (1 if a.active else 2)
+
+    keys = {"symbol": lambda a: (a.symbol, a.id), "id": lambda a: a.id, "state": lambda a: (state_rank(a), a.id)}
+    for a in navigation.sort_items(app, "alerts", alerts, keys):
         q = quotes.get(a.symbol)
         state = (
             Text("● triggered", style="warn")

@@ -100,8 +100,10 @@ Pausing preserves history. Resuming preserves it too, so a condition that is
 still true does not immediately notify again. Rearming clears it deliberately:
 the next matching fresh price can notify again. Invalid legacy alerts can be
 inspected or paused, but cannot be resumed or rearmed until replaced with a
-valid alert. Alert JSON includes stored fields plus `state`; a non-finite legacy
-threshold is represented as `null`.
+valid alert. `pause`, `resume`, `rearm` and `rm` take several ids
+(`marketpulse alerts pause 3 4`); if any id has no alert, none of them changes
+([details](cli-thousand-improvements.md)). Alert JSON includes stored fields
+plus `state`; a non-finite legacy threshold is represented as `null`.
 
 Import JSON contains the full existing import result: counts (`added`,
 `duplicates`), `accounts_created`, `backup` (path or `null`), `profile`,

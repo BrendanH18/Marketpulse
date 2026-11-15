@@ -223,9 +223,9 @@ def test_describe_without_source_access(monkeypatch):
     payload = json.loads(result.output)
     assert payload["source"] == "accounts"
     assert payload["fields"] == list(reports.SOURCES["accounts"])
-    # The original forty come first; #143 appended ten more.
+    # The original forty come first; #143 appended ten more and #153 seven.
     assert payload["operations"][:40] == list(report_metrics.OPERATIONS)
-    assert payload["operations"] == list(report_metrics.ALL_OPERATIONS) and len(payload["operations"]) == 50
+    assert payload["operations"] == list(report_metrics.ALL_OPERATIONS) and len(payload["operations"]) == 57
 
 
 def test_new_file_exports_and_no_overwrite(monkeypatch, tmp_path):

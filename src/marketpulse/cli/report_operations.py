@@ -45,11 +45,26 @@ def _choices(
     return tuple(Operation(family, name, commands, syntax.format(name), summary, issue) for name, summary in rows)
 
 
+def _derive(issue: int, functions: tuple[report_derive.Function, ...]) -> tuple[Operation, ...]:
+    """Derive functions, for both commands; each describes itself."""
+    return tuple(
+        Operation(
+            "derive",
+            function.name,
+            _BOTH,
+            f"--derive NAME={function.name}:FIELD" + (f":{function.argument}" if function.argument else ""),
+            function.description,
+            issue,
+        )
+        for function in functions
+    )
+
+
 # The catalog order is part of the interface: batches as they shipped and, within each, the order of
 # its documentation. `commands` names only the commands that really have the option, and a summary
 # is one plain sentence. The first hundred summaries come from docs/cli-composable-reports.md (#136),
 # docs/cli-report-improvements.md (#138) and docs/cli-report-summaries.md (#140); the derive
-# functions (#142) describe themselves.
+# functions (#142, #153) describe themselves.
 OPERATIONS: tuple[Operation, ...] = (
     # 136: twenty operations for `report`; `summarize` accepts ten of them.
     *_options(
@@ -217,17 +232,7 @@ OPERATIONS: tuple[Operation, ...] = (
         ("text-max", "Largest string in case-sensitive Unicode order."),
     ),
     # 142: fifty --derive functions, for both commands, in the order `report derive-functions` lists them.
-    *(
-        Operation(
-            "derive",
-            function.name,
-            _BOTH,
-            f"--derive NAME={function.name}:FIELD" + (f":{function.argument}" if function.argument else ""),
-            function.description,
-            142,
-        )
-        for function in report_derive.FUNCTIONS
-    ),
+    *_derive(142, report_derive.FUNCTIONS[:50]),
     # 143: thirty more: filters, keyed selection, summaries, grouping steps and formats.
     *_options(
         143,
@@ -285,6 +290,22 @@ OPERATIONS: tuple[Operation, ...] = (
         ("records", "Emit one field-per-line block per row."),
         ("lines", "Emit one raw value per line from a single column."),
         ("json-columns", "Emit one JSON array per column."),
+    ),
+    # 153: ten more --derive functions, numbered 51-60 by `report derive-functions`.
+    *_derive(153, report_derive.FUNCTIONS[50:]),
+    # 153: seven more summary operations.
+    *_choices(
+        153,
+        "summary",
+        _SUMMARIZE,
+        "--metric NAME={}:FIELD",
+        ("number-p10", "Inclusive 10th percentile of finite numbers, interpolated like the quartiles."),
+        ("number-p90", "Inclusive 90th percentile of finite numbers, interpolated like the quartiles."),
+        ("number-iqr", "Third quartile minus first quartile of finite numbers."),
+        ("number-mean-absolute-deviation", "Mean absolute distance of finite numbers from their mean."),
+        ("present-percent", "Percentage of values that are not null or an empty string."),
+        ("date-distinct", "Number of distinct calendar days among date values."),
+        ("longest-text", "Longest string by character count, the first in source order on ties."),
     ),
 )
 

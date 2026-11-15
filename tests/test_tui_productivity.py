@@ -219,8 +219,8 @@ def test_sort_cycling_and_reverse(tracker, store):
             await pilot.press("o", "o")  # amount, largest first
             first = next(t for t in store.transactions() if str(t.id) == keys(activity)[0])
             assert first.symbol == "XEQT.TO" and first.quantity == 100
-            await pilot.press("3", "o")  # elsewhere it only explains
-            assert app.table_sort.get("watchlist") is None
+            await pilot.press("6", "o")  # without a table it only explains (the watchlist sorts since #153)
+            assert app.table_sort.get("income") is None
 
     run(scenario())
 

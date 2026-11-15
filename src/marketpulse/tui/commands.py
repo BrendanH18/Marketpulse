@@ -10,7 +10,7 @@ from textual.command import DiscoveryHit, Hit, Hits, Provider
 from ..market import PERIODS
 from ..themes import pretty_name, theme_names
 from . import navigation
-from .constants import ALLOC_MODES, NW_RANGES
+from .constants import ALLOC_MODES, NW_RANGES, SORT_MODES
 from .widgets import WORKSPACES
 
 if TYPE_CHECKING:
@@ -34,7 +34,32 @@ class PortfolioCommands(Provider):
         entries += self._view_actions(app)
         entries += self._selection_actions(app)
         entries += self._productivity_actions(app)
+        entries += self._more_actions(app)
+        entries += self._sort_actions(app)
         return entries
+
+    @staticmethod
+    def _more_actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:
+        """Actions added under #153, each with its key."""
+        return [
+            ("Copy table", "ctrl+y · every row shown, with headers", app.action_copy_table),
+            ("Show or hide cash rows", "$ · holdings", app.action_toggle_cash),
+            ("Duplicate selected transaction", "d · activity, dated today", app.action_duplicate),
+            ("Show problems", "! · ledger issues, missing prices and quotes", app.action_problems),
+        ]
+
+    @staticmethod
+    def _sort_actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:
+        """Sort any sortable table by one column directly; `o` / `O` can only cycle and reverse."""
+        return [
+            (
+                f"Sort {'accounts' if ws == 'tax' else ws} by {name}",
+                f"o / O · {'↓' if descending else '↑'}" + (" · the usual order" if index == 0 else ""),
+                partial(navigation.set_sort, app, ws, name, descending),
+            )
+            for ws, modes in SORT_MODES.items()
+            for index, (name, descending) in enumerate(modes)
+        ]
 
     @staticmethod
     def _view_actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:

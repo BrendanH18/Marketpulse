@@ -94,6 +94,13 @@ _OPERATION_RESULTS = {
     "number-q3": "decimal",
     "value-counts": "list",
     "repeated-values": "list",
+    "number-p10": "decimal",
+    "number-p90": "decimal",
+    "number-iqr": "decimal",
+    "number-mean-absolute-deviation": "decimal",
+    "present-percent": "decimal",
+    "date-distinct": "integer",
+    "longest-text": "string",
 }
 
 # The single colors of a palette, in display order; its name, mode and chart series are left out.

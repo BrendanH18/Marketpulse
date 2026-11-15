@@ -90,18 +90,21 @@ def test_chart_periods_cover_the_engine_periods():
 
 def test_tui_keys_list_global_then_workspace_bindings():
     rows = load_source("tui-keys", App())
-    assert rows[:4] == [
+    assert rows[:5] == [
         {"workspace": "global", "key": "backspace", "action": "previous workspace"},
         {"workspace": "global", "key": "{ / }", "action": "previous / next workspace"},
         {"workspace": "global", "key": "N", "action": "record any transaction type"},
         {"workspace": "global", "key": "F1", "action": "keys for this workspace"},
+        {"workspace": "global", "key": "!", "action": "problems: ledger issues, missing prices"},
     ]
-    assert [(row["workspace"], row["key"], row["action"]) for row in rows[4:]] == [
+    assert [(row["workspace"], row["key"], row["action"]) for row in rows[5:]] == [
         (workspace, key, action)
         for workspace in constants.HINTS
         for key, action in constants.WORKSPACE_KEYS.get(workspace, [])
     ]
-    assert rows[4] == {"workspace": "dashboard", "key": "z", "action": "zoom: hide the side column"}
+    assert rows[5] == {"workspace": "dashboard", "key": "z", "action": "zoom: hide the side column"}
+    assert {"workspace": "activity", "key": "d", "action": "duplicate the entry, dated today"} in rows
+    assert {"workspace": "alerts", "key": "o / O", "action": "sort column / reverse"} in rows
 
 
 def test_workspaces_describe_tables_and_sort_modes():
@@ -114,6 +117,9 @@ def test_workspaces_describe_tables_and_sort_modes():
     assert rows["holdings"]["table"] == "#holdings-table"
     assert rows["holdings"]["sort_modes"] == ["account", "symbol", "value", "day %", "gain", "gain %"]
     assert rows["dashboard"]["table"] is None and rows["dashboard"]["sort_modes"] == []
+    assert rows["watchlist"]["sort_modes"] == ["list", "symbol", "day %"]
+    assert rows["tax"]["sort_modes"] == ["id", "name", "type", "value"]
+    assert rows["alerts"]["sort_modes"] == ["symbol", "id", "state"]
 
 
 def test_report_operations_are_the_operation_catalog():

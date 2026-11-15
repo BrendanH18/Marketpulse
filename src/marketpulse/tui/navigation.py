@@ -8,18 +8,20 @@ what the views already show; no figure is computed differently.
 
 from __future__ import annotations
 
+import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from rich.text import Text
 from textual.widgets import DataTable, Input
 
+from .. import fmt
 from ..market import PERIODS
 from ..models import Transaction
 from ..valuation import PositionView
 from .constants import GLOBAL_KEYS, HINTS, NW_RANGES, SORT_MODES, TABLES, TXN_CHOICES, WORKSPACE_KEYS
-from .screens import TxnTypeScreen, WorkspaceKeysScreen
+from .screens import ProblemsScreen, TxnTypeScreen, WorkspaceKeysScreen
 from .widgets import WORKSPACES
 
 if TYPE_CHECKING:
@@ -141,10 +143,13 @@ def sort_label(app: MarketPulseApp, ws: str) -> str:
     return f"sort {state[0]} {'↓' if state[1] else '↑'}"
 
 
+_NOT_SORTABLE = "Sorting works in holdings, watchlist, activity, accounts and alerts"
+
+
 def cycle_sort(app: MarketPulseApp) -> None:
     ws = app.workspace
     if ws not in SORT_MODES:
-        app.notify("Sorting works in holdings and activity", timeout=3)
+        app.notify(_NOT_SORTABLE, timeout=3)
         return
     modes = SORT_MODES[ws]
     names = [name for name, _desc in modes]
@@ -156,18 +161,30 @@ def cycle_sort(app: MarketPulseApp) -> None:
 def reverse_sort(app: MarketPulseApp) -> None:
     ws = app.workspace
     if ws not in SORT_MODES:
-        app.notify("Sorting works in holdings and activity", timeout=3)
+        app.notify(_NOT_SORTABLE, timeout=3)
         return
     name, descending = sort_state(app, ws)
     app.table_sort[ws] = (name, not descending)
     _rerender_sorted(app, ws)
 
 
+def set_sort(app: MarketPulseApp, ws: str, name: str, descending: bool) -> None:
+    """Command-palette target: sort a workspace's table by one column directly, then show it."""
+    if (name, descending) not in SORT_MODES.get(ws, []):
+        return
+    app.table_sort[ws] = (name, descending)
+    app.set_workspace(ws)
+    _rerender_sorted(app, ws)
+
+
 def _rerender_sorted(app: MarketPulseApp, ws: str) -> None:
-    if ws == "holdings":
-        app.render_holdings()
-    else:
-        app.render_activity()
+    {
+        "holdings": app.render_holdings,
+        "watchlist": app.render_watchlist,
+        "activity": app.render_activity,
+        "tax": app.render_accounts,
+        "alerts": app.render_alerts,
+    }[ws]()
     name, descending = sort_state(app, ws)
     app.notify(f"Sorted by {name} {'↓' if descending else '↑'}", timeout=2)
 
@@ -217,6 +234,14 @@ def sort_transactions(app: MarketPulseApp, txns: list[Transaction], accounts: di
     return sorted(newest, key=keys[name], reverse=descending)
 
 
+def sort_items(app: MarketPulseApp, ws: str, items: Iterable[T], keys: Mapping[str, Callable[[T], Any]]) -> list[T]:
+    """Order the watchlist, accounts or alerts rows; the default keeps the order they arrive in."""
+    name, descending = sort_state(app, ws)
+    if (name, descending) == SORT_MODES[ws][0]:
+        return list(items)
+    return _ordered(items, keys[name], descending)
+
+
 # ── clipboard, chart, transactions ────────────────────────────────────────────
 
 
@@ -239,6 +264,60 @@ def copy_row(app: MarketPulseApp) -> None:
     text = "\t".join(c.plain if isinstance(c, Text) else str(c) for c in cells)
     app.copy_to_clipboard(text)
     app.notify(f"Copied row {table.cursor_row + 1}", timeout=2)
+
+
+def copy_table(app: MarketPulseApp) -> None:
+    """Copy the whole table as shown: headers first, then every row the filters and sort leave, masks included."""
+    table = current_table(app)
+    if table is None or table.row_count == 0:
+        app.notify("No table rows to copy here", timeout=3)
+        return
+
+    def plain(cell: object) -> str:
+        return cell.plain if isinstance(cell, Text) else str(cell)
+
+    lines = ["\t".join(plain(c.label) for c in table.ordered_columns)]
+    lines += ["\t".join(plain(c) for c in table.get_row_at(i)) for i in range(table.row_count)]
+    app.copy_to_clipboard("\n".join(lines))
+    app.notify(f"Copied {table.row_count} row{'' if table.row_count == 1 else 's'} with headers", timeout=2)
+
+
+def toggle_cash(app: MarketPulseApp) -> None:
+    app.hide_cash = not app.hide_cash
+    if app.workspace != "holdings":
+        app.set_workspace("holdings")
+    app.render_holdings()
+    app.notify("Cash rows hidden" if app.hide_cash else "Cash rows shown", timeout=2)
+
+
+# A quantity or amount in an English message, but not part of a symbol (0700.HK) or a date.
+_NUMBER = re.compile(r"(?<![\w.])(?<!\d-)\d[\d,]*(?:\.\d+)?(?!\w|\.\w|-\d)")
+
+
+def problems(app: MarketPulseApp) -> list[tuple[str, list[str]]]:
+    """What needs attention, from the ledger replay and the last refresh; nothing is fetched.
+
+    Privacy mode masks the quantities and amounts in the messages, as the tables do.
+    """
+
+    def shown(text: str) -> str:
+        return _NUMBER.sub(fmt.MASK, text) if app.privacy else text
+
+    issues = [
+        "  ".join(part for part in (i.date, f"#{i.txn_id}" if i.txn_id is not None else "", shown(i.message)) if part)
+        for i in app.tracker.store.ledger().issues
+    ]
+    v = app.view
+    left_out = [shown(text) for text in v.excluded] if v else []
+    if v is not None:
+        left_out += [f"Archived {name} still holds value" for name in v.archived_with_value]
+    errors = {**(v.errors if v else {}), **app.watch_errors}
+    quotes = [f"{symbol}: {message}" for symbol, message in sorted(errors.items())]
+    return [("Ledger issues", issues), ("Left out of net worth", left_out), ("Quotes unavailable", quotes)]
+
+
+def show_problems(app: MarketPulseApp) -> None:
+    app.push_screen(ProblemsScreen(problems(app)))
 
 
 def chart_selected(app: MarketPulseApp) -> None:

@@ -25,6 +25,8 @@ reports without `--derive` produce the same output as before.
 
 Issue #143 later added 7 more datasets and 30 more operations; see
 [Offline report filters, selections, summaries and formats](cli-report-expansion.md).
+Issue [#153](https://github.com/BrendanH18/Marketpulse/issues/153) added 10 more
+derived-field functions (51–60 below) on all 57 datasets: 10 × 57 = 570.
 
 ## New datasets
 
@@ -234,6 +236,16 @@ Rules:
 | 48 | `equals` | `JSON` | True when the value equals the `JSON` argument, comparing JSON types. |
 | 49 | `item` | `N` | Element `N` of an array, counting from 0; negative `N` counts from the end. `N` has at most nine digits. |
 | 50 | `key` | `NAME` | Member `NAME` of an object. |
+| 51 | `add-days` | `N` | The date `N` days later; a negative `N` counts back. |
+| 52 | `add-months` | `N` | The date `N` calendar months later; a day past the end of a shorter month becomes its last day. |
+| 53 | `divide` | `NUMBER` | The value divided by `NUMBER`, which must not be zero. |
+| 54 | `at-least` | `NUMBER` | The larger of the value and `NUMBER`. |
+| 55 | `at-most` | `NUMBER` | The smaller of the value and `NUMBER`. |
+| 56 | `percent-of-field` | `FIELD` | The value as a percentage of another field's value; null when that value is zero. |
+| 57 | `right` | `N` | The last `N` characters (`N` from 1 to 999,999,999). |
+| 58 | `contains` | `TEXT` | True when the text contains `TEXT`, matching case. |
+| 59 | `starts-with` | `TEXT` | True when the text starts with `TEXT`, matching case. |
+| 60 | `ends-with` | `TEXT` | True when the text ends with `TEXT`, matching case. |
 
 **Dates (1–22)** read ISO date text: `YYYY-MM-DD`, alone or followed by `T`
 or one space and a time (`HH:MM` or `HH:MM:SS`, optionally with fractional
@@ -266,6 +278,19 @@ from 0, 1 equals 1.0, and objects compare without regard to key order. `item`
 gives null for an index outside the array and for values that are not arrays;
 `key` gives null for a missing member and for values that are not objects.
 
+**Added by #153 (51–60)** follow the rules of their family above.
+`add-days` and `add-months` read dates as the date functions do, take a whole
+`N` from -999,999,999 to 999,999,999 and give null when the result falls
+outside the years 1 to 9999; `add-months` moves January 31 by one month to
+February 28, or 29 in a leap year. `add-days:date:30` and `add-days:date:-30`
+give the ends of the 30-day window around a sale. `divide`, `at-least`,
+`at-most` and `percent-of-field` use the decimal arithmetic of numbers 23–36;
+`percent-of-field` multiplies the value by 100 before dividing, so 1 of 8 gives
+12.5. `right` counts Unicode code points like `left`. `contains`, `starts-with`
+and `ends-with` compare text exactly as written, without case folding or
+Unicode normalization, unlike the case-insensitive `--contains`, `--prefix` and
+`--suffix` filters; they give null for values that are not text.
+
 ### Processing order
 
 `report` computes derived columns immediately after loading the source, before
@@ -291,6 +316,8 @@ marketpulse summarize cash-flows --derive year=year:date --group-by year --group
 marketpulse report symbols --where held=false --where watched=true --fields symbol,alerts
 marketpulse report ledger-issues --derive symbol=key:details:symbol --fields date,account,code,symbol
 marketpulse report closed-positions --derive closed_after=days-from:last_date:2024-01-01 --gt closed_after=0
+marketpulse report transactions --where type=SELL --derive window_end=add-days:date:30 --fields date,symbol,window_end
+marketpulse summarize positions --derive tsx=ends-with:symbol:.TO --group-by tsx --metric positions=count
 marketpulse summarize transactions --derive weekday=weekday-name:date --group-by weekday --metric rows=count
 marketpulse report schema --where table=transactions --fields position,column,type
 marketpulse report tfsa-limits --ge year=2020 --format tsv
@@ -380,7 +407,8 @@ not add types or fields to a dataset.
   25 new datasets add 2,500 cases.
 - `tests/test_derive_capabilities.py` runs all 50 functions on all 50 datasets
   through the actual CLI against independently specified results (2,500
-  cases), and each function again through `summarize`.
+  cases), and each function again through `summarize`. The same matrix runs
+  the 10 functions of #153 on all 57 datasets (570 cases).
 - `tests/test_report_ledger.py`, `tests/test_report_system.py` and
   `tests/test_report_reference.py` load every new dataset from fictional saved
   data and check exact rows, archived-account hiding, offline and read-only

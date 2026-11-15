@@ -36,6 +36,10 @@ SORT_MODES: dict[str, list[tuple[str, bool]]] = {
         ("gain %", True),
     ],
     "activity": [("date", True), ("symbol", False), ("type", False), ("account", False), ("amount", True)],
+    # #153: the watchlist, accounts and alerts tables sort too; each default is the order they always had.
+    "watchlist": [("list", False), ("symbol", False), ("day %", True)],
+    "tax": [("id", False), ("name", False), ("type", False), ("value", True)],
+    "alerts": [("symbol", False), ("id", False), ("state", False)],
 }
 # Every transaction type for the `N` picker, in the command palette's order.
 TXN_CHOICES = [
@@ -52,28 +56,42 @@ TXN_CHOICES = [
     ("FEE", "Fee", "Account or management fee"),
     ("VALUATION", "Valuation", "Mark a manual asset at a price"),
 ]
-_TABLE_KEYS = [("j / k", "next / previous row"), ("< / >", "first / last row"), ("Y", "copy the row")]
+_TABLE_KEYS = [
+    ("j / k", "next / previous row"),
+    ("< / >", "first / last row"),
+    ("Y", "copy the row"),
+    ("ctrl+y", "copy the whole table"),
+]
+_SORT_KEYS = [("o / O", "sort column / reverse")]
 _SYMBOL_KEYS = [("y", "copy the symbol"), ("v", "open its chart"), ("T", "show its transactions")]
-# Keys added under #130, per workspace; F1 lists them after the workspace's HINTS.
+# Keys added under #130 and #153, per workspace; F1 lists them after the workspace's HINTS.
 WORKSPACE_KEYS: dict[str, list[tuple[str, str]]] = {
     "dashboard": [("z", "zoom: hide the side column")],
     "holdings": [
         ("F", "filter holdings as you type"),
-        ("o / O", "sort column / reverse"),
+        *_SORT_KEYS,
         *_TABLE_KEYS,
         *_SYMBOL_KEYS,
         ("z", "zoom: hide the position pane"),
+        ("$", "show / hide cash rows"),
     ],
-    "watchlist": [*_TABLE_KEYS, *_SYMBOL_KEYS, ("z", "zoom: hide the quote pane")],
+    "watchlist": [*_SORT_KEYS, *_TABLE_KEYS, *_SYMBOL_KEYS, ("z", "zoom: hide the quote pane")],
     "chart": [("y", "copy the symbol"), ("T", "show its transactions")],
-    "activity": [("o / O", "sort column / reverse"), *_TABLE_KEYS, *_SYMBOL_KEYS, ("escape", "clear the filter")],
+    "activity": [
+        *_SORT_KEYS,
+        *_TABLE_KEYS,
+        *_SYMBOL_KEYS,
+        ("escape", "clear the filter"),
+        ("d", "duplicate the entry, dated today"),
+    ],
     "income": [],
-    "tax": _TABLE_KEYS,
-    "alerts": [*_TABLE_KEYS, *_SYMBOL_KEYS],
+    "tax": [*_SORT_KEYS, *_TABLE_KEYS],
+    "alerts": [*_SORT_KEYS, *_TABLE_KEYS, *_SYMBOL_KEYS],
 }
 GLOBAL_KEYS = [
     ("backspace", "previous workspace"),
     ("{ / }", "previous / next workspace"),
     ("N", "record any transaction type"),
     ("F1", "keys for this workspace"),
+    ("!", "problems: ledger issues, missing prices"),
 ]

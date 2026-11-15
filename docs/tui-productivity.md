@@ -1,6 +1,6 @@
 # Terminal app productivity
 
-[User guide](usage.md) · [One hundred improvements](cli-hundred-improvements.md) · [Issue #130](https://github.com/BrendanH18/Marketpulse/issues/130)
+[User guide](usage.md) · [One hundred improvements](cli-hundred-improvements.md) · [Issue #130](https://github.com/BrendanH18/Marketpulse/issues/130) · [Fifteen more improvements](tui-thousand-improvements.md)
 
 These ten additions to the terminal app sort and copy what's on screen, record
 any transaction type from the keyboard, and put every key-only action in the
@@ -8,7 +8,7 @@ command palette (`ctrl+p`). See [Terminal app navigation](tui-navigation.md) for
 items 81–90. Sorting and copying only change how existing rows are ordered or
 copied; no figure is calculated differently. The examples use fictional accounts.
 
-91. `o` cycles the sort column in holdings (account, which is the default, then symbol, value, day %, gain and gain %) and in activity (date, which is the default and newest first, then symbol, type, account and amount). Each column starts in its natural direction: names A–Z and amounts largest first. When sorting by an amount or percentage, holdings without one (no price or FX rate) stay at the bottom, and cash rows always come after positions. The pane footer shows the order (`sort value ↓`) whenever it isn't the default. Value and gain sort by the base-currency amounts shown in the Value column and the position pane; activity's amount sorts by each entry's native amount, ignoring sign. (Palette: *Sort by next column*.)
+91. `o` cycles the sort column in holdings (account, which is the default, then symbol, value, day %, gain and gain %) and in activity (date, which is the default and newest first, then symbol, type, account and amount). Each column starts in its natural direction: names A–Z and amounts largest first. When sorting by an amount or percentage, holdings without one (no price or FX rate) stay at the bottom, and cash rows always come after positions. The pane footer shows the order (`sort value ↓`) whenever it isn't the default. Value and gain sort by the base-currency amounts shown in the Value column and the position pane; activity's amount sorts by each entry's native amount, ignoring sign. (Palette: *Sort by next column*.) The watchlist, accounts and alerts tables sort too since [#153](tui-thousand-improvements.md).
 92. `O` reverses the current sort, for example smallest holdings first or oldest activity first (`sort date ↑`). Cycling `o` back to the default column restores the original order. (Palette: *Reverse sort*.)
 93. `y` copies the selected symbol to the clipboard (holdings, watchlist, activity, alerts, or the chart's symbol) and confirms with `Copied XEQT.TO`. It uses the terminal's clipboard escape (OSC 52), which most terminals support; macOS Terminal.app doesn't. (Palette: *Copy selected symbol*.)
 94. `Y` copies the selected table row as tab-separated text exactly as shown, ready to paste into a spreadsheet. In privacy mode the copy has the same masked amounts (`••••`) as the screen. (Palette: *Copy selected row*.)

@@ -493,7 +493,8 @@ class Alert:
     id: int | None = None
 
     def __post_init__(self) -> None:
-        self.symbol = self.symbol.upper()
+        # Quotes are keyed by the bare symbol: " xyz " would never match one.
+        self.symbol = self.symbol.strip().upper()
         if self.condition not in ALERT_CONDITIONS:
             raise ValueError(f"Alert condition must be one of: {', '.join(ALERT_CONDITIONS)}")
         # Stored alerts predate the stricter checks. Store.alerts keeps invalid

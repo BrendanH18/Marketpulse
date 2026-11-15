@@ -32,12 +32,13 @@ from marketpulse.themes import OMARCHY_PALETTES, Palette, resolve_palette
 RESULTS = {
     "integer": "count present missing empty nonempty distinct duplicates mode-count number-count number-distinct "
     "positive-count negative-count zero-count true-count false-count string-count array-count object-count "
-    "length-sum length-min length-max date-count date-span",
+    "length-sum length-min length-max date-count date-span date-distinct",
     "decimal": "number-sum number-min number-max number-mean number-median number-range positive-sum negative-sum "
-    "absolute-sum length-mean number-variance number-stdev number-q1 number-q3",
+    "absolute-sum length-mean number-variance number-stdev number-q1 number-q3 number-p10 number-p90 number-iqr "
+    "number-mean-absolute-deviation present-percent",
     "value": "first last first-present last-present mode",
     "list": "values distinct-values value-counts repeated-values",
-    "string": "text-min text-max date-min date-max",
+    "string": "text-min text-max date-min date-max longest-text",
 }
 ROLES = "background surface panel selection border foreground bright muted accent up down warn info".split()
 
@@ -159,9 +160,9 @@ def test_sources_lists_every_dataset_by_name(app):
             assert (by_name[name]["group"], by_name[name]["description"]) == (module.GROUP, description)
 
 
-def test_summary_operations_classify_all_fifty_in_documented_order(app):
+def test_summary_operations_classify_all_in_documented_order(app):
     rows = load_source("summary-operations", app)
-    assert [row["position"] for row in rows] == list(range(1, 51))
+    assert [row["position"] for row in rows] == list(range(1, 58))
     assert [row["operation"] for row in rows] == list(report_metrics.ALL_OPERATIONS)
     assert [row["operation"] for row in rows if not row["takes_field"]] == ["count"]
     expected = {operation: result for result, operations in RESULTS.items() for operation in operations.split()}
@@ -198,10 +199,10 @@ def test_an_unclassified_summary_operation_fails_loudly(app, monkeypatch):
         load_source("summary-operations", app)
 
 
-def test_derive_functions_list_all_fifty_in_documented_order(app):
+def test_derive_functions_list_all_sixty_in_documented_order(app):
     rows = load_source("derive-functions", app)
-    assert [row["position"] for row in rows] == list(range(1, 51))
-    assert len({row["function"] for row in rows}) == 50
+    assert [row["position"] for row in rows] == list(range(1, 61))
+    assert len({row["function"] for row in rows}) == 60
     assert [row["function"] for row in rows] == [function.name for function in report_derive.FUNCTIONS]
     assert {row["family"] for row in rows} == {"date", "number", "text", "value"}
     assert all(row["argument"] is None or row["argument"] for row in rows)
@@ -213,13 +214,22 @@ def test_derive_functions_list_all_fifty_in_documented_order(app):
         "result": "integer",
         "description": "Calendar year.",
     }
-    assert rows[-1] == {
+    assert rows[49] == {
         "position": 50,
         "function": "key",
         "family": "value",
         "argument": "NAME",
         "result": "value",
         "description": "Object member NAME.",
+    }
+    # 51-60 came later (#153) and follow the first fifty, so earlier positions never move.
+    assert rows[-1] == {
+        "position": 60,
+        "function": "ends-with",
+        "family": "text",
+        "argument": "TEXT",
+        "result": "boolean",
+        "description": "True when the text ends with TEXT, matching case.",
     }
 
 
@@ -404,17 +414,17 @@ def test_cli_report_filters_and_exports_reference_rows():
 
 def test_cli_summarize_groups_reference_rows():
     assert json.loads(_cli("summarize", "derive-functions", "--group-by", "family", "--metric", "functions=count")) == [
-        {"family": "date", "functions": 22},
-        {"family": "number", "functions": 14},
-        {"family": "text", "functions": 6},
+        {"family": "date", "functions": 24},
+        {"family": "number", "functions": 18},
+        {"family": "text", "functions": 10},
         {"family": "value", "functions": 8},
     ]
     by_result = ["summarize", "summary-operations", "--group-by", "result", "--metric", "operations=count"]
     assert json.loads(_cli(*by_result, "--sort", "operations", "--descending")) == [
-        {"result": "integer", "operations": 23},
-        {"result": "decimal", "operations": 14},
+        {"result": "integer", "operations": 24},
+        {"result": "decimal", "operations": 19},
         {"result": "value", "operations": 5},
+        {"result": "string", "operations": 5},
         {"result": "list", "operations": 4},
-        {"result": "string", "operations": 4},
     ]
     assert json.loads(_cli("summarize", "theme-colors", "--metric", "roles=distinct:role")) == [{"roles": 13}]

@@ -19,7 +19,13 @@ import pytest
 from click.testing import CliRunner
 
 from marketpulse.cli import main, reports
-from marketpulse.cli.report_metrics import ALL_OPERATIONS, EXPANSION_OPERATIONS, OPERATIONS, summarize_values
+from marketpulse.cli.report_metrics import (
+    ALL_OPERATIONS,
+    EXPANSION_OPERATIONS,
+    FURTHER_OPERATIONS,
+    OPERATIONS,
+    summarize_values,
+)
 
 # Operations 34 to 43, in the order the specification numbers them.
 EXPANSION = (
@@ -149,19 +155,20 @@ def test_reference_helpers_reproduce_hand_values():
 
 def test_operation_catalog():
     assert EXPANSION_OPERATIONS == EXPANSION
-    assert ALL_OPERATIONS == OPERATIONS + EXPANSION_OPERATIONS
-    assert len(OPERATIONS) == 40 and len(EXPANSION_OPERATIONS) == 10
-    assert len(ALL_OPERATIONS) == len(set(ALL_OPERATIONS)) == 50
+    # #153 appends seven more after these ten.
+    assert ALL_OPERATIONS == OPERATIONS + EXPANSION_OPERATIONS + FURTHER_OPERATIONS
+    assert len(OPERATIONS) == 40 and len(EXPANSION_OPERATIONS) == 10 and len(FURTHER_OPERATIONS) == 7
+    assert len(ALL_OPERATIONS) == len(set(ALL_OPERATIONS)) == 57
 
 
 @pytest.mark.parametrize("source", SOURCES)
-def test_describe_lists_all_fifty_operations(monkeypatch, source):
+def test_describe_lists_all_operations(monkeypatch, source):
     monkeypatch.setattr(reports, "load_source", lambda *args: pytest.fail("describe loaded source"))
     result = summarize(source, "--describe")
     assert result.exit_code == 0, result.output
     operations = json.loads(result.output)["operations"]
-    assert operations == [*OPERATIONS, *EXPANSION]
-    assert len(operations) == len(set(operations)) == 50
+    assert operations == [*OPERATIONS, *EXPANSION, *FURTHER_OPERATIONS]
+    assert len(operations) == len(set(operations)) == 57
 
 
 # Every operation on one list of mixed cells.

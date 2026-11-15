@@ -65,7 +65,20 @@ EXPANSION_OPERATIONS = (
     "value-counts",
     "repeated-values",
 )
-ALL_OPERATIONS = OPERATIONS + EXPANSION_OPERATIONS
+# Added under #153, after the others so the catalog order is kept.
+FURTHER_OPERATIONS = (
+    "number-p10",
+    "number-p90",
+    "number-iqr",
+    "number-mean-absolute-deviation",
+    "present-percent",
+    "date-distinct",
+    "longest-text",
+)
+ALL_OPERATIONS = OPERATIONS + EXPANSION_OPERATIONS + FURTHER_OPERATIONS
+# The inclusive quantiles, as (numerator, denominator) fractions of the way from the smallest value.
+_QUANTILES = {"number-q1": (1, 4), "number-q3": (3, 4), "number-p10": (1, 10), "number-p90": (9, 10)}
+_SPREAD_OPERATIONS = (*_QUANTILES, "number-variance", "number-stdev", "number-iqr", "number-mean-absolute-deviation")
 
 
 def _typed_key(value: Any) -> tuple:
@@ -234,28 +247,52 @@ def _rounded(numerator: int, denominator: int, exponent: int, *, root: bool = Fa
     return _decimal(result, exponent - shift)
 
 
-def _spread_summary(operation: str, numbers: list[Decimal]) -> str | None:
-    """Population variance and deviation, and inclusive quartiles, as decimal text.
+def _quantile(integers: list[int], order: list[int], fraction: tuple[int, int]) -> tuple[int, int]:
+    """An inclusive quantile in hundredths of the integer grid, with the rank it falls on or after.
 
-    Quartiles interpolate linearly between the closest ranks and are exact. Variance and
-    deviation are the exact values rounded once to 28 significant digits (half even). The
-    same 10,000-digit working limit as the other numeric summaries applies, and results
-    beyond the supported exponent range fail with a CLI error.
+    The quantile lies ``(count - 1) * fraction`` ranks above the smallest value and interpolates
+    linearly between the two closest ranks. Every fraction used has a denominator dividing 100,
+    so hundredths hold it exactly.
+    """
+    numerator, denominator = fraction
+    lower, remainder = divmod((len(integers) - 1) * numerator, denominator)
+    below = integers[order[lower]]
+    if not remainder:
+        return 100 * below, lower
+    above = integers[order[lower + 1]]
+    return 100 * below + 100 // denominator * remainder * (above - below), lower
+
+
+def _spread_summary(operation: str, numbers: list[Decimal]) -> str | None:
+    """Population variance, deviations, inclusive quantiles and their range, as decimal text.
+
+    Quantiles interpolate linearly between the closest ranks and are exact, as is the
+    interquartile range. Variance, standard deviation and mean absolute deviation are the
+    exact values rounded once to 28 significant digits (half even). The same 10,000-digit
+    working limit as the other numeric summaries applies, and results beyond the supported
+    exponent range fail with a CLI error.
     """
     if not numbers:
         return None
     _precision(numbers)
     count = len(numbers)
     integers, exponent = _integers(numbers)
-    if operation in ("number-q1", "number-q3"):
-        lower, quarters = divmod((count - 1) * (1 if operation == "number-q1" else 3), 4)
+    if operation in _QUANTILES or operation == "number-iqr":
         order = sorted(range(count), key=integers.__getitem__)
-        if not quarters:
-            return _decimal_text(numbers[order[lower]])
-        below, above = integers[order[lower]], integers[order[lower + 1]]
-        # (4 * below + quarters * (above - below)) / 4, written as hundredths to stay exact.
-        return _decimal_text(_decimal(25 * (4 * below + quarters * (above - below)), exponent - 2))
+        if operation == "number-iqr":
+            first, _ = _quantile(integers, order, _QUANTILES["number-q1"])
+            third, _ = _quantile(integers, order, _QUANTILES["number-q3"])
+            return _decimal_text(_decimal(third - first, exponent - 2))
+        hundredths, rank = _quantile(integers, order, _QUANTILES[operation])
+        if hundredths == 100 * integers[order[rank]]:
+            # A quantile on a rank is that value exactly, whatever its exponent.
+            return _decimal_text(numbers[order[rank]])
+        return _decimal_text(_decimal(hundredths, exponent - 2))
     total = sum(integers)
+    if operation == "number-mean-absolute-deviation":
+        # |x - total / count| is |count * x - total| / count, so the sum over count is exact over count^2.
+        deviation = sum(abs(count * integer - total) for integer in integers)
+        return _decimal_text(_rounded(deviation, count * count, exponent))
     # count * sum(x^2) - sum(x)^2 is count^2 times the variance on the integer grid, exactly.
     spread = count * sum(integer * integer for integer in integers) - total * total
     if operation == "number-stdev":
@@ -275,8 +312,11 @@ def summarize_values(operation: str, values: list[Any]) -> Any:
         raise click.UsageError(f"Unknown summary operation '{operation}'.")
     if operation == "count":
         return len(values)
-    if operation in ("present", "missing"):
+    if operation in ("present", "missing", "present-percent"):
         missing = sum(_missing(value) for value in values)
+        if operation == "present-percent":
+            # 100 * present / count, rounded once to 28 significant digits; no rows have no share.
+            return _decimal_text(_rounded(100 * (len(values) - missing), len(values), 0)) if values else None
         return missing if operation == "missing" else len(values) - missing
     if operation in ("empty", "nonempty"):
         empty = sum(value is None or isinstance(value, (str, list, dict)) and len(value) == 0 for value in values)
@@ -290,6 +330,8 @@ def summarize_values(operation: str, values: list[Any]) -> Any:
         dates = [day for value in values if (day := date_of(value)) is not None]
         if operation == "date-count":
             return len(dates)
+        if operation == "date-distinct":
+            return len(set(dates))
         if not dates:
             return None
         if operation == "date-span":
@@ -330,7 +372,7 @@ def summarize_values(operation: str, values: list[Any]) -> Any:
         if operation == "repeated-values":
             return [value for value, occurrences in zip(distinct, counts, strict=True) if occurrences > 1]
         return distinct[counts.index(max(counts))] if distinct else None
-    if operation in ("number-variance", "number-stdev", "number-q1", "number-q3"):
+    if operation in _SPREAD_OPERATIONS:
         return _spread_summary(operation, [number for value in values if (number := _number(value)) is not None])
     if operation.startswith("number-") or operation.startswith(("positive-", "negative-", "zero-", "absolute-")):
         return _numeric_summary(operation, [number for value in values if (number := _number(value)) is not None])
@@ -347,4 +389,7 @@ def summarize_values(operation: str, values: list[Any]) -> Any:
             return _numeric_summary("number-mean", [Decimal(length) for length in lengths])
         return (min if operation == "length-min" else max)(lengths) if lengths else None
     strings = [value for value in values if isinstance(value, str)]
+    if operation == "longest-text":
+        # max() keeps the first of equally long strings, so ties go to source order.
+        return max(strings, key=len) if strings else None
     return (min if operation == "text-min" else max)(strings) if strings else None
