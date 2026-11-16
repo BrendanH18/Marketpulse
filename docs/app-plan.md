@@ -130,8 +130,8 @@ Phases 2 and 3 ran alongside Phase 1 after #31 merged.
 
 v3.0.0 shipped on 2026-11-14, and the maintainer accepted it as App 1.0 on
 2026-11-15 after installing the published release on a Mac and confirming it works.
-The first and third bullets were not verified in full: the QA table on #32 leaves
-items 1 and 12–27 unverified, and the install wasn't timed or done on a fresh account.
+The second and third bullets were not verified in full: the install wasn't timed or
+done on a fresh account, and the QA table on #32 leaves items 1 and 12–27 unverified.
 
 ## Not doing
 
