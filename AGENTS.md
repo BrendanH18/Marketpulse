@@ -9,8 +9,9 @@ repository docs so it is available to every agent and fresh clone.
 MarketPulse is a local-first investment tracker for Canadian investors: a Python
 engine (ledger, pooled ACB, FX, tax, CSV import, quotes) with a CLI and TUI, plus
 a native SwiftUI app for macOS that talks to the engine through a versioned JSON
-bridge. The current goal is a downloadable app: [docs/app-plan.md](docs/app-plan.md),
-epic [#32](https://github.com/BrendanH18/Marketpulse/issues/32).
+bridge. The Mac app shipped in v3.0.0 (epic [#32](https://github.com/BrendanH18/Marketpulse/issues/32),
+closed); current status and next steps are in [docs/roadmap.md](docs/roadmap.md), and
+the app's decisions in [docs/app-plan.md](docs/app-plan.md).
 
 | Path | What's there |
 | --- | --- |
