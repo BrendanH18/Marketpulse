@@ -93,6 +93,11 @@ before introducing caches that could become incorrect after edits.
 
 ### 5. Finish native distribution and lifecycle
 
+> Superseded: v3.0.0 ships a standalone app with a bundled backend, an icon, an
+> update check and restore from a backup. It is ad-hoc signed, not notarized, by
+> the decision in the [App 1.0 plan](app-plan.md). The text below is the October
+> 2026 review.
+
 The app currently requires an editable source checkout, Python CLI, macOS 14+,
 and Swift tools. The next release-quality milestone is a signed/notarized app
 bundle with a pinned bundled backend, a proper icon, update strategy, and a

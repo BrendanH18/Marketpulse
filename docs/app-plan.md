@@ -2,8 +2,8 @@
 
 [Back to the README](../README.md) · [Roadmap](roadmap.md) · [QA checklist](qa.md) · [Agent guide](../AGENTS.md)
 
-**Status is tracked on GitHub, not here.** The epic is
-[#32](https://github.com/BrendanH18/Marketpulse/issues/32); each step below is an
+**Status is tracked on GitHub, not here.** App 1.0 shipped as v3.0.0, and its epic
+[#32](https://github.com/BrendanH18/Marketpulse/issues/32) is closed; each step below is an
 issue with its own scope and acceptance criteria. This page records the goal,
 the decisions behind it, and how the pieces fit, so any contributor or agent can
 pick up the work without the conversation that produced it.
@@ -42,10 +42,13 @@ SwiftUI app (macOS) ───── desktop JSON bridge ──┤
   requires bumping `version` and updating every interface. `scripts/check_native_bridge.py`
   decodes a real Python payload with the app's Swift models in CI; extend it with
   every bridge change. `status --json` is a separate, stable contract.
-- If refreshes become slow on large ledgers, a persistent helper process
-  ([#48](https://github.com/BrendanH18/Marketpulse/issues/48)) can replace one-shot
-  CLI calls, behind the same bridge. [Desktop refresh measurements](performance.md)
-  provides a repeatable offline baseline before that decision.
+- The app keeps one-shot CLI calls. A persistent helper process
+  ([#48](https://github.com/BrendanH18/Marketpulse/issues/48)) was closed as not
+  planned on 2026-11-15: the measurements supported deferring it (a zero-delay
+  offline engine refresh on a 5,000-transaction ledger takes about 0.2 s on hosted
+  macOS), and the Windows app it would also have served was dropped. If refreshes
+  become slow, start from the repeatable offline baseline in
+  [Desktop refresh measurements](performance.md).
 
 ## Distributing without code signing
 
@@ -73,8 +76,9 @@ most daily and offers the install command
 
 ## Phases
 
+This was the implementation plan; every phase below is now done or dropped.
 Prerequisite: [#31](https://github.com/BrendanH18/Marketpulse/pull/31) (native
-workspace, desktop bridge, review fixes, app icon) merges first.
+workspace, desktop bridge, review fixes, app icon) merged first.
 
 **Phase 1: a downloadable Mac app**
 
@@ -104,9 +108,9 @@ workspace, desktop bridge, review fixes, app icon) merges first.
 | Issue | What |
 | --- | --- |
 | [#46](https://github.com/BrendanH18/Marketpulse/issues/46) | French localization |
-| [#47](https://github.com/BrendanH18/Marketpulse/issues/47) | Accessibility and keyboard |
+| [#47](https://github.com/BrendanH18/Marketpulse/issues/47) | Accessibility and keyboard: code shipped in #83; the Inspector audit and VoiceOver walkthrough are not planned |
 | [#49](https://github.com/BrendanH18/Marketpulse/issues/49) | Pluggable quote providers (with [#23](https://github.com/BrendanH18/Marketpulse/issues/23)) |
-| [#48](https://github.com/BrendanH18/Marketpulse/issues/48) | Persistent backend helper, only if measurements justify it |
+| [#48](https://github.com/BrendanH18/Marketpulse/issues/48) | Persistent backend helper: measured, not built (closed as not planned) |
 | [#20](https://github.com/BrendanH18/Marketpulse/issues/20) | Coverage gates for the financial core |
 
 **Phase 4: Windows** (dropped)
@@ -115,7 +119,7 @@ The Windows backend, app and installer (#50–#53) were built and then removed
 before any release: see [ADR 0002](adr/0002-no-windows-build.md) and
 [#150](https://github.com/BrendanH18/Marketpulse/issues/150).
 
-Phases 2 and 3 can run alongside Phase 1 once #31 merges.
+Phases 2 and 3 ran alongside Phase 1 after #31 merged.
 
 ## App 1.0 for macOS: definition of done
 
@@ -123,6 +127,11 @@ Phases 2 and 3 can run alongside Phase 1 once #31 merges.
 - A person with no developer tools installs from the README in under five minutes.
 - `docs/qa.md` passes on the released build, including the fresh-install and onboarding items.
 - `CHANGELOG.md` has the release section; the tag's workflow produced every artifact.
+
+v3.0.0 shipped on 2026-11-14, and the maintainer accepted it as App 1.0 on
+2026-11-15 after installing the published release on a Mac and confirming it works.
+The second and third bullets were not verified in full: the install wasn't timed or
+done on a fresh account, and the QA table on #32 leaves items 1 and 12–27 unverified.
 
 ## Not doing
 

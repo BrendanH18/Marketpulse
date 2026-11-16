@@ -2,9 +2,10 @@
 
 [Contributing](../CONTRIBUTING.md) · [App plan](app-plan.md) · [Issue #48](https://github.com/BrendanH18/Marketpulse/issues/48)
 
-Issue #48 asks whether a persistent Python helper would make refreshes and edits
+Issue #48 asked whether a persistent Python helper would make refreshes and edits
 fast enough to justify its protocol, restart handling, and cross-process locking.
-This benchmark measures the current engine first. It does not implement a helper
+The maintainer closed it as not planned on 2026-11-15 after these measurements.
+This benchmark measures the current engine. It does not implement a helper
 or change either desktop client.
 
 ## Repeat the benchmark
@@ -142,9 +143,8 @@ Process reuse can help, but this experiment does not prove the benefit of a
 server, and it omits the server protocol, crash recovery, locking, and UI costs.
 
 The original measurement change did not optimize runtime. The maintainer approved
-the snapshot reuse below as the next slice on 2026-11-09. Keep #48 open; choosing
-a persistent helper remains a separate maintainer decision. Repeat this benchmark
-on target macOS and Windows hardware before making that decision.
+the snapshot reuse below as the next slice on 2026-11-09, and the target-platform
+measurements after it.
 
 ## Snapshot reuse
 
@@ -247,5 +247,5 @@ native decoding and UI drawing remain unmeasured. The simulated wait is not a
 measurement of live Yahoo latency. Seven samples do not establish tail latency,
 and these results do not cover Intel Macs, Windows ARM64, bundled runtimes,
 long snapshot histories or interactive UI QA. No native UI item is claimed as
-passing. Keep #48 open and `needs-decision`; building a helper or changing
-runtime behavior still requires a separate maintainer decision.
+passing. Following this recommendation, #48 was closed as not planned on
+2026-11-15; a helper or other runtime change needs a new issue.
