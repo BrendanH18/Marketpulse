@@ -43,10 +43,12 @@ SwiftUI app (macOS) ───── desktop JSON bridge ──┤
   decodes a real Python payload with the app's Swift models in CI; extend it with
   every bridge change. `status --json` is a separate, stable contract.
 - The app keeps one-shot CLI calls. A persistent helper process
-  ([#48](https://github.com/BrendanH18/Marketpulse/issues/48)) was measured and
-  closed as not planned on 2026-11-15: a refresh on a 5,000-transaction ledger takes
-  about 0.2 s on hosted macOS. If refreshes become slow, start from the repeatable
-  offline baseline in [Desktop refresh measurements](performance.md).
+  ([#48](https://github.com/BrendanH18/Marketpulse/issues/48)) was closed as not
+  planned on 2026-11-15: the measurements supported deferring it (a zero-delay
+  offline engine refresh on a 5,000-transaction ledger takes about 0.2 s on hosted
+  macOS), and the Windows app it would also have served was dropped. If refreshes
+  become slow, start from the repeatable offline baseline in
+  [Desktop refresh measurements](performance.md).
 
 ## Distributing without code signing
 
@@ -74,8 +76,9 @@ most daily and offers the install command
 
 ## Phases
 
+This was the implementation plan; every phase below is now done or dropped.
 Prerequisite: [#31](https://github.com/BrendanH18/Marketpulse/pull/31) (native
-workspace, desktop bridge, review fixes, app icon) merges first.
+workspace, desktop bridge, review fixes, app icon) merged first.
 
 **Phase 1: a downloadable Mac app**
 
@@ -116,7 +119,7 @@ The Windows backend, app and installer (#50–#53) were built and then removed
 before any release: see [ADR 0002](adr/0002-no-windows-build.md) and
 [#150](https://github.com/BrendanH18/Marketpulse/issues/150).
 
-Phases 2 and 3 can run alongside Phase 1 once #31 merges.
+Phases 2 and 3 ran alongside Phase 1 after #31 merged.
 
 ## App 1.0 for macOS: definition of done
 
@@ -125,8 +128,10 @@ Phases 2 and 3 can run alongside Phase 1 once #31 merges.
 - `docs/qa.md` passes on the released build, including the fresh-install and onboarding items.
 - `CHANGELOG.md` has the release section; the tag's workflow produced every artifact.
 
-v3.0.0 met this on 2026-11-15, except that the QA checklist wasn't recorded item by
-item: the maintainer installed the published release on a Mac and confirmed it works.
+v3.0.0 shipped on 2026-11-14, and the maintainer accepted it as App 1.0 on
+2026-11-15 after installing the published release on a Mac and confirming it works.
+The first and third bullets were not verified in full: the QA table on #32 leaves
+items 1 and 12–27 unverified, and the install wasn't timed or done on a fresh account.
 
 ## Not doing
 

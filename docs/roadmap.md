@@ -14,12 +14,13 @@ pointer: claim and track work on the issues themselves.
 
 App 1.0 is out.
 
-- **Published:** [v3.0.0](https://github.com/BrendanH18/Marketpulse/releases/tag/v3.0.0),
-  the first release with the Mac app: a DMG and a zip for Apple Silicon and Intel,
-  the wheel and sdist, the one-line installer and `SHA256SUMS`. The maintainer
-  installed the published release on a Mac and confirmed it works, which closed the
-  app epic [#32](https://github.com/BrendanH18/Marketpulse/issues/32). The
-  [QA checklist](qa.md) was not recorded item by item for this release.
+- **Published:** [v3.0.0](https://github.com/BrendanH18/Marketpulse/releases/tag/v3.0.0)
+  (2026-11-14), the first release with the Mac app: a DMG and a zip for Apple
+  silicon and Intel, the wheel and sdist, the one-line installer and `SHA256SUMS`.
+  The maintainer installed the published release on a Mac, confirmed it works, and
+  closed the app epic [#32](https://github.com/BrendanH18/Marketpulse/issues/32) on
+  that basis. The [QA checklist](qa.md) was not completed for this release: the
+  partial table on #32 has item 10 passing and items 1 and 12–27 unverified.
 - **Unreleased on `main`:** fixes and additions since 3.0.0, listed under
   Unreleased in the [changelog](../CHANGELOG.md). The most important is
   [#149](https://github.com/BrendanH18/Marketpulse/issues/149): sales are now
@@ -38,9 +39,6 @@ App 1.0 is out.
    (3.1.0) unless the maintainer decides otherwise. Follow the maintainer release
    checklist in [CONTRIBUTING](../CONTRIBUTING.md).
 2. **Choose further work from what people run into** when using the released app.
-   Open an issue for each piece of work before starting it.
-
-There are no open `agent-ready` issues.
 
 ## Later
 
@@ -62,12 +60,13 @@ There are no open `agent-ready` issues.
 | Offline CLI inspection, `report` and `summarize` (57 datasets, 197 shared operations) | 20 issues from #104 to #143, #145 and #153 |
 | New and imported sales checked at their date | #149 |
 
-## Closed without doing
+## Closed as not planned
 
 | Issue | Why |
 | --- | --- |
-| [#47](https://github.com/BrendanH18/Marketpulse/issues/47) | Accessibility: the code shipped in 3.0.0 (#83), but the Accessibility Inspector audit and the VoiceOver walkthrough are not planned. |
-| [#48](https://github.com/BrendanH18/Marketpulse/issues/48) | Persistent backend process: [measurements](performance.md) show a refresh takes about 0.2 s on hosted macOS, so it isn't needed. |
+| [#27](https://github.com/BrendanH18/Marketpulse/issues/27) | The old roadmap issue, superseded by this page. |
+| [#47](https://github.com/BrendanH18/Marketpulse/issues/47) | Accessibility: the code shipped in 3.0.0 (#83), but the Accessibility Inspector audit and the VoiceOver walkthrough are not planned. Unverified as a result: whether VoiceOver reads Overview's three metric cards as separate items ([QA](qa.md) item 26). |
+| [#48](https://github.com/BrendanH18/Marketpulse/issues/48) | Persistent backend process: the [measurements](performance.md) supported deferring it (a zero-delay offline engine refresh takes about 0.2 s on hosted macOS), and the Windows app it would also have served was dropped. Open a new issue with native app timings if refreshes feel slow. |
 
 ## Dropped
 
@@ -80,8 +79,9 @@ release. See [#150](https://github.com/BrendanH18/Marketpulse/issues/150) and
 Read [AGENTS.md](../AGENTS.md) first: it covers claiming issues, checks, and the
 handoff protocol for switching between agents mid-task.
 
-1. Pick **one** open issue (prefer `agent-ready`; skip `needs-decision`). If there
-   is none, ask the maintainer instead of starting unlisted work.
+1. Pick **one** open issue outside Later (prefer `agent-ready`; skip
+   `needs-decision`). If there is none, ask the maintainer instead of starting
+   unlisted work.
 2. Treat that issue's scope and acceptance checkboxes as the contract.
 3. Keep the work to that issue; do not bundle unrelated roadmap items.
 4. Use fictional portfolio data in tests, docs, and screenshots.

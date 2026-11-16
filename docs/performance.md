@@ -5,7 +5,7 @@
 Issue #48 asked whether a persistent Python helper would make refreshes and edits
 fast enough to justify its protocol, restart handling, and cross-process locking.
 The maintainer closed it as not planned on 2026-11-15 after these measurements.
-This benchmark measures the current engine first. It does not implement a helper
+This benchmark measures the current engine. It does not implement a helper
 or change either desktop client.
 
 ## Repeat the benchmark
