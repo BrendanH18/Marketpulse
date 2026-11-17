@@ -59,7 +59,9 @@ jobs:
           languages: swift
           build-mode: manual
       - name: Build the Swift package
-        run: swift build --package-path macos/MarketPulseBar
+        # Under CodeQL's build tracer, SwiftPM's /usr/bin/sandbox-exec fails to launch
+        # ("Bad CPU type in executable"), so build without SwiftPM's sandbox.
+        run: swift build --disable-sandbox --package-path macos/MarketPulseBar
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:swift
