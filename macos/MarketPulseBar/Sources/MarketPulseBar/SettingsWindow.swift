@@ -93,7 +93,8 @@ private struct GeneralSettings: View {
         Toggle("Launch at login", isOn: Binding(get: { model.loginEnabled }, set: model.setLoginItem))
         if let error = model.loginError { Text(error).foregroundStyle(Studio.red) }
       } footer: {
-        Text("Refreshes, daily snapshots, backups and alerts run while MarketPulse is open, even with the window closed.")
+        Text(
+          "Refreshes, daily snapshots, backups and alerts run while MarketPulse is open, even with the window closed.")
       }
       if StatusModel.updatesSupported {
         Section {
@@ -122,8 +123,10 @@ private struct GeneralSettings: View {
         }
       } else {
         Section("Updates") {
-          Text("This copy was built from a MarketPulse checkout. Update the checkout, then run marketpulse desktop install again.")
-            .foregroundStyle(.secondary)
+          Text(
+            "This copy was built from a MarketPulse checkout. Update the checkout, then run marketpulse desktop install again."
+          )
+          .foregroundStyle(.secondary)
         }
       }
       Section("Menu bar") {
@@ -311,7 +314,9 @@ private struct PortfolioSettings: View {
       Section {
         Picker("Show totals in", selection: model.configBinding("base_currency", \.baseCurrency)) {
           let base = model.configValue("base_currency", \.baseCurrency)
-          ForEach(Self.currencies.contains(base) || base.isEmpty ? Self.currencies : [base] + Self.currencies, id: \.self) {
+          ForEach(
+            Self.currencies.contains(base) || base.isEmpty ? Self.currencies : [base] + Self.currencies, id: \.self
+          ) {
             Text($0).tag($0)
           }
         }
@@ -365,7 +370,9 @@ private struct DataSettings: View {
         location(String(localized: "Portfolio"), model.demo ? nil : model.dataDir)
         location(String(localized: "Settings file"), model.demo ? nil : model.desktop?.settings?.configPath)
       } footer: {
-        Text("Your portfolio stays on this Mac and is never uploaded. MarketPulse goes online only for prices, exchange rates and the update check.")
+        Text(
+          "Your portfolio stays on this Mac and is never uploaded. MarketPulse goes online only for prices, exchange rates and the update check."
+        )
       }
       Section("Backups") {
         LabeledContent(

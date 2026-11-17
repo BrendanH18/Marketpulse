@@ -154,7 +154,8 @@ struct PortfolioWindow: View {
         }
         .help("Toggle privacy mode")
         .accessibilityLabel(
-          (model.status?.privacy ?? false) ? String(localized: "Show amounts") : String(localized: "Hide amounts"))
+          (model.status?.privacy ?? false) ? String(localized: "Show amounts") : String(localized: "Hide amounts")
+        )
         .disabled(!model.canEdit)
         Button {
           model.refresh()
@@ -418,8 +419,9 @@ private struct Metric: View {
       Text(value).font(.system(size: 25, weight: .medium)).monospacedDigit().foregroundStyle(color)
       Text(detail).font(.system(size: 10)).foregroundStyle(Studio.muted)
     }.frame(maxWidth: .infinity, alignment: .leading).padding(20).background(
-      Studio.panel, in: RoundedRectangle(cornerRadius: 10))
-      .accessibilityElement(children: .combine)
+      Studio.panel, in: RoundedRectangle(cornerRadius: 10)
+    )
+    .accessibilityElement(children: .combine)
   }
 }
 
@@ -469,8 +471,9 @@ private struct OverviewWorkspace: View {
         Surface(String(localized: "Portfolio value"), trailing: String(localized: "\(s.base) · DAILY SNAPSHOTS")) {
           HStack {
             Text(s.privacy ? String(localized: "Values hidden") : String(localized: "The bigger picture")).font(
-              .system(size: 12))
-              .foregroundStyle(Studio.muted)
+              .system(size: 12)
+            )
+            .foregroundStyle(Studio.muted)
             Spacer()
             Picker("History range", selection: $draft.period) {
               Text("1M").tag(30)
@@ -729,7 +732,9 @@ private struct HoldingsWorkspace: View {
         } label: {
           Label("Add asset", systemImage: "plus")
         }.fixedSize().disabled(!canEdit || payload.accounts.isEmpty || payload.assets == nil)
-          .help("Add something the market can't price: a GIC or bond valued by its interest, or an asset you value yourself.")
+          .help(
+            "Add something the market can't price: a GIC or bond valued by its interest, or an asset you value yourself."
+          )
         Button(draft.sortByValue ? String(localized: "Sort: value ↓") : String(localized: "Sort: symbol A–Z")) {
           draft.sortByValue.toggle()
         }.buttonStyle(.bordered)
@@ -911,8 +916,9 @@ private struct ActivityWorkspace: View {
         AccountFilter(accounts: payload.accounts, selected: $accountFilter)
         Spacer()
         Text("\(rows.count) transactions · + money in, − money out, in original currency").font(
-          .system(size: 11))
-          .foregroundStyle(Studio.muted)
+          .system(size: 11)
+        )
+        .foregroundStyle(Studio.muted)
       }.padding(.horizontal, 30)
       Table(rows, selection: $draft.selection) {
         TableColumn("Date") { t in Text(shownDay(t.date)) }.width(100)
@@ -1022,8 +1028,9 @@ private struct AccountsWorkspace: View {
           if let archived = payload.archivedAccounts?.count, archived > 0 {
             Button(
               archived == 1 ? String(localized: "1 archived") : String(localized: "\(archived) archived"),
-              action: showArchived)
-              .buttonStyle(.link).help("Archived accounts are listed in Settings › Data, to unarchive them")
+              action: showArchived
+            )
+            .buttonStyle(.link).help("Archived accounts are listed in Settings › Data, to unarchive them")
           }
           Spacer()
           Button("Add account", systemImage: "plus", action: add).disabled(!canEdit)
@@ -1054,7 +1061,9 @@ private struct AccountsWorkspace: View {
             Button("Edit Account…") { edit(a) }.disabled(!canEdit)
           }
         }
-        Surface(String(localized: "Contribution room"), trailing: String(localized: "IN CAD · FROM THE ROOM YOU ENTERED")) {
+        Surface(
+          String(localized: "Contribution room"), trailing: String(localized: "IN CAD · FROM THE ROOM YOU ENTERED")
+        ) {
           ForEach(roomTypes, id: \.self) { type in
             let room = payload.room.first { $0.accountType == type }
             HStack {
@@ -1333,7 +1342,8 @@ private struct TaxWorkspace: View {
       Metric(
         title: String(localized: "Denied losses"),
         value: Format.money(year.denied, base, privacy: privacy),
-        detail: year.denied > 0 ? String(localized: "Don't reduce this year's gains") : String(localized: "None this year"),
+        detail: year.denied > 0
+          ? String(localized: "Don't reduce this year's gains") : String(localized: "None this year"),
         color: year.denied > 0 ? Studio.warn : Studio.text)
     }.accessibilityElement(children: .contain)
     if year.missingFx > 0 {
@@ -1702,8 +1712,10 @@ private struct QuoteProvidersPanel: View {
         && !providers.contains(where: { !$0.primary })
       {
         HStack {
-          Text("No fallback provider is set up. Add one in Settings to keep prices current when the primary can't be reached.")
-            .font(.system(size: 11)).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
+          Text(
+            "No fallback provider is set up. Add one in Settings to keep prices current when the primary can't be reached."
+          )
+          .font(.system(size: 11)).foregroundStyle(Studio.muted).fixedSize(horizontal: false, vertical: true)
           Spacer()
           Button("Set Up…") { model.showSettingsWindow(tab: 0) }.disabled(model.demo)
         }
@@ -1731,9 +1743,10 @@ private struct QuoteProvidersPanel: View {
         HStack(spacing: 8) {
           Text(p.label).font(.system(size: 13, weight: .medium))
           Text(p.primary ? String(localized: "Primary") : String(localized: "Fallback")).font(
-            .system(size: 10, weight: .medium))
-            .foregroundStyle(Studio.muted).padding(.horizontal, 6).padding(.vertical, 2)
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Studio.line))
+            .system(size: 10, weight: .medium)
+          )
+          .foregroundStyle(Studio.muted).padding(.horizontal, 6).padding(.vertical, 2)
+          .overlay(RoundedRectangle(cornerRadius: 4).stroke(Studio.line))
         }
         Text(detail(p)).font(.system(size: 11)).foregroundStyle(Studio.muted)
           .fixedSize(horizontal: false, vertical: true)

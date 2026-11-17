@@ -131,7 +131,8 @@ struct TransactionEntry {
     case "BUY", "SELL": return positive(quantity) && nonnegative(price) && nonnegative(fees)
     case "DRIP": return positive(quantity) && nonnegative(price)
     case "TRANSFER":
-      let priced = priceRequired ? positive(price) : price.trimmingCharacters(in: .whitespaces).isEmpty || nonnegative(price)
+      let priced =
+        priceRequired ? positive(price) : price.trimmingCharacters(in: .whitespaces).isEmpty || nonnegative(price)
       return !target.isEmpty && target != account && positive(quantity) && priced
     case "SPLIT": return ratio(locale: locale).map { $0 != 1 } ?? false
     default: return positive(amount)
@@ -150,7 +151,9 @@ struct TransactionEntry {
       return ["transfer", "--from", account, "--to", target] + common + price + currency
         + ["--", symbolCode, number(quantity)]
     case "SPLIT":
-      return ["split", "--account", account] + common + ["--", symbolCode, ratio(locale: locale).map { String($0) } ?? ""]
+      return ["split", "--account", account] + common + [
+        "--", symbolCode, ratio(locale: locale).map { String($0) } ?? "",
+      ]
     case "DRIP":
       return ["drip", "--account", account] + common + currency + ["--", symbolCode, number(quantity), number(price)]
     case "ROC":
@@ -467,7 +470,9 @@ enum BridgeDate {
     let local = DateFormatter()
     local.locale = Locale(identifier: "en_US_POSIX")
     local.calendar = Calendar(identifier: .gregorian)
-    for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss"] {
+    for format in [
+      "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss.SSSSSS", "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss",
+    ] {
       local.dateFormat = format
       if let date = local.date(from: text) { return date }
     }
@@ -880,7 +885,8 @@ struct TaxExportResult: Decodable {
       return one
         ? String(
           localized:
-            "Saved 1 sale from \(year) to \(file). \(n) issues, listed under Needs attention, may leave sales out of it.")
+            "Saved 1 sale from \(year) to \(file). \(n) issues, listed under Needs attention, may leave sales out of it."
+        )
         : String(
           localized:
             "Saved \(exported) sales from \(year) to \(file). \(n) issues, listed under Needs attention, may leave sales out of it."
@@ -1255,7 +1261,8 @@ enum EngineMessage {
       return account.map { String(localized: "account '\($0)' is archived") }
     case "ambiguous_listing_both":
       guard let (first, second) = pair(args["symbols"]) else { return nil }
-      return String(localized: "can't tell whether this is \(first) or \(second): the account holds both; record it by hand")
+      return String(
+        localized: "can't tell whether this is \(first) or \(second): the account holds both; record it by hand")
     case "ambiguous_listing_neither":
       guard let (first, second) = pair(args["symbols"]) else { return nil }
       return String(
