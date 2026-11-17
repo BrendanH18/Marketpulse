@@ -82,8 +82,6 @@ LAYOUT = (
 
 # A fictional argument for every placeholder a syntax uses, so each entry can run on the catalog itself.
 EXAMPLES = {
-    "FIELD,FIELD": "issue,family",
-    "FIELD": "issue",
     "NAME": "result",
     "VALUE": "x",
     "TEXT": "x",
@@ -136,10 +134,12 @@ def accepting(item):
 def invocation(command, item, source="report-operations"):
     """An entry's syntax as arguments for one command, with what its option needs beside it."""
     option, _, argument = item.syntax.partition(" ")
-    field = "position" if source == "report-fields" else "issue"
-    examples = {**EXAMPLES, "FIELD": field}
-    if source == "report-fields":
-        examples["FIELD,FIELD"] = "position,source"
+    field, second_field = {
+        "report-operations": ("issue", "family"),
+        "report-fields": ("position", "source"),
+        "command-parameters": ("position", "command"),
+    }[source]
+    examples = {**EXAMPLES, "FIELD": field, "FIELD,FIELD": f"{field},{second_field}"}
     arguments = [command, source, option]
     if argument:
         arguments.append(PLACEHOLDER.sub(lambda match: examples[match.group()], argument))
@@ -221,7 +221,7 @@ def test_every_operation_of_a_command_is_cataloged(command):
     assert cataloged == set(formats.type.choices) - {formats.default}
 
 
-@pytest.mark.parametrize("source", ["report-operations", "report-fields"])
+@pytest.mark.parametrize("source", ["report-operations", "report-fields", "command-parameters"])
 def test_every_syntax_runs_on_each_command_that_lists_it(source):
     failures = {}
     for item in OPERATIONS:

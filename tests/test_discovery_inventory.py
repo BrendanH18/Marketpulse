@@ -9,8 +9,7 @@ from marketpulse.cli import report_operations, reports
 def test_documented_inventory_is_exactly_two_hundred_improvements():
     guide = (Path(__file__).parent.parent / "docs" / "cli-discovery-improvements.md").read_text(encoding="utf-8")
     rows = re.findall(r"^\| (\d+) \| `report-fields` \| ([a-z]+) \| `(.+)` \|$", guide, re.MULTILINE)
-    assert "report-fields" in reports.SOURCES
-    assert len(reports.SOURCES) == 58
+    assert list(reports.SOURCES)[57] == "report-fields"
     assert [(int(number), family, syntax) for number, family, syntax in rows] == [
         (number, operation.family, operation.syntax) for number, operation in enumerate(report_operations.OPERATIONS, 1)
     ]

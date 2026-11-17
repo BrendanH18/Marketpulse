@@ -451,7 +451,9 @@ class DerivePlan:
                 )
             field, has_argument, argument = call.partition(":")
             if field not in schema:
-                raise click.UsageError(f"Unknown field '{field}'. Choose from: {', '.join(schema)}.")
+                raise click.UsageError(
+                    f"Unknown field '{field}'. Choose from: {', '.join(schema)}." + suggestion(field, schema)
+                )
             if function.argument is None and has_argument:
                 raise _usage(function, "takes no argument")
             if function.argument is not None and not has_argument:

@@ -444,8 +444,8 @@ def test_inventory_matches_documented_capabilities():
     earlier = [
         name for module in EARLIER_MODULES for name in importlib.import_module(f"marketpulse.cli.{module}").SOURCES
     ]
-    assert len(earlier) == 50 and len(reports.SOURCES) == 58
-    assert list(reports.SOURCES) == [*earlier, *NEW_SOURCES, "report-fields"]
+    assert len(earlier) == 50
+    assert list(reports.SOURCES)[:57] == [*earlier, *NEW_SOURCES]
 
     operations = [(name, family) for family, names in NEW_OPERATIONS.items() for name in names.split()]
     assert [(case.name, case.family) for case in CASES] == operations

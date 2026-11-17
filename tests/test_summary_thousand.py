@@ -76,8 +76,9 @@ def test_inventory_is_seven_operations_on_fifty_seven_datasets():
     assert [case[0] for case in CASES] == list(FURTHER_OPERATIONS)
     assert len(FURTHER_OPERATIONS) == len(set(FURTHER_OPERATIONS)) == 7
     assert ALL_OPERATIONS[-7:] == FURTHER_OPERATIONS
-    # Preserve the historical #153 inventory; #162 adds report-fields afterwards.
-    earlier_sources = set(reports.SOURCES) - {"report-fields"}
+    # The #153 inventory stops before the first dataset added under #162.
+    sources = list(reports.SOURCES)
+    earlier_sources = sources[: sources.index("report-fields")]
     assert len(earlier_sources) == 57
     assert len(CASES) * len(earlier_sources) == 399
 

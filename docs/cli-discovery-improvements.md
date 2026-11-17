@@ -7,7 +7,7 @@ This batch adds **exactly 200 improvements** using the same dataset × operation
 counting convention as earlier reporting batches: **one new dataset × 197 existing
 shared operations, plus three CLI typo suggestions = 200**. These are 197 new
 combinations of existing operations with a dataset, not 197 new operations.
-The registry now has 58 datasets; the shared operation catalog stays at 197.
+This batch brought the registry to 58 datasets and kept the shared operation catalog at 197.
 
 `report-fields` lists the field names of every registered report dataset,
 including itself. It contains program metadata only: it opens no tracker,
@@ -261,7 +261,7 @@ Summary options require a metric; `--descending` requires a sort field and
 
 ## Verification
 
-The shared dataset matrices run their output assertions against all 58 schemas,
+The shared dataset matrices run their output assertions against all registered schemas,
 including `report-fields`. A separate catalog integration test invokes every one
 of the 197 operation syntaxes on the real metadata dataset using each accepting
 command. Metadata and CLI tests also exercise actual rows, schema ordering,

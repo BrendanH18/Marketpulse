@@ -27,6 +27,8 @@ Issue #143 later added 7 more datasets and 30 more operations; see
 [Offline report filters, selections, summaries and formats](cli-report-expansion.md).
 Issue [#153](https://github.com/BrendanH18/Marketpulse/issues/153) added 10 more
 derived-field functions (51–60 below) on all 57 datasets: 10 × 57 = 570.
+The [field catalog](cli-discovery-improvements.md) and
+[command parameter catalog](cli-command-parameter-improvements.md) were added later.
 
 ## New datasets
 
