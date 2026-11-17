@@ -13,6 +13,7 @@ from typing import Any
 
 import click
 
+from .report_discovery import suggestion
 from .report_output import _equal, _json, _text
 
 
@@ -446,6 +447,7 @@ class DerivePlan:
             if function is None:
                 raise click.UsageError(
                     f"Unknown --derive function '{function_name}'. List them with `report derive-functions`."
+                    + suggestion(function_name, _BY_NAME)
                 )
             field, has_argument, argument = call.partition(":")
             if field not in schema:

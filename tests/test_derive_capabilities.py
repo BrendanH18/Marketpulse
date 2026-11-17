@@ -317,8 +317,10 @@ def test_inventory_matches_documented_ten_more_functions():
         "starts-with",
         "ends-with",
     ]
-    assert len(reports.SOURCES) == 57
-    assert len(added) * len(reports.SOURCES) == 570
+    # Preserve the historical #153 inventory; #162 adds report-fields afterwards.
+    earlier_sources = set(reports.SOURCES) - {"report-fields"}
+    assert len(earlier_sources) == 57
+    assert len(added) * len(earlier_sources) == 570
 
 
 def test_documented_inventory_matches_the_code():

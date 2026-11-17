@@ -17,6 +17,7 @@ SOURCES: dict[str, tuple[str, ...]] = {
     "tui-keys": ("workspace", "key", "action"),
     "workspaces": ("name", "hint", "table", "sort_modes"),
     "report-operations": ("number", "family", "operation", "commands", "syntax", "summary", "issue"),
+    "report-fields": ("source", "group", "position", "field"),
 }
 DESCRIPTIONS: dict[str, str] = {
     "alert-conditions": "Alert conditions and whether their threshold is a percent.",
@@ -24,6 +25,7 @@ DESCRIPTIONS: dict[str, str] = {
     "tui-keys": "Terminal app keys by workspace.",
     "workspaces": "Terminal app workspaces with their hint, table and sort columns.",
     "report-operations": "Every shared report and summary operation, with its syntax and the commands that accept it.",
+    "report-fields": "Every report source field, with its group and one-based position in the source schema.",
 }
 
 # What each alert condition compares, and whether its threshold is a percent. Looked up by
@@ -68,4 +70,13 @@ def load_source(name: str, app: App) -> list[dict[str, Any]]:
         ]
     if name == "report-operations":
         return report_operations.rows()
+    if name == "report-fields":
+        from . import reports  # imported here because reports imports this module to register it
+
+        return [
+            {"source": source, "group": module.GROUP, "position": position, "field": field}
+            for module in reports.SOURCE_MODULES
+            for source, schema in module.SOURCES.items()
+            for position, field in enumerate(schema, 1)
+        ]
     raise KeyError(name)

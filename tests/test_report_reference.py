@@ -117,7 +117,7 @@ def test_registry_is_consistent_across_every_source_module():
         assert set(module.DESCRIPTIONS) == set(module.SOURCES)
         assert all(text and text.endswith(".") for text in module.DESCRIPTIONS.values())
     names = [name for module in modules for name in module.SOURCES]
-    assert len(names) == len(set(names)) == 57
+    assert len(names) == len(set(names)) == 58
     assert sum(len(module.SOURCES) for module in (report_ledger, report_system, report_reference)) == 25
     assert set(reports.SOURCES) == set(names)
 
@@ -125,7 +125,7 @@ def test_registry_is_consistent_across_every_source_module():
 def test_sources_lists_every_dataset_by_name(app):
     rows = load_source("sources", app)
     names = [row["source"] for row in rows]
-    assert len(rows) == 57
+    assert len(rows) == 58
     assert names == sorted(names) == sorted(reports.SOURCES)
     assert all(row["fields"] == list(reports.SOURCES[row["source"]]) for row in rows)
     assert all(row["field_count"] == len(row["fields"]) for row in rows)
@@ -134,7 +134,7 @@ def test_sources_lists_every_dataset_by_name(app):
         "catalog": 12,
         "ledger": 11,
         "system": 5,
-        "reference": 16,
+        "reference": 17,
     }
     by_name = {row["source"]: row for row in rows}
     assert by_name["sources"] == {
@@ -398,9 +398,9 @@ def test_cli_report_filters_and_exports_reference_rows():
     assert tsv_text.splitlines() == ["suffix\tcurrency", ".TO\tCAD", ".V\tCAD", ".NE\tCAD", ".CN\tCAD"]
     markdown = _cli("report", "sources", "--fields", "source,group,description", "--format", "markdown").splitlines()
     assert markdown[:2] == ["| source | group | description |", "| --- | --- | --- |"]
-    assert len(markdown) == 59
+    assert len(markdown) == 60
     assert "| sources | reference | Every report dataset with its group, fields and description. |" in markdown
-    assert _cli("report", "sources", "--where", "group=reference", "--count") == "16\n"
+    assert _cli("report", "sources", "--where", "group=reference", "--count") == "17\n"
     assert json.loads(_cli("report", "summary-operations", "--where", "result=list", "--fields", "operation")) == [
         {"operation": "values"},
         {"operation": "distinct-values"},
