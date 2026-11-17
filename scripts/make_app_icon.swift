@@ -53,7 +53,7 @@ func drawIcon() {
   ]
   let pulse = NSBezierPath()
   pulse.move(to: points[0])
-  points.dropFirst().forEach { pulse.line(to: $0) }
+  for point in points.dropFirst() { pulse.line(to: point) }
   pulse.lineJoinStyle = .round
   pulse.lineCapStyle = .round
 

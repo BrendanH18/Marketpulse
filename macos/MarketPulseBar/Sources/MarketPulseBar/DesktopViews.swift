@@ -66,6 +66,8 @@ struct PortfolioWindow: View {
   @ObservedObject var model: StatusModel
 
   var body: some View {
+    // The rule misreads SwiftUI's labeled trailing closures (`detail:`) on this view as mixed arguments.
+    // swift-format-ignore: OnlyOneTrailingClosureArgument
     NavigationSplitView {
       sidebar
         .navigationSplitViewColumnWidth(min: 190, ideal: 215, max: 245)
