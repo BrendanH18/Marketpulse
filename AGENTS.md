@@ -67,6 +67,8 @@ uv run ruff check . && uv run ruff format --check .   # lint; `ruff format .` ap
 swift build -c release --package-path macos/MarketPulseBar       # menu bar app
 ```
 
+The main ruleset requires the `CI passed` job in `.github/workflows/ci.yml`, which fails when any other CI job failed or was cancelled: add any new CI job to its `needs`.
+
 Run the CLI against throwaway data with `MARKETPULSE_DATA=/tmp/x MARKETPULSE_CONFIG=/tmp/x/config.toml uv run marketpulse ...` — otherwise it reads/writes `~/.marketpulse/marketpulse.db` and `~/.config/marketpulse/config.toml`.
 
 TUI changes can be checked headlessly, with `MARKETPULSE_DATA`/`MARKETPULSE_CONFIG` pointed at scratch paths as above (the test fixtures do this for you): `async with MarketPulseApp(Config.load()).run_test(size=(180, 52)) as pilot:`, then `pilot.press(...)` and `app.save_screenshot(...)` (see `tests/test_tui.py`).

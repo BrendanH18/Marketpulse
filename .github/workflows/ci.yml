@@ -188,3 +188,21 @@ jobs:
         run: uv run --locked python scripts/check_native_bridge.py
       - name: Build standalone app with bundled backend (signs, verifies, smoke-tests)
         run: uv run --locked python scripts/build_app.py --out "$RUNNER_TEMP/app"
+
+  # The check the main ruleset requires. A job that a failed job `needs` is skipped, and a skipped
+  # required check counts as passing, so this runs always() and fails if any job failed or was
+  # cancelled. Skips are allowed: `changes` runs only on pull requests, and `menubar` only when the
+  # Mac app is affected. The manual desktop benchmark is left out.
+  ci-passed:
+    name: CI passed
+    needs: [quality, test, coverage, package, changes, menubar]
+    if: always()
+    runs-on: namespace-profile-gitrunner
+    timeout-minutes: 5
+    steps:
+      - name: No job failed or was cancelled
+        run: |
+          echo "Results: $RESULTS"
+          ! echo "$RESULTS" | grep -qE 'failure|cancelled'
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
