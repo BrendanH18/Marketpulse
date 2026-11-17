@@ -13,8 +13,10 @@ permissions:
   contents: read
 
 # Runs for the same tag go one at a time, and a release in progress is never cancelled.
+# The event is part of the group so a manual dry run can never replace a pending tag release
+# (GitHub keeps only one pending run per group).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
