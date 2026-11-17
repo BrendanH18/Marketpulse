@@ -80,6 +80,7 @@ and edit-plus-refresh timings without opening your portfolio.
 On macOS, changes to the companion should also pass:
 
 ```bash
+swift format lint --strict -r macos/MarketPulseBar scripts/*.swift   # `swift format -i -r ...` applies fixes
 swift build -c release --package-path macos/MarketPulseBar
 uv run --locked python scripts/check_native_bridge.py
 ```
@@ -103,16 +104,19 @@ Windows build ([ADR 0002](docs/adr/0002-no-windows-build.md)).
 
 CI runs on [Namespace](https://namespace.so) runners:
 lint, formatting, type checks, Python tests on Linux and macOS, Python distribution
-builds with an installed-wheel smoke check, and the Swift build. On a pull request, the Mac app job (Swift build, bridge check,
-standalone app build) runs only when the PR touches the app's sources, the scripts it runs,
-the Python package (anything outside the terminal UI in `tui/`), test fixtures, dependencies or the CI
-workflow; the path list is in the `changes` job of `.github/workflows/ci.yml`. Pushes to
-`main` and releases always run it. The **Audit** workflow runs `shellcheck` on
-`scripts/install.sh` and `uv audit` on `uv.lock` for every pull request and weekly.
+builds with an installed-wheel smoke check, `shellcheck` on `scripts/install.sh`, `uv audit`
+on `uv.lock` (also weekly, so a new advisory shows up without a code change), and the Swift
+build. On a pull request, the Mac app job (Swift format check, Swift build, bridge check,
+standalone app build) runs only when the PR touches the app's sources, the Swift scripts, the
+scripts it runs, the Python package (anything outside the terminal UI in `tui/`), test fixtures,
+dependencies or the CI workflow; the path list is in the `changes` job of
+`.github/workflows/ci.yml`. Pushes to `main` and releases always run it. The **CodeQL**
+workflow scans the Python, Swift and workflow code on pull requests, pushes to `main` and weekly.
 Dependency changes should include the updated `uv.lock`; use `uv lock` and
 verify `uv sync --locked --dev` succeeds.
 Dependabot is configured to propose monthly updates to Python dependencies and
-GitHub Actions; these updates still require review and passing checks.
+GitHub Actions, grouped into one pull request per ecosystem and only for releases at least a
+week old; these updates still require review and passing checks.
 
 ## Architecture
 
