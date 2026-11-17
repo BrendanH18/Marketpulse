@@ -108,8 +108,9 @@ struct UpdateCheckTests {
     check(v("1.0.0-1") < v("1.0.0-a"), "numeric below alphanumeric")
     check(v("1.0.0-rc.99999999999999999999") > v("1.0.0-rc.9"), "long numeric identifiers don't overflow")
     check(v("1.0.0-Beta") < v("1.0.0-beta"), "alphanumeric identifiers compare in ASCII order")
-    check([v("1.10.0"), v("1.2.0-rc.1"), v("1.2.0"), v("1.9")].sorted().map(\.description)
-      == ["1.2.0-rc.1", "1.2.0", "1.9.0", "1.10.0"], "sorting")
+    check(
+      [v("1.10.0"), v("1.2.0-rc.1"), v("1.2.0"), v("1.9")].sorted().map(\.description)
+        == ["1.2.0-rc.1", "1.2.0", "1.9.0", "1.10.0"], "sorting")
   }
 
   static func decisions() {

@@ -167,7 +167,8 @@ final class StatusModel: ObservableObject {
     case "day_pct":
       return "\(Format.arrow(s.dayChange)) \(Format.pct(s.dayChangePct))"
     case "day_change":
-      return "\(Format.arrow(s.dayChange)) \(Format.money(s.dayChange, s.base, privacy: false, decimals: 0, sign: true))"
+      return
+        "\(Format.arrow(s.dayChange)) \(Format.money(s.dayChange, s.base, privacy: false, decimals: 0, sign: true))"
     case "net_worth":
       return s.netWorth.map { value in
         // "412,5 k $": a compact number where the locale puts an amount (currency
@@ -247,7 +248,8 @@ final class StatusModel: ObservableObject {
       return
     } catch let error as DecodingError {
       let detail = String(describing: error)
-      desktopError = String(localized: "Unexpected portfolio data (\(detail)). Update MarketPulse and reinstall the app.")
+      desktopError = String(
+        localized: "Unexpected portfolio data (\(detail)). Update MarketPulse and reinstall the app.")
     } catch {
       desktopError = error.localizedDescription
     }
@@ -321,7 +323,9 @@ final class StatusModel: ObservableObject {
       lastUpdateCheck = now
       UserDefaults.standard.set(now, forKey: Self.lastUpdateCheckKey)
       guard let latest else {
-        if manual { updateCheckResult = String(localized: "Couldn't reach GitHub. Check your connection and try again later.") }
+        if manual {
+          updateCheckResult = String(localized: "Couldn't reach GitHub. Check your connection and try again later.")
+        }
         return
       }
       let update = UpdateCheck.decide(current: UpdateCheck.currentVersion, latest: latest)
@@ -434,7 +438,8 @@ final class StatusModel: ObservableObject {
     await perform(args) { _ in success }
   }
 
-  func recordTransaction(_ request: TransactionSaveRequest, success: String = String(localized: "Transaction recorded")) async
+  func recordTransaction(_ request: TransactionSaveRequest, success: String = String(localized: "Transaction recorded"))
+    async
     -> TransactionSaveResult
   {
     guard !demo && !saving else { return .unknown(String(localized: "Another save is in progress.")) }
@@ -444,7 +449,8 @@ final class StatusModel: ObservableObject {
     switch result {
     case .recorded, .recovered:
       errorMessage = nil
-      message = result == .recovered
+      message =
+        result == .recovered
         ? String(localized: "\(success). Its confirmation failed.") : success
       await reload()
     case .notRecorded(let error), .unknown(let error):
@@ -725,7 +731,9 @@ final class StatusModel: ObservableObject {
         guard generation == taxGeneration else { return }
         taxError =
           error is DecodingError
-          ? String(localized: "Unexpected tax report (\(String(describing: error))). Update MarketPulse and reinstall the app.")
+          ? String(
+            localized: "Unexpected tax report (\(String(describing: error))). Update MarketPulse and reinstall the app."
+          )
           : error.localizedDescription
         // So the next change, or Try Again, loads it again.
         taxLoadedKey = nil
@@ -776,10 +784,10 @@ final class StatusModel: ObservableObject {
     Task { await perform(["export", url.path], success: String(localized: "Ledger exported")) }
   }
 
-    func openTUI() {
-        guard !demo else { return }
-        TerminalLauncher.open(command: CLI.path)
-    }
+  func openTUI() {
+    guard !demo else { return }
+    TerminalLauncher.open(command: CLI.path)
+  }
 
   private func configureHotKey() {
     guard !demo else { return }

@@ -5,8 +5,20 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    # Wait a week after a release, so a broken or compromised version is likely pulled first.
+    cooldown:
+      default-days: 7
+    # One pull request for the month's updates; security updates still arrive on their own.
+    groups:
+      python:
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]

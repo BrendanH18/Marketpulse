@@ -37,6 +37,7 @@ uv sync --locked --dev
 uv run --locked ruff check . && uv run --locked ruff format --check . && uv run --locked mypy
 uv run --locked pytest -q --cov && uv run --locked python scripts/check_coverage.py
 # macOS, for app or bridge changes:
+swift format lint --strict -r macos/MarketPulseBar scripts/*.swift
 swift build -c release --package-path macos/MarketPulseBar
 uv run --locked python scripts/check_native_bridge.py
 ```
@@ -64,6 +65,7 @@ uv run pytest                                  # full suite, offline (~2s)
 uv run pytest tests/test_ledger.py::test_split_keeps_cost_base   # single test
 uv run pytest --cov && uv run python scripts/check_coverage.py   # financial-core coverage floors (CI gate)
 uv run ruff check . && uv run ruff format --check .   # lint; `ruff format .` applies fixes; line length 120
+swift format -i -r macos/MarketPulseBar scripts/*.swift          # format Swift (.swift-format: 2 spaces, 120 columns)
 swift build -c release --package-path macos/MarketPulseBar       # menu bar app
 ```
 

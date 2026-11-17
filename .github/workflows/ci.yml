@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 9 * * 1" # Mondays, 09:17 UTC; runs only the dependency audit
   workflow_dispatch:
     inputs:
       desktop_benchmark:
@@ -16,19 +18,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A new push to a pull request replaces its previous run. Every other run (main, the schedule, the
+  # release workflow) gets a group of its own, so none is cancelled or left pending behind another.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   desktop-benchmark:
-    name: Desktop benchmark (${{ matrix.os }})
+    name: Desktop benchmark (macOS)
     if: github.event_name == 'workflow_dispatch' && inputs.desktop_benchmark
-    runs-on: ${{ matrix.os }}
+    runs-on: namespace-profile-macos
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [namespace-profile-macos]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,7 +41,7 @@ jobs:
       - name: Measure the fictional ledger
         env:
           BENCHMARK_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
-          BENCHMARK_RUNNER: ${{ matrix.os }}
+          BENCHMARK_RUNNER: namespace-profile-macos
         run: uv run --locked python scripts/benchmark_desktop.py --output desktop-benchmark.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -51,6 +51,7 @@ jobs:
           retention-days: 90
 
   quality:
+    if: github.event_name != 'schedule'
     runs-on: namespace-profile-gitrunner
     timeout-minutes: 15
     steps:
@@ -71,6 +72,7 @@ jobs:
 
   test:
     name: Test (Python ${{ matrix.python }}, ${{ matrix.os }})
+    if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -95,6 +97,7 @@ jobs:
 
   coverage:
     name: Coverage gate (financial core)
+    if: github.event_name != 'schedule'
     runs-on: namespace-profile-gitrunner
     timeout-minutes: 15
     steps:
@@ -112,6 +115,7 @@ jobs:
         run: uv run --locked python scripts/check_coverage.py
 
   package:
+    if: github.event_name != 'schedule'
     runs-on: namespace-profile-gitrunner
     timeout-minutes: 15
     steps:
@@ -132,6 +136,36 @@ jobs:
           .package-smoke/bin/mp --version
           .package-smoke/bin/python -c 'from importlib.metadata import version; from marketpulse import __version__; assert version("marketpulse") == __version__'
 
+  shellcheck:
+    name: ShellCheck install.sh
+    if: github.event_name != 'schedule'
+    runs-on: namespace-profile-gitrunner
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: ShellCheck
+        run: |
+          shellcheck --version
+          shellcheck scripts/install.sh
+
+  audit:
+    name: Audit uv.lock
+    # Also runs weekly (the schedule above), so a newly published advisory shows up without a code change.
+    runs-on: namespace-profile-gitrunner
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false # the audit reads uv.lock and installs nothing
+      - name: Check locked dependencies against the OSV advisory database
+        # `uv audit` is a preview command; the flag opts in to it explicitly.
+        run: uv audit --frozen --preview-features audit-command
+
   changes:
     # Pull requests build the Mac app only when they touch something it builds or checks.
     # Pushes to main, manual runs, and the release workflow (workflow_call) always build it.
@@ -150,14 +184,15 @@ jobs:
         run: |
           git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
           cat "$RUNNER_TEMP/changed.txt"
-          # The Swift sources, the scripts the job runs, the Python package the app bundles (the
-          # bridge check loads nearly all of it through the CLI; only the terminal UI in tui/ is
-          # unused), the fixtures the bridge check reads, the bundled backend's dependencies, and
-          # this workflow.
+          # The Swift sources, scripts and format config, the Python scripts the job runs, the Python
+          # package the app bundles (the bridge check loads nearly all of it through the CLI; only
+          # the terminal UI in tui/ is unused), the fixtures the bridge check reads, the bundled
+          # backend's dependencies, and this workflow.
           app_paths='^(macos/'
-          app_paths+='|scripts/(build_app\.py|check_native_bridge\.)'
+          app_paths+='|scripts/(build_app\.py|check_native_bridge\.|[^/]+\.swift$)'
           app_paths+='|src/marketpulse/'
           app_paths+='|tests/fixtures/'
+          app_paths+='|\.swift-format$'
           app_paths+='|pyproject\.toml|uv\.lock'
           app_paths+='|\.github/workflows/ci\.yml)'
           if grep -E "$app_paths" "$RUNNER_TEMP/changed.txt" | grep -qvE '^src/marketpulse/tui/'; then
@@ -170,7 +205,7 @@ jobs:
   menubar:
     needs: changes
     # `changes` runs only on pull requests; !cancelled() keeps its skip from skipping this job.
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.menubar == 'true') }}
+    if: ${{ !cancelled() && github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.menubar == 'true') }}
     runs-on: namespace-profile-macos
     timeout-minutes: 20
     steps:
@@ -180,6 +215,10 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
+      - name: Swift format check
+        run: |
+          swift format --version
+          swift format lint --strict -r macos/MarketPulseBar scripts/*.swift
       - name: Install backend for native bridge checks
         run: uv sync --locked --dev --python 3.11
       - name: Build menu bar companion
@@ -191,11 +230,11 @@ jobs:
 
   # The check the main ruleset requires. A job that a failed job `needs` is skipped, and a skipped
   # required check counts as passing, so this runs always() and fails if any job failed or was
-  # cancelled. Skips are allowed: `changes` runs only on pull requests, and `menubar` only when the
-  # Mac app is affected. The manual desktop benchmark is left out.
+  # cancelled. Skips are allowed: `changes` runs only on pull requests, `menubar` only when the Mac
+  # app is affected, and the weekly schedule runs only `audit`. The manual desktop benchmark is left out.
   ci-passed:
     name: CI passed
-    needs: [quality, test, coverage, package, changes, menubar]
+    needs: [quality, test, coverage, package, shellcheck, audit, changes, menubar]
     if: always()
     runs-on: namespace-profile-gitrunner
     timeout-minutes: 5

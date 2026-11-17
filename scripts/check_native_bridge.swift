@@ -104,7 +104,8 @@ struct NativeBridgeCheck {
     precondition(demoTax.version == 1 && demoTax.demo && demoTax.baseCurrency == "CAD" && demoTax.inclusionRate == 0.5)
     let demoSales = demoTax.years.reversed().flatMap(\.rows)
     precondition(demoSales.map(\.superficial) == [true, false] && demoSales.allSatisfy(\.complete))
-    precondition(demoSales.allSatisfy { $0.allowedGain != nil && $0.fx != nil && $0.accountLabel == "Personal investing" })
+    precondition(
+      demoSales.allSatisfy { $0.allowedGain != nil && $0.fx != nil && $0.accountLabel == "Personal investing" })
     precondition(demoSales[0].allowedGain == 0 && demoSales[0].denied! > 0 && demoSales[0].note == "superficial")
     precondition(demoTax.years.allSatisfy { $0.securities.map(\.symbol) == ["NVDA"] && $0.missingFx == 0 })
     precondition(demoTax.room.count == 1 && demoTax.issues.isEmpty)
@@ -116,7 +117,8 @@ struct NativeBridgeCheck {
     precondition(!unpriced.complete && unpriced.proceeds == nil && unpriced.allowedGain == nil && unpriced.fx == nil)
     precondition(unpriced.note == "FX missing" && unpriced.accountLabel == "Fictional Taxable")
     let archivedSale = ledgerTax.years[0].rows.first { $0.symbol == "ZAG.TO" }!
-    precondition(archivedSale.archived && archivedSale.account == nil && archivedSale.accountLabel == "Archived account")
+    precondition(
+      archivedSale.archived && archivedSale.account == nil && archivedSale.accountLabel == "Archived account")
     precondition(archivedSale.allowedGain == 100 && ledgerTax.years[0].netGain == 100)
     // Export CSV reports what the export itself found.
     let export = try decoder.decode(
@@ -187,7 +189,10 @@ struct NativeBridgeCheck {
     precondition(NumberInput.hint("12,5", locale: english)?.hasPrefix("Enter a number") == true)
     // The edit form prefills stored numbers; they must read back unchanged, with no hint.
     for locale in [french, german, english] {
-      for value in [0, 1234.5, 0.000125, 10, 33.333333, 0.123456789012, 1.0 / 3, 0.1 + 0.2, 1e-12, 0.000012345678901234568, 1e-21, 123456789.123456789] {
+      for value in [
+        0, 1234.5, 0.000125, 10, 33.333333, 0.123456789012, 1.0 / 3, 0.1 + 0.2, 1e-12, 0.000012345678901234568, 1e-21,
+        123456789.123456789,
+      ] {
         let text = NumberInput.editable(value, locale: locale)
         precondition(NumberInput.parse(text, locale: locale) == value, "\(text) in \(locale.identifier)")
       }
@@ -205,9 +210,10 @@ struct NativeBridgeCheck {
     let request = TransactionSaveRequest(
       arguments: ["deposit", "--note", "--a literal note", "--", "12.5"],
       id: "00000000-0000-0000-0000-000000000055")
-    precondition(request.arguments == [
-      "deposit", "--request-id", request.id, "--note", "--a literal note", "--", "12.5",
-    ])
+    precondition(
+      request.arguments == [
+        "deposit", "--request-id", request.id, "--note", "--a literal note", "--", "12.5",
+      ])
     let failed = NSError(domain: "Save confirmation failed", code: 1)
     var calls: [[String]] = []
     let recovered = await request.submit { args in
@@ -300,11 +306,15 @@ struct NativeBridgeCheck {
       let entry = TargetsEntry(weights: form.weights)
       precondition(entry.isValid(locale: us) == form.valid, "Targets validity differs for \(form.weights)")
       if let expected = form.arguments {
-        precondition(entry.arguments(locale: us) == expected, "Targets arguments differ: \(entry.arguments(locale: us))")
+        precondition(
+          entry.arguments(locale: us) == expected, "Targets arguments differ: \(entry.arguments(locale: us))")
       }
     }
     // Other commands keep the request ID right after the command, as before.
-    precondition(TransactionSaveRequest(arguments: ["deposit", "--", "1"], id: "R").arguments == ["deposit", "--request-id", "R", "--", "1"])
+    precondition(
+      TransactionSaveRequest(arguments: ["deposit", "--", "1"], id: "R").arguments == [
+        "deposit", "--request-id", "R", "--", "1",
+      ])
     // Engine messages by code (issue #46): in English they read exactly as the engine's text.
     let enUS = Locale(identifier: "en_US")
     precondition(payload.warningItems?.isEmpty == true)
@@ -334,21 +344,29 @@ struct NativeBridgeCheck {
     let codedTax = try decoder.decode(
       TaxPayload.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[15])))
     precondition(
-      Set(codedTax.issues.compactMap(\.code)) == ["transfer_to_registered_unpriced", "transfer_from_registered_unpriced"])
+      Set(codedTax.issues.compactMap(\.code)) == [
+        "transfer_to_registered_unpriced", "transfer_from_registered_unpriced",
+      ])
     precondition(codedTax.issues.allSatisfy { $0.localizedMessage(locale: enUS) == $0.message })
     precondition(codedTax.localizedNotes == codedTax.notes)
     let withCodedIssue = TaxExportResult(exported: 1, issues: [codedTax.issues[0]])
     precondition(
       withCodedIssue.message(year: 2025, file: "g.csv", locale: enUS)
-        == "Saved 1 sale from 2025 to g.csv. 1 issue may leave sales out of it: \(codedTax.issues[0].date) \(codedTax.issues[0].message)")
+        == "Saved 1 sale from 2025 to g.csv. 1 issue may leave sales out of it: \(codedTax.issues[0].date) \(codedTax.issues[0].message)"
+    )
     let badRows = try decoder.decode(
       ImportPreview.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[16])))
     let rowIssues = badRows.issues ?? []
     precondition(rowIssues.count == 12, "Expected 12 skipped rows, got \(rowIssues.map(\.reason))")
-    precondition(rowIssues.contains { $0.code == "sell_exceeds_held" } && rowIssues.contains { $0.code == "breaks_later_entry" })
-    precondition(rowIssues.allSatisfy { $0.code?.isEmpty == false }, "Uncoded: \(rowIssues.filter { $0.code?.isEmpty != false }.map(\.reason))")
+    precondition(
+      rowIssues.contains { $0.code == "sell_exceeds_held" } && rowIssues.contains { $0.code == "breaks_later_entry" })
+    precondition(
+      rowIssues.allSatisfy { $0.code?.isEmpty == false },
+      "Uncoded: \(rowIssues.filter { $0.code?.isEmpty != false }.map(\.reason))")
     for issue in rowIssues + issues {
-      precondition(issue.localizedReason(locale: enUS) == issue.reason, "\(issue.localizedReason(locale: enUS)) != \(issue.reason)")
+      precondition(
+        issue.localizedReason(locale: enUS) == issue.reason, "\(issue.localizedReason(locale: enUS)) != \(issue.reason)"
+      )
     }
     precondition(issues.contains { $0.code == "not_imported" } && issues.contains { $0.code == "negative_amount" })
     precondition(broker.localizedProfileLabel == "Questrade" && ImportProfile.all.map(\.label).last == "Generic CSV")
@@ -359,7 +377,8 @@ struct NativeBridgeCheck {
       [DesktopAlert].self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[18])))
     precondition(alerts.count == 4)
     for alert in alerts {
-      precondition(alert.localizedDescription(locale: enUS) == alert.description, alert.localizedDescription(locale: enUS))
+      precondition(
+        alert.localizedDescription(locale: enUS) == alert.description, alert.localizedDescription(locale: enUS))
     }
     precondition(AssetClassOption.all.map(\.localizedLabel) == AssetClassOption.all.map(\.label))
     precondition(TransactionEntry.title("BUY") == "Buy" && TransactionEntry.title("ROC") == "Return of capital")

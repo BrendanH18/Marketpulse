@@ -1,0 +1,67 @@
+name: CodeQL
+
+# Code scanning for the Python engine, the GitHub Actions workflows and the Swift app, on Namespace
+# runners. This replaces GitHub's default setup, which must stay off: while it is on, GitHub
+# rejects the results this workflow uploads.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 9 * * 1" # Mondays, 09:41 UTC, so new queries run against unchanged code
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  # A new push to a pull request replaces its previous run; other runs always finish.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: namespace-profile-gitrunner
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+
+  analyze-swift:
+    name: CodeQL (swift)
+    runs-on: namespace-profile-macos
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: swift
+          build-mode: manual
+      - name: Build the Swift package
+        # Under CodeQL's build tracer, SwiftPM's /usr/bin/sandbox-exec fails to launch
+        # ("Bad CPU type in executable"), so build without SwiftPM's sandbox.
+        run: swift build --disable-sandbox --package-path macos/MarketPulseBar
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:swift

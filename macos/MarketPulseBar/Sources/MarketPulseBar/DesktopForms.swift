@@ -72,26 +72,26 @@ struct TransactionSheet: View {
         }
         TextField("Note (optional)", text: $draft.note)
       }.formStyle(.grouped).disabled(model.saving || draft.request != nil)
-      .onAppear {
-        if let editing, !draft.loaded {
-          draft.load(editing)
-        } else if draft.account.isEmpty, let id = model.desktop?.settings?.defaultAccountId,
-          accounts.contains(where: { $0.id == id })
-        {
-          // Settings › Portfolio › Default account, when it's one of the accounts listed.
-          draft.account = String(id)
+        .onAppear {
+          if let editing, !draft.loaded {
+            draft.load(editing)
+          } else if draft.account.isEmpty, let id = model.desktop?.settings?.defaultAccountId,
+            accounts.contains(where: { $0.id == id })
+          {
+            // Settings › Portfolio › Default account, when it's one of the accounts listed.
+            draft.account = String(id)
+          }
         }
-      }
-      .onChange(of: draft.symbol) { _, _ in
-        // The original currency belongs to the original symbol: work it out again for a new
-        // one, unless the user typed a currency themselves.
-        if let editing, entry.symbolCode != editing.symbol, entry.currencyCode == editing.currency {
-          draft.currency = ""
+        .onChange(of: draft.symbol) { _, _ in
+          // The original currency belongs to the original symbol: work it out again for a new
+          // one, unless the user typed a currency themselves.
+          if let editing, entry.symbolCode != editing.symbol, entry.currencyCode == editing.currency {
+            draft.currency = ""
+          }
         }
-      }
-      .onChange(of: draft.account) { _, account in
-        if draft.target == account { draft.target = "" }
-      }
+        .onChange(of: draft.account) { _, account in
+          if draft.target == account { draft.target = "" }
+        }
       if draft.request != nil && !model.saving {
         Text("The save outcome is unknown. Retry the same entry before changing or closing it.")
           .font(.caption).foregroundStyle(.secondary)
@@ -183,12 +183,14 @@ struct TransactionSheet: View {
         ? String(
           localized:
             "This account holds no \(symbol) now. A return of capital only lowers the cost of shares held on its date.")
-        : String(localized: "This account holds no \(symbol) now. An earlier date is checked against what it held then.")
+        : String(
+          localized: "This account holds no \(symbol) now. An earlier date is checked against what it held then.")
     }
     if let held { return String(localized: "\(name) holds \(Self.quantity(held.quantity)) \(held.symbol) now.") }
     return draft.type == "ROC"
       ? String(
-        localized: "\(name) holds no \(symbol) now. A return of capital only lowers the cost of shares held on its date.")
+        localized:
+          "\(name) holds no \(symbol) now. A return of capital only lowers the cost of shares held on its date.")
       : String(localized: "\(name) holds no \(symbol) now. An earlier date is checked against what it held then.")
   }
 
@@ -644,7 +646,8 @@ struct AssetClassSheet: View {
   var body: some View {
     SheetLayout(
       title: String(localized: "Change asset class"),
-      subtitle: String(localized: "Which class \(symbol) counts toward in Allocation and your targets, in every account."),
+      subtitle: String(
+        localized: "Which class \(symbol) counts toward in Allocation and your targets, in every account."),
       model: model
     ) {
       Form {
@@ -692,7 +695,8 @@ struct TargetsSheet: View {
   var body: some View {
     SheetLayout(
       title: String(localized: "Allocation targets"),
-      subtitle: String(localized: "The share of your portfolio you want in each asset class. Leave a class blank for none."),
+      subtitle: String(
+        localized: "The share of your portfolio you want in each asset class. Leave a class blank for none."),
       model: model
     ) {
       Form {
@@ -876,13 +880,18 @@ struct WelcomeSheet: View {
         choice(
           String(localized: "Import a CSV"), icon: "square.and.arrow.down",
           detail: String(
-            localized: "Bring in transactions exported from your broker. You'll see a preview before anything is saved."),
+            localized: "Bring in transactions exported from your broker. You'll see a preview before anything is saved."
+          ),
           action: importCSV
         ).disabled(model.demoOnly)
         if model.demo {
           choice(
             String(localized: "Leave the demo"), icon: "arrow.uturn.backward",
-            detail: String(localized: "Go back to your own portfolio."), action: { model.leaveDemo(); dismiss() }
+            detail: String(localized: "Go back to your own portfolio."),
+            action: {
+              model.leaveDemo()
+              dismiss()
+            }
           ).disabled(model.demoOnly)
         } else {
           choice(
