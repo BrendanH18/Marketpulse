@@ -16,7 +16,7 @@ import click
 
 from . import report_derive, report_filters, report_formats, report_metrics, reports
 from .base import App, pass_app
-from .report_discovery import SourceChoice
+from .report_discovery import SourceChoice, suggestion
 from .root import main
 
 
@@ -57,7 +57,10 @@ def _metrics(values: tuple[str, ...], schema: tuple[str, ...], groups: tuple[str
         if name in names:
             raise click.UsageError(f"Metric name '{name}' duplicates a metric or grouping field.")
         if operation not in report_metrics.ALL_OPERATIONS:
-            raise click.UsageError(f"Unknown summary operation '{operation}'. Use --describe to list operations.")
+            raise click.UsageError(
+                f"Unknown summary operation '{operation}'. Use --describe to list operations."
+                + suggestion(operation, report_metrics.ALL_OPERATIONS, prefer_simple_edits=True)
+            )
         if operation == "count":
             if colon:
                 raise click.UsageError("The count operation takes no field; use NAME=count.")
@@ -94,7 +97,11 @@ def _having(values: tuple[str, ...], fields: tuple[str, ...]) -> report_filters.
     for value in values:
         spelling, separator, condition = value.partition(":")
         if not separator or spelling not in spellings:
-            raise click.UsageError(f"--having requires FILTER:NAME=VALUE with a filter from: {', '.join(spellings)}.")
+            # A looser match can offer the opposite filter, such as not-contains for contains.
+            hint = suggestion(spelling, spellings, cutoff=0.85, prefer_simple_edits=True) if separator else ""
+            raise click.UsageError(
+                f"--having requires FILTER:NAME=VALUE with a filter from: {', '.join(spellings)}." + hint
+            )
         try:
             predicates.append(report_filters.compile_filters(fields, {spellings[spelling]: (condition,)}))
         except click.UsageError as exc:

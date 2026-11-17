@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Two hundred offline command discovery improvements
+  ([#164](https://github.com/BrendanH18/Marketpulse/issues/164),
+  [inventory](docs/cli-command-parameter-improvements.md)).
+  `report command-parameters` exposes each registered CLI option and argument
+  supported by the command catalog through all 197 shared operations.
+  Misspelled summary operations, `--having` filters and derived-field inputs
+  suggest close matches.
+
 - Two hundred offline discovery improvements
   ([#162](https://github.com/BrendanH18/Marketpulse/issues/162); see the
   [inventory](docs/cli-discovery-improvements.md)): `report report-fields` exposes

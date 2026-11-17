@@ -1,4 +1,4 @@
-"""Offline catalogs of alert conditions, chart periods, the terminal app and the report operations."""
+"""Offline catalogs of alert conditions, chart periods, the terminal app and CLI discovery."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from ..models import ALERT_CONDITIONS
 from ..tui.constants import GLOBAL_KEYS, HINTS, SORT_MODES, TABLES, WORKSPACE_KEYS
 from . import report_operations
 from .base import App
+from .discovery import _catalog
+from .root import main
 
 GROUP = "reference"
 SOURCES: dict[str, tuple[str, ...]] = {
@@ -18,6 +20,7 @@ SOURCES: dict[str, tuple[str, ...]] = {
     "workspaces": ("name", "hint", "table", "sort_modes"),
     "report-operations": ("number", "family", "operation", "commands", "syntax", "summary", "issue"),
     "report-fields": ("source", "group", "position", "field"),
+    "command-parameters": ("command", "position", "name", "kind", "flags", "required", "type", "help"),
 }
 DESCRIPTIONS: dict[str, str] = {
     "alert-conditions": "Alert conditions and whether their threshold is a percent.",
@@ -26,6 +29,7 @@ DESCRIPTIONS: dict[str, str] = {
     "workspaces": "Terminal app workspaces with their hint, table and sort columns.",
     "report-operations": "Every shared report and summary operation, with its syntax and the commands that accept it.",
     "report-fields": "Every report source field, with its group and one-based position in the source schema.",
+    "command-parameters": "Visible CLI options and arguments, with their one-based position within each command.",
 }
 
 # What each alert condition compares, and whether its threshold is a percent. Looked up by
@@ -78,5 +82,16 @@ def load_source(name: str, app: App) -> list[dict[str, Any]]:
             for module in reports.SOURCE_MODULES
             for source, schema in module.SOURCES.items()
             for position, field in enumerate(schema, 1)
+        ]
+    if name == "command-parameters":
+        parameter_fields = SOURCES[name][2:]
+        return [
+            {
+                "command": row["command"],
+                "position": position,
+                **{field: parameter[field] for field in parameter_fields},
+            }
+            for row in _catalog(main)
+            for position, parameter in enumerate(row["parameters"], 1)
         ]
     raise KeyError(name)

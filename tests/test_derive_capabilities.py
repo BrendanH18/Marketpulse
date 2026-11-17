@@ -303,7 +303,7 @@ def test_inventory_matches_documented_five_thousand():
 
 
 def test_inventory_matches_documented_ten_more_functions():
-    # #153 adds functions 51-60, and the matrix above runs each on all 57 datasets.
+    # #153 adds functions 51-60, and the matrix above runs each on all current datasets.
     added = [function.name for function in report_derive.FUNCTIONS[50:]]
     assert added == [
         "add-days",
@@ -317,8 +317,9 @@ def test_inventory_matches_documented_ten_more_functions():
         "starts-with",
         "ends-with",
     ]
-    # Preserve the historical #153 inventory; #162 adds report-fields afterwards.
-    earlier_sources = set(reports.SOURCES) - {"report-fields"}
+    # The #153 inventory stops before the first dataset added under #162.
+    sources = list(reports.SOURCES)
+    earlier_sources = sources[: sources.index("report-fields")]
     assert len(earlier_sources) == 57
     assert len(added) * len(earlier_sources) == 570
 

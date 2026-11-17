@@ -520,9 +520,7 @@ def test_having_without_group_by_filters_the_single_summary_row(serve):
         ":rows=1",
         "bigger:rows=1",
         "GT:rows=1",
-        # Underscore spellings and option names that are not dashed filter names.
-        "not_contains:code=x",
-        "min_length:code=2",
+        # Option names that are not dashed filter names and have no close filter name.
         "in_values:rows=[1]",
         "in-values:rows=[1]",
         # Older report options that are not FIELD=VALUE row filters.
