@@ -28,6 +28,7 @@ from . import (
     report_system,
 )
 from .base import App, pass_app
+from .report_discovery import SourceChoice
 from .root import main
 
 # Each module owns its adapters: SOURCES (ordered field schemas), DESCRIPTIONS, GROUP and load_source.
@@ -241,7 +242,7 @@ def _advanced_options(command):
 
 @main.command("report")
 @_advanced_options
-@click.argument("source", type=click.Choice(sorted(SOURCES)), metavar="SOURCE")
+@click.argument("source", type=SourceChoice(sorted(SOURCES)), metavar="SOURCE")
 @click.option(
     "--derive",
     multiple=True,

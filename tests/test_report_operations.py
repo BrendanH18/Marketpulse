@@ -133,23 +133,27 @@ def accepting(item):
     return tuple(found)
 
 
-def invocation(command, item):
+def invocation(command, item, source="report-operations"):
     """An entry's syntax as arguments for one command, with what its option needs beside it."""
     option, _, argument = item.syntax.partition(" ")
-    arguments = [command, "report-operations", option]
+    field = "position" if source == "report-fields" else "issue"
+    examples = {**EXAMPLES, "FIELD": field}
+    if source == "report-fields":
+        examples["FIELD,FIELD"] = "position,source"
+    arguments = [command, source, option]
     if argument:
-        arguments.append(PLACEHOLDER.sub(lambda match: EXAMPLES[match.group()], argument))
+        arguments.append(PLACEHOLDER.sub(lambda match: examples[match.group()], argument))
     if command == "summarize":
         # Every summary needs a metric; `result` is also the column that --having filters.
         if option != "--metric":
             arguments += ["--metric", "result=count"]
         # Grouping on the example field lets --sort and --totals run; lines output takes one column only.
         if item.syntax != "--format lines":
-            arguments += ["--group-by", "issue"]
+            arguments += ["--group-by", field]
     elif item.syntax == "--format lines":
-        arguments += ["--fields", "issue"]
+        arguments += ["--fields", field]
     if option == "--descending":
-        arguments += ["--sort", "issue"]
+        arguments += ["--sort", field]
     return arguments
 
 
@@ -217,11 +221,12 @@ def test_every_operation_of_a_command_is_cataloged(command):
     assert cataloged == set(formats.type.choices) - {formats.default}
 
 
-def test_every_syntax_runs_on_each_command_that_lists_it():
+@pytest.mark.parametrize("source", ["report-operations", "report-fields"])
+def test_every_syntax_runs_on_each_command_that_lists_it(source):
     failures = {}
     for item in OPERATIONS:
         for command in item.commands:
-            result = CliRunner().invoke(main, invocation(command, item))
+            result = CliRunner().invoke(main, invocation(command, item, source))
             if result.exit_code != 0:
                 failures[command, item.syntax] = result.output or repr(result.exception)
     assert not failures

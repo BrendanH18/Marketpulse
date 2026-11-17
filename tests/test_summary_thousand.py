@@ -76,8 +76,10 @@ def test_inventory_is_seven_operations_on_fifty_seven_datasets():
     assert [case[0] for case in CASES] == list(FURTHER_OPERATIONS)
     assert len(FURTHER_OPERATIONS) == len(set(FURTHER_OPERATIONS)) == 7
     assert ALL_OPERATIONS[-7:] == FURTHER_OPERATIONS
-    assert len(reports.SOURCES) == 57
-    assert len(CASES) * len(reports.SOURCES) == 399
+    # Preserve the historical #153 inventory; #162 adds report-fields afterwards.
+    earlier_sources = set(reports.SOURCES) - {"report-fields"}
+    assert len(earlier_sources) == 57
+    assert len(CASES) * len(earlier_sources) == 399
 
 
 # Edge cases, straight on the summary function.

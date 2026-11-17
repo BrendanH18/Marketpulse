@@ -16,6 +16,7 @@ import click
 
 from . import report_derive, report_filters, report_formats, report_metrics, reports
 from .base import App, pass_app
+from .report_discovery import SourceChoice
 from .root import main
 
 
@@ -131,7 +132,7 @@ def _filter_options(command):
 
 @main.command("summarize")
 @_filter_options
-@click.argument("source", type=click.Choice(sorted(reports.SOURCES)), metavar="SOURCE")
+@click.argument("source", type=SourceChoice(sorted(reports.SOURCES)), metavar="SOURCE")
 @click.option(
     "--derive",
     multiple=True,

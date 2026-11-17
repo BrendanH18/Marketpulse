@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Two hundred offline discovery improvements
+  ([#162](https://github.com/BrendanH18/Marketpulse/issues/162); see the
+  [inventory](docs/cli-discovery-improvements.md)): `report report-fields` exposes
+  each dataset's ordered columns with all 197 shared report operations, and
+  misspelled report sources, summary sources and derived-field functions suggest close matches.
+
 - One thousand offline improvements
   ([#153](https://github.com/BrendanH18/Marketpulse/issues/153); see the
   [inventory](docs/thousand-improvements.md)):

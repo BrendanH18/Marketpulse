@@ -444,8 +444,8 @@ def test_inventory_matches_documented_capabilities():
     earlier = [
         name for module in EARLIER_MODULES for name in importlib.import_module(f"marketpulse.cli.{module}").SOURCES
     ]
-    assert len(earlier) == 50 and len(reports.SOURCES) == 57
-    assert list(reports.SOURCES) == [*earlier, *NEW_SOURCES]
+    assert len(earlier) == 50 and len(reports.SOURCES) == 58
+    assert list(reports.SOURCES) == [*earlier, *NEW_SOURCES, "report-fields"]
 
     operations = [(name, family) for family, names in NEW_OPERATIONS.items() for name in names.split()]
     assert [(case.name, case.family) for case in CASES] == operations
@@ -454,7 +454,7 @@ def test_inventory_matches_documented_capabilities():
     assert set(EXPORTS) == {case.name for case in CASES if case.family == FORMAT}
     # The 7 new sources × the 150 earlier shared operations (100 report and summary operations and
     # 50 derive functions), plus the 30 new operations × all 57 sources.
-    assert len(NEW_SOURCES) * 150 + len(CASES) * len(reports.SOURCES) == 2760
+    assert len(NEW_SOURCES) * 150 + len(CASES) * len([*earlier, *NEW_SOURCES]) == 2760
 
     for source, schema in reports.SOURCES.items():
         # The matrix needs two distinct source fields, and its metric names must differ from the
