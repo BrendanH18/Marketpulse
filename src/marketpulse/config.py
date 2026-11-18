@@ -15,9 +15,10 @@ DEFAULT_WATCHLIST = ["XEQT.TO", "VFV.TO", "QQQ", "SPY", "AAPL", "NVDA", "BTC-USD
 _warned: set[Path] = set()
 
 
-def data_dir() -> Path:
+def data_dir(*, create: bool = True) -> Path:
     base = Path(os.environ.get("MARKETPULSE_DATA") or Path.home() / ".marketpulse")
-    base.mkdir(parents=True, exist_ok=True)
+    if create:
+        base.mkdir(parents=True, exist_ok=True)
     return base
 
 

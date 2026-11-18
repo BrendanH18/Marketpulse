@@ -1,6 +1,8 @@
 """Offline backup discovery and read-only verification on fictional databases."""
 
 import json
+import os
+import re
 import sqlite3
 from hashlib import sha256
 
@@ -9,7 +11,7 @@ from click.testing import CliRunner
 
 from marketpulse.cli import main
 from marketpulse.db import Store, latest_version
-from marketpulse.models import Account
+from marketpulse.models import Account, Transaction, TxnType
 
 
 @pytest.fixture
@@ -121,3 +123,80 @@ def test_backup_verify_reports_staging_sqlite_error(cli, copies, monkeypatch):
     human = cli("backup", "verify", str(source))
     assert human.exit_code == 1 and "database or disk is full" in human.output
     assert sha256(source.read_bytes()).digest() == before
+
+
+@pytest.mark.parametrize("selector", ["path", "name", "latest"])
+def test_restore_preview_compares_ledgers_without_taking_a_backup(selector):
+    # Exercise real startup: the old backup dates would normally trigger a daily backup.
+    live = Store()
+    try:
+        first = live.add_account(Account(name="Fictional Maple"))
+        live.add_transaction(Transaction(first.saved_id, TxnType.DEPOSIT, date="2024-01-02", amount=40))
+        source = live.backup(dest=live.backup_dir / "marketpulse-20240103-090000-manual.db")
+        second = live.add_account(Account(name="Fictional Cedar"))
+        for day in ("2024-02-04", "2024-02-01"):
+            live.add_transaction(Transaction(second.saved_id, TxnType.DEPOSIT, date=day, amount=20))
+        # --latest must skip this newer pre-restore copy.
+        live.backup(dest=live.backup_dir / "marketpulse-20240205-090000-pre-restore.db")
+    finally:
+        live.close()
+
+    inventory = set(live.path.parent.rglob("*"))
+    files = [live.path, *live.backups()]
+    before = {p: p.read_bytes() for p in files}
+    argument = {"path": str(source), "name": source.name, "latest": "--latest"}[selector]
+    result = CliRunner().invoke(main, ["backup", "restore", "--dry-run", argument], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    assert source.name in result.output.replace("\n", "")
+    for label, current, backup in (
+        ("Accounts", "2", "1"),
+        ("Transactions", "3", "1"),
+        ("Latest transaction date", "2024-02-04", "2024-01-02"),
+    ):
+        assert re.search(rf"{label}\W+{current}\W+{backup}\b", result.output)
+    assert set(live.path.parent.rglob("*")) == inventory
+    assert {p: p.read_bytes() for p in files} == before
+
+
+def test_restore_preview_empty_backup_without_a_current_database(store):
+    source = store.backup_dir / "empty.db"
+    store.backup(dest=source)
+    result = CliRunner().invoke(main, ["backup", "restore", str(source), "--dry-run"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    for label in ("Accounts", "Transactions"):
+        assert re.search(rf"{label}\W+0\W+0\b", result.output)
+    assert re.search(r"Latest transaction date\W*—\W*—", result.output)
+    assert not (store.path.parent / "data").exists()
+
+
+def test_restore_preview_rejects_invalid_backup_without_creating_a_ledger(tmp_path):
+    source = tmp_path / "damaged.db"
+    source.write_bytes(b"fictional invalid backup")
+    result = CliRunner().invoke(main, ["backup", "restore", "--dry-run", str(source)], catch_exceptions=False)
+    assert result.exit_code == 1
+    assert "database" in result.output.lower()
+    assert source.read_bytes() == b"fictional invalid backup"
+    assert not (tmp_path / "data").exists()
+
+
+def test_restore_preview_includes_committed_wal_frames(tmp_path):
+    live = Store()
+    saved = Store(tmp_path / "saved.db")
+    try:
+        for store, name in ((live, "Maple"), (saved, "Cedar")):
+            store._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            store.add_account(Account(name=name))
+        saved.add_account(Account(name="Aspen"))
+        result = CliRunner().invoke(main, ["backup", "restore", "--dry-run", str(saved.path)], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        assert re.search(r"Accounts\W+1\W+2\b", result.output)
+    finally:
+        saved.close()
+        live.close()
+
+
+def test_restore_preview_rejects_device_file():
+    result = CliRunner().invoke(main, ["backup", "restore", "--dry-run", os.devnull], catch_exceptions=False)
+    assert result.exit_code == 1
+    assert "not a regular file" in result.output

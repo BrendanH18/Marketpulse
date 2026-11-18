@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `backup restore --dry-run` compares account counts, transaction counts and latest transaction dates
+  before replacing the ledger ([#171](https://github.com/BrendanH18/Marketpulse/issues/171)).
+
 ## [3.1.0] - 2026-11-18
 
 MarketPulse now checks sales against the ledger on the sale date, including

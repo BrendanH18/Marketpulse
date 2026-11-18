@@ -946,7 +946,7 @@ def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool)
         raise click.UsageError("Give one or more backups to verify, or --latest.")
     if latest:
         started = datetime.now().replace(microsecond=0)
-        candidates = _restore_candidates(app.store, started)
+        candidates = _restore_candidates(app.store.backup_dir, started)
         if not candidates:
             fail(f"No backups to verify in {app.store.backup_dir}")
         sources = candidates[:1]
@@ -969,18 +969,20 @@ def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool)
         raise click.exceptions.Exit(1)
 
 
-def _restore_candidates(store: Store, started: datetime) -> list[Path]:
+def _restore_candidates(directory: Path, started: datetime) -> list[Path]:
     """Backups `restore --latest` may pick, newest first.
 
     Neither a daily backup taken since `started` (a copy of the ledger as it is now) nor a
     pre-restore one (the ledger a restore replaced) is what "go back to my latest backup" means.
     """
 
-    def is_copy_of_current(p: Path) -> bool:
-        reason = store.backup_reason(p)
-        return reason == "pre-restore" or (reason == "daily" and (store.backup_time(p) or started) >= started)
+    from ..db import Store, list_backups
 
-    return [p for p in store.backups() if not is_copy_of_current(p)]
+    def is_copy_of_current(p: Path) -> bool:
+        reason = Store.backup_reason(p)
+        return reason == "pre-restore" or (reason == "daily" and (Store.backup_time(p) or started) >= started)
+
+    return [p for p in list_backups(directory) if not is_copy_of_current(p)]
 
 
 @backup.command("restore")
@@ -988,8 +990,9 @@ def _restore_candidates(store: Store, started: datetime) -> list[Path]:
 @click.argument("path", type=click.Path(dir_okay=False), required=False)
 @click.option("--latest", is_flag=True, help="Restore the newest backup in the backups directory.")
 @click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation.")
+@click.option("--dry-run", is_flag=True, help="Compare the current ledger and backup without restoring.")
 @pass_app
-def backup_restore(app: App, path: str | None, latest: bool, yes: bool) -> None:
+def backup_restore(app: App, path: str | None, latest: bool, yes: bool, dry_run: bool) -> None:
     """Replace the ledger with a backup (a PATH, or a file name from `backup list`).
 
     \b
@@ -999,28 +1002,43 @@ def backup_restore(app: App, path: str | None, latest: bool, yes: bool) -> None:
     is copied in. Anything recorded after the backup was taken is replaced.
     The configuration file is not part of a backup and stays as it is.
     """
-    from ..db import RestoreError
+    from ..config import data_dir
+    from ..db import BACKUP_DIRNAME, RestoreError, Store, preview_restore
 
     if latest == (path is not None):
         fail("Give a backup to restore, or --latest.")
     # Opening the ledger may take the daily backup, a copy of the ledger as it is now.
     started = datetime.now().replace(microsecond=0)
-    store = app.store
+    ledger = data_dir(create=False) / "marketpulse.db" if dry_run else app.store.path
+    directory = ledger.parent / BACKUP_DIRNAME
     if latest:
-        candidates = _restore_candidates(store, started)
+        candidates = _restore_candidates(directory, started)
         if not candidates:
-            fail(f"No backups to restore in {store.backup_dir}")
+            fail(f"No backups to restore in {directory}")
         source = candidates[0]
     else:
         assert path is not None
         source = Path(path).expanduser()
         # A bare name is one from `backup list`, even if the current folder has a file called that too.
-        if path == source.name and (store.backup_dir / path).exists():
-            source = store.backup_dir / path
-    taken = store.backup_time(source)
+        if path == source.name and (directory / path).exists():
+            source = directory / path
+    taken = Store.backup_time(source)
     when = f" (taken {taken:%Y-%m-%d %H:%M})" if taken else ""
     # A file outside the backups folder is shown in full, so it can't pass for one in it.
-    shown = source.name if source.parent == store.backup_dir else str(source.resolve())
+    shown = source.name if source.parent == directory else str(source.resolve())
+    if dry_run:
+        try:
+            current, saved = preview_restore(ledger, source)
+        except RestoreError as e:
+            fail(str(e))
+        click.echo(f"Restore preview: {shown}{when}")
+        table = render.table("Metric", "Current", "Backup")
+        table.add_row("Accounts", str(current.accounts), str(saved.accounts))
+        table.add_row("Transactions", str(current.transactions), str(saved.transactions))
+        table.add_row("Latest transaction date", Text(current.latest_date or "—"), Text(saved.latest_date or "—"))
+        app.console.print(table)
+        return
+    store = app.store
     if not yes and not click.confirm(
         f"Replace the ledger in {store.path.parent} with {shown}{when}? The current ledger is backed up first."
     ):
