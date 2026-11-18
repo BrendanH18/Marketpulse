@@ -131,6 +131,14 @@ marketpulse backup restore /path/to/portfolio-backup.db           # or any backu
 marketpulse backup restore --latest                               # the newest backup
 ```
 
+To compare before restoring, run `marketpulse backup restore PATH --dry-run` or
+`marketpulse backup restore --latest --dry-run`. The preview shows the selected
+file and compares the total account count (including archived accounts), transaction
+count, and latest transaction date with your current ledger. A dash means there
+are no transactions. If there is no current database, the current counts are zero.
+The preview runs the backup integrity and version checks and skips startup
+maintenance, so it creates no daily or pre-restore backup.
+
 A restore:
 
 1. Checks the backup first. It must pass SQLite's integrity check, be a MarketPulse

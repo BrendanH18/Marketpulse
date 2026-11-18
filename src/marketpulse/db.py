@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
+import stat
 import threading
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -241,6 +243,63 @@ def backup_verification_error(source: Path) -> str | None:
     except (RestoreError, OSError, sqlite3.Error) as problem:
         return str(problem)
     return None
+
+
+@dataclass(frozen=True)
+class LedgerSummary:
+    accounts: int
+    transactions: int
+    latest_date: str | None
+
+
+def _ledger_summary(path: Path) -> LedgerSummary:
+    with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as conn:
+        row = conn.execute("SELECT (SELECT COUNT(*) FROM accounts), COUNT(*), MAX(date) FROM transactions").fetchone()
+        return LedgerSummary(*row)
+
+
+def _preview_copy(source: Path, directory: Path) -> Path:
+    """Keep SQLite sidecars in scratch, including when it recovers a WAL."""
+    source = source.resolve(strict=True)
+    directory.mkdir()
+    target = directory / source.name
+    files = [source, Path(f"{source}-wal"), Path(f"{source}-journal")]
+
+    def revisions() -> dict[Path, tuple[int, int, int, int]]:
+        result = {}
+        for path in files:
+            try:
+                st = path.stat()
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                raise RestoreError(f"{path} is not a regular file.")
+            result[path] = (st.st_dev, st.st_ino, st.st_size, st.st_ctime_ns)
+        return result
+
+    # Copy a stable set of files. A concurrent write/checkpoint invalidates the copy.
+    before = revisions()
+    for path in before:
+        shutil.copyfile(path, directory / path.name)
+    if before != revisions():
+        raise RestoreError(f"{source.name} changed during preview. Please try again.")
+    return target
+
+
+def preview_restore(current: Path, source: Path) -> tuple[LedgerSummary, LedgerSummary]:
+    """Read both summaries without running startup maintenance on the live database."""
+    try:
+        if current.exists() and source.is_file() and current.samefile(source):
+            raise RestoreError(f"{source} is the ledger itself.")
+        with TemporaryDirectory(prefix="marketpulse-preview-") as scratch:
+            staged = Path(scratch) / "checked.db"
+            _stage_restore(_preview_copy(source, Path(scratch) / "backup"), staged)
+            before = LedgerSummary(0, 0, None)
+            if current.exists():
+                before = _ledger_summary(_preview_copy(current, Path(scratch) / "current"))
+            return before, _ledger_summary(staged)
+    except (OSError, sqlite3.Error) as error:
+        raise RestoreError(str(error)) from error
 
 
 _TXN_COLS = "account_id, date, type, symbol, quantity, price, amount, fees, currency, note, ratio, target_account_id"
