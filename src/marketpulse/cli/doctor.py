@@ -10,14 +10,15 @@ import shutil
 import sys
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Literal
 
 import click
 from rich.text import Text
 
 from .. import __version__
-from ..config import config_path
-from ..db import backup_verification_error
+from ..config import config_path, data_dir
+from ..db import BACKUP_DIRNAME, backup_verification_error, list_backups
 from ..market import PRIMARY
 from ..providers import provider_label
 from ..themes import omarchy_active, pretty_name
@@ -177,6 +178,25 @@ def doctor(
         click.get_current_context().exit(1)
 
 
+def _backup_check(backups: list[Path], *, verify: bool) -> Check:
+    if not backups:
+        return Check("backups", "fail" if verify else "info", "none yet — `marketpulse backup`")
+    newest = backups[0]
+    try:
+        fresh = time.time() - newest.stat().st_mtime < 7 * 86400
+    except OSError as error:
+        return Check("backups", "fail", str(error))
+    detail = f"{len(backups)} · newest {newest.name}"
+    if verify:
+        if not fresh:
+            detail += " · at least 7 days old"
+        problem = backup_verification_error(newest)
+        detail += f" · {problem or 'integrity verified'}"
+        if problem is not None:
+            return Check("backups", "fail", detail)
+    return Check("backups", _status(fresh), detail)
+
+
 def _collect(app: App, *, offline: bool, selected: set[str] | None = None, verify_backup: bool = False) -> list[Check]:
     """Run each selected check once (all by default); the caller renders them as text or JSON.
 
@@ -195,6 +215,11 @@ def _collect(app: App, *, offline: bool, selected: set[str] | None = None, verif
     def skip(label: str, value: str) -> None:
         checks.append(Check(label, "skipped", value))
 
+    # Opening the ledger may create a daily or pre-migration backup. Inspect the files first.
+    verified_backup = None
+    if verify_backup and want("backups"):
+        verified_backup = _backup_check(list_backups(data_dir() / BACKUP_DIRNAME), verify=True)
+
     if want("version"):
         python = f"Python {platform.python_version()}"
         row("version", f"MarketPulse {__version__} · {python} · {platform.system()} {platform.release()}", None)
@@ -203,26 +228,7 @@ def _collect(app: App, *, offline: bool, selected: set[str] | None = None, verif
     if want("database"):
         row("database", f"{app.tracker.store.path} (schema v{app.tracker.store.schema_version})")
     if want("backups"):
-        backups = app.tracker.store.backups()
-        if not backups:
-            row("backups", "none yet — `marketpulse backup`", False if verify_backup else None)
-        else:
-            newest = backups[0]
-            try:
-                age_days = (time.time() - newest.stat().st_mtime) / 86400
-            except OSError as error:
-                row("backups", str(error), False)
-            else:
-                fresh = age_days < 7
-                detail = f"{len(backups)} · newest {newest.name}"
-                if verify_backup:
-                    if not fresh:
-                        detail += " · at least 7 days old"
-                    problem = backup_verification_error(newest)
-                    detail += f" · {problem or 'integrity verified'}"
-                    row("backups", detail, fresh and problem is None)
-                else:
-                    row("backups", detail, fresh)
+        checks.append(verified_backup or _backup_check(app.store.backups(), verify=False))
     if want("ledger"):
         row(
             "ledger",

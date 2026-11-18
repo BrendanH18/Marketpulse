@@ -72,7 +72,8 @@ never masked.
 
 For a scheduled backup check, run
 `marketpulse doctor --only backups --verify-backup --strict --json`.
-Doctor checks the age and integrity of the newest file in its backup list.
+Doctor checks the age and integrity of the newest backup present when the
+command starts. Selecting only backups avoids opening the live ledger.
 A missing, invalid, or week-old backup fails the check. Verification uses
 the same read-only restore preflight as `backup verify` and needs temporary
 disk space for a copy. Omit `--json` for human-readable output.

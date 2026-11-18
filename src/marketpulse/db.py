@@ -205,6 +205,23 @@ def _stage_restore(source: Path, staged: Path) -> None:
         conn.close()
 
 
+def list_backups(directory: Path) -> list[Path]:
+    """List backup files newest first without opening the live database."""
+    if not directory.is_dir():
+        return []
+
+    # The timestamp is at a fixed offset in the name, so sorting by name is sorting by time.
+    def ordering(path: Path) -> tuple[str, int, int, str]:
+        suffix = path.stem.rsplit("-", 1)[-1]
+        try:
+            modified = path.stat().st_mtime_ns
+        except OSError:
+            modified = 0
+        return path.name[12:27], modified, int(suffix) if suffix.isdecimal() else 0, path.name
+
+    return sorted(directory.glob("marketpulse-*.db"), key=ordering, reverse=True)
+
+
 def backup_verification_error(source: Path) -> str | None:
     """Run the restore preflight on a temporary copy and report any failure."""
     try:
@@ -377,10 +394,7 @@ class Store:
 
     def backups(self) -> list[Path]:
         """Backups in the backups directory, newest first."""
-        if not self.backup_dir.is_dir():
-            return []
-        # The timestamp is at a fixed offset in the name, so sorting by name is sorting by time.
-        return sorted(self.backup_dir.glob("marketpulse-*.db"), key=lambda p: p.name[12:27], reverse=True)
+        return list_backups(self.backup_dir)
 
     @staticmethod
     def backup_reason(path: Path) -> str:

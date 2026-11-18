@@ -315,7 +315,8 @@ def test_new_csv_outputs_use_newline_endings(cli, store):
         assert "\r" not in cli(*args).stdout_bytes.decode().replace(os.linesep, "\n")
 
 
-def test_doctor_verify_backup(offline, store):
+def test_doctor_verify_backup(offline, store, monkeypatch):
+    monkeypatch.setenv("MARKETPULSE_DATA", str(store.path.parent))
     args = ("doctor", "--only", "backups", "--strict", "--json")
 
     def check(expected_code, detail, *extra):
@@ -335,3 +336,34 @@ def test_doctor_verify_backup(offline, store):
     backup.write_bytes(b"fictional damaged backup")
     check(0, backup.name)
     check(1, f"{backup.name} isn't a readable database", "--verify-backup")
+
+
+@pytest.mark.parametrize("migration", [False, True])
+def test_verify_backup_inspects_populated_ledger_before_startup_backups(migration, monkeypatch):
+    from marketpulse.db import MIGRATIONS, latest_version
+
+    runner = CliRunner()
+    assert runner.invoke(main, ["deposit", "500"]).exit_code == 0
+    if migration:
+        monkeypatch.setitem(MIGRATIONS, latest_version() + 1, "SELECT 1;")
+    result = runner.invoke(
+        main,
+        ["doctor", "--offline", "--only", "database", "--only", "backups", "--verify-backup", "--strict", "--json"],
+    )
+    assert result.exit_code == 1, result.output
+    assert "none yet" in json.loads(result.output)["checks"][-1]["detail"]
+    result = runner.invoke(main, ["doctor", "--only", "backups", "--strict"])
+    assert result.exit_code == 0
+    assert ("pre-v" if migration else "daily.db") in result.output
+
+
+def test_verify_backup_checks_newest_same_second_backup(offline, store, monkeypatch):
+    monkeypatch.setenv("MARKETPULSE_DATA", str(store.path.parent))
+    directory = store.backup_dir
+    older = store.backup(dest=directory / "marketpulse-20260101-120000-manual-2.db")
+    newest = older.with_name("marketpulse-20260101-120000-manual-10.db")
+    newest.write_bytes(b"damaged")
+    os.utime(newest, ns=(older.stat().st_mtime_ns,) * 2)
+    result = offline("doctor", "--only", "backups", "--verify-backup", "--strict", "--json")
+    assert result.exit_code == 1, result.output
+    assert newest.name in json.loads(result.output)["checks"][0]["detail"]
