@@ -210,14 +210,14 @@ def list_backups(directory: Path) -> list[Path]:
     if not directory.is_dir():
         return []
 
-    # The timestamp is at a fixed offset in the name, so sorting by name is sorting by time.
+    # The name records the backup second and collision counter even if a file is later touched.
     def ordering(path: Path) -> tuple[str, int, int, str]:
         suffix = path.stem.rsplit("-", 1)[-1]
         try:
             modified = path.stat().st_mtime_ns
         except OSError:
             modified = 0
-        return path.name[12:27], modified, int(suffix) if suffix.isdecimal() else 0, path.name
+        return path.name[12:27], int(suffix) if suffix.isdecimal() else 0, modified, path.name
 
     return sorted(directory.glob("marketpulse-*.db"), key=ordering, reverse=True)
 

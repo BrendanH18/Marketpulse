@@ -357,13 +357,15 @@ def test_verify_backup_inspects_populated_ledger_before_startup_backups(migratio
     assert ("pre-v" if migration else "daily.db") in result.output
 
 
-def test_verify_backup_checks_newest_same_second_backup(offline, store, monkeypatch):
+@pytest.mark.parametrize("older_touched_later", [False, True])
+def test_verify_backup_checks_newest_same_second_backup(offline, store, monkeypatch, older_touched_later):
     monkeypatch.setenv("MARKETPULSE_DATA", str(store.path.parent))
     directory = store.backup_dir
     older = store.backup(dest=directory / "marketpulse-20260101-120000-manual-2.db")
     newest = older.with_name("marketpulse-20260101-120000-manual-10.db")
     newest.write_bytes(b"damaged")
-    os.utime(newest, ns=(older.stat().st_mtime_ns,) * 2)
+    older_mtime = newest.stat().st_mtime_ns + (1_000_000_000 if older_touched_later else 0)
+    os.utime(older, ns=(older_mtime,) * 2)
     result = offline("doctor", "--only", "backups", "--verify-backup", "--strict", "--json")
     assert result.exit_code == 1, result.output
     assert newest.name in json.loads(result.output)["checks"][0]["detail"]
