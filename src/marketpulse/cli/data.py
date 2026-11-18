@@ -940,10 +940,7 @@ def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool)
     Uses the restore preflight with a temporary copy; each source is opened read-only.
     Does not check financial correctness or restore the backup.
     """
-    import sqlite3
-    from tempfile import TemporaryDirectory
-
-    from ..db import RestoreError, _stage_restore
+    from ..db import backup_verification_error
 
     if latest == bool(paths):
         raise click.UsageError("Give one or more backups to verify, or --latest.")
@@ -957,12 +954,7 @@ def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool)
         sources = [_backup_source(app, path) for path in paths]
     results: list[dict] = []
     for source in sources:
-        error = None
-        try:
-            with TemporaryDirectory(prefix="marketpulse-verify-") as scratch:
-                _stage_restore(source, Path(scratch) / "checked.db")
-        except (RestoreError, OSError, sqlite3.Error) as problem:
-            error = str(problem)
+        error = backup_verification_error(source)
         results.append({"ok": error is None, "path": str(source.resolve()), "error": error})
     several = len(paths) > 1
     if as_json:

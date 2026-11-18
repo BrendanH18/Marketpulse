@@ -10,13 +10,15 @@ import shutil
 import sys
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Literal
 
 import click
 from rich.text import Text
 
 from .. import __version__
-from ..config import config_path
+from ..config import config_path, data_dir
+from ..db import BACKUP_DIRNAME, backup_verification_error, list_backups
 from ..market import PRIMARY
 from ..providers import provider_label
 from ..themes import omarchy_active, pretty_name
@@ -76,6 +78,7 @@ def _check_names(ctx, param, values: tuple[str, ...]) -> tuple[str, ...]:
 @main.command()
 @click.option("--offline", is_flag=True, help="Skip the network checks (market data, fallback quotes).")
 @click.option("--json", "as_json", is_flag=True, help="Print every check as JSON with an overall ok flag.")
+@click.option("--verify-backup", is_flag=True, help="Also verify the newest backup during the backups check.")
 @click.option("--strict", is_flag=True, help="Exit with status 1 if any check failed.")
 @click.option(
     "--only", multiple=True, callback=_check_names, help="Run only this check (repeatable), e.g. --only ledger-checks."
@@ -95,6 +98,7 @@ def doctor(
     app: App,
     offline: bool,
     as_json: bool,
+    verify_backup: bool,
     strict: bool,
     only: tuple[str, ...],
     exclude: tuple[str, ...],
@@ -116,7 +120,7 @@ def doctor(
     if count and summary:
         raise click.UsageError("--count cannot be combined with --summary.")
     if list_checks:
-        if only or exclude or failed_only or summary or statuses or search or strict:
+        if only or exclude or failed_only or summary or statuses or search or strict or verify_backup:
             raise click.UsageError("--list-checks cannot be combined with execution or result filters.")
         if as_json:
             click.echo(json.dumps(list(CHECKS)))
@@ -134,7 +138,7 @@ def doctor(
     if failed_only and summary:
         raise click.UsageError("--failed-only cannot be combined with --summary.")
     selected = set(only) if only else set(CHECKS) - set(exclude)
-    checks = _collect(app, offline=offline, selected=selected)
+    checks = _collect(app, offline=offline, selected=selected, verify_backup=verify_backup)
     failed = any(c.status == "fail" for c in checks)
     if failed_only:
         checks = [c for c in checks if c.status == "fail"]
@@ -174,7 +178,26 @@ def doctor(
         click.get_current_context().exit(1)
 
 
-def _collect(app: App, *, offline: bool, selected: set[str] | None = None) -> list[Check]:
+def _backup_check(backups: list[Path], *, verify: bool) -> Check:
+    if not backups:
+        return Check("backups", "fail" if verify else "info", "none yet — `marketpulse backup`")
+    newest = backups[0]
+    try:
+        fresh = time.time() - newest.stat().st_mtime < 7 * 86400
+    except OSError as error:
+        return Check("backups", "fail", str(error))
+    detail = f"{len(backups)} · newest {newest.name}"
+    if verify:
+        if not fresh:
+            detail += " · at least 7 days old"
+        problem = backup_verification_error(newest)
+        detail += f" · {problem or 'integrity verified'}"
+        if problem is not None:
+            return Check("backups", "fail", detail)
+    return Check("backups", _status(fresh), detail)
+
+
+def _collect(app: App, *, offline: bool, selected: set[str] | None = None, verify_backup: bool = False) -> list[Check]:
     """Run each selected check once (all by default); the caller renders them as text or JSON.
 
     A check left out of `selected` never runs, so excluding `market data` makes no request.
@@ -192,6 +215,11 @@ def _collect(app: App, *, offline: bool, selected: set[str] | None = None) -> li
     def skip(label: str, value: str) -> None:
         checks.append(Check(label, "skipped", value))
 
+    # Opening the ledger may create a daily or pre-migration backup. Inspect the files first.
+    verified_backup = None
+    if verify_backup and want("backups"):
+        verified_backup = _backup_check(list_backups(data_dir() / BACKUP_DIRNAME), verify=True)
+
     if want("version"):
         python = f"Python {platform.python_version()}"
         row("version", f"MarketPulse {__version__} · {python} · {platform.system()} {platform.release()}", None)
@@ -200,13 +228,7 @@ def _collect(app: App, *, offline: bool, selected: set[str] | None = None) -> li
     if want("database"):
         row("database", f"{app.tracker.store.path} (schema v{app.tracker.store.schema_version})")
     if want("backups"):
-        newest = next(iter(app.tracker.store.backups()), None)
-        if newest is None:
-            row("backups", "none yet — `marketpulse backup`", None)
-        else:
-            age_days = (time.time() - newest.stat().st_mtime) / 86400
-            # Daily backups keep this under a day; a week means they're failing (full disk, permissions…).
-            row("backups", f"{len(app.tracker.store.backups())} · newest {newest.name}", age_days < 7)
+        checks.append(verified_backup or _backup_check(app.store.backups(), verify=False))
     if want("ledger"):
         row(
             "ledger",

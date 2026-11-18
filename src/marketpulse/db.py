@@ -205,6 +205,44 @@ def _stage_restore(source: Path, staged: Path) -> None:
         conn.close()
 
 
+def list_backups(directory: Path) -> list[Path]:
+    """List backup files newest first without opening the live database."""
+    if not directory.is_dir():
+        return []
+
+    groups: dict[tuple[str, str], list[tuple[int, Path]]] = {}
+    for path in directory.glob("marketpulse-*.db"):
+        reason = path.stem[28:]
+        prefix, _, suffix = reason.rpartition("-")
+        counter = 1
+        if prefix and suffix.isdecimal():
+            reason, counter = prefix, int(suffix)
+        groups.setdefault((path.name[12:27], reason), []).append((counter, path))
+
+    ranked = []
+    for (stamp, reason), files in groups.items():
+        newer_mtime = None
+        for counter, path in sorted(files, reverse=True):
+            try:
+                modified = path.stat().st_mtime_ns
+            except OSError:
+                modified = 0
+            # A touched older copy cannot be newer than its successor in this collision series.
+            newer_mtime = modified if newer_mtime is None else min(modified, newer_mtime)
+            ranked.append((stamp, newer_mtime, reason, counter, path))
+    return [item[-1] for item in sorted(ranked, reverse=True)]
+
+
+def backup_verification_error(source: Path) -> str | None:
+    """Run the restore preflight on a temporary copy and report any failure."""
+    try:
+        with TemporaryDirectory(prefix="marketpulse-verify-") as scratch:
+            _stage_restore(source, Path(scratch) / "checked.db")
+    except (RestoreError, OSError, sqlite3.Error) as problem:
+        return str(problem)
+    return None
+
+
 _TXN_COLS = "account_id, date, type, symbol, quantity, price, amount, fees, currency, note, ratio, target_account_id"
 _SNAPSHOT_UPSERT = (
     "INSERT INTO snapshots(date, net_worth, book, contributions, currency, detail) VALUES (?,?,?,?,?,?)"
@@ -367,10 +405,7 @@ class Store:
 
     def backups(self) -> list[Path]:
         """Backups in the backups directory, newest first."""
-        if not self.backup_dir.is_dir():
-            return []
-        # The timestamp is at a fixed offset in the name, so sorting by name is sorting by time.
-        return sorted(self.backup_dir.glob("marketpulse-*.db"), key=lambda p: p.name[12:27], reverse=True)
+        return list_backups(self.backup_dir)
 
     @staticmethod
     def backup_reason(path: Path) -> str:
