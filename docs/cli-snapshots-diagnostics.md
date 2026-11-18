@@ -69,3 +69,10 @@ never masked.
 | `snapshots` | Printed (an empty list is still 0) | `--latest` with no match | Usage error: conflicting output flags, `--count` with `--latest`/`--limit`/`--json`/`--csv`, `--latest` with `--limit`, `--since` after `--until`, an invalid date, a blank `--currency`, `--limit` below 1 |
 | `quote --cached`, `quote --json` | At least one symbol found | No symbol found | No symbols given |
 | `doctor` | Always, unless `--strict` | `--strict` and a check failed | Unknown option |
+
+For a scheduled backup check, run
+`marketpulse doctor --only backups --verify-backup --strict --json`.
+Doctor checks the age and integrity of the newest file in its backup list.
+A missing, invalid, or week-old backup fails the check. Verification uses
+the same read-only restore preflight as `backup verify` and needs temporary
+disk space for a copy. Omit `--json` for human-readable output.

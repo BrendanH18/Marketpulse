@@ -313,3 +313,25 @@ def test_new_csv_outputs_use_newline_endings(cli, store):
     for args in (("backup", "list", "--csv"), ("config", "--csv")):
         # Windows text-mode stdout writes "\n" as os.linesep; the csv default "\r\n" would add a stray "\r".
         assert "\r" not in cli(*args).stdout_bytes.decode().replace(os.linesep, "\n")
+
+
+def test_doctor_verify_backup(offline, store):
+    args = ("doctor", "--only", "backups", "--strict", "--json")
+
+    def check(expected_code, detail, *extra):
+        result = offline(*args, *extra)
+        assert result.exit_code == expected_code, result.output
+        report = json.loads(result.output)
+        assert report["ok"] == (expected_code == 0)
+        assert detail in report["checks"][0]["detail"]
+
+    check(1, "none yet", "--verify-backup")
+    backup = store.backup()
+    check(0, "integrity verified", "--verify-backup")
+    old = time.time() - 8 * 86400
+    os.utime(backup, (old, old))
+    check(1, "integrity verified", "--verify-backup")
+    shutil.copyfile(backup, backup.with_name("marketpulse-20000101-120000-manual.db"))
+    backup.write_bytes(b"fictional damaged backup")
+    check(0, backup.name)
+    check(1, f"{backup.name} isn't a readable database", "--verify-backup")

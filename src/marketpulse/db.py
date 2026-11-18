@@ -205,6 +205,16 @@ def _stage_restore(source: Path, staged: Path) -> None:
         conn.close()
 
 
+def backup_verification_error(source: Path) -> str | None:
+    """Run the restore preflight on a temporary copy and report any failure."""
+    try:
+        with TemporaryDirectory(prefix="marketpulse-verify-") as scratch:
+            _stage_restore(source, Path(scratch) / "checked.db")
+    except (RestoreError, OSError, sqlite3.Error) as problem:
+        return str(problem)
+    return None
+
+
 _TXN_COLS = "account_id, date, type, symbol, quantity, price, amount, fees, currency, note, ratio, target_account_id"
 _SNAPSHOT_UPSERT = (
     "INSERT INTO snapshots(date, net_worth, book, contributions, currency, detail) VALUES (?,?,?,?,?,?)"

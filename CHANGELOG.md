@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `marketpulse doctor --verify-backup` checks the newest backup’s integrity as well as its age.
+
 - Two hundred offline command discovery improvements
   ([#164](https://github.com/BrendanH18/Marketpulse/issues/164),
   [inventory](docs/cli-command-parameter-improvements.md)).
