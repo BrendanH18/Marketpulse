@@ -7,13 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-11-18
+
+MarketPulse now checks sales against the ledger on the sale date, including
+sales imported from CSV. This release also expands offline CLI reporting and
+improves transaction editing and navigation in the terminal app.
+
 ### Added
 
-- `marketpulse doctor --verify-backup` checks the newest backup’s integrity as well as its age.
+- `marketpulse doctor --verify-backup` checks the newest backup's integrity as well as its age
+  ([#167](https://github.com/BrendanH18/Marketpulse/issues/167)).
 
 - Two hundred offline command discovery improvements
   ([#164](https://github.com/BrendanH18/Marketpulse/issues/164),
-  [inventory](docs/cli-command-parameter-improvements.md)).
+  [inventory](https://github.com/BrendanH18/Marketpulse/blob/v3.1.0/docs/cli-command-parameter-improvements.md)).
   `report command-parameters` exposes each registered CLI option and argument
   supported by the command catalog through all 197 shared operations.
   Misspelled summary operations, `--having` filters and derived-field inputs
@@ -21,13 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Two hundred offline discovery improvements
   ([#162](https://github.com/BrendanH18/Marketpulse/issues/162); see the
-  [inventory](docs/cli-discovery-improvements.md)): `report report-fields` exposes
+  [inventory](https://github.com/BrendanH18/Marketpulse/blob/v3.1.0/docs/cli-discovery-improvements.md)): `report report-fields` exposes
   each dataset's ordered columns with all 197 shared report operations, and
   misspelled report sources, summary sources and derived-field functions suggest close matches.
 
 - One thousand offline improvements
   ([#153](https://github.com/BrendanH18/Marketpulse/issues/153); see the
-  [inventory](docs/thousand-improvements.md)):
+  [inventory](https://github.com/BrendanH18/Marketpulse/blob/v3.1.0/docs/thousand-improvements.md)):
   - 10 `--derive` functions for `marketpulse report` and `marketpulse summarize`
     (`add-days`, `add-months`, `divide`, `at-least`, `at-most`, `percent-of-field`,
     `right`, `contains`, `starts-with`, `ends-with`) and 7 `summarize --metric`
@@ -39,12 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `remove`, `alerts add` and `edit`, and `watch add` and `rm`; `--json` receipts
     for `accounts add` and `alerts add`; and several alert ids at once for
     `alerts pause`, `resume`, `rearm` and `rm`. See the
-    [CLI guide](docs/cli-thousand-improvements.md).
+    [CLI guide](https://github.com/BrendanH18/Marketpulse/blob/v3.1.0/docs/cli-thousand-improvements.md).
   - 15 terminal app improvements: sorting for the watchlist, accounts and alerts
     tables (`o`/`O`), `d` to duplicate a transaction, `!` to list problems,
     `ctrl+y` to copy a table, `$` to hide cash rows, direct sort commands in the
     command palette, and fuller pane footers. See the
-    [terminal app guide](docs/tui-thousand-improvements.md).
+    [terminal app guide](https://github.com/BrendanH18/Marketpulse/blob/v3.1.0/docs/tui-thousand-improvements.md).
 
 ### Changed
 
@@ -79,6 +86,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a symbol.
 - The chart keys `[`, `]`, `c` and `C` explain what to do outside the chart
   instead of doing nothing.
+
+### Upgrade notes
+
+- Back up your ledger before upgrading. In the Mac app, use **Automation ›
+  Back up now**, or run `marketpulse backup now` in the CLI.
+- Upgrading from 3.0.0 requires no database migration. The desktop bridge
+  version and the `status --json` payload are unchanged.
 
 ## [3.0.0] - 2026-11-14
 
@@ -622,7 +636,8 @@ Initial 2.0 overhaul: transaction ledger engine, SQLite store, Yahoo market
 client, Omarchy-styled Textual TUI, and native macOS menu bar companion.
 See PR [#3](https://github.com/BrendanH18/Marketpulse/pull/3).
 
-[Unreleased]: https://github.com/BrendanH18/Marketpulse/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/BrendanH18/Marketpulse/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/BrendanH18/Marketpulse/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/BrendanH18/Marketpulse/compare/v2.1.0...v3.0.0
 [2.1.0]: https://github.com/BrendanH18/Marketpulse/compare/08b9aff...v2.1.0
 [2.0.0]: https://github.com/BrendanH18/Marketpulse/tree/08b9aff

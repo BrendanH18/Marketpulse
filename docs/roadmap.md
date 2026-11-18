@@ -10,7 +10,7 @@ correctness**; the decisions behind the app are in the [App 1.0 plan](app-plan.m
 **GitHub issues are the source of truth** for agents and humans. This page is a
 pointer: claim and track work on the issues themselves.
 
-## Status (2026-11-15)
+## Status (2026-11-18)
 
 App 1.0 is out.
 
@@ -21,24 +21,18 @@ App 1.0 is out.
   closed the app epic [#32](https://github.com/BrendanH18/Marketpulse/issues/32) on
   that basis. The [QA checklist](qa.md) was not completed for this release: the
   partial table on #32 has item 10 passing and items 1 and 12–27 unverified.
-- **Unreleased on `main`:** fixes and additions since 3.0.0, listed under
-  Unreleased in the [changelog](../CHANGELOG.md). The most important is
-  [#149](https://github.com/BrendanH18/Marketpulse/issues/149): sales are now
-  checked against what the account held on the sale's date, and CSV imports check
-  them too; before, an import could leave the ledger with an oversell. The rest are
-  the [#153](https://github.com/BrendanH18/Marketpulse/issues/153) CLI and terminal
-  app additions and smaller fixes, including the Mac app's "Get a Alpha Vantage key"
-  wording.
+- **3.1.0** includes sale-date validation for manual and imported transactions
+  ([#149](https://github.com/BrendanH18/Marketpulse/issues/149)), expanded offline
+  CLI discovery, terminal app improvements, and backup integrity checks.
+  Follow [#169](https://github.com/BrendanH18/Marketpulse/issues/169) for release
+  status and see the [changelog](../CHANGELOG.md#310---2026-11-18) for the
+  full list.
 - **Dropped:** Windows. The maintainer decided on 2026-11-14 to support macOS and
   Linux only ([#150](https://github.com/BrendanH18/Marketpulse/issues/150)).
 
 ## Next
 
-1. **Release what's on `main`.** People who install today get 3.0.0, without the
-   #149 fix. Unreleased includes additions, so the next version is a minor bump
-   (3.1.0) unless the maintainer decides otherwise. Follow the maintainer release
-   checklist in [CONTRIBUTING](../CONTRIBUTING.md).
-2. **Choose further work from what people run into** when using the released app.
+**Choose further work from what people run into** when using the released app.
 
 ## Later
 
