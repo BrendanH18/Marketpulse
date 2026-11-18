@@ -79,7 +79,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [namespace-profile-gitrunner]
-        python: ["3.11", "3.12", "3.13", "3.14"]
+        python: ["3.12", "3.13", "3.14"]
         include:
           - os: namespace-profile-macos
             python: "3.14"
