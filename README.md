@@ -72,10 +72,10 @@ platforms, and there is no Windows build; the menu bar companion requires macOS 
 
 Install a pinned release so you are not tracking `main`. Prefer the tag shown on
 the [latest GitHub Release](https://github.com/BrendanH18/Marketpulse/releases)
-(examples below use `v3.0.0`):
+(examples below use `v3.1.0`):
 
 ```bash
-uv tool install --python 3.11 git+https://github.com/BrendanH18/Marketpulse.git@v3.0.0
+uv tool install --python 3.11 git+https://github.com/BrendanH18/Marketpulse.git@v3.1.0
 marketpulse --version
 ```
 
@@ -84,7 +84,7 @@ Without uv, the same pin works with pip in a virtual environment:
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-pip install git+https://github.com/BrendanH18/Marketpulse.git@v3.0.0
+pip install git+https://github.com/BrendanH18/Marketpulse.git@v3.1.0
 marketpulse --version
 ```
 
@@ -154,7 +154,7 @@ Quit the TUI and menu bar companion, back up, then reinstall from the newer tag
 
 ```bash
 marketpulse backup
-uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v3.0.0
+uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v3.1.0
 ```
 
 On an unpinned `@main` or editable install, pull or reinstall from `@main`
@@ -225,7 +225,7 @@ pinned to the same release tag as the CLI (the published wheel / non-editable
 git-tag install does not bundle the Swift project):
 
 ```bash
-git clone --branch v3.0.0 --depth 1 https://github.com/BrendanH18/Marketpulse.git
+git clone --branch v3.1.0 --depth 1 https://github.com/BrendanH18/Marketpulse.git
 cd Marketpulse
 uv tool install --python 3.11 --editable .
 xcode-select --install  # if the Command Line Tools are not installed

@@ -29,10 +29,10 @@ If MarketPulse is open, the script waits for you to quit it. Your portfolio in
 `~/.marketpulse` is never touched; installing or upgrading replaces only the app.
 
 To install a particular version, take the script from that release and name the version
-(replace `v3.0.0` with the one you want):
+(replace `v3.1.0` with the one you want):
 
 ```bash
-curl -fsSL https://github.com/BrendanH18/Marketpulse/releases/download/v3.0.0/install.sh | bash -s -- --version v3.0.0
+curl -fsSL https://github.com/BrendanH18/Marketpulse/releases/download/v3.1.0/install.sh | bash -s -- --version v3.1.0
 ```
 
 Other options: `--dir FOLDER` installs somewhere else (for example `--dir /Applications`,
