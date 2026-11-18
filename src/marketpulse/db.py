@@ -210,16 +210,27 @@ def list_backups(directory: Path) -> list[Path]:
     if not directory.is_dir():
         return []
 
-    # The name records the backup second and collision counter even if a file is later touched.
-    def ordering(path: Path) -> tuple[str, int, int, str]:
-        suffix = path.stem.rsplit("-", 1)[-1]
-        try:
-            modified = path.stat().st_mtime_ns
-        except OSError:
-            modified = 0
-        return path.name[12:27], int(suffix) if suffix.isdecimal() else 0, modified, path.name
+    groups: dict[tuple[str, str], list[tuple[int, Path]]] = {}
+    for path in directory.glob("marketpulse-*.db"):
+        reason = path.stem[28:]
+        prefix, _, suffix = reason.rpartition("-")
+        counter = 1
+        if prefix and suffix.isdecimal():
+            reason, counter = prefix, int(suffix)
+        groups.setdefault((path.name[12:27], reason), []).append((counter, path))
 
-    return sorted(directory.glob("marketpulse-*.db"), key=ordering, reverse=True)
+    ranked = []
+    for (stamp, reason), files in groups.items():
+        newer_mtime = None
+        for counter, path in sorted(files, reverse=True):
+            try:
+                modified = path.stat().st_mtime_ns
+            except OSError:
+                modified = 0
+            # A touched older copy cannot be newer than its successor in this collision series.
+            newer_mtime = modified if newer_mtime is None else min(modified, newer_mtime)
+            ranked.append((stamp, newer_mtime, reason, counter, path))
+    return [item[-1] for item in sorted(ranked, reverse=True)]
 
 
 def backup_verification_error(source: Path) -> str | None:

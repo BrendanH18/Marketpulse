@@ -369,3 +369,14 @@ def test_verify_backup_checks_newest_same_second_backup(offline, store, monkeypa
     result = offline("doctor", "--only", "backups", "--verify-backup", "--strict", "--json")
     assert result.exit_code == 1, result.output
     assert newest.name in json.loads(result.output)["checks"][0]["detail"]
+
+
+def test_verify_backup_counters_are_local_to_backup_reason(offline, store, monkeypatch):
+    monkeypatch.setenv("MARKETPULSE_DATA", str(store.path.parent))
+    manual = store.backup(dest=store.backup_dir / "marketpulse-20260101-120000-manual-2.db")
+    imported = manual.with_name("marketpulse-20260101-120000-import.db")
+    imported.write_bytes(b"damaged")
+    os.utime(imported, ns=(manual.stat().st_mtime_ns + 1_000_000_000,) * 2)
+    result = offline("doctor", "--only", "backups", "--verify-backup", "--strict", "--json")
+    assert result.exit_code == 1, result.output
+    assert imported.name in json.loads(result.output)["checks"][0]["detail"]
