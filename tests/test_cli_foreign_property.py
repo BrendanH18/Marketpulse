@@ -192,7 +192,8 @@ def test_tax_view_line():
     assert "Foreign property (T1135), 2024: highest cost $130,000.00 on 2024-03-04" in line
     assert "simplified method" in line and "Estimate, not tax advice" in line
     line = _text(render.foreign_property_line([y, older], 2023))
-    assert "T1135 not required" in line and "may be too low" in line
+    # Under the threshold with a rate missing, the status can't be settled.
+    assert "T1135 not required" not in line and "T1135 undetermined" in line and "may be too low" in line
     assert "none in non-registered accounts" in _text(render.foreign_property_line([y], 2022))
     assert "130,000" not in _text(render.foreign_property_line([y], privacy=True))
 

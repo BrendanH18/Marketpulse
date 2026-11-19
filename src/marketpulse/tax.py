@@ -587,6 +587,14 @@ class ForeignPropertyYear:
         return T1135_NOT_REQUIRED
 
     @property
+    def label(self) -> str:
+        """The status in words. Below the threshold with an FX rate missing, it is undetermined:
+        the cost left out could take the year over it."""
+        if self.incomplete and self.status == T1135_NOT_REQUIRED:
+            return "T1135 undetermined: an FX rate is missing, so the cost may be over $100,000"
+        return T1135_STATUS_LABELS[self.status]
+
+    @property
     def gain(self) -> float:
         return sum((h.gain for h in self.holdings), 0.0)
 

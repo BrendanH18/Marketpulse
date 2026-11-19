@@ -654,12 +654,14 @@ def asset_foreign(app: App, symbol: str, setting: str, dry_run: bool, as_json: b
     sym = symbol.strip().upper()
     if not sym:
         raise click.BadParameter("cannot be blank.", param_hint="SYMBOL")
-    # A market symbol needs no asset row: the setting creates a minimal one.
-    existing = app.store.assets().get(sym) or Asset(symbol=sym)
-    existing.foreign_property = FOREIGN_SETTINGS[setting.lower()]
-    counts = is_foreign_property(sym, existing)
-    if not dry_run:
-        app.store.set_foreign_property(existing)
+    # A market symbol needs no asset row: the setting creates a minimal one. Read and write
+    # together, so an edit to the same asset in between isn't overwritten.
+    with app.store.atomic():
+        existing = app.store.assets().get(sym) or Asset(symbol=sym)
+        existing.foreign_property = FOREIGN_SETTINGS[setting.lower()]
+        counts = is_foreign_property(sym, existing)
+        if not dry_run:
+            app.store.set_foreign_property(existing)
     if as_json:
         click.echo(
             json.dumps(

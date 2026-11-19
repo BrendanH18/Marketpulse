@@ -32,7 +32,6 @@ from .providers import provider_label
 from .tax import (
     DENIED_REGISTERED,
     T1135_NOT_REQUIRED,
-    T1135_STATUS_LABELS,
     Disposition,
     ForeignPropertyYear,
     TaxReport,
@@ -692,7 +691,7 @@ def foreign_property_line(
         (fmt.money(focus.max_cost, "CAD", privacy=privacy), "bright"),
         (f" on {focus.max_cost_date}" if focus.max_cost_date else "", "muted"),
         (" · ", "muted"),
-        (T1135_STATUS_LABELS[focus.status], "muted" if focus.status == T1135_NOT_REQUIRED else "warn"),
+        (focus.label, "muted" if focus.status == T1135_NOT_REQUIRED and not focus.incomplete else "warn"),
     )
     if focus.incomplete:
         line.append(" · an FX rate is missing, so this may be too low", style="down")

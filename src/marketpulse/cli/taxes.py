@@ -23,8 +23,8 @@ from ..tax import (
     FOREIGN_PROPERTY_NOTES,
     T1135_DETAILED,
     T1135_DETAILED_THRESHOLD,
+    T1135_NOT_REQUIRED,
     T1135_SIMPLIFIED,
-    T1135_STATUS_LABELS,
     T1135_THRESHOLD,
     Disposition,
     ForeignPropertyYear,
@@ -479,8 +479,11 @@ def tax_foreign_property(app: App, year: int | None, as_json: bool) -> None:
 
 
 def _foreign_status(y: ForeignPropertyYear) -> Text:
-    style = "warn" if y.status == T1135_DETAILED else "accent" if y.status == T1135_SIMPLIFIED else "muted"
-    return Text(T1135_STATUS_LABELS[y.status], style=style)
+    undetermined = y.incomplete and y.status == T1135_NOT_REQUIRED
+    style = (
+        "warn" if y.status == T1135_DETAILED or undetermined else "accent" if y.status == T1135_SIMPLIFIED else "muted"
+    )
+    return Text(y.label, style=style)
 
 
 def _foreign_years(app: App, found: list[ForeignPropertyYear]) -> None:
