@@ -71,5 +71,5 @@ settings separate as well, also set `MARKETPULSE_CONFIG` to another TOML file.
 | Menu bar uses an old CLI path | Re-run `marketpulse menubar install` from the current environment |
 | Terminal characters look incorrect | Use a UTF-8 locale and a font with Unicode/braille support |
 
-`marketpulse doctor` includes paths, ledger counts, and a market connectivity
-check. Review its output for personal information before attaching it to an issue.
+`marketpulse doctor` includes paths, ledger counts, recent automation failures,
+and a market connectivity check. Review its output for personal information before attaching it to an issue.

@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to confirm a restore ([#173](https://github.com/BrendanH18/Marketpulse/issues/173)).
 - `backup verify --all` checks every managed backup newest first and reports any failures
   ([#176](https://github.com/BrendanH18/Marketpulse/issues/176)).
+- Automation keeps a history of its newest 50 runs (schema version 2): `automation history
+  [--failures] [--limit N] [--json]` lists them newest first, and `doctor` warns when a run in the
+  last 24 hours failed ([#180](https://github.com/BrendanH18/Marketpulse/issues/180)).
 - One hundred CLI and terminal app workflow improvements
   ([inventory](docs/cli-tui-hundred-improvements.md)):
   - 80 opt-in CLI additions across `tax`, `allocation`, `targets`, `doctor`,

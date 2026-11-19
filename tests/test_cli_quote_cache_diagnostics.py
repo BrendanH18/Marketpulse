@@ -287,7 +287,16 @@ def test_doctor_unknown_check_lists_valid_names(offline):
 def test_doctor_default_output_unchanged(offline):
     payload = doctor_json(offline, "--offline")
     names = check_names(payload)
-    assert names[:7] == ["version", "config", "database", "backups", "ledger", "ledger checks", "market data"]
+    assert names[:8] == [
+        "version",
+        "config",
+        "database",
+        "backups",
+        "automation",
+        "ledger",
+        "ledger checks",
+        "market data",
+    ]
     assert set(names) <= set(CHECKS)
 
 

@@ -513,6 +513,7 @@ def test_report_command_filters_projects_and_exports_schema(cli, fake):
         {"table": "accounts", "column": "id"},
         {"table": "alerts", "column": "id"},
         {"table": "assets", "column": "symbol"},
+        {"table": "automation_runs", "column": "id"},
     ]
     assert fake.calls == []
 

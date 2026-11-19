@@ -10,6 +10,7 @@ import shutil
 import sys
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -18,7 +19,7 @@ from rich.text import Text
 
 from .. import __version__
 from ..config import config_path, data_dir
-from ..db import BACKUP_DIRNAME, backup_verification_error, list_backups
+from ..db import BACKUP_DIRNAME, AutomationRun, backup_verification_error, list_backups
 from ..market import PRIMARY
 from ..providers import provider_label
 from ..themes import omarchy_active, pretty_name
@@ -51,6 +52,7 @@ CHECKS = (
     "config",
     "database",
     "backups",
+    "automation",
     "ledger",
     "ledger checks",
     "market data",
@@ -247,6 +249,52 @@ def _backup_check(backups: list[Path], *, verify: bool) -> Check:
     return Check("backups", _status(fresh), detail)
 
 
+AUTOMATION_WINDOW = timedelta(hours=24)
+
+
+def _automation_check(
+    runs: list[AutomationRun], now: datetime | None = None, *, pruned_failure: AutomationRun | None = None
+) -> Check:
+    """Fail when any recorded run in the last 24 hours (before `now`) listed errors.
+
+    Quote errors alone aren't failures, and a failure older than the window doesn't count.
+    `pruned_failure` is the latest failure when it has left the capped history: it is
+    reported only if nothing newer failed, and without a count the history can't confirm.
+    """
+    if not runs:
+        return Check("automation", "info", "no runs recorded yet")
+    cutoff = (now or datetime.now()) - AUTOMATION_WINDOW
+    recent = []
+    for run in runs:
+        try:
+            ran_at = datetime.fromisoformat(run.ran_at)
+        except ValueError:
+            continue
+        if ran_at >= cutoff and run.report.get("errors"):
+            recent.append(run)
+    if not recent and pruned_failure and pruned_failure.report.get("errors"):
+        try:
+            pruned_recent = datetime.fromisoformat(pruned_failure.ran_at) >= cutoff
+        except ValueError:
+            pruned_recent = False
+        if pruned_recent:
+            return Check(
+                "automation",
+                "fail",
+                f"a run failed at {pruned_failure.ran_at}: {'; '.join(pruned_failure.report['errors'])} · "
+                f"older than the {len(runs)} runs `marketpulse automation history` keeps",
+            )
+    if recent:
+        latest = recent[0]
+        return Check(
+            "automation",
+            "fail",
+            f"{len(recent)} failed run(s) in the last 24 hours · latest {latest.ran_at}: "
+            f"{'; '.join(latest.report['errors'])} · `marketpulse automation history --failures`",
+        )
+    return Check("automation", "ok", f"last run {runs[0].ran_at} · no failures in the last 24 hours")
+
+
 def _collect(app: App, *, offline: bool, selected: set[str] | None = None, verify_backup: bool = False) -> list[Check]:
     """Run each selected check once (all by default); the caller renders them as text or JSON.
 
@@ -279,6 +327,9 @@ def _collect(app: App, *, offline: bool, selected: set[str] | None = None, verif
         row("database", f"{app.tracker.store.path} (schema v{app.tracker.store.schema_version})")
     if want("backups"):
         checks.append(verified_backup or _backup_check(app.store.backups(), verify=False))
+    if want("automation"):
+        runs, pruned = app.store.automation_status()
+        checks.append(_automation_check(runs, pruned_failure=pruned))
     if want("ledger"):
         row(
             "ledger",

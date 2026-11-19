@@ -240,11 +240,12 @@ def test_doctor_default_rows_and_exit_status(cli, fake):
     result = cli("doctor")
     assert result.exit_code == 0
     labels = [line[2:20].strip() for line in result.output.splitlines()]
-    assert labels[:8] == [
+    assert labels[:9] == [
         "version",
         "config",
         "database",
         "backups",
+        "automation",
         "ledger",
         "ledger checks",
         "market data",

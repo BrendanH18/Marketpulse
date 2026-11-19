@@ -94,7 +94,7 @@ def table(*headers: Column, title: str | None = None, expand: bool = False) -> T
     return t
 
 
-FLEX_COLUMNS = {"Name", "Note", "Institution", "Alert", "Source"}
+FLEX_COLUMNS = {"Name", "Note", "Institution", "Alert", "Source", "Errors", "Alerts fired"}
 NARROW_WIDTH = 110
 
 

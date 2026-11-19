@@ -324,6 +324,22 @@ written). A symbol or exchange rate the provider can't quote is listed under
 avoid duplicate alert notifications. Automation does not create ledger entries.
 Backups are local; see [data and restoration](data.md) for retention and recovery.
 
+Every cycle, whether from the app's refreshes or `automation run`, is kept in the
+ledger's automation history (the newest 50 runs), so a failure overnight isn't
+hidden by the next success:
+
+```bash
+marketpulse automation history              # newest first: time, result, errors, quote errors, stale prices, alerts fired
+marketpulse automation history --failures   # only runs that recorded errors
+marketpulse automation history --limit 5 --json
+```
+
+`--json` prints a list, newest first, with `id`, `ran_at`, `failed`, `errors`,
+`quote_error_count`, `stale_count`, `fired` and the full `report` that
+`automation run --json` printed. A run failed when it recorded `errors`; quote
+errors alone don't count. `marketpulse doctor` warns when any run in the last
+24 hours failed.
+
 ## Read-only demo
 
 In the app, choose **Help › Explore a Demo Portfolio** (or the option on the welcome

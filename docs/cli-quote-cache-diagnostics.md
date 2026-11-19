@@ -36,11 +36,16 @@ shorter than `--newer-than` fail with usage errors.
 
 ## Doctor rules
 
-Check names are `version`, `config`, `database`, `backups`, `ledger`,
-`ledger checks`, `market data`, `fallback quotes`, `theme`, `cli path`,
-`swift` and `menu bar app` (the last two on macOS only). Names ignore case,
-and `-` or `_` can stand for spaces. An unknown name fails with a usage error
-listing the valid names.
+Check names are `version`, `config`, `database`, `backups`, `automation`,
+`ledger`, `ledger checks`, `market data`, `fallback quotes`, `theme`,
+`cli path`, `swift` and `menu bar app` (the last two on macOS only). Names
+ignore case, and `-` or `_` can stand for spaces. An unknown name fails with a
+usage error listing the valid names.
+
+`automation` fails when any automation run in the last 24 hours recorded
+`errors` (see `marketpulse automation history --failures`). Quote errors alone,
+and failures older than 24 hours, don't fail it; with no recorded runs it is
+informational.
 
 A check that isn't selected doesn't run, so excluding `market data` makes no
 network request. `--offline` still skips the network checks when they are

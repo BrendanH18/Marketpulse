@@ -1,7 +1,8 @@
 """Schema versioning, migrations and backups (db.Store).
 
-Migrations are exercised by swapping in a throwaway MIGRATIONS table, so the
-tests keep working however many real migrations ship later.
+Migrations are exercised by swapping in a throwaway MIGRATIONS table (starting
+from the baseline via the `baseline` fixture), so the tests keep working however
+many real migrations ship later. The real migrations have their own tests at the end.
 """
 
 import os
@@ -13,7 +14,7 @@ import pytest
 
 from marketpulse import db
 from marketpulse.csvio import import_transactions
-from marketpulse.db import BASELINE_VERSION, SchemaError, Store
+from marketpulse.db import BASELINE_VERSION, SchemaError, Store, latest_version
 from marketpulse.models import Account, Transaction, TxnType
 
 
@@ -24,6 +25,12 @@ def _seed(store: Store) -> Account:
         Transaction(account_id=acct.id, type=TxnType.BUY, date="2024-01-01", symbol="AAPL", quantity=1, price=10)
     )
     return acct
+
+
+@pytest.fixture
+def baseline(monkeypatch):
+    """No real migrations: databases are created at the baseline, as MarketPulse 2.0 left them."""
+    monkeypatch.setattr(db, "MIGRATIONS", {})
 
 
 def _user_version(path) -> int:
@@ -37,14 +44,14 @@ def _user_version(path) -> int:
 # ── versioning ────────────────────────────────────────────────────────────────
 
 
-def test_new_database_is_stamped_with_the_baseline_version(tmp_path):
+def test_new_database_is_stamped_with_the_latest_version(tmp_path):
     store = Store(tmp_path / "new.db")
-    assert store.schema_version == BASELINE_VERSION
-    assert store.get_meta("schema_version") == str(BASELINE_VERSION)
+    assert store.schema_version == latest_version()
+    assert store.get_meta("schema_version") == str(latest_version())
     assert store.backups() == []  # nothing to protect in a brand-new file
 
 
-def test_unversioned_2_0_database_is_adopted_as_baseline(tmp_path):
+def test_unversioned_2_0_database_is_adopted_as_baseline(tmp_path, baseline):
     path = tmp_path / "old.db"
     store = Store(path)
     _seed(store)
@@ -55,7 +62,7 @@ def test_unversioned_2_0_database_is_adopted_as_baseline(tmp_path):
     assert len(reopened.transactions()) == 1
 
 
-def test_pending_migrations_run_in_order_after_a_backup(tmp_path, monkeypatch):
+def test_pending_migrations_run_in_order_after_a_backup(tmp_path, monkeypatch, baseline):
     path = tmp_path / "m.db"
     _seed(Store(path))  # an existing v1 database with data in it
 
@@ -79,7 +86,7 @@ def test_pending_migrations_run_in_order_after_a_backup(tmp_path, monkeypatch):
     assert Store(path).backups() == [pre]
 
 
-def test_failed_migration_rolls_back_and_keeps_old_version(tmp_path, monkeypatch):
+def test_failed_migration_rolls_back_and_keeps_old_version(tmp_path, monkeypatch, baseline):
     path = tmp_path / "f.db"
     _seed(Store(path))
 
@@ -95,7 +102,7 @@ def test_failed_migration_rolls_back_and_keeps_old_version(tmp_path, monkeypatch
     assert len(Store(path).transactions()) == 1
 
 
-def test_failed_sql_migration_also_rolls_back(tmp_path, monkeypatch):
+def test_failed_sql_migration_also_rolls_back(tmp_path, monkeypatch, baseline):
     path = tmp_path / "s.db"
     _seed(Store(path))
     monkeypatch.setattr(db, "MIGRATIONS", {2: "DELETE FROM transactions; SELECT * FROM no_such_table"})
@@ -210,13 +217,13 @@ def test_restore_puts_a_backup_back_and_keeps_the_replaced_ledger(store):
     assert Store.backup_reason(safety) == "pre-restore" and safety.parent == store.backup_dir
     assert _names(Store(safety)) == ["Later", "Main"]  # so the restore can itself be undone
     assert store._query("PRAGMA journal_mode")[0][0] == "wal"
-    assert store.schema_version == BASELINE_VERSION
+    assert store.schema_version == latest_version()
     # Writes after a restore land in the restored ledger.
     store.add_account(Account(name="After"))
     assert _names(Store(store.path)) == ["After", "Main"]
 
 
-def test_restore_upgrades_an_older_backup_without_changing_it(tmp_path, monkeypatch):
+def test_restore_upgrades_an_older_backup_without_changing_it(tmp_path, monkeypatch, baseline):
     old = tmp_path / "old.db"
     seeded = Store(old)
     _seed(seeded)
@@ -340,3 +347,31 @@ def test_a_failed_backup_leaves_no_partial_copy_behind(store):
             store.add_account(Account(name="Pending"))
             store.backup(reason="manual")  # the copy file is opened before this is refused
     assert store.backups() == []
+
+
+# ── real migrations ───────────────────────────────────────────────────────────
+
+
+def test_v2_adds_an_empty_automation_history_to_an_existing_ledger(tmp_path, monkeypatch):
+    path = tmp_path / "existing.db"
+    last_run = '{"last_run": "2026-01-02T03:04:05", "errors": []}'
+    monkeypatch.setattr(db, "MIGRATIONS", {})
+    seeded = Store(path)
+    _seed(seeded)
+    seeded.set_meta("automation_last_run", last_run)
+    seeded.close()
+    assert _user_version(path) == BASELINE_VERSION
+    monkeypatch.undo()
+
+    store = Store(path)
+    assert store.schema_version == 2
+    assert store.automation_runs() == []
+    assert [t.symbol for t in store.transactions()] == ["AAPL"]
+    # The latest-run meta key the desktop bridge and `status` read is left alone.
+    assert store.get_meta("automation_last_run") == last_run
+    (pre,) = store.backups()
+    assert Store.backup_reason(pre) == "pre-v2" and _user_version(pre) == BASELINE_VERSION
+    store.record_automation_run({"last_run": "2026-01-03T03:04:05", "errors": ["Backup failed: fictional"]})
+    store.close()
+    (run,) = Store(path).automation_runs()
+    assert (run.ran_at, run.failed) == ("2026-01-03T03:04:05", True)

@@ -117,12 +117,24 @@ Migration = str | Callable[[sqlite3.Connection], None]
 # ..."), never edit a step that has already shipped, and never edit SCHEMA to
 # alter an existing table: databases created before your change won't see it.
 # Keep the keys contiguous (2, 3, 4, ...) so every database walks the same path.
-MIGRATIONS: dict[int, Migration] = {}
+MIGRATIONS: dict[int, Migration] = {
+    # Every automation cycle's report, so an overnight failure isn't lost to the next success (#180).
+    2: """
+CREATE TABLE IF NOT EXISTS automation_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ran_at TEXT NOT NULL,
+    failed INTEGER NOT NULL,
+    report TEXT NOT NULL
+);
+""",
+}
 
 # Where automatic backups go and how many to keep (see Store.backup).
 BACKUP_DIRNAME = "backups"
 AUTO_BACKUP_KEEP = 14  # automatic backups kept per reason (daily, import, ...)
 AUTO_BACKUP_MAX_AGE_HOURS = 24.0  # take a fresh daily backup when the newest is older than this
+AUTOMATION_LAST_FAILURE_KEY = "automation_last_failure"
+AUTOMATION_RUNS_KEEP = 50  # automation cycle reports kept in `automation_runs` (see Store.record_automation_run)
 
 
 class SchemaError(RuntimeError):
@@ -338,6 +350,16 @@ _SNAPSHOT_UPSERT = (
     " ON CONFLICT(date) DO UPDATE SET net_worth=excluded.net_worth, book=excluded.book,"
     " contributions=excluded.contributions, currency=excluded.currency, detail=excluded.detail"
 )
+
+
+@dataclass
+class AutomationRun:
+    """One recorded automation cycle. `report` is what `automation run --json` printed for it."""
+
+    id: int
+    ran_at: str
+    failed: bool
+    report: dict
 
 
 @dataclass
@@ -691,6 +713,62 @@ class Store:
             "INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
+
+    # ── automation history ────────────────────────────────────────────────────
+
+    def record_automation_run(self, report: dict, *, keep: int = AUTOMATION_RUNS_KEEP) -> AutomationRun:
+        """Append one automation cycle's report and keep only the newest `keep` runs.
+
+        A run failed when its report lists `errors` (or says `failed`); quote errors alone are not failures.
+        """
+        ran_at = str(report.get("last_run") or datetime.now().isoformat(timespec="seconds"))
+        failed = bool(report.get("failed") or report.get("errors"))
+        with self.atomic():
+            cursor = self._exec(
+                "INSERT INTO automation_runs(ran_at, failed, report) VALUES (?, ?, ?)",
+                (ran_at, int(failed), json.dumps(report, allow_nan=False)),
+            )
+            self._exec(
+                "DELETE FROM automation_runs WHERE id NOT IN (SELECT id FROM automation_runs ORDER BY id DESC LIMIT ?)",
+                (keep,),
+            )
+            run = AutomationRun(int(cursor.lastrowid or 0), ran_at, failed, report)
+            if failed:
+                # Kept apart from the capped history: a frequent timer can prune a recent failure from it.
+                self.set_meta(AUTOMATION_LAST_FAILURE_KEY, json.dumps(asdict(run), allow_nan=False))
+        return run
+
+    def automation_status(self) -> tuple[list[AutomationRun], AutomationRun | None]:
+        """The kept runs and, if it has been pruned from them, the latest failure: read from one
+        snapshot, so a run recorded or a backup restored in between can't pair two ledgers' rows."""
+        with self._lock:
+            if self._in_transaction:
+                raise RuntimeError("Transactions don't nest.")
+            self._conn.execute("BEGIN")  # deferred: a read snapshot, without taking the write lock
+            try:
+                failure = self.latest_automation_failure()
+                runs = self.automation_runs()
+            finally:
+                self._conn.commit()
+        pruned = failure if failure and all(r.id != failure.id for r in runs) else None
+        return runs, pruned
+
+    def latest_automation_failure(self) -> AutomationRun | None:
+        """The newest failed automation run, even after it has been pruned from `automation_runs`."""
+        raw = self.get_meta(AUTOMATION_LAST_FAILURE_KEY)
+        return AutomationRun(**json.loads(raw)) if raw else None
+
+    def automation_runs(self, *, failures_only: bool = False, limit: int | None = None) -> list[AutomationRun]:
+        """Recorded automation runs, newest first."""
+        sql = "SELECT * FROM automation_runs" + (" WHERE failed = 1" if failures_only else "") + " ORDER BY id DESC"
+        params: tuple = ()
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (limit,)
+        return [
+            AutomationRun(r["id"], r["ran_at"], bool(r["failed"]), json.loads(r["report"]))
+            for r in self._query(sql, params)
+        ]
 
     # ── accounts ──────────────────────────────────────────────────────────────
 
