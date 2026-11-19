@@ -312,7 +312,11 @@ def _collect(app: App, *, offline: bool, selected: set[str] | None = None, verif
     if want("backups"):
         checks.append(verified_backup or _backup_check(app.store.backups(), verify=False))
     if want("automation"):
-        checks.append(_automation_check(app.store.automation_runs()))
+        runs = app.store.automation_runs()
+        failure = app.store.latest_automation_failure()
+        if failure and all(r.id != failure.id for r in runs):
+            runs.append(failure)  # pruned from the capped history, so older than every run in it
+        checks.append(_automation_check(runs))
     if want("ledger"):
         row(
             "ledger",

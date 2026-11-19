@@ -120,7 +120,7 @@ Migration = str | Callable[[sqlite3.Connection], None]
 MIGRATIONS: dict[int, Migration] = {
     # Every automation cycle's report, so an overnight failure isn't lost to the next success (#180).
     2: """
-CREATE TABLE automation_runs (
+CREATE TABLE IF NOT EXISTS automation_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ran_at TEXT NOT NULL,
     failed INTEGER NOT NULL,
@@ -133,6 +133,7 @@ CREATE TABLE automation_runs (
 BACKUP_DIRNAME = "backups"
 AUTO_BACKUP_KEEP = 14  # automatic backups kept per reason (daily, import, ...)
 AUTO_BACKUP_MAX_AGE_HOURS = 24.0  # take a fresh daily backup when the newest is older than this
+AUTOMATION_LAST_FAILURE_KEY = "automation_last_failure"
 AUTOMATION_RUNS_KEEP = 50  # automation cycle reports kept in `automation_runs` (see Store.record_automation_run)
 
 
@@ -731,7 +732,16 @@ class Store:
                 "DELETE FROM automation_runs WHERE id NOT IN (SELECT id FROM automation_runs ORDER BY id DESC LIMIT ?)",
                 (keep,),
             )
-        return AutomationRun(int(cursor.lastrowid or 0), ran_at, failed, report)
+            run = AutomationRun(int(cursor.lastrowid or 0), ran_at, failed, report)
+            if failed:
+                # Kept apart from the capped history: a frequent timer can prune a recent failure from it.
+                self.set_meta(AUTOMATION_LAST_FAILURE_KEY, json.dumps(asdict(run), allow_nan=False))
+        return run
+
+    def latest_automation_failure(self) -> AutomationRun | None:
+        """The newest failed automation run, even after it has been pruned from `automation_runs`."""
+        raw = self.get_meta(AUTOMATION_LAST_FAILURE_KEY)
+        return AutomationRun(**json.loads(raw)) if raw else None
 
     def automation_runs(self, *, failures_only: bool = False, limit: int | None = None) -> list[AutomationRun]:
         """Recorded automation runs, newest first."""
