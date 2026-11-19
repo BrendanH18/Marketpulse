@@ -122,9 +122,18 @@ def test_asset_foreign_setting_both_ways(cli, ledger, store):
     (y,) = json.loads(cli("tax", "foreign-property", "-y", "2024", "--json").output)["years"]
     assert [h["symbol"] for h in y["holdings"]] == ["XFIC.TO"] and y["status"] == "simplified"
     # auto goes back to the listing, keeping the rest of the row.
-    store.upsert_asset(Asset("XFIC.TO", asset_class=AssetClass.ETF, foreign_property=True))
+    store.set_foreign_property(Asset("XFIC.TO", asset_class=AssetClass.ETF, foreign_property=True))
     assert "does not count as foreign property (by listing)" in cli("asset", "foreign", "XFIC.TO", "auto").output
     assert store.assets()["XFIC.TO"] == Asset("XFIC.TO", asset_class=AssetClass.ETF)
+
+
+def test_saving_an_asset_without_the_setting_keeps_it(cli, store):
+    # Adding a lot, or editing the asset in a form, doesn't carry the T1135 setting.
+    cli("asset", "foreign", "FICTPROP", "yes")
+    store.upsert_asset(Asset("FICTPROP", AssetKind.MANUAL, name="Fictional cottage abroad"))
+    assert store.assets()["FICTPROP"].foreign_property is True
+    cli("asset", "foreign", "FICTPROP", "auto")
+    assert store.assets()["FICTPROP"] == Asset("FICTPROP", AssetKind.MANUAL, name="Fictional cottage abroad")
 
 
 def test_asset_foreign_dry_run_and_blank_symbol(cli, store):
@@ -163,7 +172,8 @@ def test_desktop_tax_carries_foreign_property(tracker, ledger, store):
     store.upsert_asset(Asset("XFIC.TO", asset_class=AssetClass.ETF, foreign_property=True))
     assert ledger_revision(tracker) != before
     # So does a class that changes whether a symbol counts by listing.
-    store.upsert_asset(Asset("XFIC.TO", asset_class=AssetClass.ETF))
+    store.set_foreign_property(Asset("XFIC.TO", asset_class=AssetClass.ETF))
+    assert ledger_revision(tracker) == before
     store.upsert_asset(Asset("FICTUS", asset_class=AssetClass.CASH))
     assert ledger_revision(tracker) != before
 

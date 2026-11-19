@@ -659,7 +659,7 @@ def asset_foreign(app: App, symbol: str, setting: str, dry_run: bool, as_json: b
     existing.foreign_property = FOREIGN_SETTINGS[setting.lower()]
     counts = is_foreign_property(sym, existing)
     if not dry_run:
-        app.store.upsert_asset(existing)
+        app.store.set_foreign_property(existing)
     if as_json:
         click.echo(
             json.dumps(

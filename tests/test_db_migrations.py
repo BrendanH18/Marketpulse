@@ -392,5 +392,5 @@ def test_v3_adds_the_foreign_property_setting_to_existing_assets(tmp_path, monke
     # Existing rows keep their details and decide by listing until set.
     assert upgraded.assets()["FICT"] == Asset("FICT", AssetKind.MARKET, asset_class=AssetClass.ETF)
     for setting in (True, False, None):
-        upgraded.upsert_asset(Asset("FICT", asset_class=AssetClass.ETF, foreign_property=setting))
+        upgraded.set_foreign_property(Asset("FICT", asset_class=AssetClass.ETF, foreign_property=setting))
         assert upgraded.assets()["FICT"].foreign_property is setting

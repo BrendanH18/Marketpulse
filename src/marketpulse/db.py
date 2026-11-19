@@ -957,7 +957,9 @@ class Store:
             " ON CONFLICT(symbol) DO UPDATE SET kind=excluded.kind, name=excluded.name,"
             " asset_class=excluded.asset_class, currency=excluded.currency, rate=excluded.rate,"
             " compounding=excluded.compounding, start_date=excluded.start_date, maturity_date=excluded.maturity_date,"
-            " foreign_property=excluded.foreign_property",
+            # Forms and purchase paths don't carry the T1135 setting: keep a saved one unless
+            # the new row sets it. `set_foreign_property` is how it is cleared.
+            " foreign_property=COALESCE(excluded.foreign_property, assets.foreign_property)",
             (
                 asset.symbol,
                 asset.kind.value,
@@ -971,6 +973,15 @@ class Store:
                 None if asset.foreign_property is None else int(asset.foreign_property),
             ),
         )
+
+    def set_foreign_property(self, asset: Asset) -> None:
+        """Save `asset` with exactly its foreign property setting (None: decide by listing)."""
+        with self.atomic():
+            self.upsert_asset(asset)
+            self._exec(
+                "UPDATE assets SET foreign_property = ? WHERE symbol = ?",
+                (None if asset.foreign_property is None else int(asset.foreign_property), asset.symbol),
+            )
 
     def delete_asset(self, symbol: str) -> None:
         self._exec("DELETE FROM assets WHERE symbol = ?", (symbol.upper(),))
