@@ -172,6 +172,46 @@ value for a backdated transfer. The report cannot see transactions by a spouse
 or controlled corporation. These outputs describe recorded activity and are
 not a complete tax filing calculation.
 
+### Foreign property (form T1135)
+
+A Canadian resident files form T1135 for any year in which the total cost of
+their specified foreign property was over $100,000 CAD at any time. MarketPulse
+estimates that cost from the same pooled ACB as the tax report:
+
+```bash
+marketpulse tax foreign-property             # every year that held foreign property
+marketpulse tax foreign-property --year 2025 # one year, property by property
+marketpulse tax foreign-property --year 2025 --json
+```
+
+For each year it shows the highest total cost at the end of any day and the
+date it was reached, the year-end cost, the gain or loss on that year's sales,
+and a status: not required (at or under $100,000 all year), the simplified
+method (over $100,000 but under $250,000 all year), or the detailed method
+($250,000 or more at some point). A year that peaked mid-year is flagged even
+if it ended below the line. Cost amounts are ACB in Canadian dollars, with each
+purchase converted at its own date's rate, whatever your base currency.
+Missing FX rates are flagged as incomplete, because the totals are then too
+low. The tax view in the terminal app shows the same status for the selected
+year, and the Mac app's `desktop tax` payload carries it as `foreign_property`.
+
+Only non-registered accounts count. A symbol is foreign when it is listed
+outside Canada: no Yahoo suffix (a US listing) or a suffix such as `.L` or `.DE`.
+`.TO`, `.V`, `.NE` and `.CN` listings are Canadian, so a Canadian-listed ETF
+that holds US stocks doesn't count. Crypto, cash-like, fixed-income and manual
+assets don't count either. The listing is only a stand-in for where the issuer
+is resident, so correct a symbol it gets wrong:
+
+```bash
+marketpulse asset foreign FICT no      # a Canadian company listed in New York
+marketpulse asset foreign FICT.TO yes  # a foreign company listed in Toronto
+marketpulse asset foreign FICT auto    # back to deciding by listing
+```
+
+This is an estimate, not tax advice. It doesn't see foreign property held
+outside MarketPulse, such as foreign bank accounts, or adjustments you haven't
+recorded. Check CRA's T1135 guide or a tax professional before you file.
+
 ## Fixed income and manual assets
 
 ```bash

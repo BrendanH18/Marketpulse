@@ -24,7 +24,7 @@ from .market import MarketData, MarketError
 from .models import Account, AccountType, Asset, AssetClass, AssetKind, Quote, Transaction, TxnType, record_revision
 from .providers import PROVIDERS
 from .services import Tracker
-from .tax import Disposition
+from .tax import T1135_NOT_REQUIRED, Disposition, ForeignPropertyYear
 from .valuation import PortfolioView
 
 
@@ -168,6 +168,13 @@ def _ledger_revision(tracker: Tracker, generation: str, transaction_revisions: l
         tracker.base,
         repr(tracker.config.capital_gains_inclusion),
     ]
+    # Foreign property settings change the report's T1135 figures. Only added when one is set,
+    # so other asset edits (and ledgers without any setting) keep the same revision.
+    overrides = sorted(
+        (a.symbol, a.foreign_property) for a in store.assets().values() if a.foreign_property is not None
+    )
+    if overrides:
+        parts.append(json.dumps(overrides))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
 
 
@@ -329,6 +336,35 @@ def disposition_row(r: Disposition, accounts: dict[int, Account]) -> dict:
     }
 
 
+def foreign_property_row(y: ForeignPropertyYear) -> dict:
+    """One year of specified foreign property for `marketpulse tax foreign-property --json` and
+    the app's Tax workspace. Amounts are cost amounts (ACB) in `currency`, which is CAD."""
+    return {
+        "year": y.year,
+        "as_of": y.as_of,
+        "currency": y.currency,
+        "status": y.status,
+        "required": y.status != T1135_NOT_REQUIRED,
+        "max_cost": y.max_cost,
+        "max_cost_date": y.max_cost_date or None,
+        "year_end_cost": y.year_end_cost,
+        "gain": y.gain,
+        "incomplete": y.incomplete,
+        "holdings": [
+            {
+                "symbol": h.symbol,
+                "max_cost": h.max_cost,
+                "max_cost_date": h.max_cost_date or None,
+                "year_end_cost": h.year_end_cost,
+                "gain": h.gain,
+                "dispositions": h.dispositions,
+                "incomplete": h.incomplete,
+            }
+            for h in y.holdings
+        ],
+    }
+
+
 def tax_report(tracker: Tracker) -> dict:
     """Capital gains for every year, as `marketpulse tax` computes them, for the app's Tax workspace.
 
@@ -377,6 +413,8 @@ def tax_report(tracker: Tracker) -> dict:
         "issues": [issue_row(i) for i in report.issues],
         "room": [asdict(r) for r, _ in tracker.room()],
         "notes": TAX_NOTES,
+        # Specified foreign property cost (form T1135), newest year first, always in CAD.
+        "foreign_property": [foreign_property_row(y) for y in tracker.foreign_property()],
     }
 
 

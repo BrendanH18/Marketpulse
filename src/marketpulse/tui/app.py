@@ -644,7 +644,8 @@ class MarketPulseApp(App):
     def load_tax(self) -> None:
         years, report = self.tracker.tax_years()
         rooms = self.tracker.room()
-        self.call_from_thread(self._tax_loaded, (years, report, rooms))
+        foreign = self.tracker.foreign_property()
+        self.call_from_thread(self._tax_loaded, (years, report, rooms, foreign))
 
     def _tax_loaded(self, result) -> None:
         self._tax = result

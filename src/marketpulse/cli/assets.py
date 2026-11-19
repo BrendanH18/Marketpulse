@@ -635,6 +635,49 @@ def asset_classify(app: App, symbol, asset_class, clear: bool, dry_run: bool, as
         app.ok(f"{sym} → {new_class.label}")
 
 
+FOREIGN_SETTINGS = {"yes": True, "no": False, "auto": None}
+
+
+@asset.command("foreign")
+@click.argument("symbol")
+@click.argument("setting", type=click.Choice(list(FOREIGN_SETTINGS), case_sensitive=False))
+@click.option("--dry-run", is_flag=True, help="Preview the setting without saving.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
+@pass_app
+def asset_foreign(app: App, symbol: str, setting: str, dry_run: bool, as_json: bool) -> None:
+    """Count a symbol as foreign property for form T1135 (yes), never (no), or by listing (auto).
+
+    \b
+    By default symbols listed outside Canada count and .TO/.V/.NE/.CN listings don't."""
+    from ..tax import is_foreign_property
+
+    sym = symbol.strip().upper()
+    if not sym:
+        raise click.BadParameter("cannot be blank.", param_hint="SYMBOL")
+    # A market symbol needs no asset row: the setting creates a minimal one.
+    existing = app.store.assets().get(sym) or Asset(symbol=sym)
+    existing.foreign_property = FOREIGN_SETTINGS[setting.lower()]
+    counts = is_foreign_property(sym, existing)
+    if not dry_run:
+        app.store.upsert_asset(existing)
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "symbol": sym,
+                    "foreign_property": existing.foreign_property,
+                    "counts": counts,
+                    "saved": not dry_run,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return
+    how = "by listing" if existing.foreign_property is None else "by your setting"
+    verdict = f"{sym} {'counts' if counts else 'does not count'} as foreign property ({how})"
+    app.ok(f"Would set: {verdict} (not saved)." if dry_run else f"{verdict}.")
+
+
 @asset.command("remove")
 @click.argument("symbol")
 @click.option("--dry-run", is_flag=True, help="Preview removing asset metadata without deleting.")

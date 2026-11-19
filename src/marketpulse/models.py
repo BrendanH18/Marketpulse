@@ -381,6 +381,9 @@ class Asset:
     compounding: str = "annual"  # annual | semiannual | quarterly | monthly | simple
     start_date: str = ""
     maturity_date: str = ""
+    # Specified foreign property for form T1135: None decides by listing (tax.is_foreign_property),
+    # True or False overrides it.
+    foreign_property: bool | None = None
 
     def __post_init__(self) -> None:
         self.symbol = self.symbol.upper()

@@ -117,6 +117,10 @@ struct NativeBridgeCheck {
     precondition(demoTax.years.allSatisfy { $0.securities.map(\.symbol) == ["NVDA"] && $0.missingFx == 0 })
     precondition(demoTax.room.count == 1 && demoTax.issues.isEmpty)
     precondition(demoTax.notes.contains { $0.contains("not tax advice") })
+    // Foreign property (T1135): the demo's NVDA, a US listing bought in a taxable account, in CAD.
+    let demoForeign = demoTax.foreignProperty!
+    precondition(!demoForeign.isEmpty && demoForeign.allSatisfy { $0.currency == "CAD" && !$0.incomplete })
+    precondition(demoForeign[0].holdings.map(\.symbol) == ["NVDA"] && demoForeign[0].status == "not_required")
     let ledgerTax = try decoder.decode(
       TaxPayload.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[7])))
     precondition(!ledgerTax.demo && ledgerTax.years.map(\.year) == [2025] && ledgerTax.years[0].missingFx == 1)
@@ -127,6 +131,11 @@ struct NativeBridgeCheck {
     precondition(
       archivedSale.archived && archivedSale.account == nil && archivedSale.accountLabel == "Archived account")
     precondition(archivedSale.allowedGain == 100 && ledgerTax.years[0].netGain == 100)
+    // SAP.DE is foreign property with no EUR rate: flagged, never guessed. ZAG.TO is Canadian.
+    let ledgerForeign = ledgerTax.foreignProperty!
+    precondition(ledgerForeign.map(\.year) == [2025] && ledgerForeign[0].incomplete)
+    let sap = ledgerForeign[0].holdings
+    precondition(sap.map(\.symbol) == ["SAP.DE"] && sap[0].dispositions == 1 && sap[0].incomplete)
     // Export CSV reports what the export itself found.
     let export = try decoder.decode(
       TaxExportResult.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[8])))

@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automation keeps a history of its newest 50 runs (schema version 2): `automation history
   [--failures] [--limit N] [--json]` lists them newest first, and `doctor` warns when a run in the
   last 24 hours failed ([#180](https://github.com/BrendanH18/Marketpulse/issues/180)).
+- `marketpulse tax foreign-property [--year] [--json]` estimates the cost of specified
+  foreign property in non-registered accounts and flags years when form T1135 may be
+  required, with the simplified or detailed method. The terminal app's tax view shows the
+  status and `desktop tax` carries it as `foreign_property`. `asset foreign SYMBOL yes|no|auto`
+  corrects the listing-based rule; the setting is stored on the asset (schema version 3)
+  ([#179](https://github.com/BrendanH18/Marketpulse/issues/179)).
 - One hundred CLI and terminal app workflow improvements
   ([inventory](docs/cli-tui-hundred-improvements.md)):
   - 80 opt-in CLI additions across `tax`, `allocation`, `targets`, `doctor`,
