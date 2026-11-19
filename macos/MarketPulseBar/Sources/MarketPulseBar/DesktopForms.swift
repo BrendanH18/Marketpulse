@@ -737,6 +737,107 @@ struct TargetsSheet: View {
   }
 }
 
+struct RestoreBackupSheet: View {
+  @ObservedObject var model: StatusModel
+  let backup: BackupInfo
+  let path: String
+  @Environment(\.dismiss) private var dismiss
+  @StateObject private var draft = RestoreBackupSheetDraft()
+
+  var body: some View {
+    SheetLayout(
+      title: String(localized: "Restore the backup from \(backup.when)?"),
+      subtitle: String(
+        localized:
+          "Your portfolio will be replaced with this backup (\(backup.reasonLabel.localizedLowercase)). Anything recorded after \(backup.when) will no longer appear. Your current portfolio is saved as a new backup first, so you can undo this."
+      ),
+      model: model
+    ) {
+      switch draft.state {
+      case .checking:
+        ProgressView("Checking the backup…").controlSize(.small)
+      case .ready(let preview):
+        comparison(preview)
+      case .failed(let error):
+        Text(error).font(.callout).foregroundStyle(Studio.red).fixedSize(
+          horizontal: false, vertical: true
+        ).textSelection(.enabled)
+      }
+      HStack {
+        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving)
+        Spacer()
+        if model.saving { ProgressView().controlSize(.small) }
+        Button("Restore", role: .destructive) {
+          guard case .ready(let preview) = draft.state else { return }
+          Task {
+            await model.restoreBackup(backup, from: path, fingerprint: preview.fingerprint)
+            dismiss()
+          }
+        }.disabled(!draft.canRestore || !model.canEdit)
+      }
+    }.task {
+      guard case .checking = draft.state else { return }
+      do {
+        let preview = try await model.previewRestore(from: path)
+        try Task.checkCancellation()
+        draft.state = .ready(preview)
+      } catch {
+        if !Task.isCancelled { draft.state = .failed(error.localizedDescription) }
+      }
+    }
+  }
+
+  private func comparison(_ preview: RestorePreview) -> some View {
+    Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
+      GridRow {
+        Color.clear.gridCellUnsizedAxes([.horizontal, .vertical]).accessibilityHidden(true)
+        Text("Current portfolio").accessibilityAddTraits(.isHeader)
+        Text("Backup").accessibilityAddTraits(.isHeader)
+      }.font(.callout.weight(.semibold))
+      Divider().gridCellUnsizedAxes(.horizontal)
+      comparisonRow(
+        String(localized: "Accounts"), current: preview.current.accounts.formatted(),
+        backup: preview.backup.accounts.formatted())
+      comparisonRow(
+        String(localized: "Transactions"), current: preview.current.transactions.formatted(),
+        backup: preview.backup.transactions.formatted())
+      comparisonRow(
+        String(localized: "Latest transaction date"), current: shownDate(preview.current.latestDate),
+        backup: shownDate(preview.backup.latestDate))
+    }.font(.callout)
+  }
+
+  private func comparisonRow(_ metric: String, current: String, backup: String) -> some View {
+    GridRow {
+      Text(metric).accessibilityHidden(true)
+      Text(current)
+        .accessibilityLabel("\(String(localized: "Current portfolio")), \(metric), \(current)")
+      Text(backup)
+        .accessibilityLabel("\(String(localized: "Backup")), \(metric), \(backup)")
+    }
+  }
+
+  private func shownDate(_ raw: String?) -> String {
+    guard let raw else { return String(localized: "None") }
+    return LedgerDate.date(raw)?.formatted(date: .numeric, time: .omitted) ?? raw
+  }
+}
+
+private final class RestoreBackupSheetDraft: ObservableObject {
+  enum State {
+    case checking
+    case ready(RestorePreview)
+    case failed(String)
+  }
+
+  @Published var state = State.checking
+
+  var canRestore: Bool {
+    if case .ready = state { return true }
+    return false
+  }
+}
+
 struct ImportSheet: View {
   @ObservedObject var model: StatusModel
   var body: some View {

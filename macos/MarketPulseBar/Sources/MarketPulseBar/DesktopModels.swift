@@ -563,6 +563,30 @@ struct BackupInfo: Decodable, Identifiable, Equatable {
   }
 }
 
+/// The two ledgers in a `desktop restore-preview` comparison.
+struct RestorePreview: Decodable {
+  struct LedgerSummary: Decodable {
+    let accounts: Int
+    let transactions: Int
+    let latestDate: String?
+  }
+
+  let version: Int
+  let current: LedgerSummary
+  let backup: LedgerSummary
+  let fingerprint: String
+
+  static func decode(_ data: Data) throws -> RestorePreview {
+    let decoder = JSONDecoder()
+    decoder.keyDecodingStrategy = .convertFromSnakeCase
+    let preview = try decoder.decode(RestorePreview.self, from: data)
+    guard preview.version == 1 else {
+      throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Unsupported restore preview version."))
+    }
+    return preview
+  }
+}
+
 struct DesktopAccount: Decodable, Identifiable {
   /// Every type `marketpulse accounts add --type` accepts.
   static let types = [

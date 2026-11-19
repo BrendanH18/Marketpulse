@@ -79,6 +79,13 @@ struct NativeBridgeCheck {
     precondition(ledger.backupDir?.hasSuffix("/backups") == true && backups.count >= 2)
     precondition(Set(backups.map(\.reasonLabel)) == ["Daily backup", "Before a restore"])
     precondition(backups.allSatisfy { $0.date != nil && $0.size > 0 && $0.when != $0.name })
+    let restorePreview = try RestorePreview.decode(Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[19])))
+    precondition(restorePreview.version == 1)
+    precondition(restorePreview.current.accounts == 2 && restorePreview.current.transactions == 1)
+    precondition(restorePreview.current.latestDate == "2025-06-02")
+    precondition(restorePreview.backup.accounts == 1 && restorePreview.backup.transactions == 0)
+    precondition(restorePreview.backup.latestDate == nil)
+    precondition(restorePreview.fingerprint.count == 64)
     // Archived accounts: none in the demo; listed with just enough to unarchive them.
     precondition(payload.archivedAccounts?.isEmpty == true)
     let archived = try decoder.decode(
@@ -386,7 +393,7 @@ struct NativeBridgeCheck {
     precondition(BackupInfo.reasonLabels["pre-v"] == "Before an upgrade")
 
     print(
-      "Native bridge checks passed: real Python demo, storage and backups, archived accounts, room, tax report, settings, quote providers, activity values, import result, broker import preview and profiles, privacy formatting, number entry, editable numbers and dates, transaction save recovery, transaction form commands, assets, allocation targets and rebalancing, asset and targets form commands, engine messages by code"
+      "Native bridge checks passed: real Python demo, storage and backups, restore preview, archived accounts, room, tax report, settings, quote providers, activity values, import result, broker import preview and profiles, privacy formatting, number entry, editable numbers and dates, transaction save recovery, transaction form commands, assets, allocation targets and rebalancing, asset and targets form commands, engine messages by code"
     )
   }
 }

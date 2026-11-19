@@ -138,12 +138,18 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
 
 18. **Restore a backup.** In **Automation**, **Back up now**, then record a deposit
     (⌘N). **Backups** lists the new backup first ("Backed up by you"), with its date,
-    time, and size; the magnifying glass shows it selected in Finder. **Restore…** on
-    it asks "Restore the backup from <date>?" and says your current portfolio is saved
-    first; **Cancel** changes nothing. Confirm: the window reloads, says "Restored the
-    backup from <date>…", the deposit is gone from Activity, and a "Before a restore"
-    backup is now first in the list. Restore that one: the deposit is back. In the
-    demo, **Backups** says the demo has none.
+    time, and size. The magnifying glass shows it selected in Finder. Click **Restore…**
+    and check the comparison: both ledgers show the same account count (including the
+    archived account), the current ledger has one more transaction, and the dates match
+    the latest entry in each ledger. The preview says your current portfolio is saved
+    first. **Cancel** keeps the deposit and creates no pre-restore backup. Open the
+    preview again and confirm. The window reloads, says "Restored the backup from
+    <date>…", the deposit is gone from Activity, and a "Before a restore" backup is now
+    first in the list. Restore that one and check the deposit is back. In the scratch
+    `data/backups` folder only, create `marketpulse-20000101-000000-manual.db` containing
+    plain text, refresh, and select **Restore…** on that backup. The preview shows the
+    validation error, Restore is unavailable, and **Cancel** closes the preview. In
+    the demo, **Backups** says the demo has none.
 
 19. **Settings and appearance.** **MarketPulse › Settings…** (⌘,) opens a window with
     General, Appearance, Portfolio, and Data tabs; the popover's gear and **Automation ›

@@ -133,6 +133,26 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     export = Path(tmp) / "tax-export.json"
     export.write_text(json.dumps(write_tax_csv(offline, Path(tmp) / "gains.csv", 2025), allow_nan=False))
     ledger.close()
+    # Compare a backup with no transactions against the ledger after a deposit.
+    restore_dir = Path(tmp) / "restore-data"
+    restore_dir.mkdir()
+    restore_ledger = Store(restore_dir / "marketpulse.db")
+    restore_account = restore_ledger.add_account(Account(name="Fictional Cash"))
+    restore_backup = restore_ledger.backup(dest=Path(tmp) / "Fictional backup.db")
+    restore_ledger.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA))
+    restore_ledger.add_transaction(
+        Transaction(account_id=restore_account.saved_id, type=TxnType.DEPOSIT, date="2025-06-02", amount=50)
+    )
+    restore_ledger.close()
+    restore_preview = Path(tmp) / "restore-preview.json"
+    restore_preview.write_bytes(
+        subprocess.run(
+            cli + ["desktop", "restore-preview", "--", str(restore_backup)],
+            env={**env, "MARKETPULSE_DATA": str(restore_dir)},
+            capture_output=True,
+            check=True,
+        ).stdout
+    )
     # Every coded warning and tax issue, on a fictional ledger: the app's English must match the engine's.
     (Path(tmp) / "coded").mkdir()
     coded = Store(Path(tmp) / "coded" / "marketpulse.db")
@@ -265,6 +285,7 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
             str(bad_preview),
             str(backup_labels),
             str(alerts),
+            str(restore_preview),
             # Foundation reads these: the expectations are English, whatever this Mac's region.
             "-AppleLanguages",
             "(en)",
