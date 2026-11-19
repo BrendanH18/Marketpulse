@@ -630,7 +630,8 @@ def _foreign_year(
     timeline = [(start, carried[0])] if carried else []
     timeline += [(day, held) for day, held in days if start <= day <= as_of]
     # A loss denied on a sale with no FX rate is a guess, and it moves into the replacement
-    # shares' cost: from that sale on, the symbol's cost is incomplete.
+    # shares' cost: from that sale on, the symbol's cost, and the gain on any later sale, are
+    # incomplete. Conservatively, this lasts even if the pool is later sold out and reopened.
     guessed: dict[str, str] = {}
     for d in dispositions:
         if not d.complete and d.denied > EPSILON:
@@ -653,7 +654,7 @@ def _foreign_year(
         if start <= d.date <= as_of:
             h = holdings.setdefault(d.symbol, ForeignHolding(d.symbol))
             h.dispositions += 1
-            if d.complete:
+            if d.complete and not (d.symbol in guessed and guessed[d.symbol] <= d.date):
                 h.gain += d.allowed_gain
             else:
                 h.incomplete = True

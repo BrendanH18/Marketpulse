@@ -248,6 +248,10 @@ def test_a_loss_denied_on_a_sale_missing_its_fx_rate_makes_the_replacement_incom
     y = year(txns, y=2025, fx=no_december_rate)
     # The replacement's cost includes a loss denied on a guess, so it can't be trusted.
     assert y.incomplete and all(h.incomplete for h in y.holdings)
+    # Nor can the gain on selling it: left out, like any gain with a missing rate.
+    sold = year([*txns, txn(TxnType.SELL, "2025-06-02", qty=200, price=150, ccy="USD")], y=2025, fx=no_december_rate)
+    (h,) = sold.holdings
+    assert h.dispositions == 1 and h.gain == 0 and h.incomplete
 
 
 def test_detailed_when_the_peak_lasts_a_single_day():
