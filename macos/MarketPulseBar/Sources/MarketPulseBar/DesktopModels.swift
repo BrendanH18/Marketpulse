@@ -817,6 +817,8 @@ struct ForeignPropertyYear: Decodable, Identifiable {
   /// not_required (at or under $100,000 all year), simplified (under $250,000 all year), or detailed.
   let status: String
   let required: Bool
+  /// `status`, or "undetermined" when it is not_required but an FX rate is missing (optional for older payloads).
+  let assessment: String?
   /// The highest end-of-day total, and the day it was first reached (nil when nothing was held).
   let maxCost: Double
   let maxCostDate: String?

@@ -348,6 +348,8 @@ def foreign_property_row(y: ForeignPropertyYear) -> dict:
         "currency": y.currency,
         "status": y.status,
         "required": y.status != T1135_NOT_REQUIRED,
+        # `status` from the known cost; "undetermined" instead of not_required when a rate is missing.
+        "assessment": y.assessment,
         "max_cost": y.max_cost,
         "max_cost_date": y.max_cost_date or None,
         "year_end_cost": y.year_end_cost,

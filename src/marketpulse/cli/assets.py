@@ -610,11 +610,12 @@ def asset_classify(app: App, symbol, asset_class, clear: bool, dry_run: bool, as
     sym = symbol.strip().upper()
     if not sym:
         raise click.BadParameter("cannot be blank.", param_hint="SYMBOL")
-    existing = app.store.assets().get(sym) or Asset(symbol=sym)
-    new_class = None if clear else AssetClass(asset_class.lower())
-    existing.asset_class = new_class
-    if not dry_run:
-        app.store.upsert_asset(existing)
+    with app.store.atomic():  # read and write together, so a concurrent edit isn't overwritten
+        existing = app.store.assets().get(sym) or Asset(symbol=sym)
+        new_class = None if clear else AssetClass(asset_class.lower())
+        existing.asset_class = new_class
+        if not dry_run:
+            app.store.upsert_asset(existing)
     if as_json:
         click.echo(
             json.dumps(

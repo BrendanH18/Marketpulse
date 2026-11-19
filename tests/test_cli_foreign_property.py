@@ -59,12 +59,24 @@ def test_json_report_for_one_year(cli, ledger):
     assert any("not tax advice" in n for n in payload["notes"])
     (y,) = payload["years"]
     assert (y["year"], y["status"], y["required"], y["incomplete"]) == (2024, "simplified", True, False)
+    assert y["assessment"] == "simplified"
     assert y["max_cost"] == pytest.approx(130_000) and y["max_cost_date"] == "2024-03-04"
     assert y["year_end_cost"] == pytest.approx(65_000)
     (h,) = y["holdings"]  # not the Canadian-listed ETF, not the TFSA
     assert h["symbol"] == "FICTUS" and h["dispositions"] == 1
     # 500 x US$110 x 1.40 = $77,000 against $65,000 of pooled ACB.
     assert h["gain"] == pytest.approx(12_000) and y["gain"] == pytest.approx(12_000)
+
+
+def test_json_assessment_is_undetermined_when_a_rate_is_missing(cli, ledger):
+    # 2025 holds a EUR listing with no EUR rate: under the threshold only because its cost is unknown.
+    (y,) = json.loads(cli("tax", "foreign-property", "--year", "2025", "--json").output)["years"]
+    assert (y["status"], y["required"], y["incomplete"], y["assessment"]) == (
+        "not_required",
+        False,
+        True,
+        "undetermined",
+    )
 
 
 def test_json_report_for_every_year(cli, ledger):

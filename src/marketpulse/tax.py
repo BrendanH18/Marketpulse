@@ -505,10 +505,12 @@ T1135_DETAILED_THRESHOLD = 250_000.0  # at or over this at any time: the detaile
 T1135_NOT_REQUIRED = "not_required"
 T1135_SIMPLIFIED = "simplified"
 T1135_DETAILED = "detailed"
+T1135_UNDETERMINED = "undetermined"  # under the threshold, but an FX rate is missing
 T1135_STATUS_LABELS = {
     T1135_NOT_REQUIRED: "T1135 not required (cost stayed at or under $100,000)",
     T1135_SIMPLIFIED: "T1135 likely required: simplified method (over $100,000, under $250,000 all year)",
     T1135_DETAILED: "T1135 likely required: detailed method (cost reached $250,000)",
+    T1135_UNDETERMINED: "T1135 undetermined: an FX rate is missing, so the cost may be over $100,000",
 }
 
 # Yahoo suffixes of Canadian listings: TSX, TSX Venture, Cboe Canada (NEO) and the CSE.
@@ -588,11 +590,13 @@ class ForeignPropertyYear:
 
     @property
     def label(self) -> str:
-        """The status in words. Below the threshold with an FX rate missing, it is undetermined:
-        the cost left out could take the year over it."""
-        if self.incomplete and self.status == T1135_NOT_REQUIRED:
-            return "T1135 undetermined: an FX rate is missing, so the cost may be over $100,000"
-        return T1135_STATUS_LABELS[self.status]
+        """The assessment in words."""
+        return T1135_STATUS_LABELS[self.assessment]
+
+    @property
+    def assessment(self) -> str:
+        """`status`, or "undetermined" when it says not required but an FX rate is missing."""
+        return T1135_UNDETERMINED if self.incomplete and self.status == T1135_NOT_REQUIRED else self.status
 
     @property
     def gain(self) -> float:
@@ -603,13 +607,22 @@ class ForeignPropertyYear:
 _ForeignDay = tuple[str, dict[str, tuple[float, bool]]]
 
 
+@dataclass
+class _ForeignLedger:
+    """One replay's worth of what `_foreign_year` needs for any year."""
+
+    days: list[_ForeignDay]
+    dispositions: list[Disposition]  # of foreign property, in replay order
+    bought: dict[str, list[str]]  # dates of taxable purchases (and DRIPs), by symbol
+
+
 def _foreign_replay(
     transactions: Sequence[Transaction],
     accounts: dict[int, Account],
     assets: dict[str, Asset],
     fx_on: FxLookup,
     today: str,
-) -> tuple[list[_ForeignDay], list[Disposition]]:
+) -> _ForeignLedger:
     """Replay the ledger once, recording the foreign pools at the end of every ledger date."""
     verdicts: dict[str, bool] = {}
 
@@ -625,14 +638,19 @@ def _foreign_replay(
         days.append((day, held))
 
     report = compute(transactions, accounts, fx_on, today=today, on_day=observe)
-    return days, [d for d in report.dispositions if foreign(d.symbol)]
+    bought: dict[str, list[str]] = defaultdict(list)
+    for t in transactions:
+        if t.type in (TxnType.BUY, TxnType.DRIP) and is_taxable(accounts.get(t.account_id)):
+            bought[t.symbol].append(t.date)
+    return _ForeignLedger(days, [d for d in report.dispositions if foreign(d.symbol)], bought)
 
 
-def _foreign_year(
-    year: int, days: list[_ForeignDay], dispositions: list[Disposition], today: str, currency: str
-) -> ForeignPropertyYear:
+def _foreign_year(year: int, ledger: _ForeignLedger, today: str, currency: str) -> ForeignPropertyYear:
+    days, dispositions = ledger.days, ledger.dispositions
     start, as_of = f"{year}-01-01", min(f"{year}-12-31", today)
     result = ForeignPropertyYear(year, as_of, currency)
+    if start > as_of:
+        return result  # a year that hasn't started: nothing has been held in it yet
     # What was held on January 1 is whatever the last earlier ledger date left behind.
     carried = [held for day, held in days if day < start][-1:]
     timeline = [(start, carried[0])] if carried else []
@@ -640,21 +658,26 @@ def _foreign_year(
 
     # A sale with an FX rate missing (on it, or on a purchase behind it) has a guessed gain, so
     # whether part of a loss was denied, and how much, is a guess too. A denied loss moves into
-    # the replacement shares' cost: when the sale's loss was denied, or the symbol is still held
-    # (or bought again) within the 30-day window after it, the symbol's cost and the gain on any
-    # later sale (in replay order) are incomplete from then on. Conservatively, this lasts even
-    # if the pool is later sold out and reopened. A loss denied on a move into a registered plan
-    # never enters taxable cost, so transfers don't count.
-    def held_soon_after(d: Disposition) -> bool:
-        end = (date.fromisoformat(d.date) + timedelta(days=SUPERFICIAL_WINDOW_DAYS)).isoformat()
-        return any(d.symbol in held for day, held in days if d.date <= day <= end)
+    # the replacement shares' cost: when the sale's loss was denied, or it could have been (a
+    # taxable purchase within 30 days either side, and shares still held 30 days after), the
+    # symbol's cost and the gain on any later sale (in replay order) are incomplete from then
+    # on. Conservatively, this lasts even if the pool is later sold out and reopened. A loss
+    # denied on a move into a registered plan never enters taxable cost, so transfers don't count.
+    def could_be_superficial(d: Disposition) -> bool:
+        sold = date.fromisoformat(d.date)
+        window = timedelta(days=SUPERFICIAL_WINDOW_DAYS)
+        lo, hi = (sold - window).isoformat(), (sold + window).isoformat()
+        if not any(lo <= day <= hi for day in ledger.bought.get(d.symbol, ())):
+            return False
+        at_end = [held for day, held in days if day <= hi][-1:]
+        return bool(at_end) and d.symbol in at_end[0]
 
     guessed: dict[str, str] = {}
     unknown_gain: set[int] = set()  # dispositions (by position) whose gain rests on a guess
     for i, d in enumerate(dispositions):
         if d.symbol in guessed:
             unknown_gain.add(i)
-        elif not d.complete and (d.superficial or (d.kind == "sale" and held_soon_after(d))):
+        elif not d.complete and (d.superficial or (d.kind == "sale" and could_be_superficial(d))):
             guessed[d.symbol] = d.date
     holdings: dict[str, ForeignHolding] = {}
     for day, held in timeline:
@@ -701,8 +724,7 @@ def foreign_property(
     because the T1135 thresholds are. A year still in progress runs to `today`.
     """
     today = today or date.today().isoformat()
-    days, dispositions = _foreign_replay(transactions, accounts, assets, fx_on, today)
-    return _foreign_year(year, days, dispositions, today, currency)
+    return _foreign_year(year, _foreign_replay(transactions, accounts, assets, fx_on, today), today, currency)
 
 
 def foreign_property_years(
@@ -717,10 +739,11 @@ def foreign_property_years(
     """`foreign_property` for every year in which foreign property was held or sold, newest
     first, from a single replay. Years holding none are left out."""
     today = today or date.today().isoformat()
-    days, dispositions = _foreign_replay(transactions, accounts, assets, fx_on, today)
+    ledger = _foreign_replay(transactions, accounts, assets, fx_on, today)
+    days, dispositions = ledger.days, ledger.dispositions
     seen = [day for day, held in days if held and day <= today] + [d.date for d in dispositions if d.date <= today]
     if not seen:
         return []
     first, last = int(min(seen)[:4]), int(today[:4])
-    found = (_foreign_year(y, days, dispositions, today, currency) for y in range(last, first - 1, -1))
+    found = (_foreign_year(y, ledger, today, currency) for y in range(last, first - 1, -1))
     return [y for y in found if y.holdings]

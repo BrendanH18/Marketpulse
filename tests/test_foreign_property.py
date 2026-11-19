@@ -269,6 +269,24 @@ def test_a_purchase_missing_its_fx_rate_makes_a_quick_replacement_incomplete():
     assert y.incomplete and y.label.startswith("T1135 undetermined")
 
 
+def test_a_partial_sale_missing_its_rate_with_no_purchase_nearby_leaves_later_gains_alone():
+    def no_june_rate(day, ccy):
+        return 1.0 if ccy == "CAD" or not day.startswith("2024-06") else None
+
+    txns = [
+        txn(TxnType.BUY, "2024-01-10", qty=20, price=100, ccy="USD"),
+        txn(TxnType.SELL, "2024-06-03", qty=10, price=90, ccy="USD"),  # rate unknown; nothing bought nearby
+        txn(TxnType.SELL, "2025-03-03", qty=10, price=200, ccy="USD"),  # 2,000 - 1,000 = 1,000
+    ]
+    (h,) = year(txns, y=2025, fx=no_june_rate).holdings
+    assert h.gain == pytest.approx(1_000) and not h.incomplete
+
+
+def test_a_year_that_has_not_started_is_empty():
+    y = year([txn(TxnType.BUY, "2024-04-02", qty=1, price=150_000)], y=2026, today="2025-06-01")
+    assert (y.max_cost, y.max_cost_date, y.holdings, y.status) == (0.0, "", [], T1135_NOT_REQUIRED)
+
+
 def test_a_loss_denied_on_a_move_into_a_registered_plan_does_not_taint_later_gains():
     def no_march_rate(day, ccy):
         return 1.0 if ccy == "CAD" else (None if day.startswith("2024-03") else 1.0)
