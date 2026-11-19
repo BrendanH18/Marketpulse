@@ -294,11 +294,13 @@ def action_value_asset(app: MarketPulseApp) -> None:
             return
         app.after_change(f"{sym} valued at {fmt.money(amount)}")
 
+    ctx_sym = app.context_symbol()
+    initial_sym = ctx_sym if ctx_sym in manual else manual[0]
     app.push_screen(
         PromptScreen(
             "Update manual asset value",
             "SYMBOL VALUE [DATE]",
-            manual[0] + " ",
+            initial_sym + " ",
             hint=f"Manual assets: {', '.join(manual)}",
         ),
         done,

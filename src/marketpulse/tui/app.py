@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from datetime import date
 
 from rich.text import Text
 from rich.theme import Theme as RichTheme
@@ -171,6 +172,22 @@ class MarketPulseApp(App):
         Binding("dollar_sign", "toggle_cash", show=False),
         Binding("d", "duplicate", show=False),
         Binding("exclamation_mark", "problems", show=False),
+        # Workflow batch (81-100); none of these keys had a binding before.
+        Binding("0", "reset_sort", show=False),
+        Binding("ctrl+d", "half_page(True)", show=False),
+        Binding("ctrl+u", "half_page(False)", show=False),
+        Binding("I", "toggle_archived", show=False),
+        Binding("S", "jump_to_holding", show=False),
+        Binding("number_sign", "copy_table_csv", show=False),
+        Binding("X", "copy_table_markdown", show=False),
+        Binding("Q", "copy_summary", show=False),
+        Binding("M", "cycle_filter_mode", show=False),
+        Binding("commercial_at", "cycle_activity_account", show=False),
+        Binding("m", "cycle_movers", show=False),
+        Binding("minus", "step_year(-1)", show=False),
+        Binding("plus", "step_year(1)", show=False),
+        Binding("U", "rearm_triggered", show=False),
+        Binding("f2", "focus_input", show=False),
     ]
 
     def __init__(self, config: Config, tracker: Tracker | None = None):
@@ -206,6 +223,14 @@ class MarketPulseApp(App):
         self.table_sort: dict[str, tuple[str, bool]] = {}
         self.refreshed_at: float | None = None
         self.hide_cash = False
+        self.hide_archived = False
+        self.holdings_filter_mode = "all"
+        self.activity_filter_mode = "all"
+        self.alerts_filter_mode = "all"
+        self.activity_account_filter: int | None = None
+        self.movers_mode = "day %"
+        self.tax_year: int | None = None
+        self.income_year: int | None = date.today().year
         for name in theme_names():
             self.register_theme(textual_theme(palette_from_colors(name, OMARCHY_PALETTES[name])))
         if self.palette.name not in OMARCHY_PALETTES:
@@ -883,3 +908,54 @@ class MarketPulseApp(App):
 
     def action_problems(self) -> None:
         navigation.show_problems(self)
+
+    def action_reset_sort(self) -> None:
+        navigation.reset_sort(self)
+
+    def action_half_page(self, down: bool) -> None:
+        navigation.jump_half_page(self, down)
+
+    def action_toggle_archived(self) -> None:
+        navigation.toggle_archived_accounts(self)
+
+    def action_jump_to_holding(self) -> None:
+        navigation.jump_to_holding(self)
+
+    def action_copy_table_csv(self) -> None:
+        navigation.copy_table_csv(self)
+
+    def action_copy_table_markdown(self) -> None:
+        navigation.copy_table_markdown(self)
+
+    def action_copy_summary(self) -> None:
+        navigation.copy_portfolio_summary(self)
+
+    def action_cycle_filter_mode(self) -> None:
+        navigation.cycle_filter_mode(self)
+
+    def action_cycle_activity_account(self) -> None:
+        navigation.cycle_activity_account(self)
+
+    def action_cycle_movers(self) -> None:
+        navigation.cycle_movers_mode(self)
+
+    def action_step_year(self, delta: int) -> None:
+        navigation.step_year(self, delta)
+
+    def action_rearm_triggered(self) -> None:
+        navigation.rearm_triggered_alerts(self)
+
+    def action_pause_all_alerts(self) -> None:
+        navigation.bulk_alerts_active(self, False)
+
+    def action_resume_all_alerts(self) -> None:
+        navigation.bulk_alerts_active(self, True)
+
+    def action_create_backup(self) -> None:
+        navigation.create_backup(self)
+
+    def action_restore_auto_theme(self) -> None:
+        navigation.restore_auto_theme(self)
+
+    def action_focus_input(self) -> None:
+        navigation.focus_workspace_input(self)

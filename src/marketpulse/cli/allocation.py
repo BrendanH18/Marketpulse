@@ -25,7 +25,9 @@ if TYPE_CHECKING:
 BREAKDOWN_FIELDS = ["key", "label", "value", "weight"]
 REBALANCE_FIELDS = ["bucket", "label", "value", "weight", "target", "drift", "delta"]
 TARGET_FIELDS = ["bucket", "label", "target"]
-SORTS = ["value", "weight", "name"]
+BREAKDOWN_SORTS = ["value", "weight", "name"]
+DRIFT_SORTS = ["target", "drift", "abs-drift", "delta"]
+SORTS = [*BREAKDOWN_SORTS, *DRIFT_SORTS]
 
 
 def _percent(ctx: click.Context, param: click.Parameter, value: float | None) -> float | None:
@@ -105,6 +107,14 @@ def _sorted_rebalance(rows: Sequence[RebalanceRow], sort_by: str | None, descend
         out.sort(key=lambda r: (r.weight, r.label.casefold()))
     elif sort_by == "name":
         out.sort(key=lambda r: r.label.casefold())
+    elif sort_by == "target":
+        out.sort(key=lambda r: (r.target, r.label.casefold()))
+    elif sort_by == "drift":
+        out.sort(key=lambda r: (r.drift, r.label.casefold()))
+    elif sort_by == "abs-drift":
+        out.sort(key=lambda r: (abs(r.drift), r.label.casefold()))
+    elif sort_by == "delta":
+        out.sort(key=lambda r: (r.delta, r.label.casefold()))
     return out[::-1] if descending else out
 
 
@@ -157,11 +167,17 @@ def _show_targets(app: App, as_json: bool) -> None:
 @click.option("--dry-run", is_flag=True, help="Validate target changes and show what would be saved; write nothing.")
 @click.option("--show-targets", is_flag=True, help="List saved targets without pricing holdings.")
 @click.option("--json", "as_json", is_flag=True, help="Print the raw, unmasked allocation as JSON.")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Print raw, unmasked rows as JSON Lines.")
 @click.option("--csv", "as_csv", is_flag=True, help="Print raw, unmasked rows as CSV to stdout.")
 @click.option("--count", "count_only", is_flag=True, help="Print only the number of rows that would be shown.")
 @click.option("--sort", "sort_by", type=click.Choice(SORTS, case_sensitive=False), help="Order rows by this field.")
 @click.option("--descending", is_flag=True, help="Reverse the row order.")
 @click.option("--min-weight", type=float, callback=_percent, metavar="PCT", help="Hide breakdown rows below PCT%.")
+@click.option("--max-weight", type=float, callback=_percent, metavar="PCT", help="Hide breakdown rows above PCT%.")
+@click.option("--search", help="Match rows whose key or label contains this text, ignoring case.")
+@click.option("--exclude", "excludes", multiple=True, help="Exclude rows matching this key or label, ignoring case.")
+@click.option("--limit", type=click.IntRange(min=1), help="Show at most N rows.")
+@click.option("--offset", type=click.IntRange(min=0), help="Skip the first N rows.")
 @click.option("--drift-only", is_flag=True, help="Show only the rebalancing rows against your targets.")
 @click.option(
     "--threshold", type=float, callback=_percent, metavar="PCT", help="Only rebalancing rows drifting more than PCT."
@@ -178,11 +194,17 @@ def allocation(
     dry_run: bool,
     show_targets: bool,
     as_json: bool,
+    as_jsonl: bool,
     as_csv: bool,
     count_only: bool,
     sort_by: str | None,
     descending: bool,
     min_weight: float | None,
+    max_weight: float | None,
+    search: str | None,
+    excludes: tuple[str, ...],
+    limit: int | None,
+    offset: int | None,
     drift_only: bool,
     threshold: float | None,
     exit_code: bool,
@@ -192,21 +214,33 @@ def allocation(
 
     ctx = click.get_current_context()
     changing = bool(targets or removals or clear_targets)
-    outputs = as_json or as_csv or count_only
+    outputs = as_json or as_jsonl or as_csv or count_only
+    paged = limit is not None or offset is not None
     view_options = bool(
-        sort_by or descending or min_weight is not None or drift_only or threshold is not None or exit_code
+        sort_by
+        or descending
+        or min_weight is not None
+        or max_weight is not None
+        or search is not None
+        or excludes
+        or paged
+        or drift_only
+        or threshold is not None
+        or exit_code
     )
     by_given = ctx.get_parameter_source("by") is not ParameterSource.DEFAULT
-    if (as_json and as_csv) or (count_only and (as_json or as_csv)):
-        raise click.UsageError("Choose one output format; --count cannot be combined with --json or --csv.")
-    if show_targets and (changing or quiet or dry_run or as_csv or count_only or view_options or by_given):
+    if sum((as_json, as_jsonl, as_csv, count_only)) > 1:
+        raise click.UsageError("Choose one output format; --count cannot be combined with --json, --jsonl or --csv.")
+    if show_targets and (changing or quiet or dry_run or as_jsonl or as_csv or count_only or view_options or by_given):
         raise click.UsageError("--show-targets only combines with --json.")
     if removals and clear_targets:
         raise click.UsageError("--remove-target cannot be combined with --clear-targets.")
     if dry_run and not changing:
         raise click.UsageError("--dry-run needs --target, --remove-target or --clear-targets.")
     if changing and outputs:
-        raise click.UsageError("--json, --csv and --count can't be combined with target changes; save them first.")
+        raise click.UsageError(
+            "--json, --jsonl, --csv and --count can't be combined with target changes; save them first."
+        )
     if dry_run and (view_options or by_given):
         raise click.UsageError("--dry-run only previews target changes; it doesn't show the allocation.")
     if {_class_key(t.partition("=")[0]) for t in targets} & {_class_key(r) for r in removals}:
@@ -215,10 +249,20 @@ def allocation(
         raise click.UsageError("--quiet saves targets only; it can't be combined with output or view options.")
     if (drift_only or threshold is not None or exit_code) and by != "class":
         raise click.UsageError("Targets are by asset class; drift options need --by class.")
+    if sort_by in DRIFT_SORTS and not drift_only:
+        raise click.UsageError(f"--sort {sort_by} requires --drift-only.")
     if exit_code and threshold is None:
         raise click.UsageError("--exit-code needs --threshold PCT.")
-    if min_weight is not None and drift_only:
-        raise click.UsageError("--min-weight filters the breakdown; use --threshold with --drift-only.")
+    if (min_weight is not None or max_weight is not None) and drift_only:
+        raise click.UsageError("--min-weight and --max-weight filter the breakdown; use --threshold with --drift-only.")
+    if min_weight is not None and max_weight is not None and min_weight > max_weight:
+        raise click.UsageError("--min-weight must be at most --max-weight.")
+    if count_only and paged:
+        raise click.UsageError("--count cannot be combined with --limit or --offset.")
+    if search is not None and not search.strip():
+        raise click.BadParameter("Cannot be blank.", param_hint="--search")
+    if any(not item.strip() for item in excludes):
+        raise click.BadParameter("Cannot be blank.", param_hint="--exclude")
 
     store = app.store
     if show_targets:
@@ -253,8 +297,25 @@ def allocation(
         view = app.tracker.valuation()
     breakdown = {"class": view.by_class, "account": view.by_account, "currency": view.by_currency}[by]
     current_targets = store.targets()
+    needle = search.strip().casefold() if search else ""
+    excluded_set = {item.strip().casefold() for item in excludes}
+
+    def _matches(key: str, label: str) -> bool:
+        haystack = f"{key} {label}".casefold()
+        if needle and needle not in haystack:
+            return False
+        return not (key.casefold() in excluded_set or label.casefold() in excluded_set)
+
     rows = _sorted_breakdown(
-        [b for b in breakdown if min_weight is None or b.weight >= min_weight], sort_by, descending
+        [
+            b
+            for b in breakdown
+            if (min_weight is None or b.weight >= min_weight)
+            and (max_weight is None or b.weight <= max_weight)
+            and _matches(b.key, b.label)
+        ],
+        sort_by,
+        descending,
     )
     drift: list[RebalanceRow] = []
     if by == "class" and current_targets:
@@ -262,15 +323,28 @@ def allocation(
             [
                 r
                 for r in rebalance(view.by_class, current_targets, view.net_worth)
-                if threshold is None or abs(r.drift) > threshold
+                if (threshold is None or abs(r.drift) > threshold) and _matches(r.bucket, r.label)
             ],
             sort_by,
             descending,
         )
     failing = exit_code and bool(drift)
+    start = offset or 0
+    if paged:
+        if drift_only:
+            drift = drift[start : start + limit if limit is not None else None]
+        else:
+            rows = rows[start : start + limit if limit is not None else None]
 
     if count_only:
         click.echo(len(drift) if drift_only else len(rows))
+    elif as_jsonl:
+        if drift_only:
+            for r in drift:
+                click.echo(json.dumps(_rebalance_dict(r), ensure_ascii=False))
+        else:
+            for b in rows:
+                click.echo(json.dumps({f: getattr(b, f) for f in BREAKDOWN_FIELDS}, ensure_ascii=False))
     elif as_csv:
         if drift_only:
             _emit_csv(REBALANCE_FIELDS, [_rebalance_dict(r) for r in drift])
@@ -348,6 +422,9 @@ def allocation(
 @click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip this many matching targets.")
 @click.option("--page-info", is_flag=True, help="With --json, include total, offset and limit before pagination.")
 @click.option("--buckets-only", is_flag=True, help="Print matching class keys, one per line, for scripts.")
+@click.option("--summary", "show_summary", is_flag=True, help="Show total targeted and unallocated percentages.")
+@click.option("--untargeted", is_flag=True, help="List asset classes that have no saved target.")
+@click.option("--require-100", is_flag=True, help="Exit 1 if saved targets do not sum to 100%.")
 @click.option("--fields", help="Ordered comma-separated fields for JSON or CSV: bucket,label,target.")
 @pass_app
 def targets(
@@ -368,11 +445,16 @@ def targets(
     offset: int,
     page_info: bool,
     buckets_only: bool,
+    show_summary: bool,
+    untargeted: bool,
+    require_100: bool,
     fields: str | None,
 ) -> None:
     """Inspect saved allocation targets offline. Set targets with `allocation --target CLASS=PCT`."""
     if sum((as_json, as_csv, count_only, buckets_only)) > 1:
         raise click.UsageError("Choose one of --json, --csv, --count or --buckets-only.")
+    if show_summary and (as_csv or count_only or buckets_only or untargeted or page_info or fields is not None):
+        raise click.UsageError("--summary only combines with --json and --require-100.")
     if positive and zero:
         raise click.UsageError("Choose --positive or --zero.")
     if min_target is not None and max_target is not None and min_target > max_target:
@@ -390,10 +472,42 @@ def targets(
             raise click.BadParameter("Use unique fields from bucket,label,target.", param_hint="--fields")
     if search is not None and not search.strip():
         raise click.BadParameter("Cannot be blank.", param_hint="--search")
+    saved = app.store.targets()
+    saved_total = sum(saved.values())
+    if show_summary:
+        unallocated = max(0.0, 100.0 - saved_total)
+        if as_json:
+            click.echo(
+                json.dumps(
+                    {
+                        "count": len(saved),
+                        "total": saved_total,
+                        "unallocated": unallocated,
+                        "complete": abs(saved_total - 100.0) <= 0.01,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        else:
+            app.console.print(
+                Text(
+                    f"{len(saved)} target(s) · {fmt.pct(saved_total, sign=False)} targeted · "
+                    f"{fmt.pct(unallocated, sign=False)} unallocated",
+                    style="muted",
+                )
+            )
+        if require_100 and abs(saved_total - 100.0) > 0.01:
+            raise click.exceptions.Exit(1)
+        return
     needle = search.strip().casefold() if search else ""
+    source_rows: list[dict[str, Any]] = (
+        [{"bucket": c.value, "label": c.label, "target": 0.0} for c in AssetClass if c.value not in saved]
+        if untargeted
+        else _target_rows(saved)
+    )
     rows = [
         row
-        for row in _target_rows(app.store.targets())
+        for row in source_rows
         if (not classes or row["bucket"] in classes)
         and row["bucket"] not in excluded_classes
         and (not needle or needle in (row["bucket"] + " " + row["label"]).casefold())
@@ -405,6 +519,8 @@ def targets(
     total = len(rows)
     if count_only:
         click.echo(total)
+        if require_100 and abs(saved_total - 100.0) > 0.01:
+            raise click.exceptions.Exit(1)
         return
     field = "bucket" if sort_by == "class" else sort_by
     rows.sort(
@@ -422,9 +538,20 @@ def targets(
         for row in rows:
             click.echo(row["bucket"])
     elif not rows:
-        app.console.print(Text("No matching saved targets." if app.store.targets() else "No targets saved.", "muted"))
+        if untargeted:
+            msg = (
+                "All asset classes have saved targets."
+                if not (classes or excluded_classes or needle)
+                else "No matching untargeted classes."
+            )
+        else:
+            msg = "No matching saved targets." if saved else "No targets saved."
+        app.console.print(Text(msg, "muted"))
     else:
-        table = render.table("Class", ("Target", "right"), title="Saved allocation targets")
+        title = "Untargeted asset classes" if untargeted else "Saved allocation targets"
+        table = render.table("Class", ("Target", "right"), title=title)
         for row in rows:
             table.add_row(Text(row["label"]), Text(fmt.pct(row["target"], sign=False)))
         app.console.print(table)
+    if require_100 and abs(saved_total - 100.0) > 0.01:
+        raise click.exceptions.Exit(1)

@@ -61,6 +61,7 @@ CHECKS = (
     "menu bar app",
 )
 STATUSES: tuple[Status, ...] = ("ok", "fail", "info", "skipped")
+_STATUS_ORDER: dict[str, int] = {"fail": 0, "info": 1, "skipped": 2, "ok": 3}
 
 
 def _check_names(ctx, param, values: tuple[str, ...]) -> tuple[str, ...]:
@@ -87,9 +88,21 @@ def _check_names(ctx, param, values: tuple[str, ...]) -> tuple[str, ...]:
 @click.option("--failed-only", is_flag=True, help="Show only the checks that failed.")
 @click.option("--summary", is_flag=True, help="Print how many checks ended in each status instead of every row.")
 @click.option("--csv", "as_csv", is_flag=True, help="Export checks or status summary as CSV.")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Print matching checks as JSON Lines.")
+@click.option("--names-only", is_flag=True, help="Print only matching check names, one per line.")
+@click.option("-q", "--quiet", is_flag=True, help="Print nothing; report health only through the exit status.")
 @click.option(
     "--status", "statuses", multiple=True, type=click.Choice(STATUSES), help="Show checks with these statuses."
 )
+@click.option(
+    "--exclude-status",
+    "excluded_statuses",
+    multiple=True,
+    type=click.Choice(STATUSES),
+    help="Hide checks with these statuses.",
+)
+@click.option("--sort", "sort_by", type=click.Choice(["check", "status"]), help="Order visible checks.")
+@click.option("--descending", is_flag=True, help="Reverse the visible check order.")
 @click.option("--search", help="Find text in check names or details, ignoring case.")
 @click.option("--count", is_flag=True, help="Count visible checks.")
 @click.option("--list-checks", is_flag=True, help="List available check names without running them.")
@@ -105,7 +118,13 @@ def doctor(
     failed_only: bool,
     summary: bool,
     as_csv: bool,
+    as_jsonl: bool,
+    names_only: bool,
+    quiet: bool,
     statuses: tuple[str, ...],
+    excluded_statuses: tuple[str, ...],
+    sort_by: str | None,
+    descending: bool,
     search: str | None,
     count: bool,
     list_checks: bool,
@@ -115,12 +134,27 @@ def doctor(
     Exit status is 0 unless --strict is given and a check failed (then 1).
     --only and --exclude take check names; checks that aren't selected don't run.
     """
-    if sum((as_json, as_csv, count)) > 1:
-        raise click.UsageError("Choose one of --json, --csv or --count.")
-    if count and summary:
-        raise click.UsageError("--count cannot be combined with --summary.")
+    if sum((as_json, as_csv, as_jsonl, names_only, count, quiet)) > 1:
+        raise click.UsageError("Choose one of --json, --csv, --jsonl, --names-only, --count or --quiet.")
+    if (count or as_jsonl or names_only or quiet) and summary:
+        raise click.UsageError("--summary cannot be combined with --count, --jsonl, --names-only or --quiet.")
     if list_checks:
-        if only or exclude or failed_only or summary or statuses or search or strict or verify_backup:
+        if (
+            only
+            or exclude
+            or failed_only
+            or summary
+            or statuses
+            or excluded_statuses
+            or sort_by
+            or descending
+            or search
+            or strict
+            or verify_backup
+            or as_jsonl
+            or names_only
+            or quiet
+        ):
             raise click.UsageError("--list-checks cannot be combined with execution or result filters.")
         if as_json:
             click.echo(json.dumps(list(CHECKS)))
@@ -144,10 +178,26 @@ def doctor(
         checks = [c for c in checks if c.status == "fail"]
     if statuses:
         checks = [c for c in checks if c.status in statuses]
+    if excluded_statuses:
+        checks = [c for c in checks if c.status not in excluded_statuses]
     if search:
         checks = [c for c in checks if search.casefold() in (c.check + " " + c.detail).casefold()]
-    if count:
+    if sort_by == "check":
+        checks = sorted(checks, key=lambda c: c.check, reverse=descending)
+    elif sort_by == "status":
+        checks = sorted(checks, key=lambda c: (_STATUS_ORDER[c.status], c.check), reverse=descending)
+    elif descending:
+        checks = list(reversed(checks))
+    if quiet:
+        pass
+    elif count:
         click.echo(len(checks))
+    elif names_only:
+        if checks:
+            click.echo("\n".join(c.check for c in checks))
+    elif as_jsonl:
+        for c in checks:
+            click.echo(json.dumps(asdict(c), ensure_ascii=False))
     elif as_csv:
         stream = io.StringIO(newline="")
         writer = csv.writer(stream)

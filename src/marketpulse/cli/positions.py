@@ -45,9 +45,13 @@ def _active_account(app: App, ref: str | None) -> Account | None:
     return acct
 
 
-def _check_outputs(as_json: bool, as_csv: bool, count_only: bool = False) -> None:
-    if (as_json and as_csv) or (count_only and (as_json or as_csv)):
-        raise click.UsageError("Choose one output format; --count cannot be combined with --json or --csv.")
+def _check_outputs(
+    as_json: bool, as_csv: bool, count_only: bool = False, as_jsonl: bool = False, symbols_only: bool = False
+) -> None:
+    if sum((as_json, as_csv, count_only, as_jsonl, symbols_only)) > 1:
+        raise click.UsageError(
+            "Choose one output format; --count cannot be combined with --json, --jsonl, --csv or --symbols-only."
+        )
 
 
 def _emit_csv(fieldnames: list[str], rows: list[dict[str, Any]]) -> None:
@@ -72,7 +76,10 @@ def _emit_csv(fieldnames: list[str], rows: list[dict[str, Any]]) -> None:
 )
 @click.option("--descending", is_flag=True, help="Reverse the selected order.")
 @click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked positions as JSON.")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Print raw, unmasked positions as JSON Lines.")
 @click.option("--csv", "as_csv", is_flag=True, help="Print raw, unmasked positions as CSV to stdout.")
+@click.option("--symbols-only", is_flag=True, help="Print matching distinct symbols, one per line.")
+@click.option("--totals", is_flag=True, help="Show per-currency book-cost totals (never mixing currencies).")
 @click.option("--count", "count_only", is_flag=True, help="Print only the number of matching positions.")
 @click.option("--limit", type=click.IntRange(min=1), help="Show at most N matching positions.")
 @click.option("--offset", type=click.IntRange(min=0), help="Skip N matching positions after sorting.")
@@ -114,6 +121,7 @@ def _emit_csv(fieldnames: list[str], rows: list[dict[str, Any]]) -> None:
     help="Match the explicitly saved asset class, without looking up quotes.",
 )
 @click.option("--symbol-prefix", help="Match a symbol prefix, ignoring case.")
+@click.option("--symbol-suffix", help="Match a symbol suffix, ignoring case (e.g. .TO).")
 @click.option(
     "--summary",
     type=click.Choice(["account", "currency", "symbol"]),
@@ -128,7 +136,10 @@ def positions(
     sort_by: str,
     descending: bool,
     as_json: bool,
+    as_jsonl: bool,
     as_csv: bool,
+    symbols_only: bool,
+    totals: bool,
     count_only: bool,
     limit: int | None,
     offset: int | None,
@@ -154,20 +165,25 @@ def positions(
     asset_kind: str | None,
     asset_class: str | None,
     symbol_prefix: str | None,
+    symbol_suffix: str | None,
     summary: str | None,
 ) -> None:
     """Open positions at cost from the ledger, offline (no quotes, no snapshot)."""
-    _check_outputs(as_json, as_csv, count_only)
+    _check_outputs(as_json, as_csv, count_only, as_jsonl=as_jsonl, symbols_only=symbols_only)
     if count_only and (limit is not None or offset is not None or page_info):
         raise click.UsageError("--count cannot be combined with --limit, --offset or --page-info.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
+    if totals and (summary or count_only or symbols_only or as_jsonl or page_info):
+        raise click.UsageError("--totals only combines with --json or --csv.")
     if held_since and held_until and held_since > held_until:
         raise click.UsageError("--held-since must be on or before --held-until.")
     _bounds(min_quantity, max_quantity, "quantity")
     _bounds(min_book, max_book, "book")
     _bounds(min_average_cost, max_average_cost, "average-cost")
     _check_summary(summary, count_only, page_info)
+    if summary and (as_jsonl or symbols_only):
+        raise click.UsageError("--summary cannot be combined with --jsonl or --symbols-only.")
     acct = _active_account(app, account)
     accounts = app.store.account_map()
     excluded_ids = _excluded_account_ids(app, excluded_accounts)
@@ -212,7 +228,33 @@ def positions(
         and (asset_kind is None or metadata.get(h.symbol, Asset(h.symbol)).kind.value == asset_kind)
         and (asset_class is None or metadata.get(h.symbol, Asset(h.symbol)).asset_class == asset_class)
         and (symbol_prefix is None or h.symbol.casefold().startswith(symbol_prefix.strip().casefold()))
+        and (symbol_suffix is None or h.symbol.casefold().endswith(symbol_suffix.strip().casefold()))
     ]
+
+    if totals:
+        by_ccy: dict[str, list[Holding]] = {}
+        for h in matches:
+            by_ccy.setdefault(h.currency, []).append(h)
+        total_rows: list[dict[str, Any]] = [
+            {"currency": ccy, "positions": len(items), "book": sum(h.book for h in items)}
+            for ccy, items in sorted(by_ccy.items())
+        ]
+        if as_csv:
+            _emit_csv(["currency", "positions", "book"], total_rows)
+        elif as_json:
+            click.echo(json.dumps(total_rows, ensure_ascii=False))
+        elif not total_rows:
+            app.console.print(Text("No positions match these filters.", style="muted"))
+        else:
+            t = render.table("Ccy", ("Positions", "right"), ("Book", "right"), title="Position book totals by currency")
+            for total_row in total_rows:
+                t.add_row(
+                    Text(str(total_row["currency"]), style="accent"),
+                    Text(str(total_row["positions"]), style="muted"),
+                    Text(fmt.money(float(total_row["book"]), privacy=app.privacy)),
+                )
+            app.console.print(t)
+        return
 
     if summary:
         values = [accounts[h.account_id].name if summary == "account" else str(getattr(h, summary)) for h in matches]
@@ -250,6 +292,15 @@ def positions(
         }
         for h in matches
     ]
+    if symbols_only:
+        distinct = list(dict.fromkeys(r["symbol"] for r in rows))
+        if distinct:
+            click.echo("\n".join(distinct))
+        return
+    if as_jsonl:
+        for row in rows:
+            click.echo(json.dumps(row, ensure_ascii=False))
+        return
     if as_csv:
         _emit_csv(POSITION_FIELDS, rows)
         return
@@ -325,6 +376,7 @@ def positions(
     type=click.Choice(["account", "currency", "account-type", "institution"]),
     help="Count matching balances by this field before pagination.",
 )
+@click.option("--totals", is_flag=True, help="Show per-currency cash totals (never mixing currencies).")
 @pass_app
 def cash(
     app: App,
@@ -351,6 +403,7 @@ def cash(
     zero: bool,
     registered: bool | None,
     summary: str | None,
+    totals: bool,
 ) -> None:
     """Cash balances from the ledger for accounts that track cash, offline.
 
@@ -360,6 +413,8 @@ def cash(
         raise click.UsageError("--count cannot be combined with --limit, --offset or --page-info.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
+    if totals and (summary or count_only or page_info):
+        raise click.UsageError("--totals only combines with --json or --csv.")
     if sum((positive, negative, zero)) > 1 or (zero and nonzero):
         raise click.UsageError("Choose one of --positive, --negative or --zero; --zero conflicts with --nonzero.")
     _check_summary(summary, count_only, page_info)
@@ -403,6 +458,33 @@ def cash(
         if max_balance is not None and balance > max_balance:
             continue
         rows.append({"account_id": account_id, "account": owner.name, "currency": ccy, "balance": balance})
+
+    if totals:
+        by_ccy_cash: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            by_ccy_cash.setdefault(str(row["currency"]), []).append(row)
+        total_rows = [
+            {"currency": ccy, "accounts": len(items), "balance": sum(float(r["balance"]) for r in items)}
+            for ccy, items in sorted(by_ccy_cash.items())
+        ]
+        if as_csv:
+            _emit_csv(["currency", "accounts", "balance"], total_rows)
+        elif as_json:
+            click.echo(json.dumps(total_rows, ensure_ascii=False))
+        elif not total_rows:
+            app.console.print(Text("No cash balances match these filters.", style="muted"))
+        else:
+            t = render.table("Ccy", ("Accounts", "right"), ("Balance", "right"), title="Cash totals by currency")
+            for row in total_rows:
+                t.add_row(
+                    Text(str(row["currency"]), style="accent"),
+                    Text(str(row["accounts"]), style="muted"),
+                    Text(fmt.money(float(row["balance"]), privacy=app.privacy)),
+                )
+            app.console.print(t)
+        if negative and rows:
+            raise click.exceptions.Exit(1)
+        return
 
     if summary:
         values = []

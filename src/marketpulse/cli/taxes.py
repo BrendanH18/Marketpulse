@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -18,7 +19,7 @@ from ..analytics import TaxYear, disposition_note
 from ..ledger import LedgerIssue
 from ..models import EPSILON, Account
 from ..tax import Disposition
-from .base import App, fail, pass_app
+from .base import App, date_callback, fail, pass_app
 from .root import main
 
 KINDS = ["sale", "roc", "deemed"]
@@ -111,11 +112,18 @@ def _write_csv(stream: TextIO, rows: list[_Row], accounts: dict[int, Account], b
         writer.writerow(capital_gains_row(row.year, row.d, accounts))
 
 
+def _finite_amount(ctx: click.Context, param: click.Parameter, value: float | None) -> float | None:
+    if value is not None and not math.isfinite(value):
+        raise click.BadParameter("Must be a finite number.", ctx=ctx, param=param)
+    return value
+
+
 def _check_options(
     *,
     stdout_csv: bool,
     csv_file: bool,
     as_json: bool,
+    as_jsonl: bool,
     count_only: bool,
     summary: bool,
     issues: bool,
@@ -129,19 +137,24 @@ def _check_options(
     gains_only: bool,
     losses_only: bool,
     denied: bool,
+    superficial: bool,
     incomplete: bool,
+    since: str | None,
+    until: str | None,
+    min_gain: float | None,
+    max_gain: float | None,
 ) -> None:
     usage = click.UsageError
-    if as_json and (stdout_csv or csv_file):
-        raise usage("Choose one output format: --json or --csv.")
-    if count_only and (as_json or stdout_csv or csv_file):
-        raise usage("--count cannot be combined with --json or --csv.")
+    if sum((as_json, as_jsonl, stdout_csv or csv_file)) > 1:
+        raise usage("Choose one output format: --json, --jsonl or --csv.")
+    if count_only and (as_json or as_jsonl or stdout_csv or csv_file):
+        raise usage("--count cannot be combined with --json, --jsonl or --csv.")
     if count_only and (paged or page_info):
         raise usage("--count cannot be combined with --limit, --offset or --page-info.")
     if sum((summary, issues, room)) > 1:
         raise usage("Choose one of --summary, --issues or --room.")
-    if (summary or issues or room) and (count_only or stdout_csv or csv_file):
-        raise usage("--summary, --issues and --room cannot be combined with --count or --csv.")
+    if (summary or issues or room) and (count_only or stdout_csv or csv_file or as_jsonl):
+        raise usage("--summary, --issues and --room cannot be combined with --count, --jsonl or --csv.")
     if (summary or issues or room) and (paged or page_info or ordered):
         raise usage("--summary, --issues and --room cannot be combined with --sort, --descending or paging.")
     if (issues or room) and filtered:
@@ -154,8 +167,14 @@ def _check_options(
         raise usage("--page-info requires --json.")
     if gains_only and losses_only:
         raise usage("Choose either --gains-only or --losses-only.")
-    if incomplete and (gains_only or losses_only or denied):
-        raise usage("--incomplete cannot be combined with --gains-only, --losses-only or --denied.")
+    if incomplete and (
+        gains_only or losses_only or denied or superficial or min_gain is not None or max_gain is not None
+    ):
+        raise usage("--incomplete cannot be combined with gain/loss filters.")
+    if since is not None and until is not None and since > until:
+        raise usage("--since must be on or before --until.")
+    if min_gain is not None and max_gain is not None and min_gain > max_gain:
+        raise usage("--min-gain must be at most --max-gain.")
 
 
 @main.command()
@@ -169,12 +188,30 @@ def _check_options(
     " '-' prints them to stdout.",
 )
 @click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked dispositions as JSON.")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Print raw, unmasked dispositions as JSON Lines.")
 @click.option("--symbol", "symbols", multiple=True, help="Symbols containing this text, ignoring case; repeat for any.")
+@click.option(
+    "--exact-symbol", "exact_symbols", multiple=True, help="Exact symbol match, ignoring case; repeat for any."
+)
+@click.option(
+    "--exclude-symbol", "excluded_symbols", multiple=True, help="Exclude symbols containing this text, ignoring case."
+)
+@click.option(
+    "--currency", "currencies", multiple=True, help="Only dispositions in this native currency; repeat for any."
+)
+@click.option(
+    "--exclude-currency", "excluded_currencies", multiple=True, help="Exclude dispositions in this native currency."
+)
+@click.option("--since", callback=date_callback, help="Only dispositions on or after YYYY-MM-DD.")
+@click.option("--until", callback=date_callback, help="Only dispositions on or before YYYY-MM-DD.")
 @click.option("-a", "--account", default=None, help="Only dispositions in this active account (name, id or type).")
 @click.option("--kind", "kinds", multiple=True, type=click.Choice(KINDS, case_sensitive=False), help="Repeat for any.")
 @click.option("--gains-only", is_flag=True, help="Only dispositions with a capital gain.")
 @click.option("--losses-only", is_flag=True, help="Only dispositions with a capital loss (denied or not).")
 @click.option("--denied", is_flag=True, help="Only dispositions with a denied loss (superficial or registered).")
+@click.option("--superficial", is_flag=True, help="Only dispositions with a superficial loss.")
+@click.option("--min-gain", type=float, callback=_finite_amount, help="Only dispositions with allowed gain >= AMOUNT.")
+@click.option("--max-gain", type=float, callback=_finite_amount, help="Only dispositions with allowed gain <= AMOUNT.")
 @click.option("--incomplete", is_flag=True, help="Only dispositions missing an FX rate (left out of totals).")
 @click.option("--sort", "sort_by", type=click.Choice(SORTS, case_sensitive=False), help="Order dispositions.")
 @click.option("--descending", is_flag=True, help="Reverse the order (date order without --sort).")
@@ -192,12 +229,22 @@ def tax(
     year: int | None,
     csv_path: Path | None,
     as_json: bool,
+    as_jsonl: bool,
     symbols: tuple[str, ...],
+    exact_symbols: tuple[str, ...],
+    excluded_symbols: tuple[str, ...],
+    currencies: tuple[str, ...],
+    excluded_currencies: tuple[str, ...],
+    since: str | None,
+    until: str | None,
     account: str | None,
     kinds: tuple[str, ...],
     gains_only: bool,
     losses_only: bool,
     denied: bool,
+    superficial: bool,
+    min_gain: float | None,
+    max_gain: float | None,
     incomplete: bool,
     sort_by: str | None,
     descending: bool,
@@ -218,13 +265,39 @@ def tax(
     csv_file = csv_path is not None and not stdout_csv
     if any(not s.strip() for s in symbols):
         raise click.UsageError("--symbol cannot be blank.")
-    filtered = bool(symbols or account or kinds or gains_only or losses_only or denied or incomplete)
+    if any(not s.strip() for s in exact_symbols):
+        raise click.UsageError("--exact-symbol cannot be blank.")
+    if any(not s.strip() for s in excluded_symbols):
+        raise click.UsageError("--exclude-symbol cannot be blank.")
+    if any(not c.strip() for c in currencies):
+        raise click.UsageError("--currency cannot be blank.")
+    if any(not c.strip() for c in excluded_currencies):
+        raise click.UsageError("--exclude-currency cannot be blank.")
+    filtered = bool(
+        symbols
+        or exact_symbols
+        or excluded_symbols
+        or currencies
+        or excluded_currencies
+        or since is not None
+        or until is not None
+        or account
+        or kinds
+        or gains_only
+        or losses_only
+        or denied
+        or superficial
+        or min_gain is not None
+        or max_gain is not None
+        or incomplete
+    )
     ordered = sort_by is not None or descending
     paged = limit is not None or offset is not None
     _check_options(
         stdout_csv=stdout_csv,
         csv_file=csv_file,
         as_json=as_json,
+        as_jsonl=as_jsonl,
         count_only=count_only,
         summary=summary,
         issues=issues,
@@ -238,7 +311,12 @@ def tax(
         gains_only=gains_only,
         losses_only=losses_only,
         denied=denied,
+        superficial=superficial,
         incomplete=incomplete,
+        since=since,
+        until=until,
+        min_gain=min_gain,
+        max_gain=max_gain,
     )
     tr = app.tracker
     if room:
@@ -254,7 +332,7 @@ def tax(
         assert csv_path is not None
         _export_file(app, csv_path, year)  # the accountant file, exactly as before
         return
-    if not (as_json or stdout_csv or csv_file or count_only or summary or issues or selecting):
+    if not (as_json or as_jsonl or stdout_csv or csv_file or count_only or summary or issues or selecting):
         _default_report(app, year)
         return
 
@@ -269,18 +347,33 @@ def tax(
 
     # The full report first, then a selection of its rows: nothing below changes a figure.
     needles = [s.strip().casefold() for s in symbols]
+    exact_set = {s.strip().casefold() for s in exact_symbols}
+    excluded_needles = [s.strip().casefold() for s in excluded_symbols]
+    wanted_currencies = {c.strip().upper() for c in currencies}
+    excluded_currency_set = {c.strip().upper() for c in excluded_currencies}
     wanted_kinds = {k.lower() for k in kinds}
 
     def keep(row: _Row) -> bool:
         d = row.d
+        sym = d.symbol.casefold()
+        ccy = d.currency.upper()
         return (
             (year is None or row.year == year)
-            and (not needles or any(n in d.symbol.casefold() for n in needles))
+            and (since is None or d.date >= since)
+            and (until is None or d.date <= until)
+            and (not needles or any(n in sym for n in needles))
+            and (not exact_set or sym in exact_set)
+            and (not excluded_needles or not any(n in sym for n in excluded_needles))
+            and (not wanted_currencies or ccy in wanted_currencies)
+            and (ccy not in excluded_currency_set)
             and (acct is None or d.account_id == acct.saved_id)
             and (not wanted_kinds or d.kind in wanted_kinds)
             and (not gains_only or (d.complete and d.gain > EPSILON))
             and (not losses_only or (d.complete and d.gain < -EPSILON))
             and (not denied or (d.complete and d.denied > EPSILON))
+            and (not superficial or d.superficial)
+            and (min_gain is None or (d.complete and d.allowed_gain >= min_gain - EPSILON))
+            and (max_gain is None or (d.complete and d.allowed_gain <= max_gain + EPSILON))
             and (not incomplete or not d.complete)
         )
 
@@ -302,6 +395,9 @@ def tax(
         out = [_json_row(r, accounts) for r in rows]
         payload: Any = {"rows": out, "total": total, "offset": start, "limit": limit} if page_info else out
         click.echo(json.dumps(payload, ensure_ascii=False))
+    elif as_jsonl:
+        for r in rows:
+            click.echo(json.dumps(_json_row(r, accounts), ensure_ascii=False))
     elif stdout_csv:
         stream = io.StringIO()
         _write_csv(stream, rows, accounts, tr.base, lineterminator="\n")

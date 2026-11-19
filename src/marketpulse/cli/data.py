@@ -168,6 +168,11 @@ IMPORT_SUMMARIES = ["account", "type", "symbol", "month"]
     help="Count the rows imported (or, with --dry-run, that would be) by this field.",
 )
 @click.option("--exit-code", is_flag=True, help="Exit 1 if any row was skipped (after reporting as usual).")
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Refuse to write anything if any row has an issue (checked via preview first).",
+)
 @pass_app
 def import_cmd(
     app: App,
@@ -179,6 +184,7 @@ def import_cmd(
     as_json: bool,
     summary: str | None,
     exit_code: bool,
+    strict: bool,
 ) -> None:
     """Import transactions from a broker or MarketPulse CSV.
 
@@ -192,9 +198,33 @@ def import_cmd(
 
     added: list[Transaction] = []
     names: dict[int, Account] = {}
+    strict_aborted = False
     try:
-        default = _import_default(app, account, path, profile, create_default=not (dry_run or as_json))
-        if summary:
+        default = _import_default(app, account, path, profile, create_default=not (dry_run or as_json or strict))
+        if strict and not dry_run:
+            preview = import_transactions(
+                app.store,
+                path,
+                default_account=default,
+                create_accounts=not no_create_accounts,
+                dry_run=True,
+                profile=profile,
+            )
+            if preview.issues:
+                result = preview
+                strict_aborted = True
+            elif summary:
+                result, added, names = _import_rows(app.store, path, default, not no_create_accounts, False, profile)
+            else:
+                result = import_transactions(
+                    app.store,
+                    path,
+                    default_account=default,
+                    create_accounts=not no_create_accounts,
+                    dry_run=False,
+                    profile=profile,
+                )
+        elif summary:
             result, added, names = _import_rows(app.store, path, default, not no_create_accounts, dry_run, profile)
         else:
             result = import_transactions(
@@ -211,15 +241,22 @@ def import_cmd(
     if as_json:
         payload = asdict(result)
         payload["backup"] = str(result.backup) if result.backup is not None else None
-        payload["dry_run"] = dry_run
+        payload["dry_run"] = dry_run or strict_aborted
+        if strict:
+            payload["strict_aborted"] = strict_aborted
         if summary:
             payload["summary"] = groups
         click.echo(json.dumps(payload, ensure_ascii=False))
-        if exit_code and result.issues:
+        if (exit_code or strict) and result.issues:
             raise click.exceptions.Exit(1)
         return
-    verb = "Would import" if dry_run else "Imported"
-    app.ok(f"{verb} {result.added} transaction(s); {result.duplicates} duplicate(s) skipped. ({result.profile_label})")
+    if strict_aborted:
+        app.warn(f"Aborted import (--strict): {len(result.issues)} row issue(s) found; nothing was written.")
+    else:
+        verb = "Would import" if dry_run else "Imported"
+        app.ok(
+            f"{verb} {result.added} transaction(s); {result.duplicates} duplicate(s) skipped. ({result.profile_label})"
+        )
     if result.backup is not None:
         # Tell the user how to undo the whole import, not just the last row.
         app.console.print(Text(f"  pre-import backup: {result.backup}", style="muted"))
@@ -233,13 +270,13 @@ def import_cmd(
         app.warn(_import_line(issue))
     if len(result.issues) > 15:
         app.warn(f"…and {len(result.issues) - 15} more skipped rows")
-    if summary:
+    if summary and not strict_aborted:
         title = "Would import" if dry_run else "Imported"
         table = render.table(summary.title(), ("Rows", "right"), title=title)
         for group in groups:
             table.add_row(Text(str(group["group"]) or "(no symbol)"), Text(str(group["count"])))
         app.console.print(table)
-    if exit_code and result.issues:
+    if (exit_code or strict) and result.issues:
         raise click.exceptions.Exit(1)
 
 
@@ -327,6 +364,8 @@ EXPORT_TYPES = [t.value for t in TxnType]
 @click.option("--month", type=click.IntRange(min=1, max=12), help="Only rows in this calendar month, in any year.")
 @click.option("--limit", type=click.IntRange(min=1), help="Write at most this many matching rows, in ledger order.")
 @click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip this many matching rows before exporting.")
+@click.option("--no-overwrite", is_flag=True, help="Refuse to overwrite an existing output file at PATH.")
+@click.option("--dry-run", is_flag=True, help="Preview how many rows would be exported without writing a file.")
 @pass_app
 def export_cmd(
     app: App,
@@ -349,6 +388,8 @@ def export_cmd(
     month: int | None,
     limit: int | None,
     offset: int,
+    no_overwrite: bool,
+    dry_run: bool,
 ) -> None:
     """Export the ledger as CSV (stdout if no PATH).
 
@@ -356,6 +397,12 @@ def export_cmd(
     other MarketPulse CSV (a file without some columns may not)."""
     from ..csvio import export_transactions
 
+    if no_overwrite and path is None:
+        raise click.UsageError("--no-overwrite requires PATH.")
+    if dry_run and count_only:
+        raise click.UsageError("--dry-run cannot be combined with --count.")
+    if path is not None and no_overwrite and path.exists():
+        fail(f"Output file already exists: {path} (--no-overwrite).")
     if not (
         account_refs
         or symbols
@@ -375,6 +422,7 @@ def export_cmd(
         or month is not None
         or limit is not None
         or offset
+        or dry_run
     ):
         if path is None:
             export_transactions(app.store, sys.stdout)
@@ -429,6 +477,11 @@ def export_cmd(
         click.echo(len(txns))
         return
     txns = txns[offset : offset + limit] if limit is not None else txns[offset:]
+    if dry_run:
+        target = str(path) if path is not None else "stdout"
+        fmt_name = "JSON Lines" if jsonl else "CSV"
+        app.ok(f"Would export {len(txns)} transactions as {fmt_name} to {target} (dry run).")
+        return
     if path is None:
         _write_export(sys.stdout, txns, accounts, chosen, jsonl)
         return
@@ -932,10 +985,14 @@ def backup_show(app: App, paths: tuple[str, ...], as_json: bool, as_csv: bool, f
 @backup.command("verify")
 @click.argument("paths", nargs=-1, type=click.Path(dir_okay=False))
 @click.option("--json", "as_json", is_flag=True, help="Print validation status as JSON; invalid files exit 1.")
+@click.option("--csv", "as_csv", is_flag=True, help="Print validation status as CSV; invalid files exit 1.")
+@click.option("-q", "--quiet", is_flag=True, help="Print nothing; report validity only through the exit status.")
 @click.option("--latest", is_flag=True, help="Verify the backup `backup restore --latest` would restore.")
 @click.option("--all", "all_backups", is_flag=True, help="Verify every managed backup, newest first.")
 @pass_app
-def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool, all_backups: bool) -> None:
+def backup_verify(
+    app: App, paths: tuple[str, ...], as_json: bool, as_csv: bool, quiet: bool, latest: bool, all_backups: bool
+) -> None:
     """Check integrity and schema compatibility without replacing the ledger.
 
     Give one or more PATHS (or file names from `backup list`), --latest, or --all.
@@ -945,6 +1002,8 @@ def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool,
     from ..config import data_dir
     from ..db import BACKUP_DIRNAME, backup_verification_error, list_backups
 
+    if sum((as_json, as_csv, quiet)) > 1:
+        raise click.UsageError("Choose one of --json, --csv or --quiet.")
     if sum((bool(paths), latest, all_backups)) != 1:
         raise click.UsageError("Choose one of: backup paths, --latest, or --all.")
     ledger = None
@@ -983,7 +1042,16 @@ def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool,
             path = source.resolve()
         results.append({"ok": error is None, "path": str(path), "error": error})
     several = all_backups or len(paths) > 1
-    if as_json:
+    if quiet:
+        pass
+    elif as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(stream, fieldnames=["ok", "path", "error"], lineterminator="\n")
+        writer.writeheader()
+        for row in results:
+            writer.writerow({"ok": row["ok"], "path": row["path"], "error": row["error"] or ""})
+        click.echo(stream.getvalue(), nl=False)
+    elif as_json:
         click.echo(json.dumps(results if several else results[0], ensure_ascii=False))
     else:
         for source, result in zip(sources, results, strict=True):
@@ -1017,10 +1085,11 @@ def _restore_candidates(directory: Path, started: datetime) -> list[Path]:
 @click.option("--latest", is_flag=True, help="Restore the newest backup in the backups directory.")
 @click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation.")
 @click.option("--dry-run", is_flag=True, help="Compare the current ledger and backup without restoring.")
+@click.option("--json", "as_json", is_flag=True, help="Print restore preview or receipt as JSON.")
 @click.option("--expect-fingerprint", hidden=True)
 @pass_app
 def backup_restore(
-    app: App, path: str | None, latest: bool, yes: bool, dry_run: bool, expect_fingerprint: str | None
+    app: App, path: str | None, latest: bool, yes: bool, dry_run: bool, as_json: bool, expect_fingerprint: str | None
 ) -> None:
     """Replace the ledger with a backup (a PATH, or a file name from `backup list`).
 
@@ -1060,9 +1129,22 @@ def backup_restore(
             preview = preview_restore(ledger, source)
         except RestoreError as e:
             fail(str(e))
+        current, saved = preview.current, preview.backup
+        if as_json:
+            click.echo(
+                json.dumps(
+                    {
+                        "source": shown,
+                        "restored": False,
+                        "current": asdict(current),
+                        "backup": asdict(saved),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            return
         click.echo(f"Restore preview: {shown}{when}")
         table = render.table("Metric", "Current", "Backup")
-        current, saved = preview.current, preview.backup
         table.add_row("Accounts", str(current.accounts), str(saved.accounts))
         table.add_row("Transactions", str(current.transactions), str(saved.transactions))
         table.add_row("Latest transaction date", Text(current.latest_date or "—"), Text(saved.latest_date or "—"))
@@ -1082,5 +1164,19 @@ def backup_restore(
             accounts, txns = summary.accounts, summary.transactions
     except RestoreError as e:
         fail(f"{str(e).rstrip('.')}. Nothing was changed.")
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "source": source.name,
+                    "restored": True,
+                    "accounts": accounts,
+                    "transactions": txns,
+                    "safety_backup": str(safety),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return
     app.ok(f"Restored {source.name}: {accounts} accounts, {txns} transactions.")
     app.console.print(Text(f"  previous ledger saved as {safety}", style="muted"))

@@ -28,6 +28,9 @@ class PortfolioCommands(Provider):
             for i, (key, label) in enumerate(WORKSPACES, 1)
         ]
         entries += [
+            ("Theme: Auto (Omarchy)", "Follow active Omarchy theme", app.action_restore_auto_theme),
+        ]
+        entries += [
             (f"Theme: {pretty_name(n)}", "Omarchy theme", partial(setattr, app, "theme", n)) for n in theme_names()
         ]
         entries += [(f"Chart {s}", "Open chart", partial(app.open_chart, s)) for s in app.known_symbols()]
@@ -35,6 +38,7 @@ class PortfolioCommands(Provider):
         entries += self._selection_actions(app)
         entries += self._productivity_actions(app)
         entries += self._more_actions(app)
+        entries += self._workflow_actions(app)
         entries += self._sort_actions(app)
         return entries
 
@@ -47,6 +51,46 @@ class PortfolioCommands(Provider):
             ("Duplicate selected transaction", "d · activity, dated today", app.action_duplicate),
             ("Show problems", "! · ledger issues, missing prices and quotes", app.action_problems),
         ]
+
+    @staticmethod
+    def _workflow_actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:
+        """Workflow actions added in the 100 CLI & TUI batch, each with its key."""
+        entries: list[tuple[str, str, object]] = [
+            ("Copy table as CSV", "# · RFC-4180 CSV with headers", app.action_copy_table_csv),
+            ("Copy table as Markdown", "X · GitHub-Flavored Markdown table", app.action_copy_table_markdown),
+            ("Copy portfolio summary", "Q · net worth, today, unrealized, income", app.action_copy_summary),
+            ("Show or hide archived accounts", "I · accounts workspace", app.action_toggle_archived),
+            ("Reset table sort", "0 · restore default table order", app.action_reset_sort),
+            ("Focus filter or chart input", "F2 · holdings, activity or chart", app.action_focus_input),
+            ("Jump to symbol in holdings", "S · locate selected symbol", app.action_jump_to_holding),
+            ("Cycle workspace filter mode", "M · holdings / activity / alerts", app.action_cycle_filter_mode),
+            ("Cycle activity account filter", "@ · activity workspace", app.action_cycle_activity_account),
+            ("Cycle dashboard movers metric", "m · day % / day $ / unrealized", app.action_cycle_movers),
+            ("Re-arm triggered alerts", "U · alerts workspace", app.action_rearm_triggered),
+            ("Pause all alerts", "Pause every active alert", app.action_pause_all_alerts),
+            ("Resume all alerts", "Resume every paused alert", app.action_resume_all_alerts),
+            ("Create database backup", "Save a manual SQLite backup", app.action_create_backup),
+            (
+                "Activity: all accounts",
+                "Clear activity account filter",
+                partial(navigation.filter_activity_account, app, None),
+            ),
+            ("Tax year: all", "- / + · show every tax year", partial(navigation.set_tax_year, app, None)),
+            (
+                "Income year: all",
+                "- / + · show all-time income by symbol",
+                partial(navigation.set_income_year, app, None),
+            ),
+        ]
+        entries += [
+            (
+                f"Activity: {a.name}",
+                "Filter activity to this account",
+                partial(navigation.filter_activity_account, app, a.id),
+            )
+            for a in app.tracker.store.accounts()
+        ]
+        return entries
 
     @staticmethod
     def _sort_actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:

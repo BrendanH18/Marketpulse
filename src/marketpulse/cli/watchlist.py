@@ -31,6 +31,7 @@ def watch(ctx: click.Context) -> None:
 @watch.command("list")
 @click.option("--offline", is_flag=True, help="List saved symbols without fetching prices.")
 @click.option("--json", "as_json", is_flag=True, help="Saved symbols as JSON (offline; no prices).")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Saved positions and symbols as JSON Lines, offline.")
 @click.option("--search", help="Offline symbol substring filter (case-insensitive).")
 @click.option("--offset", type=click.IntRange(min=0), help="Skip matching symbols (implies offline).")
 @click.option("--limit", type=click.IntRange(min=1), help="Maximum matching symbols (implies offline).")
@@ -48,6 +49,7 @@ def watch(ctx: click.Context) -> None:
 @click.option("--page-info", is_flag=True, help="With --json, include pagination metadata.")
 @click.option("--held/--not-held", default=None, help="Match symbols held in active accounts, offline.")
 @click.option("--cached/--not-cached", default=None, help="Match symbols with a saved quote, offline.")
+@click.option("--prefix", help="Match a symbol prefix, ignoring case; e.g. XEQ, offline.")
 @click.option("--suffix", help="Match a symbol suffix, ignoring case; e.g. .TO, offline.")
 @click.option("--exclude-search", help="Exclude symbols containing this text, ignoring case, offline.")
 @click.option("--lines", is_flag=True, help="Print one saved symbol per line, offline.")
@@ -56,6 +58,7 @@ def watch_list(
     app: App,
     offline: bool,
     as_json: bool,
+    as_jsonl: bool,
     search: str | None,
     offset: int | None,
     limit: int | None,
@@ -71,24 +74,26 @@ def watch_list(
     with_alert: bool | None,
     held: bool | None,
     cached: bool | None,
+    prefix: str | None,
     suffix: str | None,
     exclude_search: str | None,
     lines: bool,
 ) -> None:
     """List watched symbols; filters, paging and reports imply offline output."""
-    if sum((as_json, as_csv, count_only, lines)) > 1:
-        raise click.UsageError("Choose one of --json, --csv, --count or --lines.")
+    if sum((as_json, as_jsonl, as_csv, count_only, lines)) > 1:
+        raise click.UsageError("Choose one of --json, --jsonl, --csv, --count or --lines.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
     included = _symbol_selection(included_symbols, "--symbol")
     if min_position is not None and max_position is not None and min_position > max_position:
         raise click.UsageError("--min-position must be at most --max-position.")
-    for option, value in (("--suffix", suffix), ("--exclude-search", exclude_search)):
+    for option, value in (("--prefix", prefix), ("--suffix", suffix), ("--exclude-search", exclude_search)):
         if value is not None and not value.strip():
             raise click.UsageError(f"{option} cannot be blank.")
     if (
         held is not None
         or cached is not None
+        or prefix is not None
         or suffix is not None
         or exclude_search is not None
         or lines
@@ -97,6 +102,7 @@ def watch_list(
         or max_position is not None
         or with_alert is not None
         or as_csv
+        or as_jsonl
         or descending
         or excluded_symbols
         or page_info
@@ -129,6 +135,7 @@ def watch_list(
             and (with_alert is None or (symbol in alerted) == with_alert)
             and (held is None or (symbol in held_symbols) == held)
             and (cached is None or (symbol in cached_symbols) == cached)
+            and (prefix is None or symbol.casefold().startswith(prefix.strip().casefold()))
             and (suffix is None or symbol.casefold().endswith(suffix.strip().casefold()))
             and (exclude_search is None or exclude_search.strip().casefold() not in symbol.casefold())
         ]
@@ -145,6 +152,9 @@ def watch_list(
         if lines:
             if symbols:
                 click.echo("\n".join(symbols))
+        elif as_jsonl:
+            for symbol in symbols:
+                click.echo(json.dumps({"position": saved.index(symbol) + 1, "symbol": symbol}, ensure_ascii=False))
         elif as_csv:
             stream = io.StringIO(newline="")
             writer = csv.DictWriter(stream, fieldnames=["position", "symbol"])
@@ -197,8 +207,10 @@ def _symbol_selection(values: tuple[str, ...], option: str) -> set[str]:
 @watch.command("move")
 @click.argument("symbol")
 @click.option("--to", "position", type=click.IntRange(min=1), required=True, help="New position (1 is first).")
+@click.option("--dry-run", is_flag=True, help="Preview moving the symbol without changing saved order.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
 @pass_app
-def watch_move(app: App, symbol: str, position: int) -> None:
+def watch_move(app: App, symbol: str, position: int, dry_run: bool, as_json: bool) -> None:
     """Move an existing symbol to a position in the saved watchlist."""
     symbol = symbol.strip().upper()
     with app.store.transaction():
@@ -207,38 +219,71 @@ def watch_move(app: App, symbol: str, position: int) -> None:
             fail(f"{symbol} is not on the watchlist.")
         if position > len(items):
             raise click.BadParameter(f"must be between 1 and {len(items)}", param_hint="--to")
-        app.store.move_watch(symbol, position - 1 - items.index(symbol))
-    app.ok(f"Moved {symbol} to position {position}.")
+        old_pos = items.index(symbol) + 1
+        if not dry_run:
+            app.store.move_watch(symbol, position - old_pos)
+    if as_json:
+        click.echo(
+            json.dumps(
+                {"symbol": symbol, "from": old_pos, "to": position, "saved": not dry_run},
+                ensure_ascii=False,
+            )
+        )
+    elif dry_run:
+        app.ok(f"Would move {symbol} from position {old_pos} to {position} (not saved).")
+    else:
+        app.ok(f"Moved {symbol} to position {position}.")
 
 
 @watch.command("add")
-@click.argument("symbols", nargs=-1, required=True)
+@click.argument("symbols", nargs=-1, required=False)
+@click.option("--from-holdings", is_flag=True, help="Add all symbols currently held in active accounts, offline.")
 @click.option("--dry-run", is_flag=True, help="Show which symbols would be added; save nothing.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
 @pass_app
-def watch_add(app: App, symbols, dry_run: bool) -> None:
-    wanted = parse_symbols(" ".join(symbols))
-    if dry_run:
-        current = app.store.watchlist()
-        new = [s for s in wanted if s not in current]
-        app.ok(f"Would watch {', '.join(new)} (not saved)." if new else "Already on the watchlist.")
-        return
-    added = app.store.add_watch(wanted)
-    app.ok(f"Watching {', '.join(added)}" if added else "Already on the watchlist.")
+def watch_add(app: App, symbols: tuple[str, ...], from_holdings: bool, dry_run: bool, as_json: bool) -> None:
+    if not symbols and not from_holdings:
+        raise click.UsageError("Supply SYMBOLS or --from-holdings.")
+    wanted = parse_symbols(" ".join(symbols)) if symbols else []
+    if from_holdings:
+        active = {a.id for a in app.store.accounts()}
+        held = sorted({h.symbol for h in app.store.ledger().open_holdings() if h.account_id in active})
+        for sym in held:
+            if sym not in wanted:
+                wanted.append(sym)
+    current = app.store.watchlist()
+    new = [s for s in wanted if s not in current]
+    if not dry_run and new:
+        added = app.store.add_watch(new)
+    else:
+        added = new
+    if as_json:
+        click.echo(json.dumps({"added": added, "saved": not dry_run}, ensure_ascii=False))
+    elif dry_run:
+        app.ok(f"Would watch {', '.join(added)} (not saved)." if added else "Already on the watchlist.")
+    else:
+        app.ok(f"Watching {', '.join(added)}" if added else "Already on the watchlist.")
 
 
 @watch.command("rm")
 @click.argument("symbols", nargs=-1, required=True)
 @click.option("--dry-run", is_flag=True, help="Show which symbols would be removed; save nothing.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
 @pass_app
-def watch_rm(app: App, symbols, dry_run: bool) -> None:
+def watch_rm(app: App, symbols, dry_run: bool, as_json: bool) -> None:
     wanted = parse_symbols(" ".join(symbols))
-    if dry_run:
-        current = app.store.watchlist()
-        gone = [s for s in wanted if s in current]
-        app.ok(f"Would remove {', '.join(gone)} (not saved)." if gone else "Nothing would be removed.")
-        return
-    removed = app.store.remove_watch(wanted)
-    app.ok(f"Removed {', '.join(removed)}" if removed else "Nothing removed.")
+    current = app.store.watchlist()
+    gone = [s for s in wanted if s in current]
+    if not dry_run and gone:
+        removed = app.store.remove_watch(gone)
+    else:
+        removed = gone
+    if as_json:
+        click.echo(json.dumps({"removed": removed, "saved": not dry_run}, ensure_ascii=False))
+    elif dry_run:
+        app.ok(f"Would remove {', '.join(removed)} (not saved)." if removed else "Nothing would be removed.")
+    else:
+        app.ok(f"Removed {', '.join(removed)}" if removed else "Nothing removed.")
 
 
 @watch.command("live")
@@ -283,6 +328,8 @@ def alerts(ctx: click.Context) -> None:
 @click.option("-s", "--symbol", help="Only alerts for this symbol.")
 @click.option("--state", type=click.Choice(["armed", "paused", "triggered"], case_sensitive=False))
 @click.option("--json", "as_json", is_flag=True, help="Alert metadata as JSON (unmasked; offline).")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Alert metadata as JSON Lines (unmasked; offline).")
+@click.option("--ids", "ids_only", is_flag=True, help="Print matching alert IDs, one per line, offline.")
 @click.option("--condition", type=click.Choice(ALERT_CONDITIONS, case_sensitive=False))
 @click.option("--count", "count_only", is_flag=True, help="Print the number of matching alerts.")
 @click.option("--csv", "as_csv", is_flag=True, help="Export raw, unmasked alert metadata as CSV, offline.")
@@ -332,6 +379,9 @@ def alerts(ctx: click.Context) -> None:
 )
 @click.option("--watched/--not-watched", default=None, help="Match alerts whose symbol is on the saved watchlist.")
 @click.option(
+    "--held/--not-held", default=None, help="Match alerts whose symbol is held in an active account, offline."
+)
+@click.option(
     "--ever-triggered/--never-triggered", default=None, help="Match retained trigger history, including paused alerts."
 )
 @pass_app
@@ -340,6 +390,8 @@ def alerts_list(
     symbol: str | None,
     state: str | None,
     as_json: bool,
+    as_jsonl: bool,
+    ids_only: bool,
     condition: str | None,
     count_only: bool,
     as_csv: bool,
@@ -365,18 +417,23 @@ def alerts_list(
     max_id: int | None,
     excluded_conditions: tuple[str, ...],
     watched: bool | None,
+    held: bool | None,
     ever_triggered: bool | None,
 ) -> None:
     """List saved alerts, optionally filtered by symbol and current state."""
-    if sum((as_json, as_csv, count_only)) > 1:
-        raise click.UsageError("Choose one of --json, --csv or --count.")
+    if sum((as_json, as_jsonl, as_csv, ids_only, count_only)) > 1:
+        raise click.UsageError("Choose one of --json, --jsonl, --csv, --ids or --count.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
-    if summary and (count_only or page_info):
-        raise click.UsageError("--summary cannot be combined with --count or --page-info.")
+    if summary and (count_only or page_info or as_jsonl or ids_only):
+        raise click.UsageError("--summary cannot be combined with --count, --jsonl, --ids or --page-info.")
     if min_id is not None and max_id is not None and min_id > max_id:
         raise click.UsageError("--min-id must be at most --max-id.")
     watched_symbols = set(app.store.watchlist()) if watched is not None else set()
+    held_symbols: set[str] = set()
+    if held is not None:
+        active = {a.id for a in app.store.accounts()}
+        held_symbols = {h.symbol for h in app.store.ledger().open_holdings() if h.account_id in active}
     included = _symbol_selection(included_symbols, "--symbols")
     if with_note and without_note:
         raise click.UsageError("Choose one of --with-note or --without-note.")
@@ -401,6 +458,7 @@ def alerts_list(
         and (max_id is None or (a.id is not None and a.id <= max_id))
         and a.condition not in excluded_conditions
         and (watched is None or (a.symbol in watched_symbols) == watched)
+        and (held is None or (a.symbol in held_symbols) == held)
         and (ever_triggered is None or bool(a.triggered_at) == ever_triggered)
         and (note is None or note.casefold() in a.note.casefold())
         and (min_threshold is None or (math.isfinite(a.threshold) and a.threshold >= min_threshold))
@@ -463,6 +521,14 @@ def alerts_list(
         if descending:
             items.reverse()
     items = items[offset:] if limit is None else items[offset : offset + limit]
+    if ids_only:
+        if items:
+            click.echo("\n".join(str(a.id) for a in items))
+        return
+    if as_jsonl:
+        for a in items:
+            click.echo(json.dumps(_alert_json(a), ensure_ascii=False, allow_nan=False))
+        return
     if as_csv:
         stream = io.StringIO(newline="")
         writer = csv.DictWriter(stream, fieldnames=[f.name for f in fields(Alert)] + ["state"])
@@ -552,10 +618,17 @@ def _alert_json(alert: Alert) -> dict:
 @alerts.command("show")
 @click.argument("alert_id", type=click.IntRange(min=1))
 @click.option("--json", "as_json", is_flag=True, help="Print unmasked alert metadata, offline.")
+@click.option("--exists", is_flag=True, help="Print nothing; exit 0 if the alert exists, 1 otherwise.")
 @pass_app
-def alerts_show(app: App, alert_id: int, as_json: bool) -> None:
+def alerts_show(app: App, alert_id: int, as_json: bool, exists: bool) -> None:
     """Inspect an alert's full note, threshold, state and trigger history."""
+    if as_json and exists:
+        raise click.UsageError("--exists cannot be combined with --json.")
     alert = next((a for a in app.store.alerts() if a.id == alert_id), None)
+    if exists:
+        if alert is None:
+            raise click.exceptions.Exit(1)
+        return
     if alert is None:
         fail(f"No alert #{alert_id}.")
     row = _alert_json(alert)
@@ -627,7 +700,15 @@ def _alert_ids(chosen: list[Alert]) -> str:
     return f"{noun} {', '.join(f'#{a.id}' for a in chosen)}"
 
 
-def _set_alert_state(app: App, alert_ids: tuple[int, ...], *, active: bool, rearm: bool = False) -> None:
+def _set_alert_state(
+    app: App,
+    alert_ids: tuple[int, ...],
+    *,
+    active: bool,
+    rearm: bool = False,
+    dry_run: bool = False,
+    as_json: bool = False,
+) -> None:
     with app.store.transaction():
         chosen = _saved_alerts(app, alert_ids)
         if active:
@@ -640,9 +721,21 @@ def _set_alert_state(app: App, alert_ids: tuple[int, ...], *, active: bool, rear
             alert.active = active
             if rearm:
                 alert.triggered_at = ""
-            app.store.update_alert(alert)
+            if not dry_run:
+                app.store.update_alert(alert)
+    action = "rearm" if rearm else ("resume" if active else "pause")
     verb = "Rearmed" if rearm else ("Resumed" if active else "Paused")
-    app.ok(f"{verb} {_alert_ids(chosen)}.")
+    if as_json:
+        click.echo(
+            json.dumps(
+                {"action": action, "ids": [a.id for a in chosen], "saved": not dry_run},
+                ensure_ascii=False,
+            )
+        )
+    elif dry_run:
+        app.ok(f"Would {action} {_alert_ids(chosen)} (not saved).")
+    else:
+        app.ok(f"{verb} {_alert_ids(chosen)}.")
 
 
 _ALERT_IDS = click.argument("alert_ids", nargs=-1, required=True, type=click.IntRange(min=1))
@@ -650,29 +743,35 @@ _ALERT_IDS = click.argument("alert_ids", nargs=-1, required=True, type=click.Int
 
 @alerts.command("pause")
 @_ALERT_IDS
+@click.option("--dry-run", is_flag=True, help="Preview pausing alerts without saving.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
 @pass_app
-def alerts_pause(app: App, alert_ids: tuple[int, ...]) -> None:
+def alerts_pause(app: App, alert_ids: tuple[int, ...], dry_run: bool, as_json: bool) -> None:
     """Pause alerts without clearing their trigger history.
 
     Several ids are checked first, so either all change or none does.
     """
-    _set_alert_state(app, alert_ids, active=False)
+    _set_alert_state(app, alert_ids, active=False, dry_run=dry_run, as_json=as_json)
 
 
 @alerts.command("resume")
 @_ALERT_IDS
+@click.option("--dry-run", is_flag=True, help="Preview resuming alerts without saving.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
 @pass_app
-def alerts_resume(app: App, alert_ids: tuple[int, ...]) -> None:
+def alerts_resume(app: App, alert_ids: tuple[int, ...], dry_run: bool, as_json: bool) -> None:
     """Resume alerts, preserving their trigger history to avoid duplicate notifications."""
-    _set_alert_state(app, alert_ids, active=True)
+    _set_alert_state(app, alert_ids, active=True, dry_run=dry_run, as_json=as_json)
 
 
 @alerts.command("rearm")
 @_ALERT_IDS
+@click.option("--dry-run", is_flag=True, help="Preview rearming alerts without saving.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
 @pass_app
-def alerts_rearm(app: App, alert_ids: tuple[int, ...]) -> None:
+def alerts_rearm(app: App, alert_ids: tuple[int, ...], dry_run: bool, as_json: bool) -> None:
     """Activate and clear the trigger history; the next matching fresh price can fire again."""
-    _set_alert_state(app, alert_ids, active=True, rearm=True)
+    _set_alert_state(app, alert_ids, active=True, rearm=True, dry_run=dry_run, as_json=as_json)
 
 
 @alerts.command("add")
@@ -704,14 +803,22 @@ def alerts_add(app: App, symbol, condition, threshold, note, dry_run: bool, as_j
 
 @alerts.command("rm")
 @_ALERT_IDS
+@click.option("--dry-run", is_flag=True, help="Preview deleting alerts without saving.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
 @pass_app
-def alerts_rm(app: App, alert_ids: tuple[int, ...]) -> None:
+def alerts_rm(app: App, alert_ids: tuple[int, ...], dry_run: bool, as_json: bool) -> None:
     """Delete alerts. Several ids are checked first, so either all go or none does."""
     with app.store.transaction():
         chosen = _saved_alerts(app, alert_ids)
-        for alert in chosen:
-            app.store.delete_alert(alert.saved_id)
-    app.ok(f"Removed {_alert_ids(chosen)}.")
+        if not dry_run:
+            for alert in chosen:
+                app.store.delete_alert(alert.saved_id)
+    if as_json:
+        click.echo(json.dumps({"removed": [a.id for a in chosen], "deleted": not dry_run}, ensure_ascii=False))
+    elif dry_run:
+        app.ok(f"Would remove {_alert_ids(chosen)} (not deleted).")
+    else:
+        app.ok(f"Removed {_alert_ids(chosen)}.")
 
 
 @alerts.command("check")

@@ -8,21 +8,37 @@ what the views already show; no figure is computed differently.
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from rich.text import Text
+from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Input
 
 from .. import fmt
 from ..market import PERIODS
 from ..models import Transaction
+from ..themes import pretty_name, resolve_palette
 from ..valuation import PositionView
-from .constants import GLOBAL_KEYS, HINTS, NW_RANGES, SORT_MODES, TABLES, TXN_CHOICES, WORKSPACE_KEYS
+from .constants import (
+    ACTIVITY_FILTER_MODES,
+    ALERT_FILTER_MODES,
+    GLOBAL_KEYS,
+    HINTS,
+    HOLDING_FILTER_MODES,
+    MOVERS_MODES,
+    NW_RANGES,
+    SORT_MODES,
+    TABLES,
+    TXN_CHOICES,
+    WORKSPACE_KEYS,
+)
 from .screens import ProblemsScreen, TxnTypeScreen, WorkspaceKeysScreen
-from .widgets import WORKSPACES
+from .widgets import WORKSPACES, ChartView
 
 if TYPE_CHECKING:
     from .app import MarketPulseApp
@@ -56,21 +72,56 @@ def current_table(app: MarketPulseApp) -> DataTable | None:
     return app.query_one(selector, DataTable) if selector else None
 
 
+def _scroll_pane(app: MarketPulseApp) -> VerticalScroll | None:
+    if app.workspace == "income":
+        return app.query_one("#income", VerticalScroll)
+    focused = app.focused
+    if isinstance(focused, VerticalScroll):
+        return focused
+    return None
+
+
 def move_cursor(app: MarketPulseApp, delta: int) -> None:
     table = current_table(app)
-    if table is None or table.row_count == 0:
+    if table is not None and table.row_count > 0:
+        row = max(0, min(table.row_count - 1, table.cursor_row + delta))
+        table.move_cursor(row=row, animate=False)
+        table.focus()
         return
-    row = max(0, min(table.row_count - 1, table.cursor_row + delta))
-    table.move_cursor(row=row, animate=False)
-    table.focus()
+    pane = _scroll_pane(app)
+    if pane is not None:
+        if delta > 0:
+            pane.scroll_down(animate=False)
+        else:
+            pane.scroll_up(animate=False)
+
+
+def jump_half_page(app: MarketPulseApp, down: bool) -> None:
+    table = current_table(app)
+    if table is not None and table.row_count > 0:
+        step = max(table.size.height // 2, 5)
+        move_cursor(app, step if down else -step)
+        return
+    pane = _scroll_pane(app)
+    if pane is not None:
+        if down:
+            pane.scroll_page_down(animate=False)
+        else:
+            pane.scroll_page_up(animate=False)
 
 
 def jump_row(app: MarketPulseApp, last: bool) -> None:
     table = current_table(app)
-    if table is None or table.row_count == 0:
+    if table is not None and table.row_count > 0:
+        table.move_cursor(row=table.row_count - 1 if last else 0, animate=False)
+        table.focus()
         return
-    table.move_cursor(row=table.row_count - 1 if last else 0, animate=False)
-    table.focus()
+    pane = _scroll_pane(app)
+    if pane is not None:
+        if last:
+            pane.scroll_end(animate=False)
+        else:
+            pane.scroll_home(animate=False)
 
 
 def row_position(app: MarketPulseApp) -> tuple[int, int] | None:
@@ -108,23 +159,34 @@ def holdings_filter_done(app: MarketPulseApp) -> None:
 
 
 def clear_filter(app: MarketPulseApp) -> None:
-    """Escape: empty the holdings or activity filter and put the cursor back in the table."""
+    """Escape: empty the holdings, activity or alerts filters and put the cursor back in the table."""
     ws = app.workspace
     if ws == "holdings":
         box = app.query_one("#holdings-filter", Input)
-        if not (box.value or box.has_class("-shown")):
+        had_mode = app.holdings_filter_mode != "all"
+        if not (box.value or box.has_class("-shown") or had_mode):
             return
         box.value = ""
         box.remove_class("-shown")
+        app.holdings_filter_mode = "all"
         app.render_holdings()
         app.query_one("#holdings-table", DataTable).focus()
     elif ws == "activity":
         box = app.query_one("#activity-filter", Input)
-        if not (box.value or box.has_focus):
+        had_extra = app.activity_filter_mode != "all" or app.activity_account_filter is not None
+        if not (box.value or box.has_focus or had_extra):
             return
         box.value = ""
+        app.activity_filter_mode = "all"
+        app.activity_account_filter = None
         app.render_activity()
         app.query_one("#activity-table", DataTable).focus()
+    elif ws == "alerts":
+        if app.alerts_filter_mode == "all":
+            return
+        app.alerts_filter_mode = "all"
+        app.render_alerts()
+        app.query_one("#alerts-table", DataTable).focus()
 
 
 # ── sorting ───────────────────────────────────────────────────────────────────
@@ -168,6 +230,15 @@ def reverse_sort(app: MarketPulseApp) -> None:
     _rerender_sorted(app, ws)
 
 
+def reset_sort(app: MarketPulseApp) -> None:
+    ws = app.workspace
+    if ws not in SORT_MODES:
+        app.notify(_NOT_SORTABLE, timeout=3)
+        return
+    app.table_sort.pop(ws, None)
+    _rerender_sorted(app, ws)
+
+
 def set_sort(app: MarketPulseApp, ws: str, name: str, descending: bool) -> None:
     """Command-palette target: sort a workspace's table by one column directly, then show it."""
     if (name, descending) not in SORT_MODES.get(ws, []):
@@ -208,6 +279,9 @@ def sort_positions(app: MarketPulseApp, positions: list[PositionView]) -> list[P
         "day %": lambda x: x.day_change_pct,
         "gain": lambda x: x.gain_base,
         "gain %": lambda x: x.gain_pct,
+        "qty": lambda x: x.quantity,
+        "book": lambda x: x.book_base,
+        "weight": lambda x: x.weight,
     }
     return _ordered(positions, keys[name], descending)
 
@@ -255,7 +329,31 @@ def copy_symbol(app: MarketPulseApp) -> None:
 
 
 def copy_row(app: MarketPulseApp) -> None:
-    """Copy the selected row as tab-separated text, exactly as shown (privacy masks included)."""
+    """Copy the selected row as tab-separated text, or on chart copy the active bar/summary."""
+    if app.workspace == "chart":
+        chart = app.query_one("#chart-view", ChartView)
+        if not app.chart_symbol:
+            app.notify("Open a chart first", timeout=3)
+            return
+        if chart.marker is not None and 0 <= chart.marker < len(chart.bars):
+            bar = chart.bars[chart.marker]
+            text = (
+                f"{app.chart_symbol}\t{bar.date}\tO {fmt.price(bar.open)}\tH {fmt.price(bar.high)}\t"
+                f"L {fmt.price(bar.low)}\tC {fmt.price(bar.close)}"
+            )
+            app.copy_to_clipboard(text)
+            app.notify(f"Copied {app.chart_symbol} bar {bar.date}", timeout=2)
+            return
+        if chart.bars:
+            first, last = chart.bars[0], chart.bars[-1]
+            pct = (last.close - first.close) / first.close * 100 if first.close else 0.0
+            text = f"{app.chart_symbol}\t{app.chart_period}\t{fmt.price(last.close)}\t{fmt.pct(pct)}"
+            app.copy_to_clipboard(text)
+            app.notify(f"Copied {app.chart_symbol} chart summary", timeout=2)
+            return
+        app.copy_to_clipboard(app.chart_symbol)
+        app.notify(f"Copied {app.chart_symbol}", timeout=2)
+        return
     table = current_table(app)
     if table is None or table.row_count == 0:
         app.notify("No table row selected", timeout=3)
@@ -266,20 +364,80 @@ def copy_row(app: MarketPulseApp) -> None:
     app.notify(f"Copied row {table.cursor_row + 1}", timeout=2)
 
 
-def copy_table(app: MarketPulseApp) -> None:
-    """Copy the whole table as shown: headers first, then every row the filters and sort leave, masks included."""
+def _table_matrix(app: MarketPulseApp) -> tuple[list[str], list[list[str]]] | None:
     table = current_table(app)
     if table is None or table.row_count == 0:
         app.notify("No table rows to copy here", timeout=3)
-        return
+        return None
 
     def plain(cell: object) -> str:
         return cell.plain if isinstance(cell, Text) else str(cell)
 
-    lines = ["\t".join(plain(c.label) for c in table.ordered_columns)]
-    lines += ["\t".join(plain(c) for c in table.get_row_at(i)) for i in range(table.row_count)]
+    headers = [plain(c.label) for c in table.ordered_columns]
+    rows = [[plain(c) for c in table.get_row_at(i)] for i in range(table.row_count)]
+    return headers, rows
+
+
+def copy_table(app: MarketPulseApp) -> None:
+    """Copy the whole table as shown: headers first, then every row the filters and sort leave, masks included."""
+    data = _table_matrix(app)
+    if data is None:
+        return
+    headers, rows = data
+    lines = ["\t".join(headers), *("\t".join(r) for r in rows)]
     app.copy_to_clipboard("\n".join(lines))
-    app.notify(f"Copied {table.row_count} row{'' if table.row_count == 1 else 's'} with headers", timeout=2)
+    app.notify(f"Copied {len(rows)} row{'' if len(rows) == 1 else 's'} with headers", timeout=2)
+
+
+def copy_table_csv(app: MarketPulseApp) -> None:
+    """Copy the visible table with headers as RFC-4180 CSV, masks included."""
+    data = _table_matrix(app)
+    if data is None:
+        return
+    headers, rows = data
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(headers)
+    writer.writerows(rows)
+    app.copy_to_clipboard(stream.getvalue())
+    app.notify(f"Copied {len(rows)} row{'' if len(rows) == 1 else 's'} as CSV", timeout=2)
+
+
+def copy_table_markdown(app: MarketPulseApp) -> None:
+    """Copy the visible table with headers as GitHub-Flavored Markdown, masks included."""
+    data = _table_matrix(app)
+    if data is None:
+        return
+    headers, rows = data
+
+    def esc(val: str) -> str:
+        return val.replace("|", "\\|")
+
+    lines = [
+        "| " + " | ".join(esc(h) for h in headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+        *("| " + " | ".join(esc(c) for c in r) + " |" for r in rows),
+    ]
+    app.copy_to_clipboard("\n".join(lines))
+    app.notify(f"Copied {len(rows)} row{'' if len(rows) == 1 else 's'} as Markdown", timeout=2)
+
+
+def copy_portfolio_summary(app: MarketPulseApp) -> None:
+    """Copy a concise plain-text portfolio summary to the clipboard (respecting privacy mode)."""
+    v = app.view
+    if v is None:
+        app.notify("Portfolio not loaded yet", timeout=3)
+        return
+    priv = app.privacy
+    lines = [
+        f"Net worth ({v.base}): {fmt.money(v.net_worth, v.base, privacy=priv)}",
+        f"Today: {fmt.money(v.day_change, v.base, sign=True, privacy=priv)} ({fmt.pct(v.day_change_pct)})",
+        f"Unrealized: {fmt.money(v.unrealized, v.base, sign=True, privacy=priv)} ({fmt.pct(v.unrealized_pct)})",
+        f"Income YTD: {fmt.money(v.income_ytd, v.base, privacy=priv)}",
+        f"Positions: {len(v.positions)}",
+    ]
+    app.copy_to_clipboard("\n".join(lines))
+    app.notify("Copied portfolio summary", timeout=2)
 
 
 def toggle_cash(app: MarketPulseApp) -> None:
@@ -288,6 +446,193 @@ def toggle_cash(app: MarketPulseApp) -> None:
         app.set_workspace("holdings")
     app.render_holdings()
     app.notify("Cash rows hidden" if app.hide_cash else "Cash rows shown", timeout=2)
+
+
+def toggle_archived_accounts(app: MarketPulseApp) -> None:
+    app.hide_archived = not app.hide_archived
+    if app.workspace != "tax":
+        app.set_workspace("tax")
+    app.render_accounts()
+    app.notify("Archived accounts hidden" if app.hide_archived else "Archived accounts shown", timeout=2)
+
+
+def jump_to_holding(app: MarketPulseApp) -> None:
+    """Switch to holdings and move cursor to the context symbol's row."""
+    symbol = app.context_symbol()
+    if not symbol:
+        app.notify("Select a row with a symbol first", timeout=3)
+        return
+    v = app.view
+    if v is None or not any(p.symbol == symbol for p in v.positions):
+        app.notify(f"{symbol} is not in current holdings", timeout=3)
+        return
+    app.account_filter = None
+    app.holdings_filter_mode = "all"
+    box = app.query_one("#holdings-filter", Input)
+    box.value = ""
+    box.remove_class("-shown")
+    app.set_workspace("holdings")
+    app.render_holdings()
+    table = app.query_one("#holdings-table", DataTable)
+    for idx, row_key in enumerate(table.rows):
+        key_val = str(row_key.value)
+        if not key_val.startswith("cash:") and ":" in key_val and key_val.split(":", 1)[1] == symbol:
+            table.move_cursor(row=idx, animate=False)
+            table.focus()
+            app._show_position(key_val)
+            return
+
+
+def cycle_filter_mode(app: MarketPulseApp) -> None:
+    """Cycle workspace-specific quick filter mode (holdings / activity / alerts)."""
+    ws = app.workspace
+    if ws == "holdings":
+        modes = HOLDING_FILTER_MODES
+        app.holdings_filter_mode = modes[(modes.index(app.holdings_filter_mode) + 1) % len(modes)]
+        app.render_holdings()
+        app.notify(f"Holdings filter: {app.holdings_filter_mode}", timeout=2)
+    elif ws == "activity":
+        modes = ACTIVITY_FILTER_MODES
+        app.activity_filter_mode = modes[(modes.index(app.activity_filter_mode) + 1) % len(modes)]
+        app.render_activity()
+        app.notify(f"Activity filter: {app.activity_filter_mode}", timeout=2)
+    elif ws == "alerts":
+        modes = ALERT_FILTER_MODES
+        app.alerts_filter_mode = modes[(modes.index(app.alerts_filter_mode) + 1) % len(modes)]
+        app.render_alerts()
+        app.notify(f"Alerts filter: {app.alerts_filter_mode}", timeout=2)
+    else:
+        app.notify("Filter modes work in holdings, activity and alerts", timeout=3)
+
+
+def cycle_activity_account(app: MarketPulseApp) -> None:
+    """Cycle account filter while staying on the activity workspace."""
+    accounts = app.tracker.store.accounts()
+    ids: list[int | None] = [None, *(a.id for a in accounts)]
+    cur = ids.index(app.activity_account_filter) if app.activity_account_filter in ids else 0
+    app.activity_account_filter = ids[(cur + 1) % len(ids)]
+    if app.workspace != "activity":
+        app.set_workspace("activity")
+    app.render_activity()
+    name = "all accounts"
+    if app.activity_account_filter is not None:
+        acct = app.tracker.store.get_account(app.activity_account_filter)
+        if acct:
+            name = acct.name
+    app.notify(f"Activity: {name}", timeout=2)
+
+
+def filter_activity_account(app: MarketPulseApp, account_id: int | None) -> None:
+    app.activity_account_filter = account_id
+    app.set_workspace("activity")
+    app.render_activity()
+
+
+def cycle_movers_mode(app: MarketPulseApp) -> None:
+    modes = MOVERS_MODES
+    app.movers_mode = modes[(modes.index(app.movers_mode) + 1) % len(modes)]
+    if app.workspace != "dashboard":
+        app.set_workspace("dashboard")
+    app.render_dashboard()
+    app.notify(f"Movers: {app.movers_mode}", timeout=2)
+
+
+def step_year(app: MarketPulseApp, delta: int) -> None:
+    """Step the selected year on the tax or income workspace (or return to all years)."""
+    if app.workspace == "tax":
+        if app._tax is None:
+            app.notify("Tax report still loading", timeout=2)
+            return
+        years = sorted({y.year for y in app._tax[0]})
+        if not years:
+            app.notify("No tax years to select", timeout=2)
+            return
+        choices: list[int | None] = [None, *years]
+        cur = choices.index(app.tax_year) if app.tax_year in choices else 0
+        app.tax_year = choices[(cur + delta) % len(choices)]
+        app.render_tax()
+        app.notify(f"Tax year: {app.tax_year or 'all'}", timeout=2)
+    elif app.workspace == "income":
+        state = app.tracker.store.ledger()
+        years = sorted({int(e.date[:4]) for e in state.income})
+        if not years:
+            app.notify("No income years to select", timeout=2)
+            return
+        choices = [None, *years]
+        cur = choices.index(app.income_year) if app.income_year in choices else 0
+        app.income_year = choices[(cur + delta) % len(choices)]
+        app.render_income()
+        app.notify(f"Income year: {app.income_year or 'all'}", timeout=2)
+    else:
+        app.notify("Year stepping works in tax and income", timeout=3)
+
+
+def set_tax_year(app: MarketPulseApp, year: int | None) -> None:
+    app.tax_year = year
+    app.set_workspace("tax")
+    app.render_tax()
+
+
+def set_income_year(app: MarketPulseApp, year: int | None) -> None:
+    app.income_year = year
+    app.set_workspace("income")
+    app.render_income()
+
+
+def rearm_triggered_alerts(app: MarketPulseApp) -> None:
+    triggered = [a for a in app.tracker.store.alerts() if a.triggered_at]
+    if not triggered:
+        app.notify("No triggered alerts to re-arm", timeout=2)
+        return
+    with app.tracker.store.transaction():
+        for a in triggered:
+            a.active = True
+            a.triggered_at = ""
+            app.tracker.store.update_alert(a)
+    app.render_alerts()
+    app.notify(f"Re-armed {len(triggered)} alert{'' if len(triggered) == 1 else 's'}", timeout=2)
+
+
+def bulk_alerts_active(app: MarketPulseApp, active: bool) -> None:
+    alerts = app.tracker.store.alerts()
+    changed = [a for a in alerts if a.active != active]
+    if not changed:
+        app.notify("All alerts already " + ("armed" if active else "paused"), timeout=2)
+        return
+    with app.tracker.store.transaction():
+        for a in changed:
+            a.active = active
+            app.tracker.store.update_alert(a)
+    app.render_alerts()
+    verb = "Resumed" if active else "Paused"
+    app.notify(f"{verb} {len(changed)} alert{'' if len(changed) == 1 else 's'}", timeout=2)
+
+
+def create_backup(app: MarketPulseApp) -> None:
+    path = app.tracker.store.backup(reason="manual")
+    app.notify(f"Backup saved: {path.name}", timeout=3)
+
+
+def focus_workspace_input(app: MarketPulseApp) -> None:
+    """F2: focus the current workspace's filter or chart input."""
+    ws = app.workspace
+    if ws == "holdings":
+        show_holdings_filter(app)
+    elif ws == "activity":
+        app.query_one("#activity-filter", Input).focus()
+    elif ws == "chart":
+        app.query_one("#chart-input", Input).focus()
+    else:
+        app.notify("No text input in this workspace", timeout=2)
+
+
+def restore_auto_theme(app: MarketPulseApp) -> None:
+    app.config.theme = "auto"
+    app.config.save()
+    app._auto_theme = True
+    target = resolve_palette("auto").name
+    app.theme = target
+    app.notify(f"Theme: Auto ({pretty_name(target)})", timeout=2)
 
 
 # A quantity or amount in an English message, but not part of a symbol (0700.HK) or a date.

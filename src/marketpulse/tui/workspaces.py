@@ -12,7 +12,7 @@ from textual.widgets import DataTable, Input, Static
 
 from .. import fmt, render
 from ..analytics import income_by_month, income_by_symbol
-from ..models import AssetKind
+from ..models import AssetKind, TxnType
 from ..valuation import PositionView
 from . import navigation
 from .constants import HOLDING_COLUMNS, NW_RANGES
@@ -171,7 +171,21 @@ def render_dashboard(app: MarketPulseApp) -> None:
     app.query_one("#pane-alloc").border_subtitle = f"g ▸ {app.alloc_mode}"
 
     movers = Text()
-    for i, pos in enumerate(v.movers(6)):
+    if app.movers_mode == "day $":
+        mover_rows = sorted(
+            [pos for pos in v.positions if pos.day_change_base is not None],
+            key=lambda pos: abs(pos.day_change_base or 0.0),
+            reverse=True,
+        )[:6]
+    elif app.movers_mode == "unrealized":
+        mover_rows = sorted(
+            [pos for pos in v.positions if pos.gain_base is not None],
+            key=lambda pos: abs(pos.gain_base or 0.0),
+            reverse=True,
+        )[:6]
+    else:
+        mover_rows = v.movers(6)
+    for i, pos in enumerate(mover_rows):
         if i:
             movers.append("\n")
         movers.append(f"{pos.symbol:<10}", style="bright")
@@ -180,13 +194,27 @@ def render_dashboard(app: MarketPulseApp) -> None:
             from ..charts import sparkline
 
             movers.append_text(sparkline(q.intraday, 12, app._trend_hex(q.change)))
-        movers.append(
-            f"  {fmt.arrow(pos.day_change_pct)} {fmt.pct(pos.day_change_pct):>8}",
-            style=app._trend_hex(pos.day_change_pct),
-        )
+        if app.movers_mode == "day $":
+            val = pos.day_change_base or 0.0
+            movers.append(
+                f"  {fmt.arrow(val)} {fmt.money(val, v.base, sign=True, privacy=priv):>10}",
+                style=app._trend_hex(val),
+            )
+        elif app.movers_mode == "unrealized":
+            val = pos.gain_base or 0.0
+            movers.append(
+                f"  {fmt.arrow(val)} {fmt.money(val, v.base, sign=True, privacy=priv):>10}",
+                style=app._trend_hex(val),
+            )
+        else:
+            movers.append(
+                f"  {fmt.arrow(pos.day_change_pct)} {fmt.pct(pos.day_change_pct):>8}",
+                style=app._trend_hex(pos.day_change_pct),
+            )
     app.query_one("#movers", Static).update(
         movers if movers.plain else Text("No market-priced holdings.", style="muted")
     )
+    app.query_one("#pane-movers").border_subtitle = f"m ▸ {app.movers_mode}" if app.movers_mode != "day %" else ""
 
     grid = Table.grid(padding=(0, 2), expand=True)
     grid.add_column(ratio=1)
@@ -226,6 +254,12 @@ def render_holdings(app: MarketPulseApp) -> None:
     positions = [
         x for x in positions if navigation.holdings_match(needle, x.symbol, x.name, x.account.name, x.asset_class.label)
     ]
+    if app.holdings_filter_mode == "gainers":
+        positions = [x for x in positions if x.gain_base is not None and x.gain_base > 0]
+    elif app.holdings_filter_mode == "losers":
+        positions = [x for x in positions if x.gain_base is not None and x.gain_base < 0]
+    elif app.holdings_filter_mode == "non-market":
+        positions = [x for x in positions if x.kind is not AssetKind.MARKET]
     p = app.palette
     for pos in navigation.sort_positions(app, positions):
         cells = render.position_cells(pos, v.base, privacy=app.privacy)
@@ -270,6 +304,8 @@ def render_holdings(app: MarketPulseApp) -> None:
             subtitle += f" · ⚠ {len(v.excluded)} excluded (! lists them)"
     if needle:
         subtitle += f" · F ▸ “{needle}”"
+    if app.holdings_filter_mode != "all":
+        subtitle += f" · M ▸ {app.holdings_filter_mode}"
     if app.hide_cash:
         subtitle += " · cash hidden ($)"
     order = navigation.sort_label(app, "holdings")
@@ -341,7 +377,17 @@ def render_activity(app: MarketPulseApp) -> None:
     exact = needle[1:].strip().upper() if needle.startswith("=") else None
     if exact == "":
         exact, needle = None, ""
+    mode_types: dict[str, set[TxnType]] = {
+        "trades": {TxnType.BUY, TxnType.SELL},
+        "income": {TxnType.DIVIDEND, TxnType.DRIP, TxnType.INTEREST},
+        "cash": {TxnType.DEPOSIT, TxnType.WITHDRAWAL},
+    }
+    wanted_types = mode_types.get(app.activity_filter_mode)
     for t in txns:
+        if app.activity_account_filter is not None and t.account_id != app.activity_account_filter:
+            continue
+        if wanted_types is not None and t.type not in wanted_types:
+            continue
         cells = render.activity_cells(t, accounts, privacy=app.privacy)
         if exact is not None:
             if t.symbol != exact:
@@ -357,8 +403,14 @@ def render_activity(app: MarketPulseApp) -> None:
     if dates:
         first, last = min(dates), max(dates)
         subtitle += f" · {first}" if first == last else f" · {first} → {last}"
-    elif txns and needle:
+    elif txns and (needle or app.activity_filter_mode != "all" or app.activity_account_filter is not None):
         subtitle += " · no match — escape clears"
+    if app.activity_account_filter is not None:
+        acct = accounts.get(app.activity_account_filter)
+        if acct:
+            subtitle += f" · @ ▸ {acct.name}"
+    if app.activity_filter_mode != "all":
+        subtitle += f" · M ▸ {app.activity_filter_mode}"
     if issues:
         subtitle += f" · ⚠ {len(issues)} ledger issue(s) (! lists them)"
     order = navigation.sort_label(app, "activity")
@@ -376,10 +428,11 @@ def render_accounts(app: MarketPulseApp) -> None:
     every = app.tracker.store.accounts(include_archived=True)
     archived = sum(a.archived for a in every)
     active = len(every) - archived
+    shown_accounts = [a for a in every if not (app.hide_archived and a.archived)]
     order = navigation.sort_label(app, "tax")
     app.query_one("#pane-accts").border_subtitle = (
         f"{active} account{'' if active == 1 else 's'}"
-        + (f" · {archived} archived" if archived else "")
+        + (f" · {archived} archived{' (hidden)' if app.hide_archived else ''}" if archived else "")
         + (f" · {order}" if order else "")
         if every
         else "No accounts — n to add one"
@@ -389,8 +442,18 @@ def render_accounts(app: MarketPulseApp) -> None:
         b = values.get(str(a.id))
         return b.value if b else None
 
-    keys = {"id": lambda a: a.id, "name": lambda a: a.name.lower(), "type": lambda a: a.type.label, "value": value}
-    for a in navigation.sort_items(app, "tax", every, keys):
+    def today_change(a) -> float | None:
+        b = values.get(str(a.id))
+        return b.day_change if b else None
+
+    keys = {
+        "id": lambda a: a.id,
+        "name": lambda a: a.name.lower(),
+        "type": lambda a: a.type.label,
+        "value": value,
+        "today": today_change,
+    }
+    for a in navigation.sort_items(app, "tax", shown_accounts, keys):
         b = values.get(str(a.id))
         # Currency and cash tracking live in the edit form (e) to keep this pane narrow
         cells = [
@@ -410,11 +473,21 @@ def render_alerts(app: MarketPulseApp) -> None:
     table.clear()
     quotes = {**(app.view.quotes if app.view else {}), **app.watch_quotes}
     alerts = app.tracker.store.alerts()  # by symbol, then id
+    if app.alerts_filter_mode == "armed":
+        filtered_alerts = [a for a in alerts if a.active and not a.triggered_at]
+    elif app.alerts_filter_mode == "triggered":
+        filtered_alerts = [a for a in alerts if bool(a.triggered_at)]
+    elif app.alerts_filter_mode == "paused":
+        filtered_alerts = [a for a in alerts if not a.active]
+    else:
+        filtered_alerts = alerts
     if alerts:
         subtitle = f"{sum(a.active for a in alerts)} armed of {len(alerts)}"
         triggered = sum(bool(a.triggered_at) for a in alerts)
         if triggered:
             subtitle += f" · {triggered} triggered"
+        if app.alerts_filter_mode != "all":
+            subtitle += f" · M ▸ {app.alerts_filter_mode}"
         order = navigation.sort_label(app, "alerts")
         if order:
             subtitle += f" · {order}"
@@ -425,8 +498,13 @@ def render_alerts(app: MarketPulseApp) -> None:
     def state_rank(a) -> int:  # triggered first, then armed, then paused
         return 0 if a.triggered_at else (1 if a.active else 2)
 
-    keys = {"symbol": lambda a: (a.symbol, a.id), "id": lambda a: a.id, "state": lambda a: (state_rank(a), a.id)}
-    for a in navigation.sort_items(app, "alerts", alerts, keys):
+    keys = {
+        "symbol": lambda a: (a.symbol, a.id),
+        "id": lambda a: a.id,
+        "state": lambda a: (state_rank(a), a.id),
+        "condition": lambda a: (a.condition, a.symbol, a.id),
+    }
+    for a in navigation.sort_items(app, "alerts", filtered_alerts, keys):
         q = quotes.get(a.symbol)
         state = (
             Text("● triggered", style="warn")
@@ -550,8 +628,10 @@ def render_income(app: MarketPulseApp) -> None:
         return
     state = app.tracker.store.ledger()
     months = income_by_month(state, v.fx.convert)
-    sources = income_by_symbol(state, v.fx.convert, date.today().year)
+    sources = income_by_symbol(state, v.fx.convert, app.income_year)
     body = render.income_group(months, sources, app._income_forecast, v, privacy=app.privacy)
+    if app.income_year is not None:
+        body = Group(Text(f"Income by symbol: {app.income_year} (- / + to change year)\n", style="muted"), body)
     if app._income_forecast is None:
         body = Group(body, Text("\nForward estimate loads when you open this workspace.", style="muted"))
     app.query_one("#income-view", Static).update(body)
@@ -564,5 +644,9 @@ def render_tax(app: MarketPulseApp) -> None:
         return
     years, report, rooms = app._tax
     tr = app.tracker
-    body = render.tax_group(years, report, rooms, tr.store.account_map(), tr.base, privacy=app.privacy)
+    body = render.tax_group(
+        years, report, rooms, tr.store.account_map(), tr.base, privacy=app.privacy, year=app.tax_year
+    )
+    if app.tax_year is not None:
+        body = Group(Text(f"Tax year: {app.tax_year} (- / + to change year)\n", style="muted"), body)
     target.update(Group(body, Text("\nEstimates only — confirm against broker slips (T5008/T3/T5).", style="muted")))

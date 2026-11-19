@@ -81,6 +81,7 @@ def _create_asset(app: App, asset: Asset, txn: Transaction, *, new_symbol: bool)
 @click.option("--symbol", help="Match one configured symbol exactly, ignoring case.")
 @click.option("--unclassified", is_flag=True, help="Only assets without an explicit asset class.")
 @click.option("--json", "as_json", is_flag=True, help="Print unmasked asset metadata as JSON.")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Print unmasked asset metadata as JSON Lines.")
 @click.option("--kind", type=click.Choice([k.value for k in AssetKind], case_sensitive=False))
 @click.option("--class", "asset_class", type=click.Choice([c.value for c in AssetClass], case_sensitive=False))
 @click.option("--currency", help="Match the asset's configured currency, ignoring case.")
@@ -150,10 +151,12 @@ def _create_asset(app: App, asset: Asset, txn: Transaction, *, new_symbol: bool)
     type=click.Choice(ASSET_FIELDS),
     help="Select JSON/CSV fields; repeat.",
 )
+@click.option("--held/--not-held", default=None, help="Match assets with or without an open active holding, offline.")
 @pass_app
 def asset_list(
     app: App,
     as_json: bool,
+    as_jsonl: bool,
     as_csv: bool,
     count_only: bool,
     page_info: bool,
@@ -190,10 +193,11 @@ def asset_list(
     summary: str | None,
     symbols_only: bool,
     selected_fields: tuple[str, ...],
+    held: bool | None,
 ) -> None:
     """List configured asset metadata without fetching prices."""
-    if sum((as_json, as_csv, count_only, symbols_only)) > 1:
-        raise click.UsageError("Choose one of --json, --csv, --count, or --symbols-only.")
+    if sum((as_json, as_jsonl, as_csv, count_only, symbols_only)) > 1:
+        raise click.UsageError("Choose one of --json, --jsonl, --csv, --count, or --symbols-only.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
     if classified and unclassified:
@@ -201,6 +205,7 @@ def asset_list(
     if summary and (
         count_only
         or symbols_only
+        or as_jsonl
         or page_info
         or limit is not None
         or offset
@@ -211,8 +216,8 @@ def asset_list(
         raise click.UsageError(
             "--summary cannot combine with counting, symbol output, projection, ordering or pagination."
         )
-    if selected_fields and not (as_json or as_csv):
-        raise click.UsageError("--fields requires --json or --csv.")
+    if selected_fields and not (as_json or as_jsonl or as_csv):
+        raise click.UsageError("--fields requires --json, --jsonl or --csv.")
     included_symbols = {value.strip().upper() for value in symbols}
     omitted_currencies = {value.strip().upper() for value in excluded_currencies}
     for option, values in (("--symbols", included_symbols), ("--exclude-currency", omitted_currencies)):
@@ -259,8 +264,21 @@ def asset_list(
     filtered = filtered or bool(symbols or excluded_currencies or excluded_kinds or excluded_classes or classified)
     filtered = filtered or any(
         value is not None
-        for value in (name, symbol_prefix, symbol_suffix, has_name, has_currency, has_start_date, has_maturity_date)
+        for value in (
+            name,
+            symbol_prefix,
+            symbol_suffix,
+            has_name,
+            has_currency,
+            has_start_date,
+            has_maturity_date,
+            held,
+        )
     )
+    held_symbols: set[str] = set()
+    if held is not None:
+        active = {a.id for a in app.store.accounts()}
+        held_symbols = {h.symbol for h in app.store.ledger().open_holdings() if h.account_id in active}
     items = [
         a
         for a in items
@@ -276,6 +294,7 @@ def asset_list(
         and (not classified or a.asset_class is not None)
         and (has_start_date is None or bool(a.start_date.strip()) == has_start_date)
         and (has_maturity_date is None or bool(a.maturity_date.strip()) == has_maturity_date)
+        and (held is None or (a.symbol in held_symbols) == held)
     ]
     if symbol is not None:
         items = [a for a in items if a.symbol == symbol.strip().upper()]
@@ -319,6 +338,10 @@ def asset_list(
             click.echo(item.symbol)
         return
     field_names = tuple(dict.fromkeys(selected_fields)) or ASSET_FIELDS
+    if as_jsonl:
+        for a in items:
+            click.echo(json.dumps({field: getattr(a, field) for field in field_names}, ensure_ascii=False))
+        return
     if as_csv:
         _asset_csv([{field: getattr(a, field) for field in field_names} for a in items], field_names)
         return
@@ -513,52 +536,122 @@ def asset_manual(app: App, symbol, value, name, asset_class, currency, account, 
 @click.argument("symbol")
 @click.argument("value", type=float)
 @click.option("-d", "--date", "when", default=None, callback=date_callback)
+@click.option("-a", "--account", default=None, help="Record valuation in this specific active account.")
+@click.option("--dry-run", is_flag=True, help="Preview the valuation without saving.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
 @retryable
 @pass_app
-def asset_value(app: App, symbol, value, when) -> None:
+def asset_value(app: App, symbol, value, when, account, dry_run: bool, as_json: bool) -> None:
     """Record a new valuation for a manual asset (per unit)."""
     sym = symbol.upper()
     holders = [h for h in app.store.ledger().open_holdings() if h.symbol == sym]
-    if not holders:
+    if account:
+        acct = app.account(account)
+        holders = [h for h in holders if h.account_id == acct.saved_id]
+        if not holders:
+            fail(f"No holding of {sym} in {acct.name}.")
+    elif not holders:
         fail(f"No holding of {sym}.")
-    record(
-        app,
-        Transaction(
-            account_id=holders[0].account_id,
-            type=TxnType.VALUATION,
-            date=parse_date(when),
-            symbol=sym,
-            price=value,
-            currency=holders[0].currency,
-        ),
-    )
-    app.ok(f"{sym} valued at {fmt.money(value)} {holders[0].currency}")
+    target = holders[0]
+    when_iso = parse_date(when)
+    if not dry_run:
+        record(
+            app,
+            Transaction(
+                account_id=target.account_id,
+                type=TxnType.VALUATION,
+                date=when_iso,
+                symbol=sym,
+                price=value,
+                currency=target.currency,
+            ),
+        )
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "symbol": sym,
+                    "account_id": target.account_id,
+                    "date": when_iso,
+                    "value": value,
+                    "currency": target.currency,
+                    "saved": not dry_run,
+                },
+                ensure_ascii=False,
+            )
+        )
+    elif dry_run:
+        app.ok(f"Would value {sym} at {fmt.money(value)} {target.currency} on {when_iso} (not saved).")
+    else:
+        app.ok(f"{sym} valued at {fmt.money(value)} {target.currency}")
 
 
 @asset.command("classify")
 @click.argument("symbol")
-@click.argument("asset_class", type=click.Choice([c.value for c in AssetClass], case_sensitive=False))
+@click.argument("asset_class", type=click.Choice([c.value for c in AssetClass], case_sensitive=False), required=False)
+@click.option("--clear", is_flag=True, help="Clear the asset class override instead of setting one.")
+@click.option("--dry-run", is_flag=True, help="Preview the classification change without saving.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
 @pass_app
-def asset_classify(app: App, symbol, asset_class) -> None:
-    """Override the asset class of any symbol (affects allocation)."""
+def asset_classify(app: App, symbol, asset_class, clear: bool, dry_run: bool, as_json: bool) -> None:
+    """Override or clear the asset class of any symbol (affects allocation)."""
+    if clear and asset_class is not None:
+        raise click.UsageError("Choose either ASSET_CLASS or --clear.")
+    if not clear and asset_class is None:
+        raise click.UsageError("Supply ASSET_CLASS or --clear.")
     sym = symbol.strip().upper()
     if not sym:
         raise click.BadParameter("cannot be blank.", param_hint="SYMBOL")
     existing = app.store.assets().get(sym) or Asset(symbol=sym)
-    existing.asset_class = AssetClass(asset_class.lower())
-    app.store.upsert_asset(existing)
-    app.ok(f"{sym} → {existing.asset_class.label}")
+    new_class = None if clear else AssetClass(asset_class.lower())
+    existing.asset_class = new_class
+    if not dry_run:
+        app.store.upsert_asset(existing)
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "symbol": sym,
+                    "asset_class": new_class.value if new_class else None,
+                    "saved": not dry_run,
+                },
+                ensure_ascii=False,
+            )
+        )
+    elif dry_run:
+        label = "(cleared)" if new_class is None else new_class.label
+        app.ok(f"Would set {sym} → {label} (not saved).")
+    elif new_class is None:
+        app.ok(f"Cleared asset class for {sym}.")
+    else:
+        app.ok(f"{sym} → {new_class.label}")
 
 
 @asset.command("remove")
 @click.argument("symbol")
+@click.option("--dry-run", is_flag=True, help="Preview removing asset metadata without deleting.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
 @pass_app
-def asset_remove(app: App, symbol) -> None:
+def asset_remove(app: App, symbol, dry_run: bool, as_json: bool) -> None:
     """Remove asset metadata (transactions are kept)."""
     stored = app.store.assets()
     # An exact key first: older versions of `asset classify` could save a symbol with spaces.
     sym = symbol.upper() if symbol.upper() in stored else symbol.strip().upper()
     if sym not in stored:
         fail(f"No configured asset '{sym}'; nothing removed. `marketpulse asset list` shows them.")
-    app.store.delete_asset(sym)
-    app.ok(f"Removed metadata for {sym}.")
+    active = {a.id for a in app.store.accounts()}
+    held_accounts = sum(1 for h in app.store.ledger().open_holdings() if h.symbol == sym and h.account_id in active)
+    if not dry_run:
+        app.store.delete_asset(sym)
+    if as_json:
+        click.echo(
+            json.dumps(
+                {"symbol": sym, "active_holdings": held_accounts, "removed": not dry_run},
+                ensure_ascii=False,
+            )
+        )
+    elif dry_run:
+        note = f" ({held_accounts} active holding(s) will fall back to market pricing)" if held_accounts else ""
+        app.ok(f"Would remove metadata for {sym}{note} (not deleted).")
+    else:
+        app.ok(f"Removed metadata for {sym}.")
