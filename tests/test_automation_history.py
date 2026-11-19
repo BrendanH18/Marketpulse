@@ -264,6 +264,9 @@ def test_automation_status_reads_one_snapshot(store):
         return marker
 
     store.latest_automation_failure = interleave
-    runs, pruned = store.automation_status()
+    try:
+        runs, pruned = store.automation_status()
+    finally:
+        other.close()
     assert [r.failed for r in runs] == [True] and pruned is None
     assert _automation_check(runs, pruned_failure=pruned).status == "fail"
