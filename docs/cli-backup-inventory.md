@@ -58,7 +58,14 @@ several paths it prints a JSON array in the order given, and human output names
 each failing file. The command exits 1 if any file fails verification. A missing
 file stops before anything is verified. `--latest` skips `pre-restore` backups and
 any daily backup taken while the command opened the ledger, exactly as
-`backup restore --latest` does, and exits 1 when there is none. Give paths or
-`--latest`, not both. Verification never replaces the ledger or modifies a
-source. Existing defaults are unchanged, and no command fetches prices or sends
-notifications.
+`backup restore --latest` does, and exits 1 when there is none. Verification
+never replaces the ledger or modifies a source. No command fetches prices or
+sends notifications.
+
+`marketpulse backup verify --all` checks every managed backup newest first,
+including pre-restore copies, without opening the live ledger. It reports each
+result even if an earlier file fails. Links to the live ledger and entries whose
+paths cannot be resolved are reported as failures. Use exactly one of paths,
+`--latest`, and `--all`. With `--all --json`, stdout always contains an array
+with the path of each managed entry. An empty inventory prints `[]` in JSON mode
+and exits 1, as does any failed verification.

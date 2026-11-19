@@ -94,6 +94,77 @@ def test_backup_verify_reports_invalid_without_modification(cli, tmp_path, kind)
     assert cli("backup", "verify", str(source)).exit_code == 1
 
 
+def test_backup_verify_all_reports_corrupt_and_older_valid_copy(store, tmp_path):
+    store.add_account(Account(name="Fictional Maple"))
+    directory = tmp_path / "data" / "backups"
+    older = store.backup(dest=directory / "marketpulse-20240101-120000-pre-restore.db")
+    newest = directory / "marketpulse-20240102-120000-manual.db"
+    newest.write_bytes(b"fictional invalid backup")
+    files = {path: path.read_bytes() for path in directory.glob("*.db")}
+    runner = CliRunner()
+    args = ["backup", "verify", "--all"]
+
+    result = runner.invoke(main, [*args, "--json"], catch_exceptions=False)
+    assert result.exit_code == 1, result.output
+    failed, passed = json.loads(result.stdout)
+    assert failed["path"] == str(newest)
+    assert failed["ok"] is False and failed["error"]
+    assert passed == {"ok": True, "path": str(older), "error": None}
+
+    human = runner.invoke(main, args, catch_exceptions=False)
+    assert human.exit_code == 1
+    assert human.stdout.index(newest.name) < human.stdout.index(f"Backup verified: {older.name}")
+    assert {path: path.read_bytes() for path in directory.glob("*.db")} == files
+    assert not (directory.parent / "marketpulse.db").exists()
+
+
+def test_backup_verify_all_json_for_empty_and_single_backup(store, tmp_path):
+    runner = CliRunner()
+    args = ["backup", "verify", "--all", "--json"]
+    directory = tmp_path / "data" / "backups"
+
+    empty = runner.invoke(main, args, catch_exceptions=False)
+    assert empty.exit_code == 1
+    assert json.loads(empty.stdout) == []
+    assert "No backups to verify" in empty.stderr
+    assert not directory.parent.exists()
+
+    source = store.backup(dest=directory / "marketpulse-20240101-120000-manual.db")
+    one = runner.invoke(main, args, catch_exceptions=False)
+    assert one.exit_code == 0, one.output
+    assert json.loads(one.stdout) == [{"ok": True, "path": str(source), "error": None}]
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "loop"])
+def test_backup_verify_all_reports_link_failures_and_continues(store, tmp_path, kind):
+    live = tmp_path / "data" / "marketpulse.db"
+    directory = live.parent / "backups"
+    older = store.backup(dest=directory / "marketpulse-20240101-120000-manual.db")
+    store.backup(dest=live)
+    newest = directory / "marketpulse-20240102-120000-manual.db"
+    if kind == "hardlink":
+        newest.hardlink_to(live)
+    else:
+        newest.symlink_to(newest if kind == "loop" else live)
+
+    result = CliRunner().invoke(main, ["backup", "verify", "--all", "--json"], catch_exceptions=False)
+
+    assert result.exit_code == 1, result.output
+    failed, passed = json.loads(result.stdout)
+    assert failed["path"] == str(newest)
+    assert failed["ok"] is False and failed["error"]
+    if kind != "loop":
+        assert "live ledger" in failed["error"]
+    assert passed == {"ok": True, "path": str(older), "error": None}
+
+
+@pytest.mark.parametrize("other", ["--latest", "fictional.db"])
+def test_backup_verify_all_rejects_other_selectors(other):
+    result = CliRunner().invoke(main, ["backup", "verify", "--all", other], catch_exceptions=False)
+    assert result.exit_code == 2
+    assert "Choose one of" in result.stderr
+
+
 def test_backup_now_json_creates_readable_copy(cli, store, tmp_path):
     destination = tmp_path / "explicit.db"
     result = cli("backup", "now", str(destination), "--json")

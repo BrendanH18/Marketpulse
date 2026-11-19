@@ -9,8 +9,10 @@ import math
 import re
 import sys
 from collections import Counter
+from contextlib import suppress
 from dataclasses import asdict
 from datetime import date, datetime
+from os.path import samestat
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
@@ -932,19 +934,31 @@ def backup_show(app: App, paths: tuple[str, ...], as_json: bool, as_csv: bool, f
 @click.argument("paths", nargs=-1, type=click.Path(dir_okay=False))
 @click.option("--json", "as_json", is_flag=True, help="Print validation status as JSON; invalid files exit 1.")
 @click.option("--latest", is_flag=True, help="Verify the backup `backup restore --latest` would restore.")
+@click.option("--all", "all_backups", is_flag=True, help="Verify every managed backup, newest first.")
 @pass_app
-def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool) -> None:
+def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool, all_backups: bool) -> None:
     """Check integrity and schema compatibility without replacing the ledger.
 
-    Give one or more PATHS (or file names from `backup list`), or --latest.
+    Give one or more PATHS (or file names from `backup list`), --latest, or --all.
     Uses the restore preflight with a temporary copy; each source is opened read-only.
     Does not check financial correctness or restore the backup.
     """
-    from ..db import backup_verification_error
+    from ..config import data_dir
+    from ..db import BACKUP_DIRNAME, backup_verification_error, list_backups
 
-    if latest == bool(paths):
-        raise click.UsageError("Give one or more backups to verify, or --latest.")
-    if latest:
+    if sum((bool(paths), latest, all_backups)) != 1:
+        raise click.UsageError("Choose one of: backup paths, --latest, or --all.")
+    ledger_stat = None
+    if all_backups:
+        directory = data_dir(create=False) / BACKUP_DIRNAME
+        sources = list_backups(directory)
+        if not sources:
+            if as_json:
+                click.echo("[]")
+            fail(f"No backups to verify in {directory}")
+        with suppress(OSError):
+            ledger_stat = (directory.parent / "marketpulse.db").stat()
+    elif latest:
         started = datetime.now().replace(microsecond=0)
         candidates = _restore_candidates(app.store.backup_dir, started)
         if not candidates:
@@ -954,9 +968,21 @@ def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool)
         sources = [_backup_source(app, path) for path in paths]
     results: list[dict] = []
     for source in sources:
-        error = backup_verification_error(source)
-        results.append({"ok": error is None, "path": str(source.resolve()), "error": error})
-    several = len(paths) > 1
+        error: str | None
+        if all_backups:
+            path = source.absolute()
+            try:
+                target = source.resolve(strict=True)
+                is_live = ledger_stat is not None and samestat(target.stat(), ledger_stat)
+            except (OSError, RuntimeError) as problem:
+                error = str(problem)
+            else:
+                error = "Backup points to the live ledger." if is_live else backup_verification_error(target)
+        else:
+            error = backup_verification_error(source)
+            path = source.resolve()
+        results.append({"ok": error is None, "path": str(path), "error": error})
+    several = all_backups or len(paths) > 1
     if as_json:
         click.echo(json.dumps(results if several else results[0], ensure_ascii=False))
     else:
