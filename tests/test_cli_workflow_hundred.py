@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from click.testing import CliRunner
@@ -512,7 +514,27 @@ def test_positions_and_snapshots_improvements_61_to_70(store, cli):
     r = cli("snapshots", "--stats", "--json")
     assert r.exit_code == 0
     st = json.loads(r.output)
-    assert st["count"] == 3 and st["min_net_worth"] == 950.0 and st["max_net_worth"] == 1200.0
+    assert st["count"] == 3
+    assert st["by_currency"]["CAD"]["min_net_worth"] == 950.0
+    assert st["by_currency"]["CAD"]["max_net_worth"] == 1200.0
+
+    store.upsert_snapshots(
+        [
+            Snapshot(date="2024-04-02", net_worth=70, book=90, contributions=90, currency="USD", detail=""),
+            Snapshot(date="2024-04-03", net_worth=90, book=95, contributions=90, currency="USD", detail=""),
+        ]
+    )
+    usd = json.loads(cli("snapshots", "--stats", "--json").output)["by_currency"]["USD"]
+    assert usd == {
+        "min_net_worth": 70,
+        "max_net_worth": 90,
+        "min_book": 90,
+        "max_book": 95,
+        "min_change": 20,
+        "max_change": 20,
+    }
+    text = cli("snapshots", "--stats").output
+    assert "Net worth range (CAD)" in text and "Net worth range (USD)" in text
 
 
 def test_assets_and_data_improvements_71_to_80(cli_store, tmp_path: Path):
@@ -617,3 +639,40 @@ def test_export_no_overwrite_rejects_dangling_symlink(tmp_path, format_args):
     r = _cli("export", str(link), "--no-overwrite", *format_args)
     assert r.exit_code == 1 and "already exists" in r.output
     assert link.is_symlink() and not target.exists()
+
+
+def test_asset_value_json_receipt_replays_after_deletion(cli_store):
+    account = cli_store.add_account(Account(name="Fictional TFSA"))
+    cli_store.add_transaction(
+        Transaction(
+            account_id=account.saved_id, date="2024-01-01", type=TxnType.BUY, symbol="HOUSE", quantity=1, price=10
+        )
+    )
+    request = str(uuid4())
+    args = ("asset", "value", "HOUSE", "42", "--request-id", request)
+    first = _cli(*args, "--json")
+    assert first.exit_code == 0
+    receipt = json.loads(first.output)
+    assert receipt["saved"] is True and isinstance(receipt["transaction_id"], int)
+    cli_store.delete_transaction(receipt["transaction_id"])
+    retry = _cli(*args, "--json")
+    assert retry.exit_code == 0 and json.loads(retry.output) == receipt
+    assert len(cli_store.transactions()) == 1
+    legacy_intent = json.dumps(["value", {"symbol": "HOUSE", "value": 42.0, "when": None}], sort_keys=True)
+    saved_request = cli_store.get_meta(f"transaction_request:{request}")
+    assert json.loads(saved_request)["fingerprint"] == hashlib.sha256(legacy_intent.encode()).hexdigest()
+
+
+def test_provider_exit_code_respects_missing_key_filters(tmp_path):
+    (tmp_path / "config.toml").write_text('quote_provider = "alphavantage"\n', encoding="utf-8")
+    for options in ((), ("--supported",)):
+        args = ("provider", "status", "--exit-code", "--json", *options)
+        assert _cli(*args, "--search", "alphavantage").exit_code == 1
+        result = _cli(*args, "--search", "nonexistent")
+        assert result.exit_code == 0 and json.loads(result.output) == []
+
+
+@pytest.mark.parametrize("scope", ["--all", "--latest"])
+def test_backup_verify_quiet_without_backups(cli, scope):
+    result = cli("backup", "verify", scope, "--quiet")
+    assert result.exit_code == 1 and result.output == ""

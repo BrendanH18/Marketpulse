@@ -176,7 +176,7 @@ def action_privacy(app: MarketPulseApp) -> None:
 
 def action_next_theme(app: MarketPulseApp) -> None:
     names = theme_names()
-    current = app.theme if app.theme in names else names[0]
+    current = app.palette.name if app.palette.name in names else names[0]
     app.theme = names[(names.index(current) + 1) % len(names)]
     app.notify(pretty_name(app.theme), title="Theme", timeout=2)
 

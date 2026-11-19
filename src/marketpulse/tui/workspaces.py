@@ -268,7 +268,8 @@ def render_holdings(app: MarketPulseApp) -> None:
             cells[5] = Text(cells[5].plain, style=f"bold {p.background} on {p.up if direction > 0 else p.down}")
         row = app._justify([cells[i] for i in HOLDING_COLUMNS], range(2, 8))
         table.add_row(*row, key=f"{pos.account.id}:{pos.symbol}")
-    for c in [] if app.hide_cash else v.cash:
+    show_cash = not app.hide_cash and app.holdings_filter_mode not in ("gainers", "losers")
+    for c in v.cash if show_cash else []:
         if app.account_filter is not None and c.account.id != app.account_filter:
             continue
         if not navigation.holdings_match(needle, "cash", c.currency, c.account.name):
@@ -292,7 +293,7 @@ def render_holdings(app: MarketPulseApp) -> None:
         acct = app.tracker.store.get_account(app.account_filter)
         scope = acct.name if acct else scope
     total = sum(x.value_base or 0 for x in positions)
-    if table.row_count == 0 and needle:
+    if table.row_count == 0 and (needle or app.holdings_filter_mode != "all"):
         subtitle = f"f ▸ {scope} · no match — escape clears"
     elif table.row_count == 0:
         subtitle = "No holdings yet — b to buy" if app.account_filter is None else f"f ▸ {scope} · nothing held"
@@ -312,11 +313,12 @@ def render_holdings(app: MarketPulseApp) -> None:
     if order:
         subtitle += f" · {order}"
     app.query_one("#pane-holdings").border_subtitle = subtitle
-    if app._detail_key is None:
-        first = app._selected_key(table) if positions else None
-        if first and not first.startswith("cash:"):
-            app._show_position(first)
+    detail = app._selected_key(table)
+    if detail != app._detail_key or detail is None:
+        if detail and not detail.startswith("cash:"):
+            app._show_position(detail)
         else:
+            app._detail_key = None
             app.render_position_detail()  # nothing selected (a filter matched no holding): clear the pane
 
 
@@ -614,9 +616,8 @@ def render_income(app: MarketPulseApp) -> None:
     state = app.tracker.store.ledger()
     months = income_by_month(state, v.fx.convert)
     sources = income_by_symbol(state, v.fx.convert, app.income_year)
-    body = render.income_group(months, sources, app._income_forecast, v, privacy=app.privacy)
-    if app.income_year is not None:
-        body = Group(Text(f"Income by symbol: {app.income_year} (- / + to change year)\n", style="muted"), body)
+    period = "This year" if app.income_year == date.today().year else str(app.income_year or "All time")
+    body = render.income_group(months, sources, app._income_forecast, v, privacy=app.privacy, source_period=period)
     if app._income_forecast is None:
         body = Group(body, Text("\nForward estimate loads when you open this workspace.", style="muted"))
     app.query_one("#income-view", Static).update(body)

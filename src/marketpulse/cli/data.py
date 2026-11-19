@@ -1022,6 +1022,8 @@ def backup_verify(
         directory = ledger.parent / BACKUP_DIRNAME
         sources = list_backups(directory)
         if not sources:
+            if quiet:
+                raise click.exceptions.Exit(1)
             if as_json:
                 click.echo("[]")
             fail(f"No backups to verify in {directory}")
@@ -1029,6 +1031,8 @@ def backup_verify(
         started = datetime.now().replace(microsecond=0)
         candidates = _restore_candidates(app.store.backup_dir, started)
         if not candidates:
+            if quiet:
+                raise click.exceptions.Exit(1)
             fail(f"No backups to verify in {app.store.backup_dir}")
         sources = candidates[:1]
     else:

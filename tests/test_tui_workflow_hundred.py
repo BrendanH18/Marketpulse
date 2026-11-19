@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Static
 
+from marketpulse import themes
 from marketpulse.models import Account, AccountType, Alert, Asset, AssetKind, Transaction, TxnType
 from marketpulse.tui.app import MarketPulseApp
 
@@ -14,10 +15,14 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_tui_workflow_improvements_81_to_100(tracker, store):
-    tfsa = store.add_account(Account(name="TFSA", type=AccountType.TFSA, currency="CAD"))
+def test_tui_workflow_improvements_81_to_100(tracker, store, monkeypatch):
+    tracker.config.theme = "tokyo-night"
+    tfsa = store.add_account(Account(name="TFSA", type=AccountType.TFSA, currency="CAD", track_cash=True))
     rrsp = store.add_account(Account(name="RRSP", type=AccountType.RRSP, currency="CAD"))
     store.add_account(Account(name="Old", type=AccountType.NONREG, currency="CAD", archived=True))
+    store.add_transaction(
+        Transaction(account_id=tfsa.id, type=TxnType.DEPOSIT, date="2024-01-01", amount=2000, currency="CAD")
+    )
     store.add_transaction(
         Transaction(
             account_id=tfsa.id,
@@ -36,7 +41,7 @@ def test_tui_workflow_improvements_81_to_100(tracker, store):
             date="2024-01-03",
             symbol="AAPL",
             quantity=2,
-            price=250,
+            price=150,
             currency="USD",
         )
     )
@@ -119,8 +124,13 @@ def test_tui_workflow_improvements_81_to_100(tracker, store):
             assert copied and "| Account | Symbol |" in copied[-1]
 
             # 89: context filter mode cycler (M) on holdings
+            holdings = app.query_one("#holdings-table", DataTable)
             await pilot.press("M")
             assert app.holdings_filter_mode == "gainers"
+            assert all(not str(key.value).startswith("cash:") for key in holdings.rows)
+            assert app._detail_key is not None
+            await pilot.press("M")
+            assert holdings.row_count == 0 and app._detail_key is None
             await pilot.press("escape")
             assert app.holdings_filter_mode == "all"
 
@@ -156,7 +166,15 @@ def test_tui_workflow_improvements_81_to_100(tracker, store):
             await pilot.pause()
             await pilot.press("j", "k", "greater_than_sign", "less_than_sign")
             await pilot.press("minus")
+            assert app.income_year == 2024
+            with app.console.capture() as report:
+                app.console.print(app.query_one("#income-view", Static).content)
+            assert "2024" in report.get() and "This year" not in report.get()
             await pilot.press("plus")
+            assert app.income_year is None
+            with app.console.capture() as report:
+                app.console.print(app.query_one("#income-view", Static).content)
+            assert "All time" in report.get()
 
             # 84, 92, 95: tax workspace — hide archived (I), today sort, tax year stepper (-/+)
             await pilot.press("7")
@@ -174,19 +192,40 @@ def test_tui_workflow_improvements_81_to_100(tracker, store):
             await pilot.press("8")
             await pilot.pause()
             await pilot.press("U")
+            await app.workers.wait_for_complete()
             assert all(not a.triggered_at for a in store.alerts())
             app.action_pause_all_alerts()
+            await app.workers.wait_for_complete()
             assert all(not a.active for a in store.alerts())
             app.action_resume_all_alerts()
+            await app.workers.wait_for_complete()
             assert all(a.active for a in store.alerts())
 
             # 99: create local database backup
             before_backups = len(store.backups())
             app.action_create_backup()
+            await app.workers.wait_for_complete()
             assert len(store.backups()) >= before_backups + 1
 
+            def fail_backup(*, reason):
+                raise PermissionError("Fictional backup directory is read-only")
+
+            received = []
+            monkeypatch.setattr(store, "backup", fail_backup)
+            monkeypatch.setattr(app, "notify", lambda message, **kwargs: received.append((message, kwargs)))
+            app.action_create_backup()
+            await app.workers.wait_for_complete()
+            assert any(options.get("severity") == "error" for _, options in received)
+
             # 100: restore auto theme
+            colors = {**themes.OMARCHY_PALETTES["tokyo-night"], "background": "#123456"}
+            monkeypatch.setattr(themes, "omarchy_active", lambda: ("custom-test", colors))
             app.action_restore_auto_theme()
             assert app.config.theme == "auto" and app._auto_theme is True
+            assert app.palette.name == "custom-test" and app.current_theme.background == "#123456"
+            app.action_restore_auto_theme()
+            assert app.current_theme.background == "#123456"
+            await app.workers.wait_for_complete()
+            await pilot.pause()
 
     _run(scenario())

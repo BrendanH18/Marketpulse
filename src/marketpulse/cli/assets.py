@@ -570,7 +570,10 @@ def asset_value(app: App, symbol, value, when, account, dry_run: bool, as_json: 
         except ValueError as e:
             fail(str(e))
     else:
-        record(app, txn)
+        saved = record(app, txn)
+        if as_json and app.request_id is not None:
+            click.echo(json.dumps({"transaction_id": saved.saved_id, "saved": True}))
+            return
     if as_json:
         click.echo(
             json.dumps(

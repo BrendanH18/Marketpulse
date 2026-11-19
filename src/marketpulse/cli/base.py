@@ -139,13 +139,23 @@ def retryable(f):
             return original(*args, **kwargs)
         # Fingerprint the user's parsed command, before inferred quotes/currency or
         # current holdings can change. Replays skip resolution and validation entirely.
-        intent = json.dumps([ctx.command.name, kwargs], sort_keys=True)
+        fields = kwargs
+        if "as_json" in kwargs:  # asset value
+            if kwargs["dry_run"]:
+                raise click.UsageError("--dry-run cannot be combined with --request-id.")
+            fields = {key: value for key, value in kwargs.items() if key not in ("as_json", "dry_run")}
+            if fields["account"] is None:
+                del fields["account"]  # preserve receipts saved before the account option existed
+        intent = json.dumps([ctx.command.name, fields], sort_keys=True)
         app.request_fingerprint = hashlib.sha256(intent.encode()).hexdigest()
         try:
             check_request(app.store, app.request_id, app.request_fingerprint)
             return original(*args, **kwargs)
         except AlreadyRecorded as saved:
-            app.ok(f"Transaction already recorded (#{saved.transaction_id}).")
+            if kwargs.get("as_json"):
+                click.echo(json.dumps({"transaction_id": saved.transaction_id, "saved": True}))
+            else:
+                app.ok(f"Transaction already recorded (#{saved.transaction_id}).")
         except ValueError as e:
             fail(str(e))
 

@@ -86,6 +86,63 @@ def _quarter_callback(ctx, param, value: str | None) -> str | None:
     return value
 
 
+def _snapshot_stats(
+    app: App,
+    rows: list[Snapshot],
+    changes: dict[str, float | None],
+    *,
+    as_json: bool,
+    has_history: bool,
+) -> None:
+    by_currency: dict[str, list[Snapshot]] = {}
+    for snapshot in rows:
+        by_currency.setdefault(snapshot.currency, []).append(snapshot)
+
+    def ranges(snapshots: list[Snapshot]) -> dict[str, float | None]:
+        known = [change for s in snapshots if (change := changes[s.date]) is not None]
+        return {
+            "min_net_worth": min(s.net_worth for s in snapshots),
+            "max_net_worth": max(s.net_worth for s in snapshots),
+            "min_book": min(s.book for s in snapshots),
+            "max_book": max(s.book for s in snapshots),
+            "min_change": min(known, default=None),
+            "max_change": max(known, default=None),
+        }
+
+    stats = {currency: ranges(snapshots) for currency, snapshots in sorted(by_currency.items())}
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "count": len(rows),
+                    "earliest": rows[0].date if rows else None,
+                    "latest": rows[-1].date if rows else None,
+                    "by_currency": stats,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return
+    if not rows:
+        app.console.print(
+            Text("No matching snapshots." if has_history else "No snapshots recorded yet.", style="muted")
+        )
+        return
+
+    table = render.table("Metric", "Value", title="Snapshot statistics")
+    table.add_row(Text("Count"), Text(str(len(rows))))
+    table.add_row(Text("Date span"), Text(f"{rows[0].date} → {rows[-1].date}"))
+    for currency, values in stats.items():
+        for label, key in (("Net worth", "net_worth"), ("Book", "book"), ("Daily change", "change")):
+            low, high = values[f"min_{key}"], values[f"max_{key}"]
+            if low is not None and high is not None:
+                amounts = " – ".join(
+                    fmt.money(n, currency, sign=key == "change", privacy=app.privacy) for n in (low, high)
+                )
+                table.add_row(Text(f"{label} range ({currency})"), Text(amounts))
+    app.console.print(table)
+
+
 def _snapshot_summary(
     app: App, rows: list[Snapshot], group: str, as_json: bool, as_csv: bool, changes: dict[str, float | None]
 ) -> None:
@@ -392,54 +449,7 @@ def snapshots(
         and (not below_book or s.net_worth < s.book)
     ]
     if stats:
-        known_changes = [c for s in rows if (c := changes[s.date]) is not None]
-        currencies_seen = sorted({s.currency for s in rows})
-        min_nw = min((s.net_worth for s in rows), default=None)
-        max_nw = max((s.net_worth for s in rows), default=None)
-        min_bk = min((s.book for s in rows), default=None)
-        max_bk = max((s.book for s in rows), default=None)
-        min_chg = min(known_changes, default=None)
-        max_chg = max(known_changes, default=None)
-        stats_payload: dict[str, object] = {
-            "count": len(rows),
-            "earliest": rows[0].date if rows else None,
-            "latest": rows[-1].date if rows else None,
-            "currencies": currencies_seen,
-            "min_net_worth": min_nw,
-            "max_net_worth": max_nw,
-            "min_book": min_bk,
-            "max_book": max_bk,
-            "min_change": min_chg,
-            "max_change": max_chg,
-        }
-        if as_json:
-            click.echo(json.dumps(stats_payload, ensure_ascii=False))
-            return
-        if not rows:
-            app.console.print(Text("No matching snapshots." if every else "No snapshots recorded yet.", style="muted"))
-            return
-        assert min_nw is not None and max_nw is not None and min_bk is not None and max_bk is not None
-        t = render.table("Metric", "Value", title="Snapshot statistics")
-        t.add_row(Text("Count"), Text(str(stats_payload["count"])))
-        t.add_row(Text("Date span"), Text(f"{stats_payload['earliest']} → {stats_payload['latest']}"))
-        t.add_row(Text("Currencies"), Text(", ".join(currencies_seen)))
-        t.add_row(
-            Text("Net worth range"),
-            Text(f"{fmt.money(min_nw, privacy=app.privacy)} – {fmt.money(max_nw, privacy=app.privacy)}"),
-        )
-        t.add_row(
-            Text("Book range"),
-            Text(f"{fmt.money(min_bk, privacy=app.privacy)} – {fmt.money(max_bk, privacy=app.privacy)}"),
-        )
-        if min_chg is not None and max_chg is not None:
-            t.add_row(
-                Text("Daily change range"),
-                Text(
-                    f"{fmt.money(min_chg, sign=True, privacy=app.privacy)} – "
-                    f"{fmt.money(max_chg, sign=True, privacy=app.privacy)}"
-                ),
-            )
-        app.console.print(t)
+        _snapshot_stats(app, rows, changes, as_json=as_json, has_history=bool(every))
         return
     if summary:
         _snapshot_summary(app, rows, summary, as_json, as_csv, changes)

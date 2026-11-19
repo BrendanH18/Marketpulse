@@ -22,7 +22,6 @@ from textual.widgets import DataTable, Input
 from .. import fmt
 from ..market import PERIODS
 from ..models import Transaction
-from ..themes import pretty_name, resolve_palette
 from ..valuation import PositionView
 from .constants import (
     ACTIVITY_FILTER_MODES,
@@ -574,37 +573,24 @@ def set_income_year(app: MarketPulseApp, year: int | None) -> None:
     app.render_income()
 
 
-def rearm_triggered_alerts(app: MarketPulseApp) -> None:
+def update_alert_batch(app: MarketPulseApp, active: bool, *, rearm: bool) -> str:
     with app.tracker.store.transaction():
-        triggered = [a for a in app.tracker.store.alerts() if a.triggered_at]
-        for a in triggered:
-            a.active = True
-            a.triggered_at = ""
-            app.tracker.store.update_alert(a)
-    if not triggered:
-        app.notify("No triggered alerts to re-arm", timeout=2)
-        return
-    app.render_alerts()
-    app.notify(f"Re-armed {len(triggered)} alert{'' if len(triggered) == 1 else 's'}", timeout=2)
-
-
-def bulk_alerts_active(app: MarketPulseApp, active: bool) -> None:
-    with app.tracker.store.transaction():
-        changed = [a for a in app.tracker.store.alerts() if a.active != active]
-        for a in changed:
-            a.active = active
-            app.tracker.store.update_alert(a)
+        alerts = app.tracker.store.alerts()
+        if rearm:
+            changed = [alert for alert in alerts if alert.triggered_at]
+        else:
+            changed = [alert for alert in alerts if alert.active != active]
+        for alert in changed:
+            alert.active = active
+            if rearm:
+                alert.triggered_at = ""
+            app.tracker.store.update_alert(alert)
     if not changed:
-        app.notify("All alerts already " + ("active" if active else "paused"), timeout=2)
-        return
-    app.render_alerts()
-    verb = "Resumed" if active else "Paused"
-    app.notify(f"{verb} {len(changed)} alert{'' if len(changed) == 1 else 's'}", timeout=2)
-
-
-def create_backup(app: MarketPulseApp) -> None:
-    path = app.tracker.store.backup(reason="manual")
-    app.notify(f"Backup saved: {path.name}", timeout=3)
+        if rearm:
+            return "No triggered alerts to re-arm"
+        return "All alerts already " + ("active" if active else "paused")
+    verb = "Re-armed" if rearm else "Resumed" if active else "Paused"
+    return f"{verb} {len(changed)} alert{'' if len(changed) == 1 else 's'}"
 
 
 def focus_workspace_input(app: MarketPulseApp) -> None:
@@ -618,15 +604,6 @@ def focus_workspace_input(app: MarketPulseApp) -> None:
         app.query_one("#chart-input", Input).focus()
     else:
         app.notify("No text input in this workspace", timeout=2)
-
-
-def restore_auto_theme(app: MarketPulseApp) -> None:
-    app.config.theme = "auto"
-    app.config.save()
-    app._auto_theme = True
-    target = resolve_palette("auto").name
-    app.theme = target
-    app.notify(f"Theme: Auto ({pretty_name(target)})", timeout=2)
 
 
 # A quantity or amount in an English message, but not part of a symbol (0700.HK) or a date.

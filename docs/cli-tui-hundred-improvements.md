@@ -93,12 +93,12 @@ ordinary portfolio views, and API keys remain redacted.
 67. `snapshots --quarter-end-only` — Keep only snapshots on Mar 31, Jun 30, Sep 30, or Dec 31.
 68. `snapshots --above-book` — Keep only snapshots where `net_worth > book`.
 69. `snapshots --below-book` — Keep only snapshots where `net_worth < book`.
-70. `snapshots --stats` — Offline summary statistics (count, date span, min/max net worth, book, and change; supports `--json`).
+70. `snapshots --stats` — Show the count and date span plus net worth, book value, and daily change ranges by currency. JSON groups ranges under `by_currency`.
 71. `asset list --jsonl` — Emit matching configured assets as JSON Lines, offline.
 72. `asset list --held/--not-held` — Filter configured assets by open active holdings, offline.
 73. `asset classify SYMBOL --clear` — Clear a custom `asset_class` override (supports `--dry-run` and `--json`).
 74. `asset remove SYMBOL --dry-run` (and `--json`) — Preview removing asset metadata with active-holding count.
-75. `asset value SYMBOL VALUE -a/--account` — Target a specific account for a manual valuation (supports `--dry-run` and `--json`).
+75. `asset value SYMBOL VALUE -a/--account` — Target a specific account for a manual valuation (supports `--dry-run` and `--json`). With `--request-id`, JSON returns the saved transaction ID on the first save and on retries.
 76. `import --strict` — Refuse to write any rows if the dry-run preview finds any row issue or the file or ledger changes before import.
 77. `export --no-overwrite` — Refuse to overwrite an existing file at `PATH`.
 78. `export --dry-run` — Preview how many rows would be exported without writing a file.

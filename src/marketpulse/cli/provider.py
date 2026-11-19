@@ -51,8 +51,14 @@ def provider_status(
         raise click.UsageError("Choose one of --json, --csv or --count.")
     if search is not None and not search.strip():
         raise click.BadParameter("Cannot be blank.", param_hint="--search")
+    needle = (search or "").strip().casefold()
+
+    def matches(provider_name: str, label: str, error: str = "") -> bool:
+        return (not name or provider_name.casefold() == name.casefold()) and (
+            not needle or needle in f"{provider_name} {label} {error}".casefold().strip()
+        )
+
     if supported:
-        needle = (search or "").strip().casefold()
         sup_rows = [
             {
                 "name": pname,
@@ -61,8 +67,7 @@ def provider_status(
                 "has_key": app.config.quote_provider == pname and bool(app.config.quote_api_key),
             }
             for pname in sorted(PROVIDERS)
-            if (not name or pname.casefold() == name.casefold())
-            and (not needle or needle in (pname + " " + provider_label(pname)).casefold())
+            if matches(pname, provider_label(pname))
         ]
         if count:
             click.echo(len(sup_rows))
@@ -81,19 +86,23 @@ def provider_status(
                 app.console.print(
                     Text(f"{sr['name']:<16}", style="accent") + Text(f"{sr['label']:<20}") + Text(tag, style=style)
                 )
+        if exit_code and any(row["configured"] and not row["has_key"] for row in sup_rows):
+            raise click.exceptions.Exit(1)
         return
-    rows = app.tracker.market.provider_status()
-    if name:
-        rows = [r for r in rows if r.name.casefold() == name.casefold()]
-    if search:
-        needle = search.strip().casefold()
-        rows = [r for r in rows if needle in f"{r.name} {r.label} {r.last_error or ''}".casefold()]
+    rows = [r for r in app.tracker.market.provider_status() if matches(r.name, r.label, r.last_error or "")]
     if role:
         rows = [r for r in rows if r.role == role]
     if state:
         rows = [r for r in rows if ("untried" if r.ok is None else "ok" if r.ok else "failing") == state]
-    missing_key = bool(app.config.quote_provider and app.tracker.market.fallback is None)
-    unhealthy = any(r.ok is False for r in rows) or (missing_key and not (name or role == "primary" or state))
+    fallback_name = app.config.quote_provider
+    missing_key = bool(
+        fallback_name
+        and app.tracker.market.fallback is None
+        and role != "primary"
+        and state is None
+        and matches(fallback_name, provider_label(fallback_name))
+    )
+    unhealthy = any(r.ok is False for r in rows) or missing_key
     if count:
         click.echo(len(rows))
         if exit_code and unhealthy:
@@ -126,14 +135,13 @@ def provider_status(
         app.console.print(line)
         if r.ok is False and r.last_error:
             app.console.print(Text(f"  {r.last_error}", style="warn"))
-    if not (name or search or role or state):
-        if missing_key:
-            app.warn(f"{provider_label(app.config.quote_provider)} has no key yet: `marketpulse provider key NAME`.")
-        elif not app.config.quote_provider:
-            names = ", ".join(PROVIDERS)
-            app.console.print(
-                Text(f"No fallback provider. Add one with `marketpulse provider key NAME` ({names}).", style="muted")
-            )
+    if missing_key:
+        app.warn(f"{provider_label(fallback_name)} has no key yet: `marketpulse provider key NAME`.")
+    elif not (fallback_name or name or search or role or state):
+        names = ", ".join(PROVIDERS)
+        app.console.print(
+            Text(f"No fallback provider. Add one with `marketpulse provider key NAME` ({names}).", style="muted")
+        )
     if exit_code and unhealthy:
         raise click.exceptions.Exit(1)
 
