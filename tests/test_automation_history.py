@@ -243,3 +243,27 @@ def test_doctor_still_reports_a_failure_pruned_from_the_history(cli, store):
     assert result.exit_code == 1
     assert "Backup failed: fictional disk full" in result.output
     assert "older than the 50 runs" in result.output and "failed run(s)" not in result.output
+
+
+def test_automation_status_reads_one_snapshot(store):
+    # Another process replaces the history (as a restore would) between the marker and history reads.
+    from marketpulse.db import Store
+
+    failure = store.record_automation_run(report(datetime.now(), errors=["Backup failed: fictional disk full"]))
+    other = Store(store.path)
+    read_marker = store.latest_automation_failure
+
+    def interleave():
+        marker = read_marker()
+        with other.transaction():
+            other._exec("DELETE FROM automation_runs")
+            other._exec(
+                "INSERT INTO automation_runs(id, ran_at, failed, report) VALUES (?, ?, 0, ?)",
+                (failure.id, failure.ran_at, json.dumps(report(datetime.now()))),
+            )
+        return marker
+
+    store.latest_automation_failure = interleave
+    runs, pruned = store.automation_status()
+    assert [r.failed for r in runs] == [True] and pruned is None
+    assert _automation_check(runs, pruned_failure=pruned).status == "fail"

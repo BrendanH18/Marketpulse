@@ -738,6 +738,21 @@ class Store:
                 self.set_meta(AUTOMATION_LAST_FAILURE_KEY, json.dumps(asdict(run), allow_nan=False))
         return run
 
+    def automation_status(self) -> tuple[list[AutomationRun], AutomationRun | None]:
+        """The kept runs and, if it has been pruned from them, the latest failure: read from one
+        snapshot, so a run recorded or a backup restored in between can't pair two ledgers' rows."""
+        with self._lock:
+            if self._in_transaction:
+                raise RuntimeError("Transactions don't nest.")
+            self._conn.execute("BEGIN")  # deferred: a read snapshot, without taking the write lock
+            try:
+                failure = self.latest_automation_failure()
+                runs = self.automation_runs()
+            finally:
+                self._conn.commit()
+        pruned = failure if failure and all(r.id != failure.id for r in runs) else None
+        return runs, pruned
+
     def latest_automation_failure(self) -> AutomationRun | None:
         """The newest failed automation run, even after it has been pruned from `automation_runs`."""
         raw = self.get_meta(AUTOMATION_LAST_FAILURE_KEY)
