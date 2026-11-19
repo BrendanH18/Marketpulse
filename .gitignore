@@ -19,3 +19,9 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Secrets and local-only files
+*.pem
+*.key
+.claude/settings.local.json
+.claude/worktrees/
