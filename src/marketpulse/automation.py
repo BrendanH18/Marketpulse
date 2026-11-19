@@ -59,5 +59,8 @@ def run_cycle(tracker: Tracker, *, fresh: bool = False, notify: bool = True) -> 
         "errors": errors,
         "quote_errors": quote_errors,
     }
-    tracker.store.set_meta("automation_last_run", json.dumps(report, allow_nan=False))
+    # `automation_last_run` feeds `status` and the desktop bridge; `automation_runs` keeps the history.
+    with tracker.store.atomic():
+        tracker.store.set_meta("automation_last_run", json.dumps(report, allow_nan=False))
+        tracker.store.record_automation_run(report)
     return Cycle(view, report)
