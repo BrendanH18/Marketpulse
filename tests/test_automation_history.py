@@ -234,6 +234,7 @@ def test_doctor_ignores_an_old_failure(cli, store):
 def test_doctor_still_reports_a_failure_pruned_from_the_history(cli, store):
     # A 60-second timer records 50 runs in under an hour, so a recent failure can leave the capped history.
     now = datetime.now()
+    store.record_automation_run(report(now - timedelta(minutes=56), errors=["Backup failed: fictional read-only"]))
     store.record_automation_run(report(now - timedelta(minutes=55), errors=["Backup failed: fictional disk full"]))
     for i in range(AUTOMATION_RUNS_KEEP):
         store.record_automation_run(report(now - timedelta(minutes=50 - i)))
@@ -241,3 +242,4 @@ def test_doctor_still_reports_a_failure_pruned_from_the_history(cli, store):
     result = cli("doctor", "--offline", "--only", "automation", "--strict")
     assert result.exit_code == 1
     assert "Backup failed: fictional disk full" in result.output
+    assert "older than the 50 runs" in result.output and "failed run(s)" not in result.output

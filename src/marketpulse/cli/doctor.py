@@ -252,10 +252,14 @@ def _backup_check(backups: list[Path], *, verify: bool) -> Check:
 AUTOMATION_WINDOW = timedelta(hours=24)
 
 
-def _automation_check(runs: list[AutomationRun], now: datetime | None = None) -> Check:
+def _automation_check(
+    runs: list[AutomationRun], now: datetime | None = None, *, pruned_failure: AutomationRun | None = None
+) -> Check:
     """Fail when any recorded run in the last 24 hours (before `now`) listed errors.
 
     Quote errors alone aren't failures, and a failure older than the window doesn't count.
+    `pruned_failure` is the latest failure when it has left the capped history: it is
+    reported only if nothing newer failed, and without a count the history can't confirm.
     """
     if not runs:
         return Check("automation", "info", "no runs recorded yet")
@@ -268,6 +272,18 @@ def _automation_check(runs: list[AutomationRun], now: datetime | None = None) ->
             continue
         if ran_at >= cutoff and run.report.get("errors"):
             recent.append(run)
+    if not recent and pruned_failure and pruned_failure.report.get("errors"):
+        try:
+            pruned_recent = datetime.fromisoformat(pruned_failure.ran_at) >= cutoff
+        except ValueError:
+            pruned_recent = False
+        if pruned_recent:
+            return Check(
+                "automation",
+                "fail",
+                f"a run failed at {pruned_failure.ran_at}: {'; '.join(pruned_failure.report['errors'])} · "
+                f"older than the {len(runs)} runs `marketpulse automation history` keeps",
+            )
     if recent:
         latest = recent[0]
         return Check(
@@ -314,9 +330,8 @@ def _collect(app: App, *, offline: bool, selected: set[str] | None = None, verif
     if want("automation"):
         runs = app.store.automation_runs()
         failure = app.store.latest_automation_failure()
-        if failure and all(r.id != failure.id for r in runs):
-            runs.append(failure)  # pruned from the capped history, so older than every run in it
-        checks.append(_automation_check(runs))
+        pruned = failure if failure and all(r.id != failure.id for r in runs) else None
+        checks.append(_automation_check(runs, pruned_failure=pruned))
     if want("ledger"):
         row(
             "ledger",
