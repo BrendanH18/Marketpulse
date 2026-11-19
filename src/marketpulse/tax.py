@@ -637,17 +637,24 @@ def _foreign_year(
     carried = [held for day, held in days if day < start][-1:]
     timeline = [(start, carried[0])] if carried else []
     timeline += [(day, held) for day, held in days if start <= day <= as_of]
-    # A superficial loss denied on a sale with no FX rate is a guess, and it moves into the
-    # replacement shares' cost: from that sale on, the symbol's cost, and the gain on any later
-    # sale (in replay order), are incomplete. Conservatively, this lasts even if the pool is
-    # later sold out and reopened. A loss denied on a move into a registered plan never enters
-    # taxable cost, so it doesn't count.
+
+    # A sale with an FX rate missing (on it, or on a purchase behind it) has a guessed gain, so
+    # whether part of a loss was denied, and how much, is a guess too. A denied loss moves into
+    # the replacement shares' cost: when the sale's loss was denied, or the symbol is still held
+    # (or bought again) within the 30-day window after it, the symbol's cost and the gain on any
+    # later sale (in replay order) are incomplete from then on. Conservatively, this lasts even
+    # if the pool is later sold out and reopened. A loss denied on a move into a registered plan
+    # never enters taxable cost, so transfers don't count.
+    def held_soon_after(d: Disposition) -> bool:
+        end = (date.fromisoformat(d.date) + timedelta(days=SUPERFICIAL_WINDOW_DAYS)).isoformat()
+        return any(d.symbol in held for day, held in days if d.date <= day <= end)
+
     guessed: dict[str, str] = {}
     unknown_gain: set[int] = set()  # dispositions (by position) whose gain rests on a guess
     for i, d in enumerate(dispositions):
         if d.symbol in guessed:
             unknown_gain.add(i)
-        elif not d.complete and d.superficial:
+        elif not d.complete and (d.superficial or (d.kind == "sale" and held_soon_after(d))):
             guessed[d.symbol] = d.date
     holdings: dict[str, ForeignHolding] = {}
     for day, held in timeline:

@@ -254,6 +254,21 @@ def test_a_loss_denied_on_a_sale_missing_its_fx_rate_makes_the_replacement_incom
     assert h.dispositions == 1 and h.gain == 0 and h.incomplete
 
 
+def test_a_purchase_missing_its_fx_rate_makes_a_quick_replacement_incomplete():
+    def no_january_rate(day, ccy):
+        return 1.0 if ccy == "CAD" or not day.startswith("2024-01") else None
+
+    txns = [
+        txn(TxnType.BUY, "2024-01-10", qty=1000, price=150, ccy="USD"),  # cost unknown: looks free
+        txn(TxnType.SELL, "2024-12-20", qty=1000, price=100, ccy="USD"),  # a real loss looks like a gain
+        txn(TxnType.BUY, "2025-01-10", qty=900, price=100, ccy="USD"),  # repurchased within 30 days
+    ]
+    assert not compute(txns, ACCOUNTS, no_january_rate, today="2030-01-01").dispositions[0].superficial
+    # The loss that would have been denied is missing from the replacement's cost.
+    y = year(txns, y=2025, fx=no_january_rate)
+    assert y.incomplete and y.label.startswith("T1135 undetermined")
+
+
 def test_a_loss_denied_on_a_move_into_a_registered_plan_does_not_taint_later_gains():
     def no_march_rate(day, ccy):
         return 1.0 if ccy == "CAD" else (None if day.startswith("2024-03") else 1.0)
