@@ -328,8 +328,9 @@ def _collect(app: App, *, offline: bool, selected: set[str] | None = None, verif
     if want("backups"):
         checks.append(verified_backup or _backup_check(app.store.backups(), verify=False))
     if want("automation"):
-        runs = app.store.automation_runs()
+        # Marker first: a failure recorded between the two reads then shows up in `runs`, not as pruned.
         failure = app.store.latest_automation_failure()
+        runs = app.store.automation_runs()
         pruned = failure if failure and all(r.id != failure.id for r in runs) else None
         checks.append(_automation_check(runs, pruned_failure=pruned))
     if want("ledger"):
