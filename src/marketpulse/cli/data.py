@@ -12,7 +12,6 @@ from collections import Counter
 from contextlib import suppress
 from dataclasses import asdict
 from datetime import date, datetime
-from os.path import samestat
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
@@ -948,16 +947,15 @@ def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool,
 
     if sum((bool(paths), latest, all_backups)) != 1:
         raise click.UsageError("Choose one of: backup paths, --latest, or --all.")
-    ledger_stat = None
+    ledger = None
     if all_backups:
-        directory = data_dir(create=False) / BACKUP_DIRNAME
+        ledger = data_dir(create=False) / "marketpulse.db"
+        directory = ledger.parent / BACKUP_DIRNAME
         sources = list_backups(directory)
         if not sources:
             if as_json:
                 click.echo("[]")
             fail(f"No backups to verify in {directory}")
-        with suppress(OSError):
-            ledger_stat = (directory.parent / "marketpulse.db").stat()
     elif latest:
         started = datetime.now().replace(microsecond=0)
         candidates = _restore_candidates(app.store.backup_dir, started)
@@ -969,14 +967,16 @@ def backup_verify(app: App, paths: tuple[str, ...], as_json: bool, latest: bool,
     results: list[dict] = []
     for source in sources:
         error: str | None
-        if all_backups:
+        if ledger is not None:
             path = source.absolute()
             try:
                 target = source.resolve(strict=True)
-                is_live = ledger_stat is not None and samestat(target.stat(), ledger_stat)
             except (OSError, RuntimeError) as problem:
                 error = str(problem)
             else:
+                is_live = False
+                with suppress(OSError):
+                    is_live = target.samefile(ledger)
                 error = "Backup points to the live ledger." if is_live else backup_verification_error(target)
         else:
             error = backup_verification_error(source)

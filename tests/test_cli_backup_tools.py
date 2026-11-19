@@ -158,6 +158,30 @@ def test_backup_verify_all_reports_link_failures_and_continues(store, tmp_path, 
     assert passed == {"ok": True, "path": str(older), "error": None}
 
 
+def test_backup_verify_all_rechecks_live_ledger_identity(store, tmp_path, monkeypatch):
+    from marketpulse.db import backup_verification_error
+
+    live = tmp_path / "data" / "marketpulse.db"
+    directory = live.parent / "backups"
+    newest = store.backup(dest=directory / "marketpulse-20240102-120000-manual.db")
+    older = directory / "marketpulse-20240101-120000-manual.db"
+    older.symlink_to(live)
+
+    def verify(source):
+        if source == newest.resolve():
+            store.backup(dest=live)
+        return backup_verification_error(source)
+
+    monkeypatch.setattr("marketpulse.db.backup_verification_error", verify)
+    result = CliRunner().invoke(main, ["backup", "verify", "--all", "--json"], catch_exceptions=False)
+
+    assert result.exit_code == 1, result.output
+    passed, failed = json.loads(result.stdout)
+    assert passed == {"ok": True, "path": str(newest), "error": None}
+    assert failed["path"] == str(older)
+    assert failed["ok"] is False and "live ledger" in failed["error"]
+
+
 @pytest.mark.parametrize("other", ["--latest", "fictional.db"])
 def test_backup_verify_all_rejects_other_selectors(other):
     result = CliRunner().invoke(main, ["backup", "verify", "--all", other], catch_exceptions=False)
