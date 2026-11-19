@@ -101,7 +101,7 @@ def test_a_cycle_that_raises_is_recorded_too(cli, tracker, monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("fictional provider meltdown")
 
-    monkeypatch.setattr("marketpulse.automation.run_cycle", boom)
+    monkeypatch.setattr("marketpulse.automation._run_cycle", boom)
     result = cli("automation", "run", "--once", "--json", "--quiet")
     assert result.exit_code == 1
     # The printed report is unchanged; the history adds when it happened.
@@ -109,6 +109,17 @@ def test_a_cycle_that_raises_is_recorded_too(cli, tracker, monkeypatch):
     (run,) = tracker.store.automation_runs()
     assert run.failed and run.report["errors"] == ["fictional provider meltdown"]
     datetime.fromisoformat(run.ran_at)
+
+
+def test_an_app_refresh_that_raises_is_recorded(tracker, monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("fictional provider meltdown")
+
+    monkeypatch.setattr("marketpulse.automation._run_cycle", boom)
+    with pytest.raises(RuntimeError):
+        snapshot(tracker)
+    (run,) = tracker.store.automation_runs()
+    assert run.failed and run.report["errors"] == ["fictional provider meltdown"]
 
 
 def test_desktop_bridge_automation_block_is_unchanged(tracker):

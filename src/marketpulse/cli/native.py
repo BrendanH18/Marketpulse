@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
 from pathlib import Path
 
 import click
@@ -199,7 +198,6 @@ def automation_run(app: App, once: bool, interval: int, as_json: bool, quiet: bo
             except Exception as e:
                 # A provider/disk failure should be visible and retried on the next tick.
                 report = {"errors": [str(e)], "failed": True}
-                _record_crash(app, report)
             if as_json:
                 click.echo(json.dumps(report, allow_nan=False))
             else:
@@ -211,14 +209,6 @@ def automation_run(app: App, once: bool, interval: int, as_json: bool, quiet: bo
                 break
             time.sleep(interval)
     except KeyboardInterrupt:
-        pass
-
-
-def _record_crash(app: App, report: dict) -> None:
-    """Keep a cycle that raised in the history too; if the ledger itself is unusable, there's nowhere to keep it."""
-    try:
-        app.store.record_automation_run({"last_run": datetime.now().isoformat(timespec="seconds"), **report})
-    except Exception:
         pass
 
 

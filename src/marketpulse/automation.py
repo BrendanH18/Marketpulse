@@ -18,6 +18,20 @@ class Cycle:
 
 
 def run_cycle(tracker: Tracker, *, fresh: bool = False, notify: bool = True) -> Cycle:
+    """`_run_cycle`, recording a cycle that raised in the automation history before re-raising,
+    so a crash in an app refresh or in `automation run` is kept like any other failure."""
+    try:
+        return _run_cycle(tracker, fresh=fresh, notify=notify)
+    except Exception as e:
+        report = {"last_run": datetime.now().isoformat(timespec="seconds"), "errors": [str(e)], "failed": True}
+        try:
+            tracker.store.record_automation_run(report)
+        except Exception:
+            pass  # the ledger itself is unusable, so there's nowhere to keep it
+        raise
+
+
+def _run_cycle(tracker: Tracker, *, fresh: bool, notify: bool) -> Cycle:
     """Refresh valuation, record eligible snapshots, check alerts, and back up.
 
     Backup failures are visible but do not stop market refreshes. Stale or
