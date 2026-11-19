@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 import click
+from click.core import ParameterSource
 from rich.text import Text
 
 from .. import fmt, render
@@ -270,8 +271,19 @@ def tax(
 
     \b
     Filters select rows from the full report: pooled ACB and gains never change with them."""
-    if click.get_current_context().invoked_subcommand is not None:
-        return  # `tax foreign-property` and other subcommands do their own work
+    ctx = click.get_current_context()
+    if ctx.invoked_subcommand is not None:
+        # `tax foreign-property` and other subcommands do their own work, with their own options.
+        given = [
+            p.opts[-1]
+            for p in ctx.command.params
+            if ctx.get_parameter_source(p.name or "") is ParameterSource.COMMANDLINE
+        ]
+        if given:
+            raise click.UsageError(
+                f"{', '.join(given)} belongs to plain `tax`; put options after `{ctx.invoked_subcommand}`."
+            )
+        return
     stdout_csv = csv_path is not None and str(csv_path) == "-"
     csv_file = csv_path is not None and not stdout_csv
     if any(not s.strip() for s in symbols):

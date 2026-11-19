@@ -17,6 +17,7 @@ from marketpulse.models import Account, AccountType, Asset, AssetClass, AssetKin
 from marketpulse.tax import ForeignPropertyYear
 from marketpulse.themes import resolve_palette, rich_styles
 from marketpulse.tui.app import MarketPulseApp
+from marketpulse.tui.navigation import step_year
 
 
 def trade(store, acct, kind, day, symbol, qty, price, ccy="CAD"):
@@ -106,6 +107,11 @@ def test_plain_tax_report_still_runs_beside_the_subcommand(cli, ledger):
     assert "foreign-property" in cli("tax", "--help").output
 
 
+def test_plain_tax_options_before_the_subcommand_are_refused(cli, ledger):
+    r = CliRunner().invoke(main, ["tax", "-y", "2024", "foreign-property", "--json"])
+    assert r.exit_code == 2 and "put options after `foreign-property`" in r.output
+
+
 def test_asset_foreign_setting_both_ways(cli, ledger, store):
     r = cli("asset", "foreign", "fictus", "no", "--json")
     assert json.loads(r.output) == {"symbol": "FICTUS", "foreign_property": False, "counts": False, "saved": True}
@@ -156,6 +162,10 @@ def test_desktop_tax_carries_foreign_property(tracker, ledger, store):
     assert ledger_revision(tracker) == before
     store.upsert_asset(Asset("XFIC.TO", asset_class=AssetClass.ETF, foreign_property=True))
     assert ledger_revision(tracker) != before
+    # So does a class that changes whether a symbol counts by listing.
+    store.upsert_asset(Asset("XFIC.TO", asset_class=AssetClass.ETF))
+    store.upsert_asset(Asset("FICTUS", asset_class=AssetClass.CASH))
+    assert ledger_revision(tracker) != before
 
 
 def _text(renderable) -> str:
@@ -189,6 +199,11 @@ def test_tui_tax_workspace_shows_the_line(tracker, ledger):
             await pilot.pause()
             assert app._tax is not None
             assert [y.year for y in app._tax[3]][-2:] == [2025, 2024]
+            # 2025 has foreign property but no dispositions: the year stepper still reaches it.
+            app.tax_year = None
+            step_year(app, 1)
+            step_year(app, 1)
+            assert app.tax_year == 2025
             app.tax_year = 2024
             app.render_tax()
             return _text(app.query_one("#tax-view", Static).content)

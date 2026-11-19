@@ -222,6 +222,34 @@ def test_each_status_threshold(cost, status):
     assert y.max_cost == pytest.approx(cost) and y.status == status
 
 
+@pytest.mark.parametrize(
+    ("prices", "status"),
+    [
+        # Each set totals exactly the threshold, but adding them in floats lands just off it.
+        ([26_118.61, 42_697.30, 12_242.35, 18_941.74], T1135_NOT_REQUIRED),  # sums to 100000.00000000001
+        ([105_636.67, 38_705.76, 80_938.92, 24_718.65], T1135_DETAILED),  # sums to 249999.99999999997
+    ],
+)
+def test_thresholds_hold_for_several_purchases(prices, status):
+    # One symbol bought in lots: its pooled ACB adds the costs one at a time.
+    txns = [txn(TxnType.BUY, "2024-04-02", qty=1, price=p) for p in prices]
+    assert year(txns).status == status
+
+
+def test_a_loss_denied_on_a_sale_missing_its_fx_rate_makes_the_replacement_incomplete():
+    def no_december_rate(day, ccy):
+        return 1.0 if ccy == "CAD" else (None if day.startswith("2024-12") else 1.0)
+
+    txns = [
+        txn(TxnType.BUY, "2024-01-10", qty=1000, price=120, ccy="USD"),  # CAD 120,000
+        txn(TxnType.SELL, "2024-12-20", qty=1000, price=100, ccy="USD"),  # proceeds unknown
+        txn(TxnType.BUY, "2025-01-10", qty=200, price=100, ccy="USD"),  # repurchased within 30 days
+    ]
+    y = year(txns, y=2025, fx=no_december_rate)
+    # The replacement's cost includes a loss denied on a guess, so it can't be trusted.
+    assert y.incomplete and all(h.incomplete for h in y.holdings)
+
+
 def test_detailed_when_the_peak_lasts_a_single_day():
     txns = [
         txn(TxnType.BUY, "2024-04-02", qty=1000, price=260),  # $260,000 for one day

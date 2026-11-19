@@ -24,7 +24,7 @@ from .market import MarketData, MarketError
 from .models import Account, AccountType, Asset, AssetClass, AssetKind, Quote, Transaction, TxnType, record_revision
 from .providers import PROVIDERS
 from .services import Tracker
-from .tax import T1135_NOT_REQUIRED, Disposition, ForeignPropertyYear
+from .tax import T1135_NOT_REQUIRED, Disposition, ForeignPropertyYear, is_foreign_property
 from .valuation import PortfolioView
 
 
@@ -168,10 +168,13 @@ def _ledger_revision(tracker: Tracker, generation: str, transaction_revisions: l
         tracker.base,
         repr(tracker.config.capital_gains_inclusion),
     ]
-    # Foreign property settings change the report's T1135 figures. Only added when one is set,
-    # so other asset edits (and ledgers without any setting) keep the same revision.
+    # An asset row (its kind, class or foreign property setting) can change whether a symbol
+    # counts for T1135. Only rows that change the verdict are added, so other asset edits (and
+    # ledgers without any) keep the same revision.
     overrides = sorted(
-        (a.symbol, a.foreign_property) for a in store.assets().values() if a.foreign_property is not None
+        (a.symbol, verdict)
+        for a in store.assets().values()
+        if (verdict := is_foreign_property(a.symbol, a)) != is_foreign_property(a.symbol)
     )
     if overrides:
         parts.append(json.dumps(overrides))

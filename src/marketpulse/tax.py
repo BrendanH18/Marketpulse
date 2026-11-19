@@ -579,9 +579,10 @@ class ForeignPropertyYear:
     @property
     def status(self) -> str:
         """Whether form T1135 looks required, and which method: one of the T1135_* values."""
-        if self.max_cost >= T1135_DETAILED_THRESHOLD:
+        cost = round(self.max_cost, 2)  # to the cent, so float dust can't cross a threshold
+        if cost >= T1135_DETAILED_THRESHOLD:
             return T1135_DETAILED
-        if self.max_cost > T1135_THRESHOLD:
+        if cost > T1135_THRESHOLD:
             return T1135_SIMPLIFIED
         return T1135_NOT_REQUIRED
 
@@ -628,6 +629,12 @@ def _foreign_year(
     carried = [held for day, held in days if day < start][-1:]
     timeline = [(start, carried[0])] if carried else []
     timeline += [(day, held) for day, held in days if start <= day <= as_of]
+    # A loss denied on a sale with no FX rate is a guess, and it moves into the replacement
+    # shares' cost: from that sale on, the symbol's cost is incomplete.
+    guessed: dict[str, str] = {}
+    for d in dispositions:
+        if not d.complete and d.denied > EPSILON:
+            guessed[d.symbol] = min(d.date, guessed.get(d.symbol, d.date))
     holdings: dict[str, ForeignHolding] = {}
     for day, held in timeline:
         total = sum((cost for cost, _ in held.values()), 0.0)
@@ -637,7 +644,7 @@ def _foreign_year(
             h = holdings.setdefault(symbol, ForeignHolding(symbol))
             if cost > h.max_cost + EPSILON or not h.max_cost_date:
                 h.max_cost, h.max_cost_date = max(cost, h.max_cost), day
-            h.incomplete |= incomplete
+            h.incomplete |= incomplete or (symbol in guessed and guessed[symbol] <= day)
     final = timeline[-1][1] if timeline else {}
     for symbol, (cost, _) in final.items():
         holdings[symbol].year_end_cost = cost
