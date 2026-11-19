@@ -208,6 +208,14 @@ def test_allocation_and_targets_improvements_11_to_20(store, cli):
     assert r.exit_code == 0 and [row["key"] for row in json.loads(r.output)["rows"]] == ["etf"]
     r = cli("allocation", "--exclude", "etf", "--json")
     assert r.exit_code == 0 and all(row["key"] != "etf" for row in json.loads(r.output)["rows"])
+    for args in (
+        ("--search", "nonexistent"),
+        ("--exclude", "etf", "--exclude", "equity"),
+        ("--max-weight", "0"),
+        ("--offset", "10"),
+    ):
+        r = cli("allocation", *args)
+        assert r.exit_code == 0 and "No allocation rows match" in r.output
 
     # 14: --jsonl
     r = cli("allocation", "--jsonl")

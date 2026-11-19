@@ -368,7 +368,12 @@ def allocation(
         if not drift_only:
             app.title(f"Allocation by {by}")
             if breakdown and not rows:
-                app.console.print(Text(f"No {by} weighs {min_weight:g}% or more.", style="muted"))
+                message = (
+                    f"No {by} weighs {min_weight:g}% or more."
+                    if min_weight is not None and not (max_weight is not None or search or excludes or paged)
+                    else "No allocation rows match the requested filters or page."
+                )
+                app.console.print(Text(message, style="muted"))
             else:
                 app.console.print(
                     render.allocation(
