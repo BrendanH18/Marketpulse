@@ -254,6 +254,37 @@ def test_a_loss_denied_on_a_sale_missing_its_fx_rate_makes_the_replacement_incom
     assert h.dispositions == 1 and h.gain == 0 and h.incomplete
 
 
+def test_a_loss_denied_on_a_move_into_a_registered_plan_does_not_taint_later_gains():
+    def no_march_rate(day, ccy):
+        return 1.0 if ccy == "CAD" else (None if day.startswith("2024-03") else 1.0)
+
+    txns = [
+        txn(TxnType.BUY, "2024-01-10", qty=20, price=150, ccy="USD"),
+        # Half moved into the TFSA at a loss with no rate: the denied loss never enters taxable cost.
+        txn(TxnType.TRANSFER, "2024-03-01", qty=10, price=100, ccy="USD", target_account_id=TFSA),
+        txn(TxnType.SELL, "2025-05-01", qty=10, price=650, ccy="USD"),  # 6,500 - 1,500 = 5,000
+    ]
+    y = year(txns, y=2025, fx=no_march_rate)
+    (h,) = y.holdings
+    assert h.gain == pytest.approx(5_000) and not h.incomplete
+
+
+def test_a_complete_gain_before_a_guessed_loss_on_the_same_day_still_counts():
+    def no_usd_in_june(day, ccy):
+        return 1.0 if ccy == "CAD" or not day.startswith("2024-06") else None
+
+    txns = [
+        txn(TxnType.BUY, "2024-01-10", qty=20, price=100),
+        txn(TxnType.SELL, "2024-06-03", qty=10, price=200),  # in CAD, so complete: +1,000
+        txn(TxnType.SELL, "2024-06-03", qty=5, price=50, ccy="USD"),  # rate unknown, at a guessed loss
+        txn(TxnType.BUY, "2024-06-10", qty=5, price=50),  # repurchased within 30 days: denied
+    ]
+    sold = compute(txns, ACCOUNTS, no_usd_in_june, today="2030-01-01").dispositions
+    assert sold[0].complete and not sold[1].complete and sold[1].superficial
+    (h,) = year(txns, fx=no_usd_in_june).holdings
+    assert h.gain == pytest.approx(1_000) and h.incomplete
+
+
 def test_detailed_when_the_peak_lasts_a_single_day():
     txns = [
         txn(TxnType.BUY, "2024-04-02", qty=1000, price=260),  # $260,000 for one day

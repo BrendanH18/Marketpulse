@@ -531,7 +531,7 @@ def is_foreign_property(symbol: str, asset: Asset | None = None) -> bool:
     An asset's `foreign_property` setting wins. Otherwise only market-priced symbols can be
     foreign: no Yahoo suffix (a US listing) or a non-Canadian one (.L, .DE, ...) is foreign,
     while .TO, .V, .NE and .CN listings are Canadian. That is why a Canadian-listed ETF holding
-    US stocks doesn't count. Crypto, currency pairs, indices, cash-like, fixed-income and
+    US stocks doesn't count. Crypto, currency pairs, indices, cash-like, accrual-priced fixed-income and
     manually valued assets don't count unless set to.
 
     The listing is only a proxy for the issuer's residence: a US company's shares bought on
@@ -629,13 +629,18 @@ def _foreign_year(
     carried = [held for day, held in days if day < start][-1:]
     timeline = [(start, carried[0])] if carried else []
     timeline += [(day, held) for day, held in days if start <= day <= as_of]
-    # A loss denied on a sale with no FX rate is a guess, and it moves into the replacement
-    # shares' cost: from that sale on, the symbol's cost, and the gain on any later sale, are
-    # incomplete. Conservatively, this lasts even if the pool is later sold out and reopened.
+    # A superficial loss denied on a sale with no FX rate is a guess, and it moves into the
+    # replacement shares' cost: from that sale on, the symbol's cost, and the gain on any later
+    # sale (in replay order), are incomplete. Conservatively, this lasts even if the pool is
+    # later sold out and reopened. A loss denied on a move into a registered plan never enters
+    # taxable cost, so it doesn't count.
     guessed: dict[str, str] = {}
-    for d in dispositions:
-        if not d.complete and d.denied > EPSILON:
-            guessed[d.symbol] = min(d.date, guessed.get(d.symbol, d.date))
+    unknown_gain: set[int] = set()  # dispositions (by position) whose gain rests on a guess
+    for i, d in enumerate(dispositions):
+        if d.symbol in guessed:
+            unknown_gain.add(i)
+        elif not d.complete and d.superficial:
+            guessed[d.symbol] = d.date
     holdings: dict[str, ForeignHolding] = {}
     for day, held in timeline:
         total = sum((cost for cost, _ in held.values()), 0.0)
@@ -650,11 +655,11 @@ def _foreign_year(
     for symbol, (cost, _) in final.items():
         holdings[symbol].year_end_cost = cost
     result.year_end_cost = sum((cost for cost, _ in final.values()), 0.0)
-    for d in dispositions:
+    for i, d in enumerate(dispositions):
         if start <= d.date <= as_of:
             h = holdings.setdefault(d.symbol, ForeignHolding(d.symbol))
             h.dispositions += 1
-            if d.complete and not (d.symbol in guessed and guessed[d.symbol] <= d.date):
+            if d.complete and i not in unknown_gain:
                 h.gain += d.allowed_gain
             else:
                 h.incomplete = True

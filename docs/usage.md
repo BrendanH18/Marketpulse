@@ -198,8 +198,9 @@ year, and the Mac app's `desktop tax` payload carries it as `foreign_property`.
 Only non-registered accounts count. A symbol is foreign when it is listed
 outside Canada: no Yahoo suffix (a US listing) or a suffix such as `.L` or `.DE`.
 `.TO`, `.V`, `.NE` and `.CN` listings are Canadian, so a Canadian-listed ETF
-that holds US stocks doesn't count. Crypto, cash-like, fixed-income and manual
-assets don't count either. The listing is only a stand-in for where the issuer
+that holds US stocks doesn't count. Crypto, cash-like, manual and accrual-priced
+fixed-income assets (such as GICs) don't count either; a market-priced bond or
+bond ETF follows the listing rule. The listing is only a stand-in for where the issuer
 is resident, so correct a symbol it gets wrong:
 
 ```bash
