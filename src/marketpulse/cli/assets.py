@@ -547,6 +547,8 @@ def asset_value(app: App, symbol, value, when, account, dry_run: bool, as_json: 
     holders = [h for h in app.store.ledger().open_holdings() if h.symbol == sym]
     if account:
         acct = app.account(account)
+        if acct.archived:
+            fail(f"{acct.name} is archived. Choose an active account.")
         holders = [h for h in holders if h.account_id == acct.saved_id]
         if not holders:
             fail(f"No holding of {sym} in {acct.name}.")
@@ -554,18 +556,21 @@ def asset_value(app: App, symbol, value, when, account, dry_run: bool, as_json: 
         fail(f"No holding of {sym}.")
     target = holders[0]
     when_iso = parse_date(when)
-    if not dry_run:
-        record(
-            app,
-            Transaction(
-                account_id=target.account_id,
-                type=TxnType.VALUATION,
-                date=when_iso,
-                symbol=sym,
-                price=value,
-                currency=target.currency,
-            ),
-        )
+    txn = Transaction(
+        account_id=target.account_id,
+        type=TxnType.VALUATION,
+        date=when_iso,
+        symbol=sym,
+        price=value,
+        currency=target.currency,
+    )
+    if dry_run:
+        try:
+            txn.validate()
+        except ValueError as e:
+            fail(str(e))
+    else:
+        record(app, txn)
     if as_json:
         click.echo(
             json.dumps(

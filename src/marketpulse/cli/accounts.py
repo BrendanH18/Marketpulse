@@ -519,9 +519,9 @@ def accounts_edit(
     if archive is not None:
         acct.archived = archive
     if dry_run:
-        acct.name = acct.name.strip()
-        _check_name(app, acct)
         if as_json:
+            acct.name = acct.name.strip()
+            _check_name(app, acct)
             after = asdict(acct)
             changes = {
                 field: {"from": before[field], "to": after[field]} for field in after if after[field] != before[field]

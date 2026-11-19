@@ -99,7 +99,7 @@ ordinary portfolio views, and API keys remain redacted.
 73. `asset classify SYMBOL --clear` — Clear a custom `asset_class` override (supports `--dry-run` and `--json`).
 74. `asset remove SYMBOL --dry-run` (and `--json`) — Preview removing asset metadata with active-holding count.
 75. `asset value SYMBOL VALUE -a/--account` — Target a specific account for a manual valuation (supports `--dry-run` and `--json`).
-76. `import --strict` — Refuse to write any rows if the dry-run preview finds any row issue.
+76. `import --strict` — Refuse to write any rows if the dry-run preview finds any row issue or the file or ledger changes before import.
 77. `export --no-overwrite` — Refuse to overwrite an existing file at `PATH`.
 78. `export --dry-run` — Preview how many rows would be exported without writing a file.
 79. `backup verify -q/--quiet` (and `--csv`) — Report backup validity solely via exit status, or export CSV.

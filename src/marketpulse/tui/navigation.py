@@ -99,15 +99,13 @@ def move_cursor(app: MarketPulseApp, delta: int) -> None:
 def jump_half_page(app: MarketPulseApp, down: bool) -> None:
     table = current_table(app)
     if table is not None and table.row_count > 0:
-        step = max(table.size.height // 2, 5)
+        step = max(table.size.height // 2, 1)
         move_cursor(app, step if down else -step)
         return
     pane = _scroll_pane(app)
     if pane is not None:
-        if down:
-            pane.scroll_page_down(animate=False)
-        else:
-            pane.scroll_page_up(animate=False)
+        step = max(pane.size.height // 2, 1)
+        pane.scroll_relative(y=step if down else -step, animate=False)
 
 
 def jump_row(app: MarketPulseApp, last: bool) -> None:
@@ -279,9 +277,6 @@ def sort_positions(app: MarketPulseApp, positions: list[PositionView]) -> list[P
         "day %": lambda x: x.day_change_pct,
         "gain": lambda x: x.gain_base,
         "gain %": lambda x: x.gain_pct,
-        "qty": lambda x: x.quantity,
-        "book": lambda x: x.book_base,
-        "weight": lambda x: x.weight,
     }
     return _ordered(positions, keys[name], descending)
 
@@ -396,7 +391,7 @@ def copy_table_csv(app: MarketPulseApp) -> None:
         return
     headers, rows = data
     stream = io.StringIO(newline="")
-    writer = csv.writer(stream, lineterminator="\n")
+    writer = csv.writer(stream)
     writer.writerow(headers)
     writer.writerows(rows)
     app.copy_to_clipboard(stream.getvalue())
@@ -411,7 +406,7 @@ def copy_table_markdown(app: MarketPulseApp) -> None:
     headers, rows = data
 
     def esc(val: str) -> str:
-        return val.replace("|", "\\|")
+        return " ".join(val.splitlines()).replace("\\", "\\\\").replace("|", "\\|")
 
     lines = [
         "| " + " | ".join(esc(h) for h in headers) + " |",
@@ -474,10 +469,10 @@ def jump_to_holding(app: MarketPulseApp) -> None:
     app.set_workspace("holdings")
     app.render_holdings()
     table = app.query_one("#holdings-table", DataTable)
-    for idx, row_key in enumerate(table.rows):
+    for row_key in table.rows:
         key_val = str(row_key.value)
         if not key_val.startswith("cash:") and ":" in key_val and key_val.split(":", 1)[1] == symbol:
-            table.move_cursor(row=idx, animate=False)
+            table.move_cursor(row=table.get_row_index(row_key), animate=False)
             table.focus()
             app._show_position(key_val)
             return
@@ -580,29 +575,28 @@ def set_income_year(app: MarketPulseApp, year: int | None) -> None:
 
 
 def rearm_triggered_alerts(app: MarketPulseApp) -> None:
-    triggered = [a for a in app.tracker.store.alerts() if a.triggered_at]
-    if not triggered:
-        app.notify("No triggered alerts to re-arm", timeout=2)
-        return
     with app.tracker.store.transaction():
+        triggered = [a for a in app.tracker.store.alerts() if a.triggered_at]
         for a in triggered:
             a.active = True
             a.triggered_at = ""
             app.tracker.store.update_alert(a)
+    if not triggered:
+        app.notify("No triggered alerts to re-arm", timeout=2)
+        return
     app.render_alerts()
     app.notify(f"Re-armed {len(triggered)} alert{'' if len(triggered) == 1 else 's'}", timeout=2)
 
 
 def bulk_alerts_active(app: MarketPulseApp, active: bool) -> None:
-    alerts = app.tracker.store.alerts()
-    changed = [a for a in alerts if a.active != active]
-    if not changed:
-        app.notify("All alerts already " + ("armed" if active else "paused"), timeout=2)
-        return
     with app.tracker.store.transaction():
+        changed = [a for a in app.tracker.store.alerts() if a.active != active]
         for a in changed:
             a.active = active
             app.tracker.store.update_alert(a)
+    if not changed:
+        app.notify("All alerts already " + ("active" if active else "paused"), timeout=2)
+        return
     app.render_alerts()
     verb = "Resumed" if active else "Paused"
     app.notify(f"{verb} {len(changed)} alert{'' if len(changed) == 1 else 's'}", timeout=2)

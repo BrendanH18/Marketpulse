@@ -201,40 +201,31 @@ def import_cmd(
     strict_aborted = False
     try:
         default = _import_default(app, account, path, profile, create_default=not (dry_run or as_json or strict))
-        if strict and not dry_run:
-            preview = import_transactions(
-                app.store,
-                path,
-                default_account=default,
-                create_accounts=not no_create_accounts,
-                dry_run=True,
-                profile=profile,
-            )
-            if preview.issues:
-                result = preview
-                strict_aborted = True
-            elif summary:
-                result, added, names = _import_rows(app.store, path, default, not no_create_accounts, False, profile)
-            else:
-                result = import_transactions(
-                    app.store,
-                    path,
-                    default_account=default,
-                    create_accounts=not no_create_accounts,
-                    dry_run=False,
-                    profile=profile,
+        create_accounts = not no_create_accounts
+
+        def run(preview: bool, fingerprint: str | None = None) -> ImportResult:
+            nonlocal added, names
+            if summary:
+                result, added, names = _import_rows(
+                    app.store, path, default, create_accounts, preview, profile, expect_fingerprint=fingerprint
                 )
-        elif summary:
-            result, added, names = _import_rows(app.store, path, default, not no_create_accounts, dry_run, profile)
-        else:
-            result = import_transactions(
+                return result
+            return import_transactions(
                 app.store,
                 path,
                 default_account=default,
-                create_accounts=not no_create_accounts,
-                dry_run=dry_run,
+                create_accounts=create_accounts,
+                dry_run=preview,
+                expect_fingerprint=fingerprint,
                 profile=profile,
             )
+
+        result = run(dry_run or strict)
+        if strict and not dry_run:
+            if result.issues:
+                strict_aborted = True
+            else:
+                result = run(False, result.fingerprint)
     except (OSError, UnicodeError, ValueError) as e:
         fail(str(e))
     groups = _import_summary(added, names, summary) if summary else []
@@ -281,7 +272,14 @@ def import_cmd(
 
 
 def _import_rows(
-    store: Store, path: Path, default: Account | None, create_accounts: bool, dry_run: bool, profile: str
+    store: Store,
+    path: Path,
+    default: Account | None,
+    create_accounts: bool,
+    dry_run: bool,
+    profile: str,
+    *,
+    expect_fingerprint: str | None = None,
 ) -> tuple[ImportResult, list[Transaction], dict[int, Account]]:
     """Import (or preview) and return the result, the rows it added and the accounts naming them.
 
@@ -296,7 +294,12 @@ def _import_rows(
     def run(target: Store) -> tuple[ImportResult, list[Transaction], dict[int, Account]]:
         before = {t.id for t in target.transactions()}
         result = import_transactions(
-            target, path, default_account=default, create_accounts=create_accounts, profile=profile
+            target,
+            path,
+            default_account=default,
+            create_accounts=create_accounts,
+            expect_fingerprint=expect_fingerprint,
+            profile=profile,
         )
         return result, [t for t in target.transactions() if t.id not in before], target.account_map()
 
@@ -401,8 +404,6 @@ def export_cmd(
         raise click.UsageError("--no-overwrite requires PATH.")
     if dry_run and count_only:
         raise click.UsageError("--dry-run cannot be combined with --count.")
-    if path is not None and no_overwrite and path.exists():
-        fail(f"Output file already exists: {path} (--no-overwrite).")
     if not (
         account_refs
         or symbols
@@ -427,7 +428,7 @@ def export_cmd(
         if path is None:
             export_transactions(app.store, sys.stdout)
             return
-        with path.open("w", newline="", encoding="utf-8") as f:
+        with _open_export(path, no_overwrite) as f:
             n = export_transactions(app.store, f)
         app.ok(f"Exported {n} transactions to {path}")
         return
@@ -478,6 +479,8 @@ def export_cmd(
         return
     txns = txns[offset : offset + limit] if limit is not None else txns[offset:]
     if dry_run:
+        if no_overwrite and path is not None and (path.exists() or path.is_symlink()):
+            fail(f"Output file already exists: {path} (--no-overwrite).")
         target = str(path) if path is not None else "stdout"
         fmt_name = "JSON Lines" if jsonl else "CSV"
         app.ok(f"Would export {len(txns)} transactions as {fmt_name} to {target} (dry run).")
@@ -485,9 +488,16 @@ def export_cmd(
     if path is None:
         _write_export(sys.stdout, txns, accounts, chosen, jsonl)
         return
-    with path.open("w", newline="", encoding="utf-8") as f:
+    with _open_export(path, no_overwrite) as f:
         n = _write_export(f, txns, accounts, chosen, jsonl)
     app.ok(f"Exported {n} transactions to {path}")
+
+
+def _open_export(path: Path, no_overwrite: bool) -> TextIO:
+    try:
+        return path.open("x" if no_overwrite else "w", newline="", encoding="utf-8")
+    except FileExistsError:
+        fail(f"Output file already exists: {path} (--no-overwrite).")
 
 
 def _export_columns(columns: str | None) -> list[str]:

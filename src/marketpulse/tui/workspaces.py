@@ -442,17 +442,7 @@ def render_accounts(app: MarketPulseApp) -> None:
         b = values.get(str(a.id))
         return b.value if b else None
 
-    def today_change(a) -> float | None:
-        b = values.get(str(a.id))
-        return b.day_change if b else None
-
-    keys = {
-        "id": lambda a: a.id,
-        "name": lambda a: a.name.lower(),
-        "type": lambda a: a.type.label,
-        "value": value,
-        "today": today_change,
-    }
+    keys = {"id": lambda a: a.id, "name": lambda a: a.name.lower(), "type": lambda a: a.type.label, "value": value}
     for a in navigation.sort_items(app, "tax", shown_accounts, keys):
         b = values.get(str(a.id))
         # Currency and cash tracking live in the edit form (e) to keep this pane narrow
@@ -498,12 +488,7 @@ def render_alerts(app: MarketPulseApp) -> None:
     def state_rank(a) -> int:  # triggered first, then armed, then paused
         return 0 if a.triggered_at else (1 if a.active else 2)
 
-    keys = {
-        "symbol": lambda a: (a.symbol, a.id),
-        "id": lambda a: a.id,
-        "state": lambda a: (state_rank(a), a.id),
-        "condition": lambda a: (a.condition, a.symbol, a.id),
-    }
+    keys = {"symbol": lambda a: (a.symbol, a.id), "id": lambda a: a.id, "state": lambda a: (state_rank(a), a.id)}
     for a in navigation.sort_items(app, "alerts", filtered_alerts, keys):
         q = quotes.get(a.symbol)
         state = (

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from marketpulse import csvio
 from marketpulse.cli import App, main
 from marketpulse.db import Snapshot, Store
 from marketpulse.models import (
@@ -250,8 +251,10 @@ def test_allocation_and_targets_improvements_11_to_20(store, cli):
 
 def test_doctor_and_provider_improvements_21_to_30(cli):
     # 21: doctor --quiet
-    r = cli("doctor", "--offline", "--quiet")
+    r = cli("doctor", "--offline", "--only", "database", "--quiet")
     assert r.exit_code == 0 and r.output == ""
+    r = cli("doctor", "--offline", "--only", "backups", "--verify-backup", "--quiet")
+    assert r.exit_code == 1 and r.output == ""
 
     # 22: doctor --exclude-status
     r = cli("doctor", "--offline", "--exclude-status", "skipped", "--json")
@@ -537,6 +540,8 @@ def test_assets_and_data_improvements_71_to_80(cli_store, tmp_path: Path):
     assert r.exit_code == 0 and json.loads(r.output) == {"symbol": "HOUSE", "active_holdings": 1, "removed": False}
     r = _cli("asset", "value", "HOUSE", "525000", "-a", "TFSA", "--dry-run", "--json")
     assert r.exit_code == 0 and json.loads(r.output)["saved"] is False
+    r = _cli("asset", "value", "HOUSE", "nan", "-a", "TFSA", "--dry-run", "--json")
+    assert r.exit_code == 1 and "must be finite" in r.output
 
     # 76: import --strict
     bad_csv = tmp_path / "bad.csv"
@@ -551,6 +556,9 @@ def test_assets_and_data_improvements_71_to_80(cli_store, tmp_path: Path):
     assert r.exit_code == 1
     assert json.loads(r.output)["strict_aborted"] is True
     assert len(cli_store.transactions()) == before_count
+    r = _cli("import", str(bad_csv), "--strict", "--summary", "symbol", "--json")
+    assert r.exit_code == 1
+    assert json.loads(r.output)["summary"] == [{"group": "XEQT.TO", "count": 1}]
 
     # 77-78: export --no-overwrite / --dry-run
     out_csv = tmp_path / "out.csv"
@@ -571,3 +579,33 @@ def test_assets_and_data_improvements_71_to_80(cli_store, tmp_path: Path):
     assert r.exit_code == 0
     preview = json.loads(r.output)
     assert preview["restored"] is False and "current" in preview and "backup" in preview
+
+
+@pytest.mark.parametrize("summary", [(), ("--summary", "symbol")])
+def test_strict_import_refuses_changed_file(cli_store, tmp_path, monkeypatch, summary):
+    path = tmp_path / "import.csv"
+    path.write_text("date,account,type,amount,currency\n2024-02-01,Example,DEPOSIT,10,CAD\n", encoding="utf-8")
+    original = csvio.import_transactions
+
+    def change_after_preview(store, source, **kwargs):
+        result = original(store, source, **kwargs)
+        if kwargs.get("dry_run") or store.path != cli_store.path:
+            assert not result.issues
+            path.write_text(path.read_text(encoding="utf-8").replace(",10,", ",20,"), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(csvio, "import_transactions", change_after_preview)
+    r = _cli("import", str(path), "--strict", *summary)
+    assert r.exit_code == 1 and "changed since the preview" in r.output
+    assert not cli_store.transactions()
+    assert not cli_store.accounts()
+
+
+@pytest.mark.parametrize("format_args", [(), ("--jsonl",)])
+def test_export_no_overwrite_rejects_dangling_symlink(tmp_path, format_args):
+    target = tmp_path / "missing"
+    link = tmp_path / "export"
+    link.symlink_to(target)
+    r = _cli("export", str(link), "--no-overwrite", *format_args)
+    assert r.exit_code == 1 and "already exists" in r.output
+    assert link.is_symlink() and not target.exists()

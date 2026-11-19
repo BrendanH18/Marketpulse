@@ -131,7 +131,7 @@ def doctor(
 ) -> None:
     """Check the installation, data, network and integrations.
 
-    Exit status is 0 unless --strict is given and a check failed (then 1).
+    Exit status is 0 unless --strict or --quiet is given and a check failed (then 1).
     --only and --exclude take check names; checks that aren't selected don't run.
     """
     if sum((as_json, as_csv, as_jsonl, names_only, count, quiet)) > 1:
@@ -224,7 +224,7 @@ def doctor(
         for c in checks:
             mark, style = MARKS[c.status]
             app.console.print(Text(mark, style=style) + Text(f"{c.check:<18}", style="muted") + Text(c.detail))
-    if strict and failed:
+    if (strict or quiet) and failed:
         click.get_current_context().exit(1)
 
 
