@@ -659,18 +659,16 @@ def _foreign_year(year: int, ledger: _ForeignLedger, today: str, currency: str) 
     # A sale with an FX rate missing (on it, or on a purchase behind it) has a guessed gain, so
     # whether part of a loss was denied, and how much, is a guess too. A denied loss moves into
     # the replacement shares' cost: when the sale's loss was denied, or it could have been (a
-    # taxable purchase within 30 days either side, and shares still held 30 days after), the
-    # symbol's cost and the gain on any later sale (in replay order) are incomplete from then
-    # on. Conservatively, this lasts even if the pool is later sold out and reopened. A loss
-    # denied on a move into a registered plan never enters taxable cost, so transfers don't count.
+    # taxable purchase within 30 days either side: what is still held at day 30 counts across
+    # every account, so a taxable lot sold before then can still take part of it), the symbol's
+    # cost and the gain on any later sale (in replay order) are incomplete from then on.
+    # Conservatively, this lasts even if the pool is later sold out and reopened. A loss denied
+    # on a move into a registered plan never enters taxable cost, so transfers don't count.
     def could_be_superficial(d: Disposition) -> bool:
         sold = date.fromisoformat(d.date)
         window = timedelta(days=SUPERFICIAL_WINDOW_DAYS)
         lo, hi = (sold - window).isoformat(), (sold + window).isoformat()
-        if not any(lo <= day <= hi for day in ledger.bought.get(d.symbol, ())):
-            return False
-        at_end = [held for day, held in days if day <= hi][-1:]
-        return bool(at_end) and d.symbol in at_end[0]
+        return any(lo <= day <= hi for day in ledger.bought.get(d.symbol, ()))
 
     guessed: dict[str, str] = {}
     unknown_gain: set[int] = set()  # dispositions (by position) whose gain rests on a guess

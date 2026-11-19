@@ -282,6 +282,22 @@ def test_a_partial_sale_missing_its_rate_with_no_purchase_nearby_leaves_later_ga
     assert h.gain == pytest.approx(1_000) and not h.incomplete
 
 
+def test_a_quick_taxable_round_trip_beside_tfsa_shares_is_incomplete():
+    def no_january_rate(day, ccy):
+        return 1.0 if ccy == "CAD" or not day.startswith("2024-01") else None
+
+    txns = [
+        txn(TxnType.BUY, "2024-01-10", qty=1000, price=150, ccy="USD"),  # cost unknown
+        txn(TxnType.BUY, "2024-01-10", qty=500, price=150, ccy="USD", account=TFSA),
+        txn(TxnType.SELL, "2024-12-20", qty=1000, price=100, ccy="USD"),  # a real loss looks like a gain
+        txn(TxnType.BUY, "2025-01-03", qty=900, price=100, ccy="USD"),  # part of the loss lands here...
+        txn(TxnType.SELL, "2025-01-13", qty=900, price=150, ccy="USD"),  # ...though sold before day 30
+    ]
+    # The TFSA shares still held at day 30 make the loss superficial; 2025 rests on that guess.
+    y = year(txns, y=2025, fx=no_january_rate)
+    assert y.incomplete and y.assessment == "undetermined"
+
+
 def test_a_year_that_has_not_started_is_empty():
     y = year([txn(TxnType.BUY, "2024-04-02", qty=1, price=150_000)], y=2026, today="2025-06-01")
     assert (y.max_cost, y.max_cost_date, y.holdings, y.status) == (0.0, "", [], T1135_NOT_REQUIRED)
