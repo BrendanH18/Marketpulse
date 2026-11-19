@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to confirm a restore ([#173](https://github.com/BrendanH18/Marketpulse/issues/173)).
 - `backup verify --all` checks every managed backup newest first and reports any failures
   ([#176](https://github.com/BrendanH18/Marketpulse/issues/176)).
+- One hundred CLI and terminal app workflow improvements
+  ([inventory](docs/cli-tui-hundred-improvements.md)):
+  - 80 opt-in CLI additions across `tax`, `allocation`, `targets`, `doctor`,
+    `provider`, `commands`, `theme`, `config`, `accounts`, `watch`, `alerts`,
+    `positions`, `cash`, `snapshots`, `asset`, `import`, `export` and `backup`.
+  - 20 terminal app additions including sort reset (`0`), half-page jumps
+    (`ctrl+d`/`ctrl+u`), CSV/Markdown/summary clipboard copy (`#`/`X`/`Q`),
+    context filter modes (`M`), activity account filter (`@`), archived account
+    toggle (`I`), jump to holding (`S`), movers metric cycler (`m`), tax/income
+    year steppers (`-`/`+`), bulk alert controls (`U`), local backup and auto
+    theme restore.
 
 ## [3.1.0] - 2026-11-18
 

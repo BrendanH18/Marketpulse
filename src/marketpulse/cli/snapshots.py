@@ -86,6 +86,63 @@ def _quarter_callback(ctx, param, value: str | None) -> str | None:
     return value
 
 
+def _snapshot_stats(
+    app: App,
+    rows: list[Snapshot],
+    changes: dict[str, float | None],
+    *,
+    as_json: bool,
+    has_history: bool,
+) -> None:
+    by_currency: dict[str, list[Snapshot]] = {}
+    for snapshot in rows:
+        by_currency.setdefault(snapshot.currency, []).append(snapshot)
+
+    def ranges(snapshots: list[Snapshot]) -> dict[str, float | None]:
+        known = [change for s in snapshots if (change := changes[s.date]) is not None]
+        return {
+            "min_net_worth": min(s.net_worth for s in snapshots),
+            "max_net_worth": max(s.net_worth for s in snapshots),
+            "min_book": min(s.book for s in snapshots),
+            "max_book": max(s.book for s in snapshots),
+            "min_change": min(known, default=None),
+            "max_change": max(known, default=None),
+        }
+
+    stats = {currency: ranges(snapshots) for currency, snapshots in sorted(by_currency.items())}
+    if as_json:
+        click.echo(
+            json.dumps(
+                {
+                    "count": len(rows),
+                    "earliest": rows[0].date if rows else None,
+                    "latest": rows[-1].date if rows else None,
+                    "by_currency": stats,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return
+    if not rows:
+        app.console.print(
+            Text("No matching snapshots." if has_history else "No snapshots recorded yet.", style="muted")
+        )
+        return
+
+    table = render.table("Metric", "Value", title="Snapshot statistics")
+    table.add_row(Text("Count"), Text(str(len(rows))))
+    table.add_row(Text("Date span"), Text(f"{rows[0].date} → {rows[-1].date}"))
+    for currency, values in stats.items():
+        for label, key in (("Net worth", "net_worth"), ("Book", "book"), ("Daily change", "change")):
+            low, high = values[f"min_{key}"], values[f"max_{key}"]
+            if low is not None and high is not None:
+                amounts = " – ".join(
+                    fmt.money(n, currency, sign=key == "change", privacy=app.privacy) for n in (low, high)
+                )
+                table.add_row(Text(f"{label} range ({currency})"), Text(amounts))
+    app.console.print(table)
+
+
 def _snapshot_summary(
     app: App, rows: list[Snapshot], group: str, as_json: bool, as_csv: bool, changes: dict[str, float | None]
 ) -> None:
@@ -206,6 +263,11 @@ def _snapshot_summary(
 @click.option("--weekends-only", is_flag=True, help="Only Saturday and Sunday snapshots.")
 @click.option("--month-start-only", is_flag=True, help="Only snapshots recorded on the first calendar day of a month.")
 @click.option("--month-end-only", is_flag=True, help="Only snapshots recorded on the final calendar day of a month.")
+@click.option("--quarter-start-only", is_flag=True, help="Only snapshots recorded on the first day of a quarter.")
+@click.option("--quarter-end-only", is_flag=True, help="Only snapshots recorded on the final day of a quarter.")
+@click.option("--above-book", is_flag=True, help="Only snapshots where net worth exceeds book value.")
+@click.option("--below-book", is_flag=True, help="Only snapshots where net worth is below book value.")
+@click.option("--stats", is_flag=True, help="Show min, max, count and date span across matching snapshots.")
 @pass_app
 def snapshots(
     app: App,
@@ -252,23 +314,44 @@ def snapshots(
     weekends_only: bool,
     month_start_only: bool,
     month_end_only: bool,
+    quarter_start_only: bool,
+    quarter_end_only: bool,
+    above_book: bool,
+    below_book: bool,
+    stats: bool,
 ) -> None:
     """Recorded daily net-worth snapshots, oldest first. Offline: no prices are fetched."""
     if since and until and since > until:
         raise click.UsageError("--since must be on or before --until.")
     if sum((as_json, as_csv, jsonl, dates_only, count_only)) > 1:
         raise click.UsageError("Choose one of --json, --csv, --jsonl, --dates or --count.")
-    if fields is not None and (not (as_json or as_csv or jsonl) or summary):
-        raise click.UsageError("--fields requires --json, --csv or --jsonl, without --summary.")
+    if fields is not None and (not (as_json or as_csv or jsonl) or summary or stats):
+        raise click.UsageError("--fields requires --json, --csv or --jsonl, without --summary or --stats.")
     chosen_fields = SNAPSHOT_FIELDS if fields is None else [field.strip() for field in fields.split(",")]
     if any(field not in SNAPSHOT_FIELDS for field in chosen_fields) or len(set(chosen_fields)) != len(chosen_fields):
         raise click.UsageError(f"--fields must name distinct fields from: {', '.join(SNAPSHOT_FIELDS)}.")
-    if summary and (jsonl or dates_only):
-        raise click.UsageError("--summary cannot be combined with --jsonl or --dates.")
+    if summary and (jsonl or dates_only or stats):
+        raise click.UsageError("--summary cannot be combined with --jsonl, --dates or --stats.")
+    if stats and (
+        as_csv
+        or jsonl
+        or dates_only
+        or count_only
+        or latest
+        or earliest
+        or page_info
+        or limit is not None
+        or offset is not None
+    ):
+        raise click.UsageError("--stats only combines with --json and snapshot filters.")
     if weekdays_only and weekends_only:
         raise click.UsageError("Choose one of --weekdays-only or --weekends-only.")
     if month_start_only and month_end_only:
         raise click.UsageError("Choose one of --month-start-only or --month-end-only.")
+    if quarter_start_only and quarter_end_only:
+        raise click.UsageError("Choose one of --quarter-start-only or --quarter-end-only.")
+    if above_book and below_book:
+        raise click.UsageError("Choose one of --above-book or --below-book.")
     if earliest and latest:
         raise click.UsageError("Choose one of --earliest or --latest.")
     if earliest and (
@@ -360,7 +443,14 @@ def snapshots(
         and (not weekends_only or date.fromisoformat(s.date).weekday() >= 5)
         and (not month_start_only or s.date[8:10] == "01")
         and (not month_end_only or int(s.date[8:10]) == monthrange(int(s.date[:4]), int(s.date[5:7]))[1])
+        and (not quarter_start_only or s.date[5:10] in ("01-01", "04-01", "07-01", "10-01"))
+        and (not quarter_end_only or s.date[5:10] in ("03-31", "06-30", "09-30", "12-31"))
+        and (not above_book or s.net_worth > s.book)
+        and (not below_book or s.net_worth < s.book)
     ]
+    if stats:
+        _snapshot_stats(app, rows, changes, as_json=as_json, has_history=bool(every))
+        return
     if summary:
         _snapshot_summary(app, rows, summary, as_json, as_csv, changes)
         return

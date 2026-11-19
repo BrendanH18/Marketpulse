@@ -33,11 +33,15 @@ def accounts(ctx: click.Context) -> None:
 
 @accounts.command("list")
 @click.option("--csv", "as_csv", is_flag=True, help="Print raw account metadata as CSV, offline.")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Print raw account metadata as JSON Lines, offline.")
+@click.option("--names", "names_only", is_flag=True, help="Print matching account names, one per line, offline.")
+@click.option("--ids", "ids_only", is_flag=True, help="Print matching account IDs, one per line, offline.")
 @click.option("--count", "count_only", is_flag=True, help="Count matching accounts before pagination, offline.")
 @click.option("--limit", type=click.IntRange(min=1), help="Show at most this many accounts, offline.")
 @click.option("--offset", type=click.IntRange(min=0), help="Skip matching accounts, offline.")
 @click.option("--page-info", is_flag=True, help="With --json, include pagination metadata.")
 @click.option("--archived", is_flag=True, help="Include archived accounts.")
+@click.option("--archived-only", is_flag=True, help="Show only archived accounts, offline.")
 @click.option("--offline", is_flag=True, help="Show account metadata without fetching prices or recording a snapshot.")
 @click.option(
     "--json", "as_json", is_flag=True, help="Print unmasked account metadata as JSON, without fetching prices."
@@ -128,7 +132,11 @@ def accounts(ctx: click.Context) -> None:
 def accounts_list(
     app: App,
     archived: bool,
+    archived_only: bool,
     as_csv: bool,
+    as_jsonl: bool,
+    names_only: bool,
+    ids_only: bool,
     count_only: bool,
     limit: int | None,
     offset: int | None,
@@ -163,14 +171,14 @@ def accounts_list(
     name_suffix: str | None,
 ) -> None:
     """List accounts, optionally filtering or reading metadata offline."""
-    if sum((as_json, as_csv, count_only)) > 1:
-        raise click.UsageError("Choose one of --json, --csv, or --count.")
+    if sum((as_json, as_jsonl, as_csv, names_only, ids_only, count_only)) > 1:
+        raise click.UsageError("Choose one of --json, --jsonl, --csv, --names, --ids or --count.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
     if min_id is not None and max_id is not None and min_id > max_id:
         raise click.UsageError("--min-id must be at or below --max-id.")
-    if summary and (count_only or page_info):
-        raise click.UsageError("--summary cannot be combined with --count or --page-info.")
+    if summary and (count_only or page_info or as_jsonl or names_only or ids_only):
+        raise click.UsageError("--summary cannot be combined with --count, --jsonl, --names, --ids or --page-info.")
     if min_transactions is not None and max_transactions is not None and min_transactions > max_transactions:
         raise click.UsageError("--min-transactions must be at or below --max-transactions.")
     if summary_sort != "group" and not summary:
@@ -183,6 +191,7 @@ def accounts_list(
             or excluded_currencies
             or excluded_institutions
             or exclude_search
+            or archived_only
         )
         or institution_search is not None
         or any(len(values) > 1 for values in (acct_types, institutions, currencies))
@@ -191,19 +200,33 @@ def accounts_list(
         value is not None
         for value in (has_positions, has_transactions, min_transactions, max_transactions, name_prefix, name_suffix)
     )
-    offline = offline or as_csv or count_only or limit is not None or offset is not None or selection or bool(summary)
-    items = app.store.accounts(include_archived=archived)
+    offline = (
+        offline
+        or as_csv
+        or as_jsonl
+        or names_only
+        or ids_only
+        or count_only
+        or limit is not None
+        or offset is not None
+        or selection
+        or bool(summary)
+    )
+    include_archived = archived or archived_only
+    items = app.store.accounts(include_archived=include_archived)
+    if archived_only:
+        items = [a for a in items if a.archived]
     included_ids = set()
     for ref in included_accounts:
         found = app.store.get_account(ref)
-        if found is None or (found.archived and not archived):
-            fail(f"No {'matching' if archived else 'active'} account '{ref}'.")
+        if found is None or (found.archived and not include_archived):
+            fail(f"No {'matching' if include_archived else 'active'} account '{ref}'.")
         included_ids.add(found.saved_id)
     excluded_ids = set()
     for ref in excluded_accounts:
         found = app.store.get_account(ref)
-        if found is None or (found.archived and not archived):
-            fail(f"No {'matching' if archived else 'active'} account '{ref}'.")
+        if found is None or (found.archived and not include_archived):
+            fail(f"No {'matching' if include_archived else 'active'} account '{ref}'.")
         excluded_ids.add(found.saved_id)
     excluded_currency_set = {value.strip().casefold() for value in excluded_currencies}
     excluded_institution_set = {value.strip().casefold() for value in excluded_institutions}
@@ -269,6 +292,18 @@ def accounts_list(
         return
     start = offset or 0
     items = items[start:] if limit is None else items[start : start + limit]
+    if names_only:
+        if items:
+            click.echo("\n".join(a.name for a in items))
+        return
+    if ids_only:
+        if items:
+            click.echo("\n".join(str(a.saved_id) for a in items))
+        return
+    if as_jsonl:
+        for a in items:
+            click.echo(json.dumps(asdict(a), ensure_ascii=False))
+        return
     if as_csv:
         stream = io.StringIO(newline="")
         writer = csv.DictWriter(stream, fieldnames=[field.name for field in fields(Account)])
@@ -371,12 +406,21 @@ def _account_summary(app: App, items: list[Account], group: str, sort: str, as_j
 @accounts.command("show")
 @click.argument("ref")
 @click.option("--json", "as_json", is_flag=True, help="Print unmasked account metadata as JSON.")
+@click.option("--archived", is_flag=True, help="Allow inspecting an archived account.")
+@click.option("--exists", is_flag=True, help="Print nothing; exit 0 if the account exists, 1 otherwise.")
 @pass_app
-def accounts_show(app: App, ref: str, as_json: bool) -> None:
+def accounts_show(app: App, ref: str, as_json: bool, archived: bool, exists: bool) -> None:
     """Inspect an active account by ID, name or unique type, without pricing."""
+    if as_json and exists:
+        raise click.UsageError("--exists cannot be combined with --json.")
     account = app.store.get_account(ref)
-    if account is None or account.archived:
-        fail(f"No active account '{ref}'.")
+    found = account is not None and (archived or not account.archived)
+    if exists:
+        if not found:
+            raise click.exceptions.Exit(1)
+        return
+    if not found or account is None:
+        fail(f"No {'matching' if archived else 'active'} account '{ref}'.")
     payload = asdict(account)
     if as_json:
         click.echo(json.dumps(payload, ensure_ascii=False))
@@ -449,9 +493,10 @@ def accounts_add(app: App, name, acct_type, currency, institution, track_cash, d
     "--revision", help="Refuse unless the account is unchanged since it had this revision (from `desktop snapshot`)."
 )
 @click.option("--dry-run", is_flag=True, help="Show each field that would change, old and new; save nothing.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON edit receipt; supports --dry-run.")
 @pass_app
 def accounts_edit(
-    app: App, ref, name, acct_type, currency, institution, track_cash, archive, revision, dry_run
+    app: App, ref, name, acct_type, currency, institution, track_cash, archive, revision, dry_run, as_json: bool
 ) -> None:
     restore_id = app.store.restore_id
     acct = app.account(ref)
@@ -474,12 +519,28 @@ def accounts_edit(
     if archive is not None:
         acct.archived = archive
     if dry_run:
+        if as_json:
+            acct.name = acct.name.strip()
+            _check_name(app, acct)
+            after = asdict(acct)
+            changes = {
+                field: {"from": before[field], "to": after[field]} for field in after if after[field] != before[field]
+            }
+            click.echo(json.dumps({**after, "changes": changes, "saved": False}, ensure_ascii=False))
+            return
         _preview_account_edit(app, before, acct)
         return
     try:
         app.tracker.update_account(acct, restore_id=restore_id, revision=revision)
     except ValueError as e:
         fail(str(e))
+    if as_json:
+        after = asdict(acct)
+        changes = {
+            field: {"from": before[field], "to": after[field]} for field in after if after[field] != before[field]
+        }
+        click.echo(json.dumps({**after, "changes": changes, "saved": True}, ensure_ascii=False))
+        return
     app.ok(f"Updated {acct.name}.")
 
 
@@ -510,11 +571,20 @@ def _preview_account_edit(app: App, before: dict, acct: Account) -> None:
 @click.argument("ref")
 @click.option("-y", "--yes", is_flag=True)
 @click.option("--dry-run", is_flag=True, help="Show the account and how many transactions would go; delete nothing.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON deletion receipt; supports --dry-run.")
 @pass_app
-def accounts_remove(app: App, ref, yes, dry_run) -> None:
+def accounts_remove(app: App, ref, yes, dry_run, as_json: bool) -> None:
     acct = app.account(ref)
     count = len([t for t in app.store.transactions() if t.account_id == acct.id])
     if dry_run:
+        if as_json:
+            click.echo(
+                json.dumps(
+                    {"id": acct.id, "name": acct.name, "transactions": count, "deleted": False},
+                    ensure_ascii=False,
+                )
+            )
+            return
         app.ok(
             f"Would delete {acct.name} (#{acct.id}) and its {count} transaction(s); nothing deleted."
             f" `accounts edit {acct.name} --archive` keeps them instead."
@@ -524,6 +594,14 @@ def accounts_remove(app: App, ref, yes, dry_run) -> None:
         f"Delete {acct.name} and its {count} transaction(s)? Consider `accounts edit {acct.name} --archive` instead."
     ):
         app.store.delete_account(acct.saved_id)
+        if as_json:
+            click.echo(
+                json.dumps(
+                    {"id": acct.id, "name": acct.name, "transactions": count, "deleted": True},
+                    ensure_ascii=False,
+                )
+            )
+            return
         app.ok(f"Deleted {acct.name}.")
 
 
@@ -533,8 +611,10 @@ def accounts_remove(app: App, ref, yes, dry_run) -> None:
 )
 @click.argument("year", type=int, required=False)
 @click.argument("amount", type=float, required=False)
+@click.option("--dry-run", is_flag=True, help="Validate and preview a room update without saving.")
+@click.option("--json", "as_json", is_flag=True, help="Print contribution room or update receipt as JSON.")
 @pass_app
-def accounts_room(app: App, account_type, year, amount) -> None:
+def accounts_room(app: App, account_type, year, amount, dry_run: bool, as_json: bool) -> None:
     """Set or show contribution room.
 
     \b
@@ -542,17 +622,36 @@ def accounts_room(app: App, account_type, year, amount) -> None:
       marketpulse accounts room TFSA 2026 21500
     TFSA and FHSA roll forward automatically with new annual limits.
     """
+    if dry_run and not (account_type and year is not None and amount is not None):
+        raise click.UsageError("--dry-run requires TYPE YEAR AMOUNT.")
     if account_type and year is not None and amount is not None:
         if not math.isfinite(amount):
             fail("Contribution room must be a finite amount.")
         latest = int(today()[:4]) + 1
         if not ROOM_FIRST_YEAR <= year <= latest:
             fail(f"Year must be between {ROOM_FIRST_YEAR} and {latest}; give all four digits, like 2026.")
-        app.store.set_room(account_type.upper(), year, amount)
-        app.ok(f"{account_type.upper()} room as of Jan 1 {year}: {fmt.money(amount)}")
+        kind = account_type.upper()
+        if not dry_run:
+            app.store.set_room(kind, year, amount)
+        if as_json:
+            click.echo(
+                json.dumps(
+                    {"account_type": kind, "year": year, "amount": amount, "saved": not dry_run},
+                    ensure_ascii=False,
+                )
+            )
+            return
+        if dry_run:
+            app.ok(f"Would set {kind} room as of Jan 1 {year}: {fmt.money(amount)} (not saved).")
+            return
+        app.ok(f"{kind} room as of Jan 1 {year}: {fmt.money(amount)}")
     elif account_type:
         fail("Usage: marketpulse accounts room TYPE YEAR AMOUNT")
     rooms = app.tracker.room()
+    if as_json:
+        payload = [{**asdict(status), "accounts": [a.name for a in members]} for status, members in rooms]
+        click.echo(json.dumps(payload, ensure_ascii=False))
+        return
     if not rooms:
         app.console.print(Text("No contribution room recorded yet.", style="muted"))
         return

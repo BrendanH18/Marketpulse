@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
 import time
+from dataclasses import replace
+from datetime import date
 
 from rich.text import Text
 from rich.theme import Theme as RichTheme
@@ -20,6 +23,7 @@ from ..services import Tracker
 from ..themes import (
     OMARCHY_PALETTES,
     palette_from_colors,
+    pretty_name,
     resolve_palette,
     rich_styles,
     textual_theme,
@@ -30,6 +34,8 @@ from . import actions, chart, navigation, records, workspaces
 from .commands import PortfolioCommands
 from .constants import HINTS, HOLDING_COLUMNS
 from .widgets import WORKSPACES, Canvas, ChartView, Tile, TopBar, pane
+
+AUTO_THEME = "marketpulse-auto"
 
 
 class MarketPulseApp(App):
@@ -171,6 +177,22 @@ class MarketPulseApp(App):
         Binding("dollar_sign", "toggle_cash", show=False),
         Binding("d", "duplicate", show=False),
         Binding("exclamation_mark", "problems", show=False),
+        # Workflow batch (81-100); none of these keys had a binding before.
+        Binding("0", "reset_sort", show=False),
+        Binding("ctrl+d", "half_page(True)", show=False),
+        Binding("ctrl+u", "half_page(False)", show=False),
+        Binding("I", "toggle_archived", show=False),
+        Binding("S", "jump_to_holding", show=False),
+        Binding("number_sign", "copy_table_csv", show=False),
+        Binding("X", "copy_table_markdown", show=False),
+        Binding("Q", "copy_summary", show=False),
+        Binding("M", "cycle_filter_mode", show=False),
+        Binding("commercial_at", "cycle_activity_account", show=False),
+        Binding("m", "cycle_movers", show=False),
+        Binding("minus", "step_year(-1)", show=False),
+        Binding("plus", "step_year(1)", show=False),
+        Binding("U", "rearm_triggered", show=False),
+        Binding("f2", "focus_input", show=False),
     ]
 
     def __init__(self, config: Config, tracker: Tracker | None = None):
@@ -206,10 +228,18 @@ class MarketPulseApp(App):
         self.table_sort: dict[str, tuple[str, bool]] = {}
         self.refreshed_at: float | None = None
         self.hide_cash = False
+        self.hide_archived = False
+        self.holdings_filter_mode = "all"
+        self.activity_filter_mode = "all"
+        self.alerts_filter_mode = "all"
+        self.activity_account_filter: int | None = None
+        self.movers_mode = "day %"
+        self.tax_year: int | None = None
+        self.income_year: int | None = date.today().year
         for name in theme_names():
             self.register_theme(textual_theme(palette_from_colors(name, OMARCHY_PALETTES[name])))
-        if self.palette.name not in OMARCHY_PALETTES:
-            self.register_theme(textual_theme(self.palette))
+        if self._auto_theme:
+            self.register_theme(replace(textual_theme(self.palette), name=AUTO_THEME))
         self._push_rich_theme()
 
     # ── theme plumbing ────────────────────────────────────────────────────────
@@ -236,14 +266,15 @@ class MarketPulseApp(App):
     def watch_theme(self, name: str) -> None:
         if name in OMARCHY_PALETTES:
             self.palette = palette_from_colors(name, OMARCHY_PALETTES[name])
-        elif name != self.palette.name:
+        elif name != AUTO_THEME:
             return
         self._push_rich_theme()
         if not self._mp_ready:
             return
-        auto_name = resolve_palette("auto").name
-        if not (self._auto_theme and name == auto_name) and self.config.theme != name:
+        if name != AUTO_THEME and self.config.theme != name:
             self.config.theme = name
+            if self._auto_theme:
+                self.unregister_theme(AUTO_THEME)
             self._auto_theme = False
             self.config.save()
         self.refresh_all_views()
@@ -301,11 +332,11 @@ class MarketPulseApp(App):
 
     def on_mount(self) -> None:
         try:
-            self.theme = self.palette.name
+            self.theme = AUTO_THEME if self._auto_theme else self.palette.name
         except Exception:  # pragma: no cover - theme registry failure falls back to Textual default
             pass
         for name in list(self.available_themes):
-            if name not in OMARCHY_PALETTES and name != self.palette.name:
+            if name not in OMARCHY_PALETTES and name != AUTO_THEME:
                 try:
                     self.unregister_theme(name)
                 except Exception:
@@ -883,3 +914,79 @@ class MarketPulseApp(App):
 
     def action_problems(self) -> None:
         navigation.show_problems(self)
+
+    def action_reset_sort(self) -> None:
+        navigation.reset_sort(self)
+
+    def action_half_page(self, down: bool) -> None:
+        navigation.jump_half_page(self, down)
+
+    def action_toggle_archived(self) -> None:
+        navigation.toggle_archived_accounts(self)
+
+    def action_jump_to_holding(self) -> None:
+        navigation.jump_to_holding(self)
+
+    def action_copy_table_csv(self) -> None:
+        navigation.copy_table_csv(self)
+
+    def action_copy_table_markdown(self) -> None:
+        navigation.copy_table_markdown(self)
+
+    def action_copy_summary(self) -> None:
+        navigation.copy_portfolio_summary(self)
+
+    def action_cycle_filter_mode(self) -> None:
+        navigation.cycle_filter_mode(self)
+
+    def action_cycle_activity_account(self) -> None:
+        navigation.cycle_activity_account(self)
+
+    def action_cycle_movers(self) -> None:
+        navigation.cycle_movers_mode(self)
+
+    def action_step_year(self, delta: int) -> None:
+        navigation.step_year(self, delta)
+
+    def action_rearm_triggered(self) -> None:
+        self.update_alert_batch(True, rearm=True)
+
+    def action_pause_all_alerts(self) -> None:
+        self.update_alert_batch(False)
+
+    def action_resume_all_alerts(self) -> None:
+        self.update_alert_batch(True)
+
+    @work(thread=True, group="write")
+    def update_alert_batch(self, active: bool, *, rearm: bool = False) -> None:
+        try:
+            message = navigation.update_alert_batch(self, active, rearm=rearm)
+        except (OSError, sqlite3.Error) as e:
+            self.call_from_thread(self.notify, str(e), title="Alert update failed", severity="error")
+            return
+        self.call_from_thread(self.render_alerts)
+        self.call_from_thread(self.notify, message, timeout=2)
+
+    @work(thread=True, group="write")
+    def action_create_backup(self) -> None:
+        try:
+            path = self.tracker.store.backup(reason="manual")
+        except (OSError, sqlite3.Error) as e:
+            self.call_from_thread(self.notify, str(e), title="Backup failed", severity="error")
+            return
+        self.call_from_thread(self.notify, f"Backup saved: {path.name}", timeout=3)
+
+    def action_restore_auto_theme(self) -> None:
+        self.config.theme = "auto"
+        self.config.save()
+        self._auto_theme = True
+        self.palette = resolve_palette("auto")
+        self.register_theme(replace(textual_theme(self.palette), name=AUTO_THEME))
+        if self.theme == AUTO_THEME:
+            self.mutate_reactive(MarketPulseApp.theme)
+        else:
+            self.theme = AUTO_THEME
+        self.notify(f"Theme: Auto ({pretty_name(self.palette.name)})", timeout=2)
+
+    def action_focus_input(self) -> None:
+        navigation.focus_workspace_input(self)

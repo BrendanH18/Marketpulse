@@ -612,6 +612,7 @@ def income_group(
     view: PortfolioView,
     *,
     privacy: bool = False,
+    source_period: str = "This year",
 ) -> RenderableType:
     values = [v for _, v in months]
     labels = [calendar.month_abbr[int(m[5:7])] for m, _ in months]
@@ -631,7 +632,7 @@ def income_group(
     else:
         parts.append(Text("No dividends or interest recorded in the last 12 months.", style="muted"))
     if by_symbol:
-        t = table("Source", ("This year", "right"), title="By source")
+        t = table("Source", (source_period, "right"), title="By source")
         for sym, amount in by_symbol[:12]:
             t.add_row(Text(sym, style="bright"), Text(fmt.money(amount, view.base, privacy=privacy), style="up"))
         parts += [Text(""), t]

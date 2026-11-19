@@ -50,16 +50,27 @@ def _catalog(group: click.Group, prefix: str = "", depth: int = 1) -> list[dict[
 @click.option("--group", "group_name", help="Only this command group and its descendants.")
 @click.option("--search", help="Find text in command paths and help, ignoring case.")
 @click.option("--option", "option_name", help="Find commands accepting this option (e.g. --json).")
+@click.option(
+    "--exclude-option", "excluded_options", multiple=True, help="Exclude commands accepting this option (e.g. --json)."
+)
 @click.option("--leaves", is_flag=True, help="Only executable leaf commands.")
 @click.option("--groups", is_flag=True, help="Only command groups.")
 @click.option("--depth", type=click.IntRange(min=1), help="Maximum command nesting depth.")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable command catalog.")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Emit matching commands as JSON Lines.")
 @click.option("--csv", "as_csv", is_flag=True, help="Export command catalog to CSV.")
 @click.option("--markdown", is_flag=True, help="Export a Markdown command reference.")
 @click.option("--count", is_flag=True, help="Count matching commands before pagination.")
 @click.option("--limit", type=click.IntRange(min=1), help="Maximum rows to show.")
 @click.option("--offset", type=click.IntRange(min=0), default=0, help="Skip matching rows.")
-@click.option("--descending", is_flag=True, help="Reverse alphabetical command order.")
+@click.option(
+    "--sort",
+    "sort_by",
+    type=click.Choice(["command", "depth", "params"]),
+    default="command",
+    help="Order matching commands.",
+)
+@click.option("--descending", is_flag=True, help="Reverse command order.")
 @click.option("--details", is_flag=True, help="Include parameter names, flags, types and help.")
 @click.option("--exact", help="Select one complete command path, ignoring case and extra spaces.")
 @click.option("--prefix", help="Match a command path prefix, ignoring case.")
@@ -68,7 +79,9 @@ def _catalog(group: click.Group, prefix: str = "", depth: int = 1) -> list[dict[
 @click.option(
     "--has-arguments/--no-arguments", default=None, help="Select commands with or without positional arguments."
 )
+@click.option("--has-options/--no-options", default=None, help="Select commands with or without options.")
 @click.option("--has-required/--no-required", default=None, help="Select commands with or without required parameters.")
+@click.option("--param-type", help="Select commands having a parameter of this Click type, ignoring case.")
 @click.option("--parameter-search", help="Find parameter names, flags, types or help containing this text.")
 @click.option("--page-info", is_flag=True, help="With --json, include total, offset and limit before pagination.")
 @click.option("--paths", is_flag=True, help="Print only command paths, one per line, for scripts.")
@@ -76,15 +89,18 @@ def commands(
     group_name,
     search,
     option_name,
+    excluded_options,
     leaves,
     groups,
     depth,
     as_json,
+    as_jsonl,
     as_csv,
     markdown,
     count,
     limit,
     offset,
+    sort_by,
     descending,
     details,
     exact,
@@ -92,14 +108,16 @@ def commands(
     excluded_groups,
     min_depth,
     has_arguments,
+    has_options,
     has_required,
+    param_type,
     parameter_search,
     page_info,
     paths,
 ) -> None:
     """Browse commands and options without opening the ledger or contacting providers."""
-    if sum((as_json, as_csv, markdown, count, paths)) > 1:
-        raise click.UsageError("Choose one of --json, --csv, --markdown, --count or --paths.")
+    if sum((as_json, as_jsonl, as_csv, markdown, count, paths)) > 1:
+        raise click.UsageError("Choose one of --json, --jsonl, --csv, --markdown, --count or --paths.")
     if page_info and not as_json:
         raise click.UsageError("--page-info requires --json.")
     if paths and details:
@@ -111,9 +129,16 @@ def commands(
     if count and (limit is not None or offset):
         raise click.UsageError("--count cannot be combined with pagination.")
     rows = _catalog(main)
-    for label, value in (("--exact", exact), ("--prefix", prefix), ("--parameter-search", parameter_search)):
+    for label, value in (
+        ("--exact", exact),
+        ("--prefix", prefix),
+        ("--parameter-search", parameter_search),
+        ("--param-type", param_type),
+    ):
         if value is not None and not value.strip():
             raise click.BadParameter("Cannot be blank.", param_hint=label)
+    if any(not value.strip() for value in excluded_options):
+        raise click.BadParameter("Cannot be blank.", param_hint="--exclude-option")
     excluded = {" ".join(value.split()) for value in excluded_groups}
     valid_groups = {r["command"] for r in rows if r["group"]}
     if excluded - valid_groups:
@@ -136,6 +161,16 @@ def commands(
     if option_name:
         flag = option_name if option_name.startswith("-") else "--" + option_name
         rows = [r for r in rows if any(flag in p["flags"] for p in r["parameters"] if p["kind"] == "option")]
+    if excluded_options:
+        excluded_flags = {
+            opt.strip() if opt.strip().startswith("-") else "--" + opt.strip() for opt in excluded_options
+        }
+        rows = [
+            r
+            for r in rows
+            if not any(flag in excluded_flags for p in r["parameters"] if p["kind"] == "option" for flag in p["flags"])
+        ]
+    wanted_type = param_type.strip().casefold() if param_type is not None else None
     rows = [
         r
         for r in rows
@@ -144,7 +179,9 @@ def commands(
         and (depth is None or r["depth"] <= depth)
         and (min_depth is None or r["depth"] >= min_depth)
         and (has_arguments is None or any(p["kind"] == "argument" for p in r["parameters"]) == has_arguments)
+        and (has_options is None or any(p["kind"] == "option" for p in r["parameters"]) == has_options)
         and (has_required is None or any(p["required"] for p in r["parameters"]) == has_required)
+        and (wanted_type is None or any(p["type"].casefold() == wanted_type for p in r["parameters"]))
         and (
             parameter_search is None
             or any(
@@ -157,7 +194,12 @@ def commands(
     if count:
         click.echo(len(rows))
         return
-    rows.sort(key=lambda r: r["command"], reverse=descending)
+    if sort_by == "depth":
+        rows.sort(key=lambda r: (r["depth"], r["command"]), reverse=descending)
+    elif sort_by == "params":
+        rows.sort(key=lambda r: (len(r["parameters"]), r["command"]), reverse=descending)
+    else:
+        rows.sort(key=lambda r: r["command"], reverse=descending)
     total = len(rows)
     rows = rows[offset:][:limit]
     if paths:
@@ -169,6 +211,9 @@ def commands(
     if as_json:
         payload = {"rows": rows, "total": total, "offset": offset, "limit": limit} if page_info else rows
         click.echo(json.dumps(payload, ensure_ascii=False))
+    elif as_jsonl:
+        for row in rows:
+            click.echo(json.dumps(row, ensure_ascii=False))
     elif as_csv:
         stream = io.StringIO(newline="")
         writer = csv.DictWriter(

@@ -2,6 +2,10 @@
 
 NW_RANGES = ["1m", "3m", "6m", "ytd", "1y", "all"]
 ALLOC_MODES = ["class", "account", "currency"]
+MOVERS_MODES = ["day %", "day $", "unrealized"]
+HOLDING_FILTER_MODES = ["all", "gainers", "losers", "non-market"]
+ACTIVITY_FILTER_MODES = ["all", "trades", "income", "cash"]
+ALERT_FILTER_MODES = ["all", "armed", "triggered", "paused"]
 # Holdings table keeps Account, Symbol, Qty, Price, Day, Value, Gain, Gain %, Weight;
 # name and average cost live in the position pane.
 HOLDING_COLUMNS = (0, 1, 3, 5, 6, 7, 8, 9, 10)
@@ -58,17 +62,29 @@ TXN_CHOICES = [
 ]
 _TABLE_KEYS = [
     ("j / k", "next / previous row"),
+    ("ctrl+d / ctrl+u", "half-page down / up"),
     ("< / >", "first / last row"),
     ("Y", "copy the row"),
-    ("ctrl+y", "copy the whole table"),
+    ("ctrl+y", "copy the whole table (TSV)"),
+    ("# / X", "copy table as CSV / Markdown"),
 ]
-_SORT_KEYS = [("o / O", "sort column / reverse")]
-_SYMBOL_KEYS = [("y", "copy the symbol"), ("v", "open its chart"), ("T", "show its transactions")]
-# Keys added under #130 and #153, per workspace; F1 lists them after the workspace's HINTS.
+_SORT_KEYS = [("o / O", "sort column / reverse"), ("0", "reset table sort")]
+_SYMBOL_KEYS = [
+    ("y", "copy the symbol"),
+    ("v", "open its chart"),
+    ("T", "show its transactions"),
+    ("S", "jump to symbol in holdings"),
+]
+# Keys added under #130, #153 and later batches, per workspace; F1 lists them after the workspace's HINTS.
 WORKSPACE_KEYS: dict[str, list[tuple[str, str]]] = {
-    "dashboard": [("z", "zoom: hide the side column")],
+    "dashboard": [
+        ("z", "zoom: hide the side column"),
+        ("m", "cycle movers metric (day % / day $ / unrealized)"),
+        ("Q", "copy portfolio summary"),
+    ],
     "holdings": [
         ("F", "filter holdings as you type"),
+        ("M", "cycle holdings mode (all / gainers / losers / non-market)"),
         *_SORT_KEYS,
         *_TABLE_KEYS,
         *_SYMBOL_KEYS,
@@ -76,17 +92,38 @@ WORKSPACE_KEYS: dict[str, list[tuple[str, str]]] = {
         ("$", "show / hide cash rows"),
     ],
     "watchlist": [*_SORT_KEYS, *_TABLE_KEYS, *_SYMBOL_KEYS, ("z", "zoom: hide the quote pane")],
-    "chart": [("y", "copy the symbol"), ("T", "show its transactions")],
+    "chart": [
+        ("y", "copy the symbol"),
+        ("Y", "copy chart bar or summary"),
+        ("T", "show its transactions"),
+        ("S", "jump to symbol in holdings"),
+    ],
     "activity": [
+        ("M", "cycle activity mode (all / trades / income / cash)"),
+        ("@", "cycle account filter"),
         *_SORT_KEYS,
         *_TABLE_KEYS,
         *_SYMBOL_KEYS,
-        ("escape", "clear the filter"),
+        ("escape", "clear filters"),
         ("d", "duplicate the entry, dated today"),
     ],
-    "income": [],
-    "tax": [*_SORT_KEYS, *_TABLE_KEYS],
-    "alerts": [*_SORT_KEYS, *_TABLE_KEYS, *_SYMBOL_KEYS],
+    "income": [
+        ("j / k / < / >", "scroll income view"),
+        ("- / +", "step income year (or all)"),
+    ],
+    "tax": [
+        *_SORT_KEYS,
+        *_TABLE_KEYS,
+        ("I", "show / hide archived accounts"),
+        ("- / +", "step tax year (or all)"),
+    ],
+    "alerts": [
+        ("M", "cycle alerts mode (all / armed / triggered / paused)"),
+        ("U", "re-arm all triggered alerts"),
+        *_SORT_KEYS,
+        *_TABLE_KEYS,
+        *_SYMBOL_KEYS,
+    ],
 }
 GLOBAL_KEYS = [
     ("backspace", "previous workspace"),

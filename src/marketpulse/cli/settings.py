@@ -8,6 +8,7 @@ import json
 import math
 import tomllib
 from dataclasses import fields, replace
+from pathlib import Path
 
 import click
 from rich.text import Text
@@ -56,6 +57,8 @@ def theme(ctx: click.Context, as_json: bool) -> None:
 @theme.command("list")
 @click.option("--search", help="Find text in a theme name or label, ignoring case.")
 @click.option("--mode", type=click.Choice(["dark", "light"], case_sensitive=False), help="Only dark or light themes.")
+@click.option("--json", "as_json", is_flag=True, help="Export matching themes as JSON.")
+@click.option("--page-info", is_flag=True, help="With --json, include total, offset and limit before pagination.")
 @click.option("--csv", "as_csv", is_flag=True, help="Export name, label and mode as CSV.")
 @click.option("--count", "count_only", is_flag=True, help="Count matching themes before pagination.")
 @click.option("--names", is_flag=True, help="Print just the theme slugs, one per line.")
@@ -67,6 +70,8 @@ def theme_list(
     app: App,
     search: str | None,
     mode: str | None,
+    as_json: bool,
+    page_info: bool,
     as_csv: bool,
     count_only: bool,
     names: bool,
@@ -75,8 +80,10 @@ def theme_list(
     descending: bool,
 ) -> None:
     """Browse the embedded theme catalog without changing the active theme."""
-    if sum((as_csv, count_only, names)) > 1:
-        raise click.UsageError("Choose one of --csv, --count or --names.")
+    if sum((as_json, as_csv, count_only, names)) > 1:
+        raise click.UsageError("Choose one of --json, --csv, --count or --names.")
+    if page_info and not as_json:
+        raise click.UsageError("--page-info requires --json.")
     if search is not None and not search.strip():
         raise click.UsageError("--search cannot be blank.")
     needle = (search or "").strip().casefold()
@@ -91,11 +98,15 @@ def theme_list(
     ]
     if mode:
         rows = [row for row in rows if row["mode"] == mode]
+    total = len(rows)
     if count_only:
-        click.echo(len(rows))
+        click.echo(total)
         return
     rows = rows[offset:] if limit is None else rows[offset : offset + limit]
-    if as_csv:
+    if as_json:
+        payload = {"rows": rows, "total": total, "offset": offset, "limit": limit} if page_info else rows
+        click.echo(json.dumps(payload, ensure_ascii=False))
+    elif as_csv:
         stream = io.StringIO(newline="")
         writer = csv.DictWriter(stream, fieldnames=["name", "label", "mode"])
         writer.writeheader()
@@ -113,11 +124,20 @@ def theme_list(
 
 @theme.command("set")
 @click.argument("name", nargs=-1, required=True)
+@click.option("--dry-run", is_flag=True, help="Validate and preview the theme change without saving.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON receipt; supports --dry-run.")
 @pass_app
-def theme_set(app: App, name: tuple[str, ...]) -> None:
-    app.config.theme = theme_slug(" ".join(name))
-    app.config.save()
-    app.ok(f"Theme → {pretty_name(app.config.theme)}")
+def theme_set(app: App, name: tuple[str, ...], dry_run: bool, as_json: bool) -> None:
+    slug = theme_slug(" ".join(name))
+    if not dry_run:
+        app.config.theme = slug
+        app.config.save()
+    if as_json:
+        click.echo(json.dumps({"theme": slug, "label": pretty_name(slug), "saved": not dry_run}, ensure_ascii=False))
+    elif dry_run:
+        app.ok(f"Would set theme → {pretty_name(slug)} (not saved).")
+    else:
+        app.ok(f"Theme → {pretty_name(slug)}")
 
 
 @main.group(invoke_without_command=True)
@@ -300,28 +320,68 @@ def config_get(app: App, keys: tuple[str, ...], as_json: bool, as_csv: bool, val
 @click.argument("keys", nargs=-1)
 @click.option("--json", "as_json", is_flag=True)
 @click.option("--csv", "as_csv", is_flag=True, help="Print key,value CSV rows.")
+@click.option("--value", "value_only", is_flag=True, help="Print only the default value(s), one per line.")
 @pass_app
-def config_defaults(app: App, keys: tuple[str, ...], as_json: bool, as_csv: bool) -> None:
+def config_defaults(app: App, keys: tuple[str, ...], as_json: bool, as_csv: bool, value_only: bool) -> None:
     """Show factory defaults (optionally only KEYS) without modifying the saved configuration."""
     _one_format(as_json, as_csv)
-    _print_settings(app, _select(Config().redacted(), keys), as_json, as_csv)
+    if value_only and (as_json or as_csv):
+        raise click.UsageError("--value cannot be combined with --json or --csv.")
+    values = _select(Config().redacted(), keys)
+    if value_only:
+        for value in values.values():
+            click.echo(_plain(value))
+        return
+    _print_settings(app, values, as_json, as_csv)
 
 
 @config.command("diff")
 @click.argument("keys", nargs=-1)
 @click.option("--json", "as_json", is_flag=True)
 @click.option("--csv", "as_csv", is_flag=True, help="Print key,value CSV rows.")
+@click.option("--details", is_flag=True, help="Include both default and effective values side by side.")
 @click.option("--exit-code", is_flag=True, help="Exit 1 when any (selected) setting differs from its default.")
 @pass_app
-def config_diff(app: App, keys: tuple[str, ...], as_json: bool, as_csv: bool, exit_code: bool) -> None:
+def config_diff(app: App, keys: tuple[str, ...], as_json: bool, as_csv: bool, details: bool, exit_code: bool) -> None:
     """Show effective settings (optionally only KEYS) that differ from factory defaults; API keys stay redacted."""
     _one_format(as_json, as_csv)
     defaults = Config().redacted()
     current = _select(app.config.redacted(), keys)
     changed = {key: value for key, value in current.items() if value != defaults[key]}
-    _print_settings(app, changed, as_json, as_csv)
-    if not changed and not (as_json or as_csv):
-        app.ok("All settings match defaults." if not keys else "Selected settings match defaults.")
+    if details:
+        detail_rows = [{"key": key, "default": defaults[key], "value": value} for key, value in changed.items()]
+        if as_csv:
+            stream = io.StringIO(newline="")
+            writer = csv.writer(stream, lineterminator="\n")
+            writer.writerow(["key", "default", "value"])
+            writer.writerows([r["key"], _plain(r["default"]), _plain(r["value"])] for r in detail_rows)
+            click.echo(stream.getvalue(), nl=False)
+        elif as_json:
+            safe_rows = [
+                {
+                    "key": r["key"],
+                    "default": None
+                    if isinstance(r["default"], float) and not math.isfinite(r["default"])
+                    else r["default"],
+                    "value": None if isinstance(r["value"], float) and not math.isfinite(r["value"]) else r["value"],
+                }
+                for r in detail_rows
+            ]
+            click.echo(json.dumps(safe_rows, ensure_ascii=False, allow_nan=False))
+        elif detail_rows:
+            for r in detail_rows:
+                app.console.print(
+                    Text(f"{r['key']:<24}", style="accent")
+                    + Text(repr(r["default"]), style="muted")
+                    + Text(" → ", style="muted")
+                    + Text(repr(r["value"]))
+                )
+        else:
+            app.ok("All settings match defaults." if not keys else "Selected settings match defaults.")
+    else:
+        _print_settings(app, changed, as_json, as_csv)
+        if not changed and not (as_json or as_csv):
+            app.ok("All settings match defaults." if not keys else "Selected settings match defaults.")
     if exit_code and changed:
         raise click.exceptions.Exit(1)
 
@@ -391,16 +451,25 @@ def config_reset(app: App, key: str, dry_run: bool, as_json: bool) -> None:
 @config.command("validate")
 @click.option("--json", "as_json", is_flag=True, help="Print diagnostics; exit 1 if the file is invalid.")
 @click.option("--quiet", "-q", is_flag=True, help="Print nothing; report validity only through the exit status.")
+@click.option(
+    "--file",
+    "file_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Validate a specific TOML file instead of the active configuration file.",
+)
 @pass_app
-def config_validate(app: App, as_json: bool, quiet: bool) -> None:
+def config_validate(app: App, as_json: bool, quiet: bool, file_path: Path | None) -> None:
     """Check the raw TOML file, setting names, types and values without writing it."""
     if as_json and quiet:
         raise click.UsageError("--quiet cannot be combined with --json.")
     issues: list[dict[str, str]] = []
-    path = config_path()
+    path = file_path if file_path is not None else config_path()
     raw: dict = {}
     try:
-        if path.exists():
+        if file_path is not None and not path.exists():
+            issues.append({"key": "", "message": "Configuration file does not exist."})
+        elif path.exists():
             raw = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError):
         # TOML parser exceptions can include source text holding the API key.
