@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before replacing the ledger ([#171](https://github.com/BrendanH18/Marketpulse/issues/171)).
 - The Mac app validates backups and compares them with your current ledger before asking you
   to confirm a restore ([#173](https://github.com/BrendanH18/Marketpulse/issues/173)).
+- `backup verify --all` checks every managed backup newest first and reports any failures
+  ([#176](https://github.com/BrendanH18/Marketpulse/issues/176)).
 
 ## [3.1.0] - 2026-11-18
 
