@@ -15,7 +15,7 @@ import pytest
 from marketpulse import db
 from marketpulse.csvio import import_transactions
 from marketpulse.db import BASELINE_VERSION, SchemaError, Store, latest_version
-from marketpulse.models import Account, Transaction, TxnType
+from marketpulse.models import Account, Asset, AssetClass, AssetKind, Transaction, TxnType
 
 
 def _seed(store: Store) -> Account:
@@ -364,14 +364,33 @@ def test_v2_adds_an_empty_automation_history_to_an_existing_ledger(tmp_path, mon
     monkeypatch.undo()
 
     store = Store(path)
-    assert store.schema_version == 2
+    assert store.schema_version == latest_version()
     assert store.automation_runs() == []
     assert [t.symbol for t in store.transactions()] == ["AAPL"]
     # The latest-run meta key the desktop bridge and `status` read is left alone.
     assert store.get_meta("automation_last_run") == last_run
     (pre,) = store.backups()
-    assert Store.backup_reason(pre) == "pre-v2" and _user_version(pre) == BASELINE_VERSION
+    assert Store.backup_reason(pre) == f"pre-v{latest_version()}" and _user_version(pre) == BASELINE_VERSION
     store.record_automation_run({"last_run": "2026-01-03T03:04:05", "errors": ["Backup failed: fictional"]})
     store.close()
     (run,) = Store(path).automation_runs()
     assert (run.ran_at, run.failed) == ("2026-01-03T03:04:05", True)
+
+
+def test_v3_adds_the_foreign_property_setting_to_existing_assets(tmp_path, monkeypatch):
+    path = tmp_path / "existing.db"
+    monkeypatch.setattr(db, "MIGRATIONS", {})
+    seeded = Store(path)
+    _seed(seeded)
+    seeded._conn.execute("INSERT INTO assets(symbol, kind, asset_class) VALUES ('FICT', 'market', 'etf')")
+    seeded._conn.commit()
+    seeded.close()
+    monkeypatch.undo()
+
+    upgraded = Store(path)
+    assert upgraded.schema_version == latest_version() >= 3
+    # Existing rows keep their details and decide by listing until set.
+    assert upgraded.assets()["FICT"] == Asset("FICT", AssetKind.MARKET, asset_class=AssetClass.ETF)
+    for setting in (True, False, None):
+        upgraded.set_foreign_property(Asset("FICT", asset_class=AssetClass.ETF, foreign_property=setting))
+        assert upgraded.assets()["FICT"].foreign_property is setting

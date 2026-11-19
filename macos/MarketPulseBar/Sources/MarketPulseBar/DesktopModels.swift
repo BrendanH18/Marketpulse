@@ -744,6 +744,8 @@ struct DesktopAsset: Decodable, Identifiable {
   let maturityDate: String
   /// Manual: the date of the valuation (or purchase) its value rests on.
   let valuedOn: String?
+  /// Form T1135: true or false when set with `marketpulse asset foreign`, nil to decide by listing.
+  let foreignProperty: Bool?
 
   var fixedIncome: Bool { kind == "fixed_income" }
   var manual: Bool { kind == "manual" }
@@ -798,8 +800,45 @@ struct TaxPayload: Decodable {
   let room: [ContributionRoom]
   /// The "not tax advice" notes the workspace must show.
   let notes: [String]
+  /// Specified foreign property cost for form T1135, newest year first. Absent from older engines.
+  let foreignProperty: [ForeignPropertyYear]?
   /// `notes` in the user's language.
   var localizedNotes: [String] { notes.map(Loc.backend) }
+}
+
+/// One year of specified foreign property (`marketpulse tax foreign-property`): cost amounts (ACB)
+/// in `currency`, always CAD, held in non-registered accounts. An estimate, not tax advice.
+struct ForeignPropertyYear: Decodable, Identifiable {
+  var id: Int { year }
+  let year: Int
+  /// December 31, or today for the year in progress.
+  let asOf: String
+  let currency: String
+  /// not_required (at or under $100,000 all year), simplified (under $250,000 all year), or detailed.
+  let status: String
+  let required: Bool
+  /// `status`, or "undetermined" when it is not_required but an FX rate is missing (optional for older payloads).
+  let assessment: String?
+  /// The highest end-of-day total, and the day it was first reached (nil when nothing was held).
+  let maxCost: Double
+  let maxCostDate: String?
+  let yearEndCost: Double
+  /// Gain (loss) on the year's dispositions of foreign property.
+  let gain: Double
+  /// An FX rate was missing, so some cost is left out and the totals may be too low.
+  let incomplete: Bool
+  let holdings: [ForeignPropertyHolding]
+}
+
+struct ForeignPropertyHolding: Decodable, Identifiable {
+  var id: String { symbol }
+  let symbol: String
+  let maxCost: Double
+  let maxCostDate: String?
+  let yearEndCost: Double
+  let gain: Double
+  let dispositions: Int
+  let incomplete: Bool
 }
 
 /// One calendar year. Totals leave out rows missing an FX rate (`missingFx` counts them).

@@ -72,7 +72,8 @@ Asset listings read configured definitions, including market-symbol overrides;
 they do not fetch quotes or infer missing classifications. `--class` matches an
 explicit class, and `--currency` matches the configured currency. Asset JSON
 contains `symbol`, `kind`, `name`, `asset_class`, `currency`, `rate`,
-`compounding`, `start_date`, and `maturity_date`. Kind and class choices ignore
+`compounding`, `start_date`, `maturity_date`, and `foreign_property` (`true`,
+`false`, or `null` to decide by listing). Kind and class choices ignore
 case; `--help` lists the accepted values. Empty JSON inventories return `[]`.
 
 ## Watchlists, alerts, and reports

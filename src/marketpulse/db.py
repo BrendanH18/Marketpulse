@@ -127,6 +127,8 @@ CREATE TABLE IF NOT EXISTS automation_runs (
     report TEXT NOT NULL
 );
 """,
+    # 3: per-asset T1135 setting. NULL decides by listing, 1 counts as foreign property, 0 doesn't.
+    3: "ALTER TABLE assets ADD COLUMN foreign_property INTEGER",
 }
 
 # Where automatic backups go and how many to keep (see Store.backup).
@@ -943,6 +945,7 @@ class Store:
                 compounding=r["compounding"],
                 start_date=r["start_date"],
                 maturity_date=r["maturity_date"],
+                foreign_property=None if r["foreign_property"] is None else bool(r["foreign_property"]),
             )
             for r in self._query("SELECT * FROM assets")
         }
@@ -950,10 +953,13 @@ class Store:
     def upsert_asset(self, asset: Asset) -> None:
         self._exec(
             "INSERT INTO assets(symbol, kind, name, asset_class, currency, rate, compounding, start_date,"
-            " maturity_date) VALUES (?,?,?,?,?,?,?,?,?)"
+            " maturity_date, foreign_property) VALUES (?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(symbol) DO UPDATE SET kind=excluded.kind, name=excluded.name,"
             " asset_class=excluded.asset_class, currency=excluded.currency, rate=excluded.rate,"
-            " compounding=excluded.compounding, start_date=excluded.start_date, maturity_date=excluded.maturity_date",
+            " compounding=excluded.compounding, start_date=excluded.start_date, maturity_date=excluded.maturity_date,"
+            # Forms and purchase paths don't carry the T1135 setting: keep a saved one unless
+            # the new row sets it. `set_foreign_property` is how it is cleared.
+            " foreign_property=COALESCE(excluded.foreign_property, assets.foreign_property)",
             (
                 asset.symbol,
                 asset.kind.value,
@@ -964,8 +970,18 @@ class Store:
                 asset.compounding,
                 asset.start_date,
                 asset.maturity_date,
+                None if asset.foreign_property is None else int(asset.foreign_property),
             ),
         )
+
+    def set_foreign_property(self, asset: Asset) -> None:
+        """Save `asset` with exactly its foreign property setting (None: decide by listing)."""
+        with self.atomic():
+            self.upsert_asset(asset)
+            self._exec(
+                "UPDATE assets SET foreign_property = ? WHERE symbol = ?",
+                (None if asset.foreign_property is None else int(asset.foreign_property), asset.symbol),
+            )
 
     def delete_asset(self, symbol: str) -> None:
         self._exec("DELETE FROM assets WHERE symbol = ?", (symbol.upper(),))

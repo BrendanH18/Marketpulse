@@ -488,17 +488,33 @@ class Tracker:
         return income_forecast(view, self.trailing_dividends(syms))
 
     def tax_years(self) -> tuple[list[TaxYear], TaxReport]:
-        """Capital gains by year, plus the full report (issues, open pools).
+        """Capital gains by year, plus the full report (issues, open pools)."""
+        txns = self.store.transactions()
+        accounts = self.store.account_map()
+        report = tax.compute(txns, accounts, self._tax_fx(txns, accounts, self.base))
+        return capital_gains(report, inclusion_rate=self.config.capital_gains_inclusion), report
 
-        FX: every foreign-currency transaction that touches a taxable account
-        needs its own day's rate (purchases as well as sales), so a daily
-        series is fetched for each such currency from a week before the
-        earliest one. The extra week covers a first trade on a Monday or just
-        after a holiday, which takes the previous close.
+    def foreign_property(self, year: int | None = None) -> list[tax.ForeignPropertyYear]:
+        """Specified foreign property cost for form T1135: `year`'s, or every year's, newest first.
+
+        Always in CAD, whatever the base currency, because the T1135 thresholds are.
         """
         txns = self.store.transactions()
         accounts = self.store.account_map()
-        base = self.base
+        fx = self._tax_fx(txns, accounts, "CAD")
+        assets = self.store.assets()
+        if year is not None:
+            return [tax.foreign_property(txns, accounts, assets, fx, year)]
+        return tax.foreign_property_years(txns, accounts, assets, fx)
+
+    def _tax_fx(self, txns: list[Transaction], accounts: dict[int, Account], base: str) -> tax.FxLookup:
+        """Trade-date FX into `base` for the tax engine.
+
+        Every foreign-currency transaction that touches a taxable account needs its own day's
+        rate (purchases as well as sales), so a daily series is fetched for each such currency
+        from a week before the earliest one. The extra week covers a first trade on a Monday or
+        just after a holiday, which takes the previous close.
+        """
         relevant = [
             t
             for t in txns
@@ -522,8 +538,7 @@ class Tracker:
                 # Offline or unknown pair: affected rows are marked incomplete
                 # and kept out of totals rather than computed with a guess.
                 series[ccy] = {}
-        report = tax.compute(txns, accounts, tax.fx_lookup(series, base))
-        return capital_gains(report, inclusion_rate=self.config.capital_gains_inclusion), report
+        return tax.fx_lookup(series, base)
 
     def room(self) -> list[tuple[RoomStatus, list[Account]]]:
         # CRA counts every contribution, so an archived account's deposits still use up room;

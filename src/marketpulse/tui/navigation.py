@@ -537,7 +537,8 @@ def step_year(app: MarketPulseApp, delta: int) -> None:
         if app._tax is None:
             app.notify("Tax report still loading", timeout=2)
             return
-        years = sorted({y.year for y in app._tax[0]})
+        # Capital gains years, and years with foreign property even if nothing was sold.
+        years = sorted({y.year for y in app._tax[0]} | {y.year for y in app._tax[3]})
         if not years:
             app.notify("No tax years to select", timeout=2)
             return

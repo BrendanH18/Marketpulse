@@ -628,11 +628,14 @@ def render_tax(app: MarketPulseApp) -> None:
     if app._tax is None:
         target.update(Text("Building tax report…", style="muted"))
         return
-    years, report, rooms = app._tax
+    years, report, rooms, foreign = app._tax
     tr = app.tracker
     body = render.tax_group(
         years, report, rooms, tr.store.account_map(), tr.base, privacy=app.privacy, year=app.tax_year
     )
+    line = render.foreign_property_line(foreign, app.tax_year, privacy=app.privacy)
+    if line is not None:
+        body = Group(line, body)
     if app.tax_year is not None:
         body = Group(Text(f"Tax year: {app.tax_year} (- / + to change year)\n", style="muted"), body)
     target.update(Group(body, Text("\nEstimates only — confirm against broker slips (T5008/T3/T5).", style="muted")))

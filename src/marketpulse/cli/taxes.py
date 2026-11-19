@@ -12,13 +12,23 @@ from pathlib import Path
 from typing import Any, TextIO
 
 import click
+from click.core import ParameterSource
 from rich.text import Text
 
 from .. import fmt, render
 from ..analytics import TaxYear, disposition_note
 from ..ledger import LedgerIssue
 from ..models import EPSILON, Account
-from ..tax import Disposition
+from ..tax import (
+    FOREIGN_PROPERTY_NOTES,
+    T1135_DETAILED,
+    T1135_DETAILED_THRESHOLD,
+    T1135_NOT_REQUIRED,
+    T1135_SIMPLIFIED,
+    T1135_THRESHOLD,
+    Disposition,
+    ForeignPropertyYear,
+)
 from .base import App, date_callback, fail, pass_app
 from .root import main
 
@@ -177,7 +187,7 @@ def _check_options(
         raise usage("--min-gain must be at most --max-gain.")
 
 
-@main.command()
+@main.group(invoke_without_command=True)
 @click.option("-y", "--year", type=int, default=None)
 @click.option(
     "--csv",
@@ -261,6 +271,19 @@ def tax(
 
     \b
     Filters select rows from the full report: pooled ACB and gains never change with them."""
+    ctx = click.get_current_context()
+    if ctx.invoked_subcommand is not None:
+        # `tax foreign-property` and other subcommands do their own work, with their own options.
+        given = [
+            p.opts[-1]
+            for p in ctx.command.params
+            if ctx.get_parameter_source(p.name or "") is ParameterSource.COMMANDLINE
+        ]
+        if given:
+            raise click.UsageError(
+                f"{', '.join(given)} belongs to plain `tax`; put options after `{ctx.invoked_subcommand}`."
+            )
+        return
     stdout_csv = csv_path is not None and str(csv_path) == "-"
     csv_file = csv_path is not None and not stdout_csv
     if any(not s.strip() for s in symbols):
@@ -416,6 +439,118 @@ def tax(
     else:
         _show_rows(app, rows, accounts, tr.base, total=total, start=start, paged=paged, any_rows=bool(every))
         _warn_issues(app, _issue_dicts(report.issues, year), "this report")
+
+
+@tax.command("foreign-property")
+@click.option(
+    "-y", "--year", type=click.IntRange(min=1900), default=None, help="One year in detail (default: every year)."
+)
+@click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked figures as JSON.")
+@pass_app
+def tax_foreign_property(app: App, year: int | None, as_json: bool) -> None:
+    """Whether foreign property cost may require form T1135 (an estimate, not tax advice).
+
+    \b
+    Totals the cost (ACB, in CAD) of property listed outside Canada held in non-registered
+    accounts at the end of every day: over $100,000 at any time means T1135 is likely due."""
+    from ..desktop import foreign_property_row
+
+    with app.busy("Building foreign property report…"):
+        found = app.tracker.foreign_property(year)
+    if as_json:
+        payload = {
+            "currency": "CAD",
+            "threshold": T1135_THRESHOLD,
+            "detailed_threshold": T1135_DETAILED_THRESHOLD,
+            "years": [foreign_property_row(y) for y in found],
+            "notes": FOREIGN_PROPERTY_NOTES,
+        }
+        click.echo(json.dumps(payload, ensure_ascii=False))
+        return
+    app.title("Foreign property (T1135)")
+    if year is None:
+        _foreign_years(app, found)
+    else:
+        _foreign_year(app, found[0])
+    if any(y.incomplete for y in found):
+        app.warn("An FX rate was missing, so some cost is left out: these totals may be too low.")
+    for note in FOREIGN_PROPERTY_NOTES:
+        app.console.print(Text(note, style="muted"))
+
+
+def _foreign_status(y: ForeignPropertyYear) -> Text:
+    undetermined = y.incomplete and y.status == T1135_NOT_REQUIRED
+    style = (
+        "warn" if y.status == T1135_DETAILED or undetermined else "accent" if y.status == T1135_SIMPLIFIED else "muted"
+    )
+    return Text(y.label, style=style)
+
+
+def _foreign_years(app: App, found: list[ForeignPropertyYear]) -> None:
+    if not found:
+        app.console.print(Text("No foreign property in non-registered accounts.", style="muted"))
+        return
+    privacy = app.privacy
+    t = render.table(
+        "Year",
+        ("Highest cost", "right"),
+        "On",
+        ("Year-end cost", "right"),
+        ("Gain", "right"),
+        "Status",
+        title="Specified foreign property, cost in CAD",
+    )
+    for y in found:
+        t.add_row(
+            Text(str(y.year), style="bright"),
+            Text(fmt.money(y.max_cost, privacy=privacy)),
+            Text(y.max_cost_date or "—", style="muted"),
+            Text(fmt.money(y.year_end_cost, privacy=privacy), style="muted"),
+            _money(y.gain, privacy, sign=True),
+            _foreign_status(y),
+        )
+    app.console.print(t)
+
+
+def _foreign_year(app: App, y: ForeignPropertyYear) -> None:
+    if not y.holdings:
+        app.console.print(Text(f"No foreign property in non-registered accounts in {y.year}.", style="muted"))
+        return
+    privacy = app.privacy
+    so_far = " so far" if y.as_of < f"{y.year}-12-31" else ""
+    app.console.print(
+        Text.assemble(
+            (f"{y.year}{so_far}: highest cost ", "muted"),
+            (fmt.money(y.max_cost, "CAD", privacy=privacy), "bright"),
+            (f" on {y.max_cost_date}" if y.max_cost_date else "", "muted"),
+            (", cost at ", "muted"),
+            (y.as_of, "muted"),
+            (" ", "muted"),
+            (fmt.money(y.year_end_cost, "CAD", privacy=privacy), ""),
+        )
+    )
+    app.console.print(_foreign_status(y))
+    t = render.table(
+        "Symbol",
+        ("Highest cost", "right"),
+        "On",
+        ("Year-end cost", "right"),
+        ("Gain", "right"),
+        ("Sales", "right"),
+        title=f"{y.year} foreign property, cost in CAD",
+    )
+    for h in y.holdings:
+        t.add_row(
+            Text(h.symbol + (" *" if h.incomplete else ""), style="bright"),
+            Text(fmt.money(h.max_cost, privacy=privacy)),
+            Text(h.max_cost_date or "—", style="muted"),
+            Text(fmt.money(h.year_end_cost, privacy=privacy), style="muted"),
+            _money(h.gain, privacy, sign=True) if h.dispositions else Text("—", style="muted"),
+            Text(str(h.dispositions) if h.dispositions else "—", style="muted"),
+        )
+    app.console.print(t)
+    if any(h.incomplete for h in y.holdings):
+        app.console.print(Text("* missing an FX rate", style="down"))
 
 
 def _issue_dicts(found: list[LedgerIssue], year: int | None) -> list[dict]:

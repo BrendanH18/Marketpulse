@@ -37,6 +37,7 @@ so and `marketpulse tax` prints it):
 
 from __future__ import annotations
 
+import re
 from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Sequence
@@ -44,11 +45,15 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from .ledger import LedgerIssue, replay, sort_key, transaction_currency
-from .models import EPSILON, Account, Transaction, TxnType
+from .models import EPSILON, Account, Asset, AssetClass, AssetKind, Transaction, TxnType
 
 # (ISO date, currency) -> units of the base currency per 1 unit of `currency`
 # on that date, or None if unknown. Must return 1.0 for the base currency.
 FxLookup = Callable[[str, str], float | None]
+
+# Called with (ISO date, open pools by symbol) once the last transaction of each ledger date
+# has been applied. The pools are the engine's own: read them, never change them.
+DayObserver = Callable[[str, dict[str, "AcbPool"]], None]
 
 # CRA's superficial-loss window: 30 calendar days either side of the sale.
 SUPERFICIAL_WINDOW_DAYS = 30
@@ -159,11 +164,14 @@ def compute(
     fx_on: FxLookup,
     *,
     today: str | None = None,
+    on_day: DayObserver | None = None,
 ) -> TaxReport:
     """Replay the ledger through pooled ACB and return every taxable event.
 
     `today` (ISO date) only decides whether a superficial-loss window is still
     open; it defaults to the real date and is a parameter so tests are stable.
+    `on_day`, if given, sees the pools at the end of every ledger date (see
+    `foreign_property`); it only observes, so the report is the same with or without it.
     """
     today = today or date.today().isoformat()
     report = TaxReport()
@@ -190,7 +198,11 @@ def compute(
             p.pending_denied = 0.0
 
     p: AcbPool | None  # the pool a transaction acts on (lookups may find none)
+    day = ""  # the ledger date being replayed
     for txn in ordered:
+        if on_day is not None and day and txn.date != day:
+            on_day(day, pools)
+        day = txn.date
         acct = accounts.get(txn.account_id)
         taxable = is_taxable(acct)
         t = txn.type
@@ -261,6 +273,8 @@ def compute(
         elif t is TxnType.TRANSFER and txn.target_account_id is not None:
             _transfer(txn, ccy, taxable, accounts, pools, pool, acquire, fx_on, report)
 
+    if on_day is not None and day:
+        on_day(day, pools)
     report.pools = {s: p for s, p in pools.items() if p.quantity > EPSILON}
     return report
 
@@ -471,3 +485,263 @@ def fx_lookup(series: dict[str, dict[str, float]], base: str) -> FxLookup:
         return series[currency.upper()][days[i - 1]] if i else None
 
     return lookup
+
+
+# ── Specified foreign property (form T1135) ───────────────────────────────────
+#
+# A Canadian resident files form T1135 for any year in which the total *cost amount* of their
+# specified foreign property was over $100,000 at any time. Under $250,000 all year, the
+# simplified method is enough; at $250,000 or more at any point, the detailed one is needed.
+# For shares and fund units the cost amount is the adjusted cost base, so the pools above
+# already hold it: `foreign_property` watches them at the end of every ledger date.
+#
+# What counts is decided per symbol (`is_foreign_property`). Registered accounts never count;
+# they are outside the pools to begin with. The thresholds are in Canadian dollars, so the
+# Tracker hands `foreign_property` CAD rates whatever the base currency is.
+
+T1135_THRESHOLD = 100_000.0  # file when the cost amount is over this at any time in the year
+T1135_DETAILED_THRESHOLD = 250_000.0  # at or over this at any time: the detailed method
+
+T1135_NOT_REQUIRED = "not_required"
+T1135_SIMPLIFIED = "simplified"
+T1135_DETAILED = "detailed"
+T1135_UNDETERMINED = "undetermined"  # under the threshold, but an FX rate is missing
+T1135_STATUS_LABELS = {
+    T1135_NOT_REQUIRED: "T1135 not required (cost stayed at or under $100,000)",
+    T1135_SIMPLIFIED: "T1135 likely required: simplified method (over $100,000, under $250,000 all year)",
+    T1135_DETAILED: "T1135 likely required: detailed method (cost reached $250,000)",
+    T1135_UNDETERMINED: "T1135 undetermined: an FX rate is missing, so the cost may be over $100,000",
+}
+
+# Yahoo suffixes of Canadian listings: TSX, TSX Venture, Cboe Canada (NEO) and the CSE.
+CANADIAN_SUFFIXES = frozenset({"TO", "V", "NE", "CN"})
+# Crypto and currency pairs (BTC-USD, ETH-CAD): not specified foreign property.
+_PAIR = re.compile(r"-[A-Z]{3}$")
+# Asset classes left out by default: crypto, and cash-like holdings such as money market funds.
+_EXCLUDED_CLASSES = frozenset({AssetClass.CRYPTO, AssetClass.CASH})
+
+FOREIGN_PROPERTY_NOTES = [
+    "Estimate only, not tax advice: confirm with CRA's T1135 guide or a tax professional.",
+    "Cost amount is your adjusted cost base in CAD, in non-registered accounts only.",
+    "Foreign means listed outside Canada; `marketpulse asset foreign SYMBOL yes|no` corrects a symbol.",
+]
+
+
+def is_foreign_property(symbol: str, asset: Asset | None = None) -> bool:
+    """Whether a symbol is specified foreign property, by where it is listed.
+
+    An asset's `foreign_property` setting wins. Otherwise only market-priced symbols can be
+    foreign: no Yahoo suffix (a US listing) or a non-Canadian one (.L, .DE, ...) is foreign,
+    while .TO, .V, .NE and .CN listings are Canadian. That is why a Canadian-listed ETF holding
+    US stocks doesn't count. Crypto, currency pairs, indices, cash-like, accrual-priced fixed-income and
+    manually valued assets don't count unless set to.
+
+    The listing is only a proxy for the issuer's residence: a US company's shares bought on
+    the TSX are foreign property, and a Canadian company's bought in New York aren't. The
+    per-asset setting is for those.
+    """
+    if asset is not None and asset.foreign_property is not None:
+        return asset.foreign_property
+    if asset is not None and (asset.kind is not AssetKind.MARKET or asset.asset_class in _EXCLUDED_CLASSES):
+        return False
+    sym = symbol.strip().upper()
+    if not sym or sym.startswith("^") or "=" in sym or _PAIR.search(sym):
+        return False
+    _, dot, suffix = sym.rpartition(".")
+    return not dot or suffix not in CANADIAN_SUFFIXES
+
+
+@dataclass
+class ForeignHolding:
+    """One specified foreign property in one year. Amounts are cost amounts (ACB)."""
+
+    symbol: str
+    max_cost: float = 0.0  # the highest end-of-day cost during the year
+    max_cost_date: str = ""  # the day it was first reached ("" if never held)
+    year_end_cost: float = 0.0  # cost at the end of the year (or at `as_of` for the current year)
+    gain: float = 0.0  # gain (loss) on the year's dispositions, as reported (complete ones only)
+    dispositions: int = 0
+    incomplete: bool = False  # an FX rate behind its cost or a disposition was missing
+
+
+@dataclass
+class ForeignPropertyYear:
+    """Specified foreign property held in taxable accounts during one calendar year."""
+
+    year: int
+    as_of: str  # December 31, or today for a year still in progress
+    currency: str = "CAD"  # the currency the amounts are in (the fx_on callback's)
+    max_cost: float = 0.0  # the highest total end-of-day cost during the year
+    max_cost_date: str = ""  # the day it was first reached ("" if nothing was held)
+    year_end_cost: float = 0.0
+    # True when an FX rate was missing: some cost is then left out, so totals may be too low.
+    incomplete: bool = False
+    holdings: list[ForeignHolding] = field(default_factory=list)
+
+    @property
+    def status(self) -> str:
+        """Whether form T1135 looks required, and which method: one of the T1135_* values."""
+        cost = round(self.max_cost, 2)  # to the cent, so float dust can't cross a threshold
+        if cost >= T1135_DETAILED_THRESHOLD:
+            return T1135_DETAILED
+        if cost > T1135_THRESHOLD:
+            return T1135_SIMPLIFIED
+        return T1135_NOT_REQUIRED
+
+    @property
+    def label(self) -> str:
+        """The assessment in words."""
+        return T1135_STATUS_LABELS[self.assessment]
+
+    @property
+    def assessment(self) -> str:
+        """`status`, or "undetermined" when it says not required but an FX rate is missing."""
+        return T1135_UNDETERMINED if self.incomplete and self.status == T1135_NOT_REQUIRED else self.status
+
+    @property
+    def gain(self) -> float:
+        return sum((h.gain for h in self.holdings), 0.0)
+
+
+# End of one ledger date: {symbol: (cost, incomplete)} for every foreign pool still held.
+_ForeignDay = tuple[str, dict[str, tuple[float, bool]]]
+
+
+@dataclass
+class _ForeignLedger:
+    """One replay's worth of what `_foreign_year` needs for any year."""
+
+    days: list[_ForeignDay]
+    dispositions: list[Disposition]  # of foreign property, in replay order
+    bought: dict[str, list[str]]  # dates of taxable purchases (and DRIPs), by symbol
+
+
+def _foreign_replay(
+    transactions: Sequence[Transaction],
+    accounts: dict[int, Account],
+    assets: dict[str, Asset],
+    fx_on: FxLookup,
+    today: str,
+) -> _ForeignLedger:
+    """Replay the ledger once, recording the foreign pools at the end of every ledger date."""
+    verdicts: dict[str, bool] = {}
+
+    def foreign(symbol: str) -> bool:
+        if symbol not in verdicts:
+            verdicts[symbol] = is_foreign_property(symbol, assets.get(symbol.upper()))
+        return verdicts[symbol]
+
+    days: list[_ForeignDay] = []
+
+    def observe(day: str, pools: dict[str, AcbPool]) -> None:
+        held = {s: (p.acb, p.incomplete) for s, p in pools.items() if p.quantity > EPSILON and foreign(s)}
+        days.append((day, held))
+
+    report = compute(transactions, accounts, fx_on, today=today, on_day=observe)
+    bought: dict[str, list[str]] = defaultdict(list)
+    for t in transactions:
+        if t.type in (TxnType.BUY, TxnType.DRIP) and is_taxable(accounts.get(t.account_id)):
+            bought[t.symbol].append(t.date)
+    return _ForeignLedger(days, [d for d in report.dispositions if foreign(d.symbol)], bought)
+
+
+def _foreign_year(year: int, ledger: _ForeignLedger, today: str, currency: str) -> ForeignPropertyYear:
+    days, dispositions = ledger.days, ledger.dispositions
+    start, as_of = f"{year}-01-01", min(f"{year}-12-31", today)
+    result = ForeignPropertyYear(year, as_of, currency)
+    if start > as_of:
+        return result  # a year that hasn't started: nothing has been held in it yet
+    # What was held on January 1 is whatever the last earlier ledger date left behind.
+    carried = [held for day, held in days if day < start][-1:]
+    timeline = [(start, carried[0])] if carried else []
+    timeline += [(day, held) for day, held in days if start <= day <= as_of]
+
+    # A sale with an FX rate missing (on it, or on a purchase behind it) has a guessed gain, so
+    # whether part of a loss was denied, and how much, is a guess too. A denied loss moves into
+    # the replacement shares' cost: when the sale's loss was denied, or it could have been (a
+    # taxable purchase within 30 days either side: what is still held at day 30 counts across
+    # every account, so a taxable lot sold before then can still take part of it), the symbol's
+    # cost and the gain on any later sale (in replay order) are incomplete from then on.
+    # Conservatively, this lasts even if the pool is later sold out and reopened. A loss denied
+    # on a move into a registered plan never enters taxable cost, so transfers don't count.
+    def could_be_superficial(d: Disposition) -> bool:
+        sold = date.fromisoformat(d.date)
+        window = timedelta(days=SUPERFICIAL_WINDOW_DAYS)
+        lo, hi = (sold - window).isoformat(), (sold + window).isoformat()
+        return any(lo <= day <= hi for day in ledger.bought.get(d.symbol, ()))
+
+    guessed: dict[str, str] = {}
+    unknown_gain: set[int] = set()  # dispositions (by position) whose gain rests on a guess
+    for i, d in enumerate(dispositions):
+        if d.symbol in guessed:
+            unknown_gain.add(i)
+        elif not d.complete and (d.superficial or (d.kind == "sale" and could_be_superficial(d))):
+            guessed[d.symbol] = d.date
+    holdings: dict[str, ForeignHolding] = {}
+    for day, held in timeline:
+        total = sum((cost for cost, _ in held.values()), 0.0)
+        if total > result.max_cost + EPSILON:
+            result.max_cost, result.max_cost_date = total, day
+        for symbol, (cost, incomplete) in held.items():
+            h = holdings.setdefault(symbol, ForeignHolding(symbol))
+            if cost > h.max_cost + EPSILON or not h.max_cost_date:
+                h.max_cost, h.max_cost_date = max(cost, h.max_cost), day
+            h.incomplete |= incomplete or (symbol in guessed and guessed[symbol] <= day)
+    final = timeline[-1][1] if timeline else {}
+    for symbol, (cost, _) in final.items():
+        holdings[symbol].year_end_cost = cost
+    result.year_end_cost = sum((cost for cost, _ in final.values()), 0.0)
+    for i, d in enumerate(dispositions):
+        if start <= d.date <= as_of:
+            h = holdings.setdefault(d.symbol, ForeignHolding(d.symbol))
+            h.dispositions += 1
+            if d.complete and i not in unknown_gain:
+                h.gain += d.allowed_gain
+            else:
+                h.incomplete = True
+    result.holdings = sorted(holdings.values(), key=lambda h: (-h.max_cost, h.symbol))
+    result.incomplete = any(h.incomplete for h in result.holdings)
+    return result
+
+
+def foreign_property(
+    transactions: Sequence[Transaction],
+    accounts: dict[int, Account],
+    assets: dict[str, Asset],
+    fx_on: FxLookup,
+    year: int,
+    *,
+    today: str | None = None,
+    currency: str = "CAD",
+) -> ForeignPropertyYear:
+    """The cost of specified foreign property held during `year`, for form T1135.
+
+    Replays the ledger through the same pooled ACB as `compute` (so registered accounts are
+    left out and every purchase is converted at its own date's rate) and totals the foreign
+    pools at the end of every day. `fx_on` must give rates in `currency`, which should be CAD
+    because the T1135 thresholds are. A year still in progress runs to `today`.
+    """
+    today = today or date.today().isoformat()
+    return _foreign_year(year, _foreign_replay(transactions, accounts, assets, fx_on, today), today, currency)
+
+
+def foreign_property_years(
+    transactions: Sequence[Transaction],
+    accounts: dict[int, Account],
+    assets: dict[str, Asset],
+    fx_on: FxLookup,
+    *,
+    today: str | None = None,
+    currency: str = "CAD",
+) -> list[ForeignPropertyYear]:
+    """`foreign_property` for every year in which foreign property was held or sold, newest
+    first, from a single replay. Years holding none are left out."""
+    today = today or date.today().isoformat()
+    ledger = _foreign_replay(transactions, accounts, assets, fx_on, today)
+    days, dispositions = ledger.days, ledger.dispositions
+    seen = [day for day, held in days if held and day <= today] + [d.date for d in dispositions if d.date <= today]
+    if not seen:
+        return []
+    first, last = int(min(seen)[:4]), int(today[:4])
+    found = (_foreign_year(y, ledger, today, currency) for y in range(last, first - 1, -1))
+    return [y for y in found if y.holdings]

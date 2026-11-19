@@ -29,7 +29,13 @@ from .ledger import RoomStatus
 from .market import PRIMARY, SearchResult
 from .models import Account, Bar, Quote, Transaction, TxnType
 from .providers import provider_label
-from .tax import DENIED_REGISTERED, Disposition, TaxReport
+from .tax import (
+    DENIED_REGISTERED,
+    T1135_NOT_REQUIRED,
+    Disposition,
+    ForeignPropertyYear,
+    TaxReport,
+)
 from .themes import OMARCHY_PALETTES, Palette, palette_from_colors, pretty_name
 from .valuation import Breakdown, PortfolioView, PositionView
 
@@ -668,6 +674,31 @@ def _disposition_note(r: Disposition) -> Text:
     else:
         style = "muted"
     return Text(disposition_note(r), style=style)
+
+
+def foreign_property_line(
+    years: Sequence[ForeignPropertyYear], year: int | None = None, *, privacy: bool = False
+) -> Text | None:
+    """One line on specified foreign property (form T1135) for the tax view: `year`'s, or the
+    newest year's. None when the ledger never held any."""
+    if not years:
+        return None
+    focus = next((y for y in years if y.year == year), None) if year is not None else years[0]
+    if focus is None:
+        return Text(f"Foreign property (T1135), {year}: none in non-registered accounts.\n", style="muted")
+    line = Text.assemble(
+        (f"Foreign property (T1135), {focus.year}: highest cost ", "muted"),
+        (fmt.money(focus.max_cost, "CAD", privacy=privacy), "bright"),
+        (f" on {focus.max_cost_date}" if focus.max_cost_date else "", "muted"),
+        (" · ", "muted"),
+        (focus.label, "muted" if focus.status == T1135_NOT_REQUIRED and not focus.incomplete else "warn"),
+    )
+    if focus.incomplete:
+        line.append(" · an FX rate is missing, so this may be too low", style="down")
+    line.append(
+        f"\nEstimate, not tax advice: `marketpulse tax foreign-property -y {focus.year}` details it.\n", "muted"
+    )
+    return line
 
 
 def tax_group(

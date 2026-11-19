@@ -64,7 +64,8 @@ output. It conflicts with JSON, CSV, and count output. Empty symbol output is
 empty stdout. List `--fields` requires JSON or CSV; show `--fields` also supports
 human output. Repeat the option to preserve a chosen column order; duplicates
 are removed. Accepted fields are `symbol`, `kind`, `name`, `asset_class`,
-`currency`, `rate`, `compounding`, `start_date`, and `maturity_date`. Existing JSON
+`currency`, `rate`, `compounding`, `start_date`, `maturity_date`, and
+`foreign_property`. Existing JSON
 page metadata remains available around projected list rows.
 
 Human `asset show` masks the rate in privacy mode, including projected output.
