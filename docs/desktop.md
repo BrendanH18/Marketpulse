@@ -190,9 +190,10 @@ v99.0.0.
   estimates, not tax advice: check them against your T5008, T3, and T5 slips.
 - **Automation:** what runs while the app is open, a link to Settings, backup action, errors,
   snapshot/backup status, and the app and backend versions. **Backups** lists the
-  backups on this Mac with **Restore…** and **Show in Finder**. A restore asks for
-  confirmation, saves your current portfolio as a backup first, refuses a damaged
-  file or one from a newer version without changing anything, and reloads the window
+  backups on this Mac with **Restore…** and **Show in Finder**. The restore preview
+  validates the backup and compares account counts, transaction counts, and latest
+  transaction dates. After confirmation, the app backs up your current portfolio,
+  restores the selected backup, and reloads the window
   ([details](data.md#restore-a-database)).
 
 Use **⌘N** to record a transaction: a buy, sell, deposit, withdrawal, dividend,

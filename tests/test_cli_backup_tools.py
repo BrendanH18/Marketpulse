@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sqlite3
+from contextlib import closing
 from hashlib import sha256
 
 import pytest
@@ -200,3 +201,81 @@ def test_restore_preview_rejects_device_file():
     result = CliRunner().invoke(main, ["backup", "restore", "--dry-run", os.devnull], catch_exceptions=False)
     assert result.exit_code == 1
     assert "not a regular file" in result.output
+
+
+def test_desktop_restore_preview_returns_json_without_changing_files():
+    live = Store()
+    try:
+        account = live.add_account(Account(name="Fictional Maple"))
+        # An old backup would trigger a daily backup if the command opened the tracker.
+        source = live.backup(dest=live.backup_dir / "marketpulse-20240101-090000-manual.db")
+        live.add_account(Account(name="Fictional Cedar"))
+        live.add_transaction(Transaction(account.saved_id, TxnType.DEPOSIT, date="2024-01-02", amount=40))
+    finally:
+        live.close()
+    inventory = set(live.path.parent.rglob("*"))
+    files = (live.path, source)
+    before = {p: p.read_bytes() for p in files}
+
+    result = CliRunner().invoke(main, ["desktop", "restore-preview", "--", str(source)], catch_exceptions=False)
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert re.fullmatch(r"[0-9a-f]{64}", payload.pop("fingerprint"))
+    assert payload == {
+        "version": 1,
+        "current": {"accounts": 2, "transactions": 1, "latest_date": "2024-01-02"},
+        "backup": {"accounts": 1, "transactions": 0, "latest_date": None},
+    }
+    assert set(live.path.parent.rglob("*")) == inventory
+    assert {p: p.read_bytes() for p in files} == before
+
+
+def test_desktop_restore_preview_rejects_invalid_backup(tmp_path):
+    source = tmp_path / "invalid backup.db"
+    source.write_bytes(b"fictional invalid backup")
+
+    result = CliRunner().invoke(main, ["desktop", "restore-preview", "--", str(source)], catch_exceptions=False)
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "isn't a readable database" in result.stderr
+    assert source.read_bytes() == b"fictional invalid backup"
+    assert not (tmp_path / "data").exists()
+
+
+def test_restore_refuses_replacement_backup_after_desktop_preview(tmp_path):
+    runner = CliRunner()
+    with closing(Store()) as live:
+        account = live.add_account(Account(name="Fictional Maple"))
+        live.add_transaction(Transaction(account.saved_id, TxnType.DEPOSIT, date="2024-01-02", amount=40))
+        source = live.backup(dest=tmp_path / "selected.db")
+        # Opening the tracker would start overdue maintenance and prune one of these copies.
+        for day in range(1, 15):
+            live.backup(dest=live.backup_dir / f"marketpulse-202401{day:02d}-090000-daily.db")
+        live.add_transaction(Transaction(account.saved_id, TxnType.DEPOSIT, date="2024-01-03", amount=20))
+        preview = runner.invoke(main, ["desktop", "restore-preview", "--", str(source)], catch_exceptions=False)
+        assert preview.exit_code == 0, preview.output
+        fingerprint = json.loads(preview.stdout)["fingerprint"]
+        restore_args = ["backup", "restore", "--yes", "--expect-fingerprint", fingerprint, "--", str(source)]
+
+        # Another valid ledger can take the original path and even match the displayed counts and date.
+        original = source.replace(tmp_path / "original.db")
+        with closing(Store(tmp_path / "other.db")) as other:
+            other_account = other.add_account(Account(name="Fictional Cedar"))
+            other.add_transaction(Transaction(other_account.saved_id, TxnType.DEPOSIT, date="2024-01-02", amount=80))
+            other.backup(dest=source)
+
+        before = live.backups()
+        rejected = runner.invoke(main, restore_args, catch_exceptions=False)
+        assert rejected.exit_code == 1
+        assert "changed since the preview" in rejected.stderr
+        assert [a.name for a in live.accounts()] == ["Fictional Maple"]
+        assert [t.amount for t in live.transactions()] == [40, 20]
+        assert live.backups() == before
+
+        original.replace(source)
+        restored = runner.invoke(main, restore_args, catch_exceptions=False)
+        assert restored.exit_code == 0, restored.output
+        assert [t.amount for t in live.transactions()] == [40]
+        assert any(live.backup_reason(path) == "pre-restore" for path in live.backups())

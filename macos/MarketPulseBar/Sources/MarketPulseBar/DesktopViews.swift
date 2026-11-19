@@ -57,7 +57,7 @@ enum Workspace: String, CaseIterable, Identifiable {
 
 enum DesktopSheet: String, Identifiable {
   case transaction, editTransaction, account, editAccount, room, alert, welcome
-  case fixedAsset, manualAsset, valuation, assetClass, targets
+  case fixedAsset, manualAsset, valuation, assetClass, targets, restoreBackup
   var id: String { rawValue }
 }
 
@@ -172,7 +172,13 @@ struct PortfolioWindow: View {
         .disabled(!model.canEdit).keyboardShortcut("n")
       }
     }
-    .sheet(item: $draft.sheet, onDismiss: presentWelcome) { item in
+    .sheet(
+      item: $draft.sheet,
+      onDismiss: {
+        draft.pendingRestore = nil
+        presentWelcome()
+      }
+    ) { item in
       switch item {
       case .transaction: TransactionSheet(model: model)
       case .editTransaction: TransactionSheet(model: model, editing: draft.editing)
@@ -185,6 +191,10 @@ struct PortfolioWindow: View {
       case .valuation: AssetSheet(model: model, kind: "VALUE", symbol: draft.assetSymbol)
       case .assetClass: AssetClassSheet(model: model, symbol: draft.assetSymbol)
       case .targets: TargetsSheet(model: model)
+      case .restoreBackup:
+        if let selection = draft.pendingRestore {
+          RestoreBackupSheet(model: model, backup: selection.backup, path: selection.path)
+        }
       case .welcome:
         WelcomeSheet(
           model: model,
@@ -349,7 +359,11 @@ struct PortfolioWindow: View {
     case .watchlist: WatchlistWorkspace(model: model, addAlert: { draft.sheet = .alert })
     case .income: IncomeWorkspace(payload: p)
     case .tax: TaxWorkspace(model: model)
-    case .automation: AutomationWorkspace(model: model)
+    case .automation:
+      AutomationWorkspace(model: model) { backup, path in
+        draft.pendingRestore = (backup, path)
+        draft.sheet = .restoreBackup
+      }
     }
   }
 
@@ -1576,6 +1590,8 @@ private final class TaxWorkspaceDraft: ObservableObject {
 
 private struct AutomationWorkspace: View {
   @ObservedObject var model: StatusModel
+  let previewRestore: (BackupInfo, String) -> Void
+
   var body: some View {
     ScrollView {
       VStack(spacing: 20) {
@@ -1609,7 +1625,7 @@ private struct AutomationWorkspace: View {
           }
         }
         QuoteProvidersPanel(model: model)
-        BackupsPanel(model: model)
+        BackupsPanel(model: model, previewRestore: previewRestore)
         Surface(String(localized: "Preferences")) {
           automationRow(
             "gearshape", String(localized: "Refresh interval, launch at login, and more"),
@@ -1805,9 +1821,10 @@ private struct QuoteProvidersPanel: View {
   }
 }
 
-/// The backups folder, with a confirmed Restore for each backup.
+/// The backups folder, with a restore preview for each backup.
 private struct BackupsPanel: View {
   @ObservedObject var model: StatusModel
+  let previewRestore: (BackupInfo, String) -> Void
   @StateObject private var draft = BackupsPanelDraft()
   private static let collapsedCount = 6
 
@@ -1845,7 +1862,10 @@ private struct BackupsPanel: View {
             Image(systemName: "magnifyingglass")
           }.buttonStyle(.plain).help("Show \(backup.name) in Finder")
             .accessibilityLabel("Show the backup from \(backup.when) in Finder")
-          Button("Restore…") { draft.pending = backup }.disabled(!model.canEdit)
+          Button("Restore…") {
+            guard let folder else { return }
+            previewRestore(backup, URL(fileURLWithPath: folder).appendingPathComponent(backup.name).path)
+          }.disabled(!model.canEdit || folder == nil)
             .accessibilityLabel("Restore the backup from \(backup.when)")
         }
       }
@@ -1864,21 +1884,6 @@ private struct BackupsPanel: View {
       ).font(.system(size: 11)).foregroundStyle(Studio.muted).fixedSize(
         horizontal: false, vertical: true)
     }
-    .confirmationDialog(
-      draft.pending.map { String(localized: "Restore the backup from \($0.when)?") }
-        ?? String(localized: "Restore this backup?"),
-      isPresented: Binding(get: { draft.pending != nil }, set: { if !$0 { draft.pending = nil } }),
-      presenting: draft.pending
-    ) { backup in
-      Button("Restore", role: .destructive) {
-        Task { await model.restoreBackup(backup) }
-      }
-      Button("Cancel", role: .cancel) {}
-    } message: { backup in
-      Text(
-        "Your portfolio will be replaced with this backup (\(backup.reasonLabel.localizedLowercase)). Anything recorded after \(backup.when) will no longer appear. Your current portfolio is saved as a new backup first, so you can undo this."
-      )
-    }
   }
 
   private func reveal(_ url: URL) {
@@ -1887,12 +1892,12 @@ private struct BackupsPanel: View {
 }
 
 private final class BackupsPanelDraft: ObservableObject {
-  @Published var pending: BackupInfo?
   @Published var showAll = false
 }
 
 private final class PortfolioWindowDraft: ObservableObject {
   @Published var sheet: DesktopSheet?
+  @Published var pendingRestore: (backup: BackupInfo, path: String)?
   /// The entry the `.editTransaction` sheet changes.
   @Published var editing: DesktopTransaction?
   /// The account the `.editAccount` sheet changes.

@@ -320,9 +320,15 @@
 "Show in Finder" = "Afficher dans le Finder";
 "Restoring replaces your portfolio with the backup. Your current portfolio is backed up first, so a restore can be undone by restoring that backup. Settings aren't part of a backup and don't change." = "La restauration remplace votre portefeuille par la sauvegarde. Votre portefeuille actuel est d’abord sauvegardé, alors vous pouvez annuler une restauration en restaurant cette sauvegarde. Les réglages ne font pas partie d’une sauvegarde et ne changent pas.";
 "Restore the backup from %@?" = "Restaurer la sauvegarde du %@?";
-"Restore this backup?" = "Restaurer cette sauvegarde?";
 "Restore" = "Restaurer";
 "Your portfolio will be replaced with this backup (%@). Anything recorded after %@ will no longer appear. Your current portfolio is saved as a new backup first, so you can undo this." = "Votre portefeuille sera remplacé par cette sauvegarde (%@). Ce qui a été inscrit après le %@ n’apparaîtra plus. Votre portefeuille actuel est d’abord enregistré comme nouvelle sauvegarde; vous pourrez donc annuler.";
+"Checking the backup…" = "Vérification de la sauvegarde…";
+"Current portfolio" = "Portefeuille actuel";
+"Backup" = "Sauvegarde";
+"Transactions" = "Opérations";
+"Latest transaction date" = "Date de la dernière opération";
+"%@, %@, %@" = "%@, %@, %@";
+"Couldn't read the restore preview." = "Impossible de lire l’aperçu de la restauration.";
 
 
 /* ==== DesktopForms.swift, SettingsWindow.swift ==== */

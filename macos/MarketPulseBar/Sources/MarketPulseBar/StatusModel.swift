@@ -480,18 +480,27 @@ final class StatusModel: ObservableObject {
     }
   }
 
+  /// Reads the comparison without startup maintenance or changes to either file.
+  func previewRestore(from path: String) async throws -> RestorePreview {
+    let output = try await CLI.run(["desktop", "restore-preview", "--", path])
+    do {
+      return try RestorePreview.decode(output)
+    } catch {
+      throw CLIError.failed(String(localized: "Couldn't read the restore preview."))
+    }
+  }
+
   /// Replaces the ledger with a backup; the backend saves the current one as a pre-restore
   /// backup first and refuses a damaged or newer file without changing anything.
-  func restoreBackup(_ backup: BackupInfo) async {
-    guard !demo && !saving, let folder = desktop?.storage?.backupDir else { return }
+  func restoreBackup(_ backup: BackupInfo, from path: String, fingerprint: String) async {
+    guard canEdit else { return }
     saving = true
     defer { saving = false }
     // A refresh still running could record today's snapshot, valued from the ledger being
     // replaced, into the restored one. `saving` keeps new refreshes from starting meanwhile.
     while realReloads > 0 { try? await Task.sleep(nanoseconds: 50_000_000) }
-    let path = URL(fileURLWithPath: folder).appendingPathComponent(backup.name).path
     do {
-      _ = try await CLI.run(["backup", "restore", "--yes", "--", path])
+      _ = try await CLI.run(["backup", "restore", "--yes", "--expect-fingerprint", fingerprint, "--", path])
       errorMessage = nil
       message = String(
         localized: "Restored the backup from \(backup.when). Your previous portfolio was saved as a backup first.")

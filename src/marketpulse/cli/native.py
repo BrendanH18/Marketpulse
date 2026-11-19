@@ -72,6 +72,22 @@ def desktop_snapshot(app: App, fresh: bool, demo: bool) -> None:
         fail(str(e))
 
 
+@desktop.command("restore-preview")
+@click.argument("path", type=click.Path(dir_okay=False, path_type=Path))
+def desktop_restore_preview(path: Path) -> None:
+    """Compare a backup with the current ledger without opening the tracker or restoring."""
+    from dataclasses import asdict
+
+    from ..config import data_dir
+    from ..db import RestoreError, preview_restore
+
+    try:
+        preview = preview_restore(data_dir(create=False) / "marketpulse.db", path)
+    except RestoreError as e:
+        fail(str(e))
+    click.echo(json.dumps({"version": 1, **asdict(preview)}))
+
+
 @desktop.command("tax")
 @click.option("--demo", is_flag=True, help="The fictional demo portfolio's report; no real ledger or network access.")
 @click.pass_obj

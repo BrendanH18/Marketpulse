@@ -991,8 +991,11 @@ def _restore_candidates(directory: Path, started: datetime) -> list[Path]:
 @click.option("--latest", is_flag=True, help="Restore the newest backup in the backups directory.")
 @click.option("-y", "--yes", is_flag=True, help="Don't ask for confirmation.")
 @click.option("--dry-run", is_flag=True, help="Compare the current ledger and backup without restoring.")
+@click.option("--expect-fingerprint", hidden=True)
 @pass_app
-def backup_restore(app: App, path: str | None, latest: bool, yes: bool, dry_run: bool) -> None:
+def backup_restore(
+    app: App, path: str | None, latest: bool, yes: bool, dry_run: bool, expect_fingerprint: str | None
+) -> None:
     """Replace the ledger with a backup (a PATH, or a file name from `backup list`).
 
     \b
@@ -1009,7 +1012,7 @@ def backup_restore(app: App, path: str | None, latest: bool, yes: bool, dry_run:
         fail("Give a backup to restore, or --latest.")
     # Opening the ledger may take the daily backup, a copy of the ledger as it is now.
     started = datetime.now().replace(microsecond=0)
-    ledger = data_dir(create=False) / "marketpulse.db" if dry_run else app.store.path
+    ledger = data_dir(create=False) / "marketpulse.db" if dry_run or expect_fingerprint is not None else app.store.path
     directory = ledger.parent / BACKUP_DIRNAME
     if latest:
         candidates = _restore_candidates(directory, started)
@@ -1028,25 +1031,30 @@ def backup_restore(app: App, path: str | None, latest: bool, yes: bool, dry_run:
     shown = source.name if source.parent == directory else str(source.resolve())
     if dry_run:
         try:
-            current, saved = preview_restore(ledger, source)
+            preview = preview_restore(ledger, source)
         except RestoreError as e:
             fail(str(e))
         click.echo(f"Restore preview: {shown}{when}")
         table = render.table("Metric", "Current", "Backup")
+        current, saved = preview.current, preview.backup
         table.add_row("Accounts", str(current.accounts), str(saved.accounts))
         table.add_row("Transactions", str(current.transactions), str(saved.transactions))
         table.add_row("Latest transaction date", Text(current.latest_date or "—"), Text(saved.latest_date or "—"))
         app.console.print(table)
         return
-    store = app.store
     if not yes and not click.confirm(
-        f"Replace the ledger in {store.path.parent} with {shown}{when}? The current ledger is backed up first."
+        f"Replace the ledger in {ledger.parent} with {shown}{when}? The current ledger is backed up first."
     ):
         return
     try:
-        safety = store.restore(source)
+        if expect_fingerprint is None:
+            store = app.store
+            safety = store.restore(source)
+            accounts, txns = len(store.accounts(include_archived=True)), len(store.transactions())
+        else:
+            safety, summary = Store.restore_previewed(source, expect_fingerprint)
+            accounts, txns = summary.accounts, summary.transactions
     except RestoreError as e:
         fail(f"{str(e).rstrip('.')}. Nothing was changed.")
-    accounts, txns = len(store.accounts(include_archived=True)), len(store.transactions())
     app.ok(f"Restored {source.name}: {accounts} accounts, {txns} transactions.")
     app.console.print(Text(f"  previous ledger saved as {safety}", style="muted"))

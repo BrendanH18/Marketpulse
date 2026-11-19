@@ -122,8 +122,12 @@ prune older daily backups according to the retention policy above.
 
 ## Restore a database
 
-In the Mac app, open **Automation › Backups**, choose **Restore…** next to a backup,
-and confirm. From the command line:
+In the Mac app, open **Automation › Backups** and choose **Restore…** next to a backup.
+Review the current ledger and backup account counts, transaction counts, and latest
+transaction dates before confirming. Account counts include archived accounts.
+If the backup fails validation, the app shows the error and keeps Restore unavailable.
+If the backup changes while the preview is open, open the preview again before restoring.
+From the command line:
 
 ```bash
 marketpulse backup restore marketpulse-20261019-091500-daily.db   # a name from `backup list`

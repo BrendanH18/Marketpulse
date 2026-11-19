@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from hashlib import file_digest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -252,6 +253,35 @@ class LedgerSummary:
     latest_date: str | None
 
 
+@dataclass(frozen=True)
+class RestorePreview:
+    current: LedgerSummary
+    backup: LedgerSummary
+    fingerprint: str
+
+
+def _staged_fingerprint(path: Path) -> str:
+    with path.open("rb") as database:
+        return file_digest(database, "sha256").hexdigest()
+
+
+@contextmanager
+def _prepared_restore(current: Path, source: Path, fingerprint: str | None = None) -> Iterator[Path]:
+    if not source.is_file():
+        raise RestoreError(f"{source} doesn't exist or isn't a file.")
+    if source.resolve() == current.resolve():
+        raise RestoreError(f"{source} is the ledger itself.")
+    with TemporaryDirectory(prefix="marketpulse-restore-") as scratch:
+        staged = Path(scratch) / "marketpulse.db"
+        try:
+            _stage_restore(source, staged)
+            if fingerprint is not None and _staged_fingerprint(staged) != fingerprint:
+                raise RestoreError(f"{source.name} changed since the preview. Preview it again before restoring.")
+        except (OSError, sqlite3.Error) as e:
+            raise RestoreError(f"{source.name} couldn't be prepared for restore: {e}") from e
+        yield staged
+
+
 def _ledger_summary(path: Path) -> LedgerSummary:
     with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as conn:
         row = conn.execute("SELECT (SELECT COUNT(*) FROM accounts), COUNT(*), MAX(date) FROM transactions").fetchone()
@@ -286,7 +316,7 @@ def _preview_copy(source: Path, directory: Path) -> Path:
     return target
 
 
-def preview_restore(current: Path, source: Path) -> tuple[LedgerSummary, LedgerSummary]:
+def preview_restore(current: Path, source: Path) -> RestorePreview:
     """Read both summaries without running startup maintenance on the live database."""
     try:
         if current.exists() and source.is_file() and current.samefile(source):
@@ -297,7 +327,7 @@ def preview_restore(current: Path, source: Path) -> tuple[LedgerSummary, LedgerS
             before = LedgerSummary(0, 0, None)
             if current.exists():
                 before = _ledger_summary(_preview_copy(current, Path(scratch) / "current"))
-            return before, _ledger_summary(staged)
+            return RestorePreview(before, _ledger_summary(staged), _staged_fingerprint(staged))
     except (OSError, sqlite3.Error) as error:
         raise RestoreError(str(error)) from error
 
@@ -519,46 +549,50 @@ class Store:
         Any failure raises RestoreError and leaves the ledger as it was.
         """
         source = Path(source).expanduser()
-        if not source.is_file():
-            raise RestoreError(f"{source} doesn't exist or isn't a file.")
-        if source.resolve() == self.path.resolve():
-            raise RestoreError(f"{source} is the ledger itself.")
-        with TemporaryDirectory(prefix="marketpulse-restore-") as scratch:
-            staged = Path(scratch) / "marketpulse.db"
-            _stage_restore(source, staged)
+        with _prepared_restore(self.path, source) as staged:
+            return self._restore_staged(source, staged)
+
+    @classmethod
+    def restore_previewed(cls, source: Path, fingerprint: str) -> tuple[Path, LedgerSummary]:
+        """Verify the copy before opening the default ledger. Restore takes its own safety backup."""
+        current = data_dir(create=False) / "marketpulse.db"
+        with _prepared_restore(current, source, fingerprint) as staged, closing(cls()) as store:
+            safety = store._restore_staged(source, staged)
+            return safety, _ledger_summary(store.path)
+
+    def _restore_staged(self, source: Path, staged: Path) -> Path:
+        try:
+            Store(staged).close()  # brings the copy up to this build's schema
+        except (SchemaError, sqlite3.Error) as e:
+            raise RestoreError(f"{source.name} couldn't be upgraded for this version of MarketPulse: {e}") from e
+        with self._lock:
+            if self._in_transaction:
+                raise RuntimeError("Restore can't run inside a transaction.")
+            # ATTACH isn't allowed inside a transaction, so it comes first.
+            self._conn.execute("ATTACH DATABASE ? AS restored", (str(staged),))
+            safety: Path | None = None
+            step = "lock"
             try:
-                Store(staged).close()  # brings the copy up to this build's schema
-            except (SchemaError, sqlite3.Error) as e:
-                raise RestoreError(f"{source.name} couldn't be upgraded for this version of MarketPulse: {e}") from e
-            with self._lock:
-                if self._in_transaction:
-                    raise RuntimeError("Restore can't run inside a transaction.")
-                # ATTACH isn't allowed inside a transaction, so it comes first.
-                self._conn.execute("ATTACH DATABASE ? AS restored", (str(staged),))
-                safety: Path | None = None
-                step = "lock"
-                try:
-                    with self.transaction():
-                        step = "safety"
-                        safety = self.backup(reason="pre-restore")
-                        step = "swap"
-                        self._replace_from("restored")
-                        self.set_meta(RESTORE_ID_KEY, uuid4().hex)
-                except (OSError, sqlite3.Error) as e:
-                    # Rolled back: the safety copy is of a ledger that didn't change.
-                    if safety is not None:
-                        safety.unlink(missing_ok=True)
-                    raise RestoreError(
-                        {
-                            "lock": f"The ledger is busy in another MarketPulse window, so {source.name} "
-                            f"wasn't restored: {e}",
-                            "safety": f"Couldn't back up the current ledger first, so {source.name} "
-                            f"wasn't restored: {e}",
-                            "swap": f"{source.name} doesn't match this ledger's tables: {e}",
-                        }[step]
-                    ) from e
-                finally:
-                    self._conn.execute("DETACH DATABASE restored")
+                with self.transaction():
+                    step = "safety"
+                    safety = self.backup(reason="pre-restore")
+                    step = "swap"
+                    self._replace_from("restored")
+                    self.set_meta(RESTORE_ID_KEY, uuid4().hex)
+            except (OSError, sqlite3.Error) as e:
+                # Rolled back: the safety copy is of a ledger that didn't change.
+                if safety is not None:
+                    safety.unlink(missing_ok=True)
+                raise RestoreError(
+                    {
+                        "lock": f"The ledger is busy in another MarketPulse window, so {source.name} "
+                        f"wasn't restored: {e}",
+                        "safety": f"Couldn't back up the current ledger first, so {source.name} wasn't restored: {e}",
+                        "swap": f"{source.name} doesn't match this ledger's tables: {e}",
+                    }[step]
+                ) from e
+            finally:
+                self._conn.execute("DETACH DATABASE restored")
         assert safety is not None
         return safety
 
