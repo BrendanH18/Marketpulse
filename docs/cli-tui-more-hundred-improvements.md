@@ -2,10 +2,12 @@
 
 [User guide](usage.md) · [Data & scratch paths](data.md) · [Previous batch](cli-tui-hundred-improvements.md)
 
-This batch adds 100 distinct, opt-in improvements across five areas: recording
+This batch adds 100 distinct improvements across five areas: recording
 and realized gains, the portfolio overview commands, quotes, charts and the
 ledger, automation and foreign property reporting, and the terminal app (TUI).
-Every addition keeps existing defaults. ACB, FX, tax, valuation and
+The 80 CLI additions are opt-in and keep existing defaults; in the terminal app
+only new keys and palette entries are added, plus today's change in the holdings
+footer (item 100). ACB, FX, tax, valuation and
 contribution-room calculations, `status --json` and the desktop bridge are
 unchanged. No new network endpoints are added, archived accounts stay hidden in
 ordinary portfolio views, and stale quotes never fire alerts or record snapshots.
@@ -75,7 +77,7 @@ ordinary portfolio views, and stale quotes never fire alerts or record snapshots
 55. `search --canadian` — Keep only Canadian listings: TSX (`.TO`), TSX Venture (`.V`), CSE (`.CN`) and Cboe Canada (`.NE`) symbols.
 56. `activity --jsonl` — Print the matching page of raw, unmasked transaction records as JSON Lines.
 57. `activity --ids` — Print only the matching transaction IDs, one per line, for piping into `txn show` or `txn delete`.
-58. `activity --totals` — Sum recorded amounts and fees of every matching entry per native currency, before pagination (table, `--json` or `--csv`; masked in privacy mode).
+58. `activity --totals` — Sum recorded amounts and fees of every matching entry per native currency, before pagination (table, `--json` or `--csv`); the table is masked in privacy mode, while `--json` and `--csv` give raw figures like the other machine-readable outputs.
 59. `activity --last-days N` — Include only entries dated within the last `N` days; with `--since`, the later date wins.
 60. `txn check --summary` — Count the reported ledger issues by code instead of listing them (works with `--json`, `--code` and `-a`; still exits 1 when issues exist).
 
@@ -121,6 +123,6 @@ ordinary portfolio views, and stale quotes never fire alerts or record snapshots
 95. **Save watchlist sort (`ctrl+s`)** — Save the watchlist's current sort (for example by symbol) as its list order, so `J` / `K` reorder from there.
 96. **Watch every held symbol** — Command palette action that adds every market-priced holding missing from the watchlist.
 97. **Copy chart history as CSV** — Command palette action that copies the open chart's bars (date or time, open, high, low, close, volume) as CSV.
-98. **Tax and income year choices** — Command palette entries *Tax year: 2024* and *Income year: 2024* for each year with data; `-` / `+` can only step through them.
+98. **Tax and income year choices** — Command palette entries *Tax year: 2024* and *Income year: 2024* for each year in the tax report once it has loaded, and each year with income; `-` / `+` can only step through them.
 99. **Direct mode choices** — Command palette entries such as *Holdings mode: losers*, *Activity mode: income*, *Alerts mode: paused*, *Movers: unrealized* and *Activity window: ytd*, which `M`, `m` and `%` can only cycle through.
 100. **Today's change in the holdings footer** — The holdings pane footer adds today's change in the base currency for the positions listed, for example `· today -$50` (masked in privacy mode).

@@ -238,6 +238,7 @@ def test_percent_cycles_the_activity_date_window(tracker, store):
             await pilot.press("escape")
             assert app.activity_window == "all" and len(keys(table)) == 6
             assert extras.window_start("ytd", date(2025, 6, 1)) == "2025-01-01"
+            assert extras.window_start("30d", date(2025, 6, 30)) == "2025-06-01"  # today and the 29 days before
             assert extras.window_start("all") is None
 
     run(scenario())

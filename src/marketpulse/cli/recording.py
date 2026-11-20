@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields, replace
@@ -23,6 +24,7 @@ from rich.text import Text
 from rich.theme import Theme as RichTheme
 
 from .. import fmt
+from ..config import data_dir
 from ..ledger import LedgerState, replay
 from ..market import MarketError
 from ..models import EPSILON, Account, Transaction, TxnType, parse_date
@@ -105,7 +107,7 @@ class _Units(click.ParamType):
                 pct = float(m[1])
                 if not 0 < pct <= 100:
                     self.fail(f"{value!r} must be a percentage above 0 and at most 100.", param, ctx)
-                return f"{pct:g}%"
+                return f"{pct!r}%"
         return click.FLOAT.convert(value, param, ctx)
 
 
@@ -312,12 +314,26 @@ def _check_combinations(extras: Extras, *, request_id: object) -> None:
         target = Path(extras.receipt_file).expanduser()
         if not extras.receipt_file.strip() or target.is_dir() or not target.parent.is_dir():
             raise click.BadParameter("must be a file in an existing folder.", param_hint="'--receipt-file'")
+        if _is_ledger_file(target):
+            raise click.BadParameter("must not be the ledger database.", param_hint="'--receipt-file'")
     if request_id is not None and not extras.plain:
         given = [flag for name, flag, _ in _FLAGS if getattr(extras, name)]
         given += ["--total"] * (extras.total is not None) + ["--per-unit"] * extras.per_unit
         given += ["--receipt-file"] * (extras.receipt_file is not None)
         given += [flag for name, (flag, _) in _OPTIONAL.items() if getattr(extras, name) not in (False, None)]
         clash("--request-id", given[0])
+
+
+def _is_ledger_file(target: Path) -> bool:
+    """True when TARGET is the SQLite ledger or one of its sidecar files (also through links)."""
+    ledger = data_dir(create=False) / "marketpulse.db"
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        candidate = Path(f"{ledger}{suffix}")
+        if target.resolve() == candidate.resolve():
+            return True
+        if target.exists() and candidate.exists() and os.path.samefile(target, candidate):
+            return True
+    return False
 
 
 def _extras() -> Extras:
@@ -640,7 +656,10 @@ def _max_units(app: App, acct: Account, ccy: str, day: str, price: float, fees: 
     units = max(math.floor((cash - (0 if fee_pct is not None else fees)) / price + 1e-9), 0)
     if fee_pct is not None:
         units = max(math.floor(cash / (price * (1 + fee_pct / 100)) + 1e-9), 0)
-    while units > 0 and cost(units) > cash + 0.005:
+    # The estimate ignores the fee's rounding to the cent, so settle on the exact largest count.
+    while cost(units + 1) <= cash + 1e-9:
+        units += 1
+    while units > 0 and cost(units) > cash + 1e-9:
         units -= 1
     if units < 1:
         fail(f"{fmt.money(cash)} {ccy} cash in {acct.name} on {day} doesn't cover one unit at {fmt.price(price)}.")
@@ -709,7 +728,9 @@ def _trade(
         fee_detail = f" (fees {fmt.money(fees)} {ccy})"
     if ex.net is not None:
         gross = quantity * price
-        fees = round(ex.net - gross if kind is TxnType.BUY else gross - ex.net, 2)
+        fees = ex.net - gross if kind is TxnType.BUY else gross - ex.net
+        if abs(fees) < 1e-9:
+            fees = 0.0
         if fees < 0:
             side = "below" if kind is TxnType.BUY else "above"
             fail(
@@ -717,7 +738,7 @@ def _trade(
                 "so the fees can't be worked out."
             )
         fee_detail = f" (fees {fmt.money(fees)} {ccy})"
-    if ex.max_value is not None and quantity * price > ex.max_value + 0.005:
+    if ex.max_value is not None and quantity * price > ex.max_value + 1e-9:
         fail(
             f"Not recorded: {fmt.qty(quantity)} × {fmt.price(price)} is {fmt.money(quantity * price)} {ccy}, "
             f"above --max-value {fmt.money(ex.max_value)}."
@@ -817,7 +838,8 @@ def _cash_event(
             fail(f"No {ccy} cash in {acct.name} on {day}.")
         amount = round(balance, 2)
         if ex.leave is not None:
-            amount = round(balance - ex.leave, 2)
+            # Round down to the cent so the account keeps at least --leave.
+            amount = math.floor((balance - ex.leave) * 100 + 1e-6) / 100
             if amount <= 0.005:
                 fail(
                     f"{acct.name} has {fmt.money(balance)} {ccy} on {day}, not more than --leave {fmt.money(ex.leave)}."

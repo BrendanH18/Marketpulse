@@ -297,6 +297,9 @@ def test_59_activity_last_days(cli, ledger):
     ids = {int(line) for line in ok(cli("activity", "--ids", "--last-days", "30")).splitlines()}
     assert ids == {ledger[2].id, ledger[3].id}
     assert ok(cli("activity", "--count", "--last-days", "365")) == "4\n"
+    # N days means today and the N-1 days before it: the entry from three days ago needs N = 4.
+    assert ok(cli("activity", "--count", "--last-days", "3")) == "0\n"
+    assert ok(cli("activity", "--count", "--last-days", "4")) == "2\n"
     # Combined with --since, the later of the two dates wins.
     since = (date.today() - timedelta(days=1)).isoformat()
     assert ok(cli("activity", "--count", "--last-days", "30", "--since", since)) == "0\n"

@@ -148,7 +148,7 @@ def _excluded_dates(ctx: click.Context, param: click.Parameter, values: tuple[st
 @click.option(
     "--last-days",
     type=click.IntRange(min=1),
-    help="Include only entries dated within the last N days (today minus N days, through today).",
+    help="Include only entries dated today or in the N-1 days before it.",
 )
 @pass_app
 def activity(
@@ -229,7 +229,7 @@ def activity(
     if page_info and (as_jsonl or ids_only or totals):
         raise click.UsageError("--page-info requires --json transaction output without --summary or --count.")
     if last_days is not None:
-        cutoff = (date.today() - timedelta(days=last_days)).isoformat()
+        cutoff = (date.today() - timedelta(days=last_days - 1)).isoformat()
         since = max(since, cutoff) if since else cutoff
     for lower, upper, label in (
         (min_amount, max_amount, "amount"),

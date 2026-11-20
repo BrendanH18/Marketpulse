@@ -370,3 +370,49 @@ def test_default_outputs_are_unchanged(browse):
     ]
     payload = receipt(browse("payouts", "--json"))
     assert set(payload) == {"rows", "totals"} and "return_pct" not in payload["rows"][0]
+
+
+# ── Review fixes: exact cents and a safe receipt path ─────────────────────────
+
+
+def test_receipt_file_refuses_the_ledger_database(cli, store, maple, tmp_path, monkeypatch):
+    data = tmp_path / "ledger-home"
+    data.mkdir()
+    monkeypatch.setenv("MARKETPULSE_DATA", str(data))
+    before = store.transactions()
+    for name in ("marketpulse.db", "marketpulse.db-wal"):
+        result = cli("deposit", "1", *DAY, "--receipt-file", str(data / name))
+        assert result.exit_code == 2 and "must not be the ledger database" in result.output
+    assert store.transactions() == before
+
+
+def test_buy_max_counts_the_fee_rounded_to_the_cent(cli, store):
+    acct = store.add_account(Account(name="Maple Cash", type=AccountType.NONREG, track_cash=True))
+    store.add_transaction(Transaction(acct.saved_id, TxnType.DEPOSIT, "2025-01-02", amount=11.04, currency="CAD"))
+    got = receipt(cli("buy", "XEQT.TO", "max", "10", "--fee-pct", "10.42", *DAY, "--dry-run", "--json"))
+    assert got["quantity"] == 1 and got["fees"] == pytest.approx(1.04)  # 10 + 1.04 is exactly the cash
+
+
+def test_net_and_max_value_compare_exact_amounts(cli, store, maple):
+    before = store.transactions()
+    result = cli("buy", "XEQT.TO", "1", "10.004", "--net", "10", *DAY)
+    assert result.exit_code == 1 and "is below quantity × price" in result.output
+    result = cli("buy", "XEQT.TO", "1", "10.004", "--max-value", "10", *DAY)
+    assert result.exit_code == 1 and "above --max-value" in result.output
+    assert store.transactions() == before
+    got = receipt(cli("buy", "XEQT.TO", "3", "10.001", "--net", "30.01", *DAY, "--dry-run", "--json"))
+    assert 3 * got["price"] + got["fees"] == pytest.approx(30.01, abs=1e-9)  # the supplied net is kept
+
+
+def test_withdraw_all_leave_keeps_at_least_the_reserve(cli, store, maple):
+    got = receipt(cli("withdraw", "all", "--leave", "10.125", *DAY, "--json"))
+    assert got["amount"] == pytest.approx(589.87) and got["after"]["cash"]["CAD"] >= 10.125
+
+
+def test_percentage_keeps_its_precision(cli, store):
+    acct = store.add_account(Account(name="Maple Cash", type=AccountType.NONREG))
+    store.add_transaction(
+        Transaction(acct.saved_id, TxnType.BUY, "2025-01-06", "XEQT.TO", quantity=1_000_000, price=1, currency="CAD")
+    )
+    got = receipt(cli("sell", "XEQT.TO", "33.333333%", "1", *DAY, "--dry-run", "--json"))
+    assert got["quantity"] == pytest.approx(333_333.33)

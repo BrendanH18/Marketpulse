@@ -338,6 +338,8 @@ def status(
             fail(f"No active account '{account}'.")  # archived accounts are reported exactly like unknown ones
         view = tr.valuation(account_id=acct.saved_id)
     else:
+        # Pick the baseline before valuing: valuation records today's snapshot, which must not be its own baseline.
+        baseline = _snapshot_on_or_before(app, change_since) if change_since is not None else None
         view = tr.valuation()
     day = f"{fmt.arrow(view.day_change)} {fmt.pct(view.day_change_pct)}"
     if waybar:
@@ -377,7 +379,7 @@ def status(
     else:
         app.console.print(render.summary(view, privacy=app.privacy))
         if change_since is not None:
-            _print_change_since(app, view, change_since)
+            _print_change_since(app, view, change_since, baseline)
         if show_accounts:
             _print_status_accounts(app, view)
     _status_exit(view, exit_code, fail_on_move)
@@ -390,13 +392,18 @@ def _status_exit(view: PortfolioView, exit_code: bool, fail_on_move: float | Non
         click.get_current_context().exit(1)
 
 
-def _print_change_since(app: App, view: PortfolioView, since: str) -> None:
+def _snapshot_on_or_before(app: App, since: str) -> Snapshot | None:
+    """The last recorded base-currency snapshot on or before `since`."""
+    base = app.tracker.base
+    earlier = [s for s in app.tracker.store.snapshots() if s.currency == base and s.date <= since]
+    return earlier[-1] if earlier else None
+
+
+def _print_change_since(app: App, view: PortfolioView, since: str, snap: Snapshot | None) -> None:
     """Net worth now against the last recorded snapshot (in the base currency) on or before `since`."""
-    earlier = [s for s in app.tracker.store.snapshots() if s.currency == view.base and s.date <= since]
-    if not earlier:
+    if snap is None:
         app.console.print(Text(f"No net worth snapshot on or before {since} to compare with.", style="muted"))
         return
-    snap = earlier[-1]
     change = view.net_worth - snap.net_worth
     pct = change / snap.net_worth * 100 if snap.net_worth else None
     line = Text(f"Since {snap.date}  ", style="muted")

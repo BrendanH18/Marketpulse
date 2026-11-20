@@ -264,8 +264,8 @@ def window_start(window: str, today: date | None = None) -> str | None:
     """The first date (ISO) the activity date window keeps, or None for every date."""
     today = today or date.today()
     start = {
-        "30d": today - timedelta(days=30),
-        "90d": today - timedelta(days=90),
+        "30d": today - timedelta(days=29),
+        "90d": today - timedelta(days=89),
         "ytd": date(today.year, 1, 1),
         "1y": today - timedelta(days=365),
     }.get(window)

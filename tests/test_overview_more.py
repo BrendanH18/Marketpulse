@@ -186,6 +186,12 @@ def test_32_status_change_since_snapshot(cli, store):
     assert none.exit_code == 0 and "No net worth snapshot on or before 2020-01-01" in none.output
     assert cli("status", "--change-since", "2025-03-01", "--short").exit_code == 2
     assert cli("status", "--change-since", "2025-03-01", "-a", "Fictional Income").exit_code == 2
+    # Today's earlier snapshot is the baseline, not the one this valuation records.
+    today = date.today().isoformat()
+    store.upsert_snapshot(Snapshot(today, 10000.0, 9000.0, 9000.0, "CAD", {}))
+    result = cli("status", "--change-since", today)
+    assert f"Since {today}" in result.output and "from $10,000.00 CAD" in result.output
+    assert "+$3,550.00" in result.output
 
 
 def test_33_status_fail_on_move(cli, tracker):
