@@ -53,6 +53,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     year steppers (`-`/`+`), bulk alert controls (`U`), local backup and auto
     theme restore.
 
+### Fixed
+
+- Mac transaction entry explains which field needs attention. Form errors are shown separately
+  from refresh errors, and the portfolio window and menu bar offer a retry after a load failure.
+  A failed backup restore offers a fresh preview before the next restore attempt.
+- Privacy mode masks manually valued holdings and GIC prices, share counts in transaction
+  hints and tax details, acquisition costs, and sensitive details in transaction confirmations and errors.
+- On compact terminals the dashboard scrolls and the tax report gets the full width. Terminal
+  activity search includes full notes and account names, and failed tax and income loads can be retried.
+- Tall Mac forms, Settings pages, and menu bar portfolios scroll to fit the display.
+- Terminal forms scroll on short screens and reveal validation errors. Malformed numbers such
+  as `1,5` are rejected before saving, and `1,234.56` still reads as 1234.56.
+
 ## [3.1.0] - 2026-11-18
 
 MarketPulse now checks sales against the ledger on the sale date, including
@@ -118,17 +131,6 @@ improves transaction editing and navigation in the terminal app.
   form in the selected entry's account instead of the first account.
 
 ### Fixed
-
-- Mac transaction entry explains which field needs attention. Form errors are shown separately
-  from refresh errors, and the portfolio window and menu bar offer a retry after a load failure.
-  A failed backup restore offers a fresh preview before the next restore attempt.
-- Privacy mode masks manually valued holdings and GIC prices, share counts in transaction
-  hints and tax details, acquisition costs, and sensitive details in transaction confirmations and errors.
-- On compact terminals the dashboard scrolls and the tax report gets the full width. Terminal
-  activity search includes full notes and account names, and failed tax and income loads can be retried.
-- Tall Mac forms, Settings pages, and menu bar portfolios scroll to fit the display.
-- Terminal forms scroll on short screens and reveal validation errors. Malformed numbers such
-  as `1,5` are rejected before saving, and `1,234.56` still reads as 1234.56.
 
 - The Mac app's Settings said "Get a Alpha Vantage key"; it now says "Get an API key
   from Alpha Vantage".

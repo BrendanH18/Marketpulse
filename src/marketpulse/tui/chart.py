@@ -64,9 +64,9 @@ def _load_chart(app: MarketPulseApp, view: ChartView) -> None:
                 view.set_message(message)
                 app.render_chart_info()
 
-        app.call_from_thread(failed, str(e))
+        app._publish_load(failed, str(e))
         return
-    app.call_from_thread(app._chart_loaded, sym, period, bars, quotes.get(sym), compare)
+    app._publish_load(app._chart_loaded, sym, period, bars, quotes.get(sym), compare)
 
 
 def _chart_loaded(app: MarketPulseApp, sym, period, bars, quote, compare) -> None:

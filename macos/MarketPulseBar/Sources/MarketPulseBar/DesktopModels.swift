@@ -973,17 +973,19 @@ struct TaxExportResult: Decodable {
   func message(year: Int, file: String, privacy: Bool = false, locale: Locale = .current) -> String {
     let one = exported == 1
     let year = String(year)  // a year, never "2,025"
-    switch issues.count {
-    case 0:
-      return one
+    if issues.isEmpty || (privacy && issues.count == 1) {
+      let receipt =
+        one
         ? String(localized: "Saved 1 sale from \(year) to \(file)")
         : String(localized: "Saved \(exported) sales from \(year) to \(file)")
+      if issues.isEmpty { return receipt }
+      return receipt + ". "
+        + String(localized: "1 issue may leave sales out of this file. Details are hidden in privacy mode.")
+    }
+    switch issues.count {
     case 1:
       let date = issues[0].date
-      let issue =
-        privacy
-        ? String(localized: "Ledger warning details are hidden in privacy mode.")
-        : issues[0].localizedMessage(locale: locale)
+      let issue = issues[0].localizedMessage(locale: locale)
       return one
         ? String(localized: "Saved 1 sale from \(year) to \(file). 1 issue may leave sales out of it: \(date) \(issue)")
         : String(

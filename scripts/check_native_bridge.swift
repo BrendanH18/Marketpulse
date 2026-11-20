@@ -156,6 +156,10 @@ struct NativeBridgeCheck {
     precondition(
       withIssue.message(year: 2024, file: "g.csv")
         == "Saved 1 sale from 2024 to g.csv. 1 issue may leave sales out of it: 2024-07-02 No price")
+    precondition(
+      withIssue.message(year: 2024, file: "g.csv", privacy: true)
+        == "Saved 1 sale from 2024 to g.csv. 1 issue may leave sales out of this file. Details are hidden in privacy mode."
+    )
 
     let transactions = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     for row in try decoder.decode([ValuedTransaction].self, from: transactions) {

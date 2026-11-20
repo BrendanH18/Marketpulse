@@ -614,7 +614,7 @@ class MarketPulseApp(App):
         if section == "portfolio":
             if self.view is None:
                 self.render_dashboard()
-            elif self._income_forecast is None:
+            if self._income_forecast is None:
                 workspaces.render_income(self, refresh_history=False)
         elif section == "tax":
             self.render_tax()

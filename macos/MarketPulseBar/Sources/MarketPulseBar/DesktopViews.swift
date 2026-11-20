@@ -1051,7 +1051,8 @@ private struct ActivityWorkspace: View {
         Task {
           await model.perform(
             ["txn", "delete", "--yes"] + t.revisionArguments + ["--", String(t.id)],
-            success: String(localized: "Transaction deleted"))
+            success: String(localized: "Transaction deleted"),
+            privateFailure: String(localized: "Couldn't delete this transaction. Check the ledger and try again."))
         }
       }
       Button("Cancel", role: .cancel) {}

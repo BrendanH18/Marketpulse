@@ -9,12 +9,13 @@ import pytest
 from textual.widgets import DataTable, Input
 
 from marketpulse import fmt
+from marketpulse.market import MarketError
 from marketpulse.models import Account, Asset, AssetKind, Transaction, TxnType
 from marketpulse.tax import TaxReport
-from marketpulse.tui import extras
+from marketpulse.tui import chart, extras
 from marketpulse.tui.app import MarketPulseApp
 from marketpulse.tui.screens import AccountForm, ConfirmScreen, PromptScreen, TransactionForm, input_number
-from marketpulse.tui.widgets import WORKSPACES, TopBar, big_text, big_width
+from marketpulse.tui.widgets import WORKSPACES, ChartView, TopBar, big_text, big_width
 
 
 def run(coro):
@@ -465,5 +466,79 @@ def test_detail_history_can_retry_after_bad_provider_response(tracker, fake):
                 app.load_detail_bars("AAPL")
                 await app.workers.wait_for_complete()
                 assert history.call_count == 2 and app._detail_bars["AAPL"] == bars
+
+    run(scenario())
+
+
+def test_income_shows_first_portfolio_failure_and_recovers(tracker):
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        started, release = Event(), Event()
+        valuation = tracker.valuation
+
+        def fail_once(**kwargs):
+            if started.is_set():
+                return valuation(**kwargs)
+            started.set()
+            assert release.wait(10)
+            raise OSError("Fictional first load failure")
+
+        with patch.object(tracker, "valuation", fail_once):
+            async with app.run_test() as pilot:
+                try:
+                    assert await asyncio.to_thread(started.wait, 5)
+                    await pilot.press("6")
+                    assert app.workspace == "income" and app.view is None
+                finally:
+                    release.set()
+                await app.workers.wait_for_complete()
+                assert "Press r to retry" in extras.pane_text(app, "#income-hint")
+                await pilot.press("1", "6")
+                assert "Press r to retry" in extras.pane_text(app, "#income-hint")
+                await pilot.press("r")
+                await app.workers.wait_for_complete()
+                assert "Press r to retry" not in extras.pane_text(app, "#income-hint")
+                assert "LAST 12 MONTHS" in extras.pane_text(app, "#income-view")
+
+    run(scenario())
+
+
+def test_cancelled_chart_cannot_replace_a_retry_with_the_same_settings(tracker, fake):
+    fake.set_history("AAPL", {"2024-01-02": 100.0})
+
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        started, release, finished = Event(), Event(), Event()
+        history = tracker.market.history
+        load = chart._load_chart
+
+        def delayed(*args):
+            if not started.is_set():
+                started.set()
+                assert release.wait(10)
+                raise MarketError("Fictional late chart failure")
+            return history(*args)
+
+        def track(app, view):
+            first = not started.is_set()
+            try:
+                load(app, view)
+            finally:
+                if first:
+                    finished.set()
+
+        async with app.run_test():
+            await app.workers.wait_for_complete()
+            with patch.object(tracker.market, "history", delayed), patch.object(chart, "_load_chart", track):
+                try:
+                    app.open_chart("AAPL")
+                    assert await asyncio.to_thread(started.wait, 5)
+                    view = app.query_one(ChartView)
+                    await app._load_chart(view).wait()
+                    assert view.bars and view.symbol == "AAPL"
+                finally:
+                    release.set()
+                assert await asyncio.to_thread(finished.wait, 5)
+                assert view.bars and view.message != "Fictional late chart failure"
 
     run(scenario())

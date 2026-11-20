@@ -163,6 +163,7 @@
 "Delete" = "Supprimer";
 "Cancel" = "Annuler";
 "Transaction deleted" = "Opération supprimée";
+"Couldn't delete this transaction. Check the ledger and try again." = "Impossible de supprimer cette opération. Vérifiez le registre et réessayez.";
 "%@. Holdings, cost base, and gains are worked out again without it. This can't be undone." = "%@. Les positions, le PBR et les gains seront recalculés sans elle. Cette action est irréversible.";
 "%lld active accounts" = "%lld comptes actifs";
 "1 archived" = "1 archivé";
@@ -762,6 +763,7 @@
 "Sale" = "Vente";
 "Saved 1 sale from %@ to %@" = "1 vente de %@ enregistrée dans %@";
 "Saved %lld sales from %@ to %@" = "%lld ventes de %@ enregistrées dans %@";
+"1 issue may leave sales out of this file. Details are hidden in privacy mode." = "Un problème pourrait exclure certaines ventes de ce fichier. Les détails sont masqués en mode confidentialité.";
 "Saved 1 sale from %@ to %@. 1 issue may leave sales out of it: %@ %@" = "1 vente de %@ enregistrée dans %@. Un problème pourrait en exclure des ventes : %@ %@";
 "Saved %lld sales from %@ to %@. 1 issue may leave sales out of it: %@ %@" = "%lld ventes de %@ enregistrées dans %@. Un problème pourrait en exclure des ventes : %@ %@";
 "Saved 1 sale from %@ to %@. %lld issues, listed under Needs attention, may leave sales out of it." = "1 vente de %@ enregistrée dans %@. %lld problèmes, listés sous « À vérifier », pourraient en exclure des ventes.";

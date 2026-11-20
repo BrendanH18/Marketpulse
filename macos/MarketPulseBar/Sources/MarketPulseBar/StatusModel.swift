@@ -17,7 +17,22 @@ final class StatusModel: ObservableObject {
   }
   @Published private(set) var refreshError: String?
   var errorMessage: String? { operationError ?? refreshError }
-  @Published var message: String?
+  private enum Confirmation {
+    case text(String)
+    case taxExport(TaxExportResult, year: Int, file: String)
+  }
+  @Published private var confirmation: Confirmation?
+  var message: String? {
+    get {
+      switch confirmation {
+      case .text(let text): return text
+      case .taxExport(let result, let year, let file):
+        return result.message(year: year, file: file, privacy: status?.privacy == true)
+      case nil: return nil
+      }
+    }
+    set { confirmation = newValue.map(Confirmation.text) }
+  }
   @Published var loading = false
   @Published var saving = false
   @Published var lastUpdated: Date?
@@ -789,7 +804,7 @@ final class StatusModel: ObservableObject {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let result = try decoder.decode(TaxExportResult.self, from: data)
         operationError = nil
-        message = result.message(year: year, file: url.lastPathComponent, privacy: status?.privacy == true)
+        confirmation = .taxExport(result, year: year, file: url.lastPathComponent)
         // The export found other issues than the shown report: it's out of date.
         if result.issues != tax?.issues { loadTax(force: true) }
       } catch {
