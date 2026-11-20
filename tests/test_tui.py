@@ -270,7 +270,7 @@ def test_short_transaction_form_scrolls_to_validation_error(tracker):
 def test_terminal_numeric_input_preserves_decimal_magnitude():
     assert input_number("1,234.50") == 1234.5
     assert input_number("1.5") == 1.5
-    for invalid in ("1,5", "1,23,456", ",", "1.2,345", "nan", "inf", "1e999"):
+    for invalid in ("1,5", "1,23,456", ",", "1.2,345", "1_5", "1_000.5", "nan", "inf", "1e999"):
         with pytest.raises(ValueError):
             input_number(invalid)
 

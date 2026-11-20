@@ -43,6 +43,8 @@ class FormError(ValueError):
 
 def input_number(raw: str) -> float:
     """Parse terminal input with a decimal point and optional grouped thousands."""
+    if "_" in raw:
+        raise ValueError("Use commas to group thousands")
     if "," in raw:
         if not re.fullmatch(r"[+-]?\d{1,3}(?:,\d{3})+(?:\.\d*)?(?:[eE][+-]?\d+)?", raw):
             raise ValueError("Invalid thousands grouping")
