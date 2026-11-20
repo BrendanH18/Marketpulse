@@ -221,7 +221,11 @@ def activity(
         "--summary": summary is not None,
         "--count": count_only,
     }
-    if sum(outputs.values()) > 1 or ((as_jsonl or ids_only) and (as_json or as_csv)):
+    if (
+        sum(outputs.values()) > 1
+        or ((as_jsonl or ids_only or totals) and as_json and as_csv)
+        or ((as_jsonl or ids_only) and (as_json or as_csv))
+    ):
         used = [name for name, on in outputs.items() if on] + [
             name for name, on in (("--json", as_json), ("--csv", as_csv)) if on
         ]

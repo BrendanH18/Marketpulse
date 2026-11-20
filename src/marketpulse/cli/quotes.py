@@ -59,6 +59,12 @@ def _finite_price(ctx: click.Context, param: click.Parameter, value: float | Non
     return value
 
 
+def _finite_percent(ctx: click.Context, param: click.Parameter, value: float | None) -> float | None:
+    if value is not None and not math.isfinite(value):
+        raise click.BadParameter("must be a finite percentage", ctx=ctx, param=param)
+    return value
+
+
 def _cache_sort_key(sort: str, now: float):
     def key(q: Quote) -> tuple:
         if sort == "age":
@@ -93,6 +99,7 @@ def _cache_sort_key(sort: str, now: float):
 @click.option(
     "--min-move",
     type=click.FloatRange(min=0),
+    callback=_finite_percent,
     help="Live: keep only symbols whose day change is at least this many percent either way.",
 )
 @click.option("--direction", type=click.Choice(MOVE_DIRECTIONS), help="Live: keep only rising or falling quotes.")

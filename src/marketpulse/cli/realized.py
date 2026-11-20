@@ -976,6 +976,8 @@ def payouts(
     _check_fields(fields, PAYOUT_FIELDS)
     if group_sort and not by:
         raise click.UsageError("--group-sort needs --by.")
+    if newest_first and group_sort in ("amount", "count"):
+        raise click.UsageError(f"--newest-first cannot be combined with --group-sort {group_sort}.")
     if fields and by:
         raise click.UsageError("--fields picks payout fields; omit --by.")
     _amount_range(min_amount, max_amount, "amount")

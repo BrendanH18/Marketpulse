@@ -345,6 +345,8 @@ def test_19_payouts_group_sort(browse):
     assert named == receipt(browse("payouts", "--by", "symbol", "--json"))["groups"]
     result = browse("payouts", "--group-sort", "amount")
     assert result.exit_code == 2 and "--group-sort needs --by" in result.output
+    result = browse("payouts", "--by", "symbol", "--group-sort", "amount", "--newest-first")
+    assert result.exit_code == 2 and "--newest-first cannot be combined with --group-sort amount" in result.output
 
 
 def test_20_markdown(browse, tracker, monkeypatch):
@@ -438,3 +440,22 @@ def test_buy_max_settles_quickly_on_a_tiny_price(cli, store, maple):
 def test_buy_max_finds_the_exact_count_far_from_the_estimate(cli, store, maple):
     got = receipt(cli("buy", "XEQT.TO", "max", "0.0001", "--fee-pct", "0.0005", *DAY, "--dry-run", "--json"))
     assert got["quantity"] == 6_000_000  # the fee rounds to $0.00, so the whole $600 buys units
+
+
+def test_split_reverse_refuses_a_ratio_that_is_already_a_consolidation(cli, store, maple):
+    before = store.transactions()
+    result = cli("split", "XEQT.TO", "1:10", "--reverse", *DAY)
+    assert result.exit_code == 2 and "already a consolidation" in result.output
+    assert store.transactions() == before
+
+
+def test_unwritable_receipt_fails_the_command(cli, store, maple, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    def refuse(self, *args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "write_text", refuse)
+    result = cli("deposit", "5", *DAY, "--receipt-file", str(tmp_path / "r.json"))
+    assert result.exit_code == 1 and "couldn't write the receipt" in result.output
+    assert latest(store).amount == 5  # the entry itself was saved; only the receipt is missing

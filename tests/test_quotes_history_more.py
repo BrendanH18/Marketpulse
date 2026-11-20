@@ -85,6 +85,7 @@ def test_42_quote_min_move(cli):
     assert "AAPL" in out and "XEQT.TO" in out
     assert "No quotes match" in ok(cli("quote", "AAPL", "XEQT.TO", "--min-move", "10"))
     usage(cli("quote", "--cached", "--all", "--min-move", "1"), "--min-move applies to live quotes")
+    usage(cli("quote", "AAPL", "--min-move", "nan"), "must be a finite percentage")
 
 
 def test_43_quote_direction(cli):
@@ -291,6 +292,7 @@ def test_58_activity_totals(cli, ledger):
     table = ok(cli("activity", "--totals", "--limit", "1"))  # totals cover every match, not one page
     assert "Matching activity totals" in table and "CAD" in table and "USD" in table
     usage(cli("activity", "--totals", "--summary", "type"), "Choose one output format")
+    usage(cli("activity", "--totals", "--json", "--csv"), "Choose one output format")
 
 
 def test_59_activity_last_days(cli, ledger):

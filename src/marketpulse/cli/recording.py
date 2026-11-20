@@ -554,18 +554,26 @@ def _show(app: App, out: Outcome, ex: Extras, *, dry_run: bool) -> None:
                 app.console.print(Text(f"  cash in {acct.name}: {shown_bal} {ccy}", style="info"))
 
 
-def _write_receipt(app: App, ex: Extras, receipt: dict[str, Any]) -> None:
-    """--receipt-file: keep a JSON copy of the receipt beside the usual output."""
+def _write_receipt(app: App, ex: Extras, receipt: dict[str, Any]) -> bool:
+    """--receipt-file: keep a JSON copy of the receipt beside the usual output; False when the write failed."""
     if ex.receipt_file is None:
-        return
+        return True
     try:
         Path(ex.receipt_file).expanduser().write_text(json.dumps(receipt, ensure_ascii=False) + "\n", encoding="utf-8")
     except OSError as e:
         app.warn(f"couldn't write the receipt to {ex.receipt_file}: {e.strerror or e}")
+        return False
+    return True
+
+
+def _exit_if_unwritten(written: bool) -> None:
+    """A requested receipt that couldn't be written fails the command (after the usual output)."""
+    if not written:
+        click.get_current_context().exit(1)
 
 
 def _report(app: App, out: Outcome, ex: Extras, *, dry_run: bool) -> None:
-    _write_receipt(app, ex, _receipt(app, out, dry_run=dry_run))
+    written = _write_receipt(app, ex, _receipt(app, out, dry_run=dry_run))
     if ex.json:
         click.echo(json.dumps(_receipt(app, out, dry_run=dry_run), ensure_ascii=False))
     elif ex.quiet:
@@ -578,6 +586,7 @@ def _report(app: App, out: Outcome, ex: Extras, *, dry_run: bool) -> None:
                 app.warn(w.message)
     else:
         _show(app, out, ex, dry_run=dry_run)
+    _exit_if_unwritten(written)
 
 
 def _finish(app: App, txn: Transaction, accounts: list[Account], describe: Describe) -> None:
@@ -631,13 +640,16 @@ def _report_duplicate(app: App, same: Transaction, accounts: list[Account], desc
         existing = _outcome(app, same, accounts, describe)
         existing.message = f"Already recorded (#{same.id})."
         receipt = _receipt(app, existing, dry_run=False, duplicate=True)
-        _write_receipt(app, ex, receipt)
+        written = _write_receipt(app, ex, receipt)
+    else:
+        written = True
     if ex.json:
         click.echo(json.dumps(receipt, ensure_ascii=False))
     elif ex.quiet:
         click.echo(str(same.id))
     else:
         app.ok(f"Already recorded (#{same.id}); nothing saved.")
+    _exit_if_unwritten(written)
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -997,6 +1009,11 @@ def split(app: App, symbol, ratio, account, when, note) -> None:
     if _extras().reverse:
         if ratio <= 0:
             fail("RATIO must be positive.")
+        if ratio < 1:
+            raise click.UsageError(
+                f"RATIO {ratio:g} is already a consolidation; drop --reverse, "
+                "or give the old shares per new one (e.g. 10)."
+            )
         ratio = 1 / ratio
     txn = Transaction(
         account_id=acct.saved_id, type=TxnType.SPLIT, date=parse_date(when), symbol=symbol, ratio=ratio, note=note
