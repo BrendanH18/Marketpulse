@@ -433,3 +433,8 @@ def test_receipt_file_refuses_sidecars_of_a_symlinked_ledger(cli, store, maple, 
 def test_buy_max_settles_quickly_on_a_tiny_price(cli, store, maple):
     result = cli("buy", "XEQT.TO", "max", "1e-20", *DAY, "--dry-run", "--json")
     assert result.exit_code in (0, 1)  # finishes either way instead of stepping one unit at a time
+
+
+def test_buy_max_finds_the_exact_count_far_from_the_estimate(cli, store, maple):
+    got = receipt(cli("buy", "XEQT.TO", "max", "0.0001", "--fee-pct", "0.0005", *DAY, "--dry-run", "--json"))
+    assert got["quantity"] == 6_000_000  # the fee rounds to $0.00, so the whole $600 buys units

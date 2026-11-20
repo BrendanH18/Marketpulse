@@ -655,20 +655,19 @@ def _max_units(app: App, acct: Account, ccy: str, day: str, price: float, fees: 
         paid = round(units * price * fee_pct / 100, 2) if fee_pct is not None else fees
         return units * price + paid
 
-    units = max(math.floor((cash - (0 if fee_pct is not None else fees)) / price + 1e-9), 0)
-    if fee_pct is not None:
-        units = max(math.floor(cash / (price * (1 + fee_pct / 100)) + 1e-9), 0)
-    # The estimate ignores the fee's rounding to the cent, which moves it by a unit or two at most:
-    # settle on the exact largest count with a few bounded steps.
-    for _ in range(3):
-        if cost(units + 1) > cash + 1e-9:
-            break
-        units += 1
-    for _ in range(3):
-        if units <= 0 or cost(units) <= cash + 1e-9:
-            break
-        units -= 1
-    if units > 0 and cost(units) > cash + 1e-9:
+    def fits(units: int) -> bool:
+        return cost(units) <= cash + 1e-9
+
+    # Cost never falls as units grow, so binary-search the largest whole count the cash covers.
+    low, high = 0, max(math.floor(cash / price), 0) + 1
+    while low < high:
+        mid = (low + high + 1) // 2
+        if fits(mid):
+            low = mid
+        else:
+            high = mid - 1
+    units = low
+    if units > 0 and fits(units + 1):  # beyond float precision: units no longer add up exactly
         fail(f"Couldn't work out how many units {fmt.money(cash)} {ccy} buys at {fmt.price(price)}; give QUANTITY.")
     if units < 1:
         fail(f"{fmt.money(cash)} {ccy} cash in {acct.name} on {day} doesn't cover one unit at {fmt.price(price)}.")
