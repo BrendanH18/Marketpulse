@@ -192,7 +192,8 @@ def _last_days_since(last_days: int | None, since: str | None) -> str | None:
         return since
     if since is not None:
         raise click.UsageError("--last-days cannot be combined with --since.")
-    return (date.today() - timedelta(days=last_days - 1)).isoformat()
+    today = date.today()
+    return (today - timedelta(days=min(last_days - 1, (today - date.min).days))).isoformat()
 
 
 def _markdown_cell(app: App, key: str, value: object) -> str:
@@ -202,7 +203,7 @@ def _markdown_cell(app: App, key: str, value: object) -> str:
         if app.privacy:
             return fmt.MASK
         return fmt.qty(value) if key == "quantity" else f"{value:.2f}"
-    return str(value).replace("|", "\\|").replace("\n", " ")
+    return str(value).replace("|", "\\|").replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
 
 
 def _emit(app: App, mode: str, fieldnames: list[str], records: list[dict]) -> None:
@@ -410,7 +411,7 @@ def _realized_totals(rows: list[RealizedGain], *, gross: bool = False) -> dict[s
 
 def _return_pct(r: RealizedGain) -> float | None:
     """Gain as a percentage of the ACB sold; none when the ACB is zero."""
-    return r.gain / r.cost * 100 if r.cost > 1e-9 else None
+    return r.gain / r.cost * 100 if r.cost > 0 else None
 
 
 def _realized_record(r: RealizedGain, accounts: dict[int, Account], with_return: bool) -> dict:
@@ -1102,6 +1103,8 @@ def _grouped_payouts(
     if group_sort and group_sort.lower() != "group":
         key = group_sort.lower()  # largest first; ties keep the group order
         groups = sorted(groups, key=lambda g: g[key], reverse=True)
+    elif group_sort:  # by name, e.g. account names rather than account ids
+        groups = sorted(groups, key=lambda g: str(g.get("account", g["group"])).casefold())
     total = len(groups)
     groups = _page(list(reversed(groups)) if newest_first else groups, limit, offset)
     if mode == "json":

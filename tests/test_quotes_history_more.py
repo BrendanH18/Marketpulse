@@ -200,6 +200,10 @@ def test_54_compare_correlation(cli, histories):
     assert "return correlation" in table and "+1.00" in table
     out = ok(cli("compare", "BASE.TO", "TWIN.TO", "--correlation", "--csv"))
     assert out.splitlines()[0] == "symbol,BASE.TO,TWIN.TO"
+    # A flat history has no correlation, not even with itself.
+    histories.set_history("FLAT.TO", dict.fromkeys(DAYS, 50.0), currency="CAD")
+    rows = json.loads(ok(cli("compare", "BASE.TO", "FLAT.TO", "--correlation", "--json")))
+    assert {r["symbol"]: r for r in rows}["FLAT.TO"]["FLAT.TO"] is None
     usage(cli("compare", "BASE.TO", "TWIN.TO", "--correlation", "--top", "1"), "--top can't be combined")
     assert cli("compare", "BASE.TO", "NOPE", "--correlation").exit_code == 1
 

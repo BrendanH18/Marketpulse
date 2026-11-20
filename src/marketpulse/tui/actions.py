@@ -12,6 +12,7 @@ from ..alerts import notify as desktop_notify
 from ..themes import pretty_name, theme_names
 from .constants import ALLOC_MODES, NW_RANGES, SORT_MODES
 from .screens import AlertForm, HelpScreen, PromptScreen, SearchScreen
+from .widgets import ChartView
 
 if TYPE_CHECKING:
     from .app import MarketPulseApp
@@ -171,6 +172,8 @@ def action_privacy(app: MarketPulseApp) -> None:
     app.config.privacy = not app.config.privacy
     app.config.save()
     app.refresh_all_views()
+    if app.chart_symbol:  # the chart's quote line shows the held quantity and gain, so redraw it with the new masks
+        app.render_chart_info(app.query_one(ChartView).quote)
     app.notify("Privacy mode on — amounts hidden" if app.privacy else "Privacy mode off")
 
 

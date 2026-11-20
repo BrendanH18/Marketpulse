@@ -334,6 +334,8 @@ def test_18_last_days(cli, store):
     assert cli("payouts", "--last-days", "6", "--count").stdout.strip() == "0"
     assert cli("payouts", "--last-days", "7", "--since", "2020-01-01").exit_code == 2
     assert cli("payouts", "--last-days", "0").exit_code == 2
+    assert cli("payouts", "--last-days", "100000000", "--count").exit_code == 0  # reaches back to date.min
+    assert cli("activity", "--last-days", "100000000", "--count").exit_code == 0
 
 
 def test_19_payouts_group_sort(browse):

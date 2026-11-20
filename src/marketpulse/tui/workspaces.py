@@ -304,7 +304,8 @@ def render_holdings(app: MarketPulseApp) -> None:
         moves = [x.day_change_base for x in positions if x.day_change_base is not None]
         if moves:  # today's change of the positions listed, in the base currency like the total
             today = sum(moves)
-            subtitle += f" · today {fmt.money(today, v.base, sign=True, privacy=app.privacy, decimals=0)}"
+            partial = " (partial)" if len(moves) < len(positions) else ""  # some listed positions have no change
+            subtitle += f" · today {fmt.money(today, v.base, sign=True, privacy=app.privacy, decimals=0)}{partial}"
         if v.excluded:
             subtitle += f" · ⚠ {len(v.excluded)} excluded (! lists them)"
     if needle:

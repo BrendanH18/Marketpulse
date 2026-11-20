@@ -1018,9 +1018,7 @@ def _print_correlation(app: App, data: dict[str, list[Bar]], period: str, *, as_
     intraday = PERIOD_INTERVALS[period][-1] in "mh"
     series = {s: _return_series(bars, intraday) for s, bars in data.items()}
     syms = list(series)
-    rows: list[dict] = [
-        {"symbol": s, **{o: 1.0 if s == o else _correlation(series[s], series[o]) for o in syms}} for s in syms
-    ]
+    rows: list[dict] = [{"symbol": s, **{o: _correlation(series[s], series[o]) for o in syms}} for s in syms]
     if as_json:
         click.echo(json.dumps(rows, ensure_ascii=False))
         return

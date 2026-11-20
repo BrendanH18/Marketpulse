@@ -233,7 +233,8 @@ def activity(
     if page_info and (as_jsonl or ids_only or totals):
         raise click.UsageError("--page-info requires --json transaction output without --summary or --count.")
     if last_days is not None:
-        cutoff = (date.today() - timedelta(days=last_days - 1)).isoformat()
+        today = date.today()
+        cutoff = (today - timedelta(days=min(last_days - 1, (today - date.min).days))).isoformat()
         since = max(since, cutoff) if since else cutoff
     for lower, upper, label in (
         (min_amount, max_amount, "amount"),

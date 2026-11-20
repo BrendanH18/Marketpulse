@@ -102,7 +102,7 @@ ordinary portfolio views, and stale quotes never fire alerts or record snapshots
 77. `tax foreign-property --holdings` — Show one row per foreign property per year (table, `--json`, `--jsonl`, `--csv`) instead of one per year.
 78. `tax foreign-property --count` — Print only the number of matching years (or `--holdings` rows).
 79. `tax foreign-property --exit-code` — Exit with status 1 when T1135 may be required (simplified, detailed or undetermined) in any year shown.
-80. `tax foreign-property --headroom` — Add how far each year's highest cost stayed under the $100,000 threshold (negative when it went over) to the table, the one-year detail, `--json`/`--jsonl` (`headroom`) and `--csv`; masked under privacy.
+80. `tax foreign-property --headroom` — Add how far each year's highest cost stayed under the $100,000 threshold (negative when it went over) to the table, the one-year detail, `--json`/`--jsonl` (`headroom`) and `--csv`; the table and one-year detail mask it under privacy, while `--json`, `--jsonl` and `--csv` give raw figures.
 
 ## Terminal app (`tui/`, 81–100)
 
