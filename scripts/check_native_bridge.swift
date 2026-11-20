@@ -72,6 +72,15 @@ struct NativeBridgeCheck {
         #"{"id":"1:FAKE","account_id":1,"account":"TFSA","symbol":"FAKE","name":"Fictional Co","asset_class":"equity","quantity":1,"price":10,"currency":"CAD","value":10,"book":9,"gain":1,"gain_pct":11.1,"day_change_pct":null,"weight":100,"stale":true,"quote_source":"fictional","quote_age_seconds":5400.0}"#
           .utf8))
     precondition(position.quoteSource == "fictional" && position.quoteAgeSeconds == 5400)
+    // Before quote_source, the asset definitions distinguished public quotes from accrued prices.
+    var legacyJSON = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+    legacyJSON["positions"] = (legacyJSON["positions"] as! [[String: Any]]).map { fields in
+      fields.filter { $0.key != "quote_source" }
+    }
+    var legacy = try decoder.decode(DesktopPayload.self, from: JSONSerialization.data(withJSONObject: legacyJSON))
+    legacy.status.privacy = true
+    precondition(legacy.positions.contains { $0.symbol == "GIC-DEMO" && legacy.masksPrice(of: $0) })
+    precondition(legacy.positions.contains { $0.symbol == "AAPL" && !legacy.masksPrice(of: $0) })
     let ledger = try decoder.decode(
       StorageInfo.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[4])))
     let backups = ledger.backups ?? []
@@ -147,6 +156,10 @@ struct NativeBridgeCheck {
     precondition(
       withIssue.message(year: 2024, file: "g.csv")
         == "Saved 1 sale from 2024 to g.csv. 1 issue may leave sales out of it: 2024-07-02 No price")
+    precondition(
+      withIssue.message(year: 2024, file: "g.csv", privacy: true)
+        == "Saved 1 sale from 2024 to g.csv. 1 issue may leave sales out of this file. Details are hidden in privacy mode."
+    )
 
     let transactions = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     for row in try decoder.decode([ValuedTransaction].self, from: transactions) {
@@ -247,6 +260,19 @@ struct NativeBridgeCheck {
     let unknown = await request.submit { _ in throw failed }
     guard case .unknown(let warning) = unknown else { preconditionFailure("Unknown save unlocked the form") }
     precondition(warning.contains("Retry save"))
+    let oversell = NSError(
+      domain: "Fictional ledger", code: 1, userInfo: [NSLocalizedDescriptionKey: "only 12.3456 held"])
+    let privateRejected = await request.submit { args in
+      if args == request.statusArguments { return Data(#"{"recorded":false,"transaction_id":null}"#.utf8) }
+      throw oversell
+    }
+    precondition(privateRejected == .notRecorded(oversell.localizedDescription))
+    precondition(privateRejected.privateError == TransactionSaveResult.privateRejection)
+    let privateUnknown = await request.submit { _ in throw oversell }
+    guard case .unknown = privateUnknown, let privateWarning = privateUnknown.privateError else {
+      preconditionFailure("Unknown private save unlocked the form")
+    }
+    precondition(privateWarning.contains("Retry save") && !privateWarning.contains("12.3456"))
     let malformed = await request.submit { args in
       if args == request.statusArguments { return Data(#"{"recorded":true,"transaction_id":null}"#.utf8) }
       throw failed

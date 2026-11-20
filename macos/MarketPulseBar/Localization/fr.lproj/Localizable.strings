@@ -4,6 +4,18 @@
    `uv run --locked python scripts/check_localization.py` checks this file against the source. */
 
 /* ==== DesktopViews.swift ==== */
+"Actions for %@" = "Actions pour %@";
+"Couldn’t load your portfolio" = "Impossible de charger votre portefeuille";
+"Check the error above, then try refreshing your portfolio." = "Consultez le message d’erreur ci-dessus, puis essayez d’actualiser votre portefeuille.";
+"Clear search" = "Effacer la recherche";
+"Record a buy or import transactions to see your holdings." = "Inscrivez un achat ou importez des opérations pour afficher vos positions.";
+"No matching holdings" = "Aucune position correspondante";
+"No transactions yet" = "Aucune opération pour le moment";
+"Record a transaction or import a CSV to see activity here." = "Inscrivez une opération ou importez un fichier CSV pour afficher votre activité.";
+"Try another search or select a different account." = "Essayez une autre recherche ou sélectionnez un autre compte.";
+"Clear filters" = "Effacer les filtres";
+"1 position" = "1 position";
+"1 transaction · + money in, − money out, in original currency" = "1 opération · + entrées, − sorties, en devise d’origine";
 "Overview" = "Aperçu";
 "Holdings" = "Placements";
 "Allocation" = "Répartition";
@@ -34,8 +46,6 @@
 "Leave demo" = "Quitter la démo";
 "Cached quotes are in use. Values may be out of date." = "Des cours en cache sont utilisés. Les valeurs peuvent être périmées.";
 "Opening your portfolio…" = "Ouverture de votre portefeuille…";
-"Your portfolio is waiting" = "Votre portefeuille vous attend";
-"Install the CLI from this checkout, then run marketpulse desktop install." = "Installez le CLI à partir de ce dépôt, puis lancez marketpulse desktop install.";
 "Try again" = "Réessayer";
 "Toggle privacy mode" = "Activer ou désactiver le mode confidentiel";
 "Show amounts" = "Afficher les montants";
@@ -50,7 +60,6 @@
 "Export ledger" = "Exporter le registre";
 "Open terminal" = "Ouvrir le terminal";
 "Stored on your Mac" = "Stocké sur votre Mac";
-"PORTFOLIO / %@" = "PORTEFEUILLE / %@";
 "Search activity" = "Rechercher l’activité";
 "Search holdings" = "Rechercher les positions";
 "Refreshing portfolio…" = "Actualisation du portefeuille…";
@@ -120,7 +129,6 @@
 "Record a valuation…" = "Inscrire une évaluation…";
 "Change asset class…" = "Changer la catégorie d’actif…";
 "No positions to show" = "Aucune position à afficher";
-"Record a buy, or adjust your search and account filter." = "Inscrivez un achat, ou modifiez votre recherche et le filtre de compte.";
 "Update MarketPulse to set targets" = "Mettez MarketPulse à jour pour fixer des cibles";
 "This version of the engine doesn't report allocation targets." = "Cette version du moteur ne fournit pas de cibles de répartition.";
 "Set the mix you're aiming for" = "Fixez la répartition que vous visez";
@@ -155,6 +163,7 @@
 "Delete" = "Supprimer";
 "Cancel" = "Annuler";
 "Transaction deleted" = "Opération supprimée";
+"Couldn't delete this transaction. Check the ledger and try again." = "Impossible de supprimer cette opération. Vérifiez le registre et réessayez.";
 "%@. Holdings, cost base, and gains are worked out again without it. This can't be undone." = "%@. Les positions, le PBR et les gains seront recalculés sans elle. Cette action est irréversible.";
 "%lld active accounts" = "%lld comptes actifs";
 "1 archived" = "1 archivé";
@@ -322,6 +331,9 @@
 "Restore the backup from %@?" = "Restaurer la sauvegarde du %@?";
 "Restore" = "Restaurer";
 "Your portfolio will be replaced with this backup (%@). Anything recorded after %@ will no longer appear. Your current portfolio is saved as a new backup first, so you can undo this." = "Votre portefeuille sera remplacé par cette sauvegarde (%@). Ce qui a été inscrit après le %@ n’apparaîtra plus. Votre portefeuille actuel est d’abord enregistré comme nouvelle sauvegarde; vous pourrez donc annuler.";
+"Preview again" = "Afficher de nouveau l’aperçu";
+"Check the transaction details and try again." = "Vérifiez les détails de l’opération et réessayez.";
+"Couldn't confirm whether this transaction was saved. Retry save to check the same request safely." = "Impossible de confirmer si l’opération a été enregistrée. Réessayez l’enregistrement pour vérifier la même demande en toute sécurité.";
 "Checking the backup…" = "Vérification de la sauvegarde…";
 "Current portfolio" = "Portefeuille actuel";
 "Backup" = "Sauvegarde";
@@ -600,7 +612,6 @@
 "Leave the Demo" = "Quitter la démo";
 "Explore a Demo Portfolio" = "Explorer un portefeuille de démonstration";
 "can't reach marketpulse" = "marketpulse inaccessible";
-"Run `marketpulse menubar install` again from a terminal." = "Relancez `marketpulse menubar install` dans un terminal.";
 "↓ MarketPulse %@ is available" = "↓ MarketPulse %@ disponible";
 "copy install command" = "copier la commande";
 "DEMO · FICTIONAL" = "DÉMO · FICTIF";
@@ -676,6 +687,21 @@
 
 
 /* ==== DesktopModels.swift, Localization.swift ==== */
+"Ledger warning details are hidden in privacy mode." = "Le mode confidentialité masque le détail des avertissements du registre.";
+"Find (⌘F)" = "Rechercher (⌘F)";
+"Find" = "Rechercher";
+"Choose an account for this transaction." = "Choisissez un compte pour cette opération.";
+"Choose a different account to receive the shares." = "Choisissez un autre compte pour recevoir les parts.";
+"Enter the asset symbol." = "Saisissez le symbole de l’actif.";
+"Enter a three-letter currency code or leave it blank." = "Saisissez un code de devise à trois lettres ou laissez le champ vide.";
+"Enter a quantity greater than zero." = "Saisissez une quantité supérieure à zéro.";
+"Enter a market price greater than zero." = "Saisissez un cours supérieur à zéro.";
+"Enter a price of zero or more." = "Saisissez un prix supérieur ou égal à zéro.";
+"Enter fees of zero or more." = "Saisissez des frais supérieurs ou égaux à zéro.";
+"Enter two different, positive share counts." = "Saisissez deux nombres de parts positifs et différents.";
+"Enter an amount greater than zero." = "Saisissez un montant supérieur à zéro.";
+"Run the checkout installer again to refresh the saved CLI path." = "Relancez l’installation depuis le dépôt pour actualiser le chemin de l’interface en ligne de commande.";
+"Check the executable path in MARKETPULSE_CLI." = "Vérifiez le chemin de l’exécutable dans MARKETPULSE_CLI.";
 "Split ratio" = "Ratio de fractionnement";
 "Target account" = "Compte de destination";
 /* Save recovery (TransactionSaveRequest) */
@@ -737,6 +763,7 @@
 "Sale" = "Vente";
 "Saved 1 sale from %@ to %@" = "1 vente de %@ enregistrée dans %@";
 "Saved %lld sales from %@ to %@" = "%lld ventes de %@ enregistrées dans %@";
+"1 issue may leave sales out of this file. Details are hidden in privacy mode." = "Un problème pourrait exclure certaines ventes de ce fichier. Les détails sont masqués en mode confidentialité.";
 "Saved 1 sale from %@ to %@. 1 issue may leave sales out of it: %@ %@" = "1 vente de %@ enregistrée dans %@. Un problème pourrait en exclure des ventes : %@ %@";
 "Saved %lld sales from %@ to %@. 1 issue may leave sales out of it: %@ %@" = "%lld ventes de %@ enregistrées dans %@. Un problème pourrait en exclure des ventes : %@ %@";
 "Saved 1 sale from %@ to %@. %lld issues, listed under Needs attention, may leave sales out of it." = "1 vente de %@ enregistrée dans %@. %lld problèmes, listés sous « À vérifier », pourraient en exclure des ventes.";

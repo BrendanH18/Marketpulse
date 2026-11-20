@@ -122,7 +122,8 @@ def test_27_holdings_markdown_table_honours_privacy(cli, tracker):
     assert len(lines) == 6
     tracker.config.privacy = True
     masked = cli("holdings", "--markdown").output
-    assert "$2,700.00" not in masked and "AAPL" in masked
+    assert "$2,700.00" not in masked and "| AAPL | •••• | 200.00 USD |" in masked
+    assert "| FICT-ART | •••• | •••• CAD |" in masked and "600.00" not in masked
     assert cli("holdings", "--markdown", "--json").exit_code == 2
 
 

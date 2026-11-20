@@ -117,7 +117,7 @@ def test_details_show_every_field_of_the_selected_row(tracker, store):
             await pilot.press("P")
             body = str(app.screen.query_one("#details", Static).content)
             assert app.screen.title_text == "AAPL · Cedar Margin"
-            assert f"Quantity      {fmt.MASK}" in body and "Average cost  150.00" in body
+            assert f"Quantity      {fmt.MASK}" in body and f"Average cost  {fmt.MASK}" in body
             await pilot.press("escape")
             await pilot.press("4")
             await pilot.press("P")

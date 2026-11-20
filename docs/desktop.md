@@ -142,11 +142,14 @@ v99.0.0.
 - **Overview:** net worth, daily change, unrealized gain, snapshot history,
   asset allocation, account balances, and recent activity.
 - **Holdings:** search, account filters, value/symbol ordering, and native/base
-  currency labels. Missing prices remain unavailable rather than becoming zero.
+  currency labels. Holdings and Activity each remember their own search while the window is open.
+  Press ⌘F to focus search and Escape to clear it. The account picker applies to both. **Clear search** keeps the selected account. **Clear filters**
+  on an empty result returns to all accounts and clears the current search.
+  Missing prices remain unavailable rather than becoming zero.
   **Add asset** adds what the market can't price (`marketpulse asset`): a **GIC or
   bond**, valued by the interest it earns from its start date to maturity, or a
   **property or other asset** you value yourself, with its asset class. The symbol is a
-  short code of your own and can't be one already in your portfolio. Right-click a row
+  short code of your own and can't be one already in your portfolio. Select a row and open its actions menu, or right-click it,
   to **Record a valuation…** of an asset you value yourself (its value is the latest
   one), or to **Change asset class…** of any symbol, which moves it in Allocation.
 - **Allocation:** each asset class against the targets you set with **Set targets…**
@@ -154,12 +157,13 @@ v99.0.0.
   percentage points, and the amount to add or reduce to reach the target at today's
   prices. These are suggestions only; MarketPulse never places trades. Targets can't add
   up to more than 100%; saving replaces them all, and clearing every field removes them.
-- **Activity:** searchable ledger entries and amounts in the original currency,
+- **Activity:** search by symbol, transaction type, note, account name, or date (as displayed or YYYY-MM-DD).
+  Amounts appear in the original currency,
   signed from the account's point of view: **+** money in (sells, deposits,
   income), **−** money out (buys, withdrawals, fees). DRIPs and transfers move
   shares rather than cash and carry no sign; splits show their ratio. Right-click an
   entry to **Edit…** (or double-click it) or **Delete…** (or select it and press Delete).
-  Edit opens the transaction form filled in; the type is fixed, so delete the entry and
+  The selected row also has an **Edit…** button. Edit opens the transaction form filled in; the type is fixed, so delete the entry and
   record a new one to change it. Buys, sells, deposits, withdrawals, dividends,
   interest, and fees can be edited; transfers, DRIPs, splits, and returns of capital can
   be deleted and recorded again. Any entry can be deleted, after a confirmation. A
@@ -192,7 +196,8 @@ v99.0.0.
   snapshot/backup status, and the app and backend versions. **Backups** lists the
   backups on this Mac with **Restore…** and **Show in Finder**. The restore preview
   validates the backup and compares account counts, transaction counts, and latest
-  transaction dates. After confirmation, the app backs up your current portfolio,
+  transaction dates. If the backup changes before you restore it, choose **Preview again**
+  to review the updated comparison. After confirmation, the app backs up your current portfolio,
   restores the selected backup, and reloads the window
   ([details](data.md#restore-a-database)).
 

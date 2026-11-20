@@ -58,9 +58,15 @@ def _load_chart(app: MarketPulseApp, view: ChartView) -> None:
         compare = {o: market.history(o, period) for o in others}
         quotes, _ = market.quotes([sym])
     except MarketError as e:
-        app.call_from_thread(view.set_message, str(e))
+
+        def failed(message: str) -> None:
+            if (sym, period, others) == (app.chart_symbol, app.chart_period, list(app.compare)):
+                view.set_message(message)
+                app.render_chart_info()
+
+        app._publish_load(failed, str(e))
         return
-    app.call_from_thread(app._chart_loaded, sym, period, bars, quotes.get(sym), compare)
+    app._publish_load(app._chart_loaded, sym, period, bars, quotes.get(sym), compare)
 
 
 def _chart_loaded(app: MarketPulseApp, sym, period, bars, quote, compare) -> None:

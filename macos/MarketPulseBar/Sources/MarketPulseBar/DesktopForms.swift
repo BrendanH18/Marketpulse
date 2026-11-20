@@ -92,6 +92,9 @@ struct TransactionSheet: View {
         .onChange(of: draft.account) { _, account in
           if draft.target == account { draft.target = "" }
         }
+      if draft.request == nil, let reason = entry.validationMessage() {
+        caption(reason)
+      }
       if draft.request != nil && !model.saving {
         Text("The save outcome is unknown. Retry the same entry before changing or closing it.")
           .font(.caption).foregroundStyle(.secondary)
@@ -108,7 +111,14 @@ struct TransactionSheet: View {
           if let editing {
             // An edit sets the same values again when repeated, so it needs no save receipt.
             let args = entry.editArguments(id: editing.id, revision: editing.revisionArguments)
-            Task { if await model.perform(args, success: String(localized: "Transaction updated")) { dismiss() } }
+            Task {
+              if await model.perform(
+                args, success: String(localized: "Transaction updated"),
+                privateFailure: TransactionSaveResult.privateRejection)
+              {
+                dismiss()
+              }
+            }
             return
           }
           let attempt = draft.request ?? TransactionSaveRequest(arguments: entry.arguments())
@@ -172,7 +182,8 @@ struct TransactionSheet: View {
 
   /// For entries that act on shares already held: how many there are now.
   private var holdingNote: String? {
-    guard ["TRANSFER", "SPLIT", "ROC"].contains(draft.type), !entry.symbolCode.isEmpty, !draft.account.isEmpty
+    guard model.status?.privacy != true, ["TRANSFER", "SPLIT", "ROC"].contains(draft.type), !entry.symbolCode.isEmpty,
+      !draft.account.isEmpty
     else { return nil }
     let symbol = entry.symbolCode
     guard let name = account(draft.account)?.name else {
@@ -195,7 +206,7 @@ struct TransactionSheet: View {
   }
 
   private var splitNote: String {
-    guard let ratio = entry.ratio(), ratio != 1, let held else {
+    guard model.status?.privacy != true, let ratio = entry.ratio(), ratio != 1, let held else {
       return String(
         localized:
           "For a 2-for-1 split, enter 2 and 1; for a 1-for-10 consolidation, 1 and 10. The cost base doesn't change.")
@@ -755,13 +766,22 @@ struct RestoreBackupSheet: View {
     ) {
       switch draft.state {
       case .checking:
-        ProgressView("Checking the backup…").controlSize(.small)
+        ProgressView("Checking the backup…").controlSize(.small).task {
+          do {
+            let preview = try await model.previewRestore(from: path)
+            try Task.checkCancellation()
+            draft.state = .ready(preview)
+          } catch {
+            if !Task.isCancelled { draft.state = .failed(error.localizedDescription) }
+          }
+        }
       case .ready(let preview):
         comparison(preview)
       case .failed(let error):
         Text(error).font(.callout).foregroundStyle(Studio.red).fixedSize(
           horizontal: false, vertical: true
         ).textSelection(.enabled)
+        Button("Preview again") { draft.state = .checking }
       }
       HStack {
         Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.saving)
@@ -770,19 +790,14 @@ struct RestoreBackupSheet: View {
         Button("Restore", role: .destructive) {
           guard case .ready(let preview) = draft.state else { return }
           Task {
-            await model.restoreBackup(backup, from: path, fingerprint: preview.fingerprint)
-            dismiss()
+            if await model.restoreBackup(backup, from: path, fingerprint: preview.fingerprint) {
+              dismiss()
+            } else {
+              draft.state = .failed(model.operationError ?? String(localized: "Couldn't read the restore preview."))
+              model.operationError = nil
+            }
           }
         }.disabled(!draft.canRestore || !model.canEdit)
-      }
-    }.task {
-      guard case .checking = draft.state else { return }
-      do {
-        let preview = try await model.previewRestore(from: path)
-        try Task.checkCancellation()
-        draft.state = .ready(preview)
-      } catch {
-        if !Task.isCancelled { draft.state = .failed(error.localizedDescription) }
       }
     }
   }
@@ -1064,17 +1079,21 @@ private struct SheetLayout<Content: View>: View {
   @ObservedObject var model: StatusModel
   @ViewBuilder let content: Content
   var body: some View {
-    VStack(alignment: .leading, spacing: 18) {
-      Text(title).font(.title2.weight(.semibold))
-      Text(subtitle).font(.callout).foregroundStyle(.secondary)
-      if let error = model.errorMessage {
-        Text(error).font(.callout).foregroundStyle(Studio.red).fixedSize(
-          horizontal: false, vertical: true
-        ).textSelection(.enabled)
-      }
-      content
-    }.padding(28).frame(width: 520).fixedSize(horizontal: false, vertical: true)
-      .interactiveDismissDisabled(model.saving)
+    BoundedPanel(reservedHeight: 120) {
+      VStack(alignment: .leading, spacing: 18) {
+        Text(title).font(.title2.weight(.semibold))
+        Text(subtitle).font(.callout).foregroundStyle(.secondary)
+        if let error = model.operationError {
+          Text(error).font(.callout).foregroundStyle(Studio.red).fixedSize(
+            horizontal: false, vertical: true
+          ).textSelection(.enabled)
+        }
+        content
+      }.padding(28).frame(width: 520)
+    }
+    .interactiveDismissDisabled(model.saving)
+    .onAppear { model.operationError = nil }
+    .onDisappear { model.operationError = nil }
   }
 }
 

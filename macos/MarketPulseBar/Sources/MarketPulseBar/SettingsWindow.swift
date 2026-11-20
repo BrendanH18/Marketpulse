@@ -56,21 +56,22 @@ private struct SettingsPage<Content: View>: View {
   @ViewBuilder let content: Content
 
   var body: some View {
-    Form {
-      if model.demo && writes {
-        Label(
-          "You're exploring the demo. Settings are read-only until you leave it.", systemImage: "sparkles"
-        ).foregroundStyle(.secondary)
+    BoundedPanel(reservedHeight: 110) {
+      Form {
+        if model.demo && writes {
+          Label(
+            "You're exploring the demo. Settings are read-only until you leave it.", systemImage: "sparkles"
+          ).foregroundStyle(.secondary)
+        }
+        if let error = model.settingsError {
+          Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Studio.red)
+            .textSelection(.enabled)
+        }
+        content.disabled(writes && model.demo)
       }
-      if let error = model.settingsError {
-        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Studio.red)
-          .textSelection(.enabled)
-      }
-      content.disabled(writes && model.demo)
+      .formStyle(.grouped)
+      .frame(width: 520)
     }
-    .formStyle(.grouped)
-    .frame(width: 520)
-    .fixedSize(horizontal: false, vertical: true)
   }
 }
 

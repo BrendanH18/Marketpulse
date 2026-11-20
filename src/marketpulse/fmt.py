@@ -43,9 +43,11 @@ def pct(value: float | None, *, sign: bool = True, decimals: int = 2) -> str:
     return f"{prefix}{value:,.{decimals}f}%"
 
 
-def price(value: float | None) -> str:
+def price(value: float | None, *, privacy: bool = False) -> str:
     if value is None:
         return "—"
+    if privacy:
+        return MASK
     if abs(value) >= 1000:
         return f"{value:,.2f}"
     if abs(value) >= 1:
@@ -53,7 +55,9 @@ def price(value: float | None) -> str:
     return f"{value:,.4f}"
 
 
-def qty(value: float) -> str:
+def qty(value: float, *, privacy: bool = False) -> str:
+    if privacy:
+        return MASK
     text = f"{value:,.4f}".rstrip("0").rstrip(".")
     return text or "0"
 

@@ -27,7 +27,7 @@ from .analytics import (
 )
 from .ledger import RoomStatus
 from .market import PRIMARY, SearchResult
-from .models import Account, Bar, Quote, Transaction, TxnType
+from .models import Account, AssetKind, Bar, Quote, Transaction, TxnType
 from .providers import provider_label
 from .tax import (
     DENIED_REGISTERED,
@@ -253,8 +253,10 @@ def position_cells(p: PositionView, base: str, *, privacy: bool = False, show_ac
         Text(p.symbol, style="bright"),
         Text(truncate(p.name, 20), style="muted"),
         Text(fmt.MASK if privacy else fmt.qty(p.quantity)),
-        Text(fmt.price(p.avg_cost), style="muted"),
-        Text(fmt.price(p.price) + (" ◌" if p.stale else "")) if p.price is not None else dash(),
+        Text(fmt.price(p.avg_cost, privacy=privacy), style="muted"),
+        Text(fmt.price(p.price, privacy=privacy and p.kind is not AssetKind.MARKET) + (" ◌" if p.stale else ""))
+        if p.price is not None
+        else dash(),
         trend(fmt.pct(p.day_change_pct), p.day_change_pct) if p.day_change_pct is not None else dash(),
         Text(fmt.money(p.market_value, privacy=privacy) + ccy_suffix) if p.market_value is not None else dash(),
         trend(fmt.money(p.gain, sign=True, privacy=privacy), p.gain) if p.gain is not None else dash(),
@@ -433,7 +435,7 @@ def activity_cells(t: Transaction, accounts: dict[int, Account], *, privacy: boo
         Text(t.type.value, style=TXN_STYLES.get(t.type, "")),
         Text(t.symbol or DASH, style="bright" if t.symbol else "muted"),
         Text(fmt.MASK if privacy and t.quantity else qty),
-        Text(fmt.price(t.price) if t.price else DASH, style="" if t.price else "muted"),
+        Text(fmt.price(t.price, privacy=privacy) if t.price else DASH, style="" if t.price else "muted"),
         Text(fmt.money(t.gross_value, privacy=privacy) if t.gross_value else DASH),
         Text(fmt.money(t.fees, privacy=privacy) if t.fees else DASH, style="muted"),
         Text(t.currency or DASH, style="muted"),
@@ -761,7 +763,7 @@ def tax_group(
                     Text(r.date, style="muted"),
                     Text(acct.name if acct else "?"),
                     Text(r.symbol, style="bright"),
-                    Text(fmt.qty(r.quantity)),
+                    Text(fmt.qty(r.quantity, privacy=privacy)),
                     Text(fmt.money(r.proceeds, privacy=privacy)),
                     Text(fmt.money(r.acb, privacy=privacy), style="muted"),
                     trend(fmt.money(r.allowed_gain, sign=True, privacy=privacy), r.allowed_gain),
@@ -780,8 +782,9 @@ def tax_group(
         for r in superficial:
             w.append(
                 f"   {r.date} {r.symbol}: {fmt.money(r.denied, privacy=privacy)} of a "
-                f"{fmt.money(-r.gain, privacy=privacy)} loss denied — sold {fmt.qty(r.quantity)}, "
-                f"bought {fmt.qty(r.acquired_in_window)} within 30 days, holding {fmt.qty(r.held_after_window)}"
+                f"{fmt.money(-r.gain, privacy=privacy)} loss denied — sold {fmt.qty(r.quantity, privacy=privacy)}, "
+                f"bought {fmt.qty(r.acquired_in_window, privacy=privacy)} within 30 days, "
+                f"holding {fmt.qty(r.held_after_window, privacy=privacy)}"
                 + (" (window still open)" if r.window_open else "")
                 + "\n",
                 style="muted",
@@ -795,7 +798,8 @@ def tax_group(
     if report.issues:
         w = Text("\n⚠ Needs attention:\n", style="warn")
         for issue in report.issues:
-            w.append(f"   {issue.date} {issue.message}\n", style="muted")
+            detail = "Issue details hidden in privacy mode" if privacy else issue.message
+            w.append(f"   {issue.date} {detail}\n", style="muted")
         parts.append(w)
     if rooms:
         parts += [Text(""), room_table(rooms, privacy=privacy)]

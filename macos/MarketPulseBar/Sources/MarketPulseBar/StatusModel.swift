@@ -7,8 +7,32 @@ import UniformTypeIdentifiers
 final class StatusModel: ObservableObject {
   @Published var status: StatusPayload?
   @Published var desktop: DesktopPayload?
-  @Published var errorMessage: String?
-  @Published var message: String?
+  @Published private var operationFailure: (detail: String, privateDetail: String?)?
+  var operationError: String? {
+    get {
+      guard let failure = operationFailure else { return nil }
+      return status?.privacy == true ? failure.privateDetail ?? failure.detail : failure.detail
+    }
+    set { operationFailure = newValue.map { ($0, nil) } }
+  }
+  @Published private(set) var refreshError: String?
+  var errorMessage: String? { operationError ?? refreshError }
+  private enum Confirmation {
+    case text(String)
+    case taxExport(TaxExportResult, year: Int, file: String)
+  }
+  @Published private var confirmation: Confirmation?
+  var message: String? {
+    get {
+      switch confirmation {
+      case .text(let text): return text
+      case .taxExport(let result, let year, let file):
+        return result.message(year: year, file: file, privacy: status?.privacy == true)
+      case nil: return nil
+      }
+    }
+    set { confirmation = newValue.map(Confirmation.text) }
+  }
   @Published var loading = false
   @Published var saving = false
   @Published var lastUpdated: Date?
@@ -236,7 +260,7 @@ final class StatusModel: ObservableObject {
       status = payload.status
       statusFromSnapshot = true
       taxKey = Self.ledgerKey(payload)
-      errorMessage = nil
+      refreshError = nil
       lastUpdated = Date()
       if !demo, let folder = payload.storage?.dataDir { dataDir = folder }
       if !demo && payload.ledgerEmpty && !UserDefaults.standard.bool(forKey: Self.welcomeShownKey) {
@@ -258,7 +282,7 @@ final class StatusModel: ObservableObject {
     // A superseded reload stops here: after entering the demo, it must not query the real ledger.
     guard generation == reloadGeneration else { return }
     guard !demo else {
-      errorMessage = desktopError
+      refreshError = desktopError
       return
     }
     do {
@@ -270,10 +294,10 @@ final class StatusModel: ObservableObject {
       // The window keeps its last payload; it must still honour the current privacy setting.
       applyPrivacy(fallback.privacy)
       lastUpdated = Date()
-      errorMessage = String(localized: "The portfolio window couldn't refresh: \(desktopError)")
+      refreshError = String(localized: "The portfolio window couldn't refresh: \(desktopError)")
     } catch {
       guard generation == reloadGeneration else { return }
-      errorMessage = desktopError
+      refreshError = desktopError
     }
   }
 
@@ -421,7 +445,8 @@ final class StatusModel: ObservableObject {
     desktop = nil
     status = nil
     statusFromSnapshot = false
-    errorMessage = nil
+    refreshError = nil
+    operationError = nil
     message = nil
     lastUpdated = nil
     clearTax()
@@ -434,8 +459,8 @@ final class StatusModel: ObservableObject {
   }
 
   @discardableResult
-  func perform(_ args: [String], success: String) async -> Bool {
-    await perform(args) { _ in success }
+  func perform(_ args: [String], success: String, privateFailure: String? = nil) async -> Bool {
+    await perform(args, privateFailure: privateFailure) { _ in success }
   }
 
   func recordTransaction(_ request: TransactionSaveRequest, success: String = String(localized: "Transaction recorded"))
@@ -448,13 +473,13 @@ final class StatusModel: ObservableObject {
     let result = await request.submit { try await CLI.run($0) }
     switch result {
     case .recorded, .recovered:
-      errorMessage = nil
+      operationError = nil
       message =
         result == .recovered
         ? String(localized: "\(success). Its confirmation failed.") : success
       await reload()
     case .notRecorded(let error), .unknown(let error):
-      errorMessage = error
+      operationFailure = (error, result.privateError)
     }
     return result
   }
@@ -463,11 +488,13 @@ final class StatusModel: ObservableObject {
   /// before the reload; `success` builds the confirmation from the command's output. `input`
   /// goes to the command's stdin, for secrets that mustn't appear in its arguments.
   private func perform(
-    _ args: [String], input: Data? = nil, afterWrite: () -> Void = {}, success: (Data) -> String
+    _ args: [String], input: Data? = nil, privateFailure: String? = nil, afterWrite: () -> Void = {},
+    success: (Data) -> String
   ) async -> Bool {
     guard !demo && !saving else { return false }
     saving = true
     defer { saving = false }
+    operationError = nil
     do {
       let output = try await CLI.run(args, input: input)
       afterWrite()
@@ -475,7 +502,7 @@ final class StatusModel: ObservableObject {
       await reload()
       return true
     } catch {
-      errorMessage = error.localizedDescription
+      operationFailure = (error.localizedDescription, privateFailure)
       return false
     }
   }
@@ -492,8 +519,8 @@ final class StatusModel: ObservableObject {
 
   /// Replaces the ledger with a backup; the backend saves the current one as a pre-restore
   /// backup first and refuses a damaged or newer file without changing anything.
-  func restoreBackup(_ backup: BackupInfo, from path: String, fingerprint: String) async {
-    guard canEdit else { return }
+  func restoreBackup(_ backup: BackupInfo, from path: String, fingerprint: String) async -> Bool {
+    guard canEdit else { return false }
     saving = true
     defer { saving = false }
     // A refresh still running could record today's snapshot, valued from the ledger being
@@ -501,12 +528,14 @@ final class StatusModel: ObservableObject {
     while realReloads > 0 { try? await Task.sleep(nanoseconds: 50_000_000) }
     do {
       _ = try await CLI.run(["backup", "restore", "--yes", "--expect-fingerprint", fingerprint, "--", path])
-      errorMessage = nil
+      operationError = nil
       message = String(
         localized: "Restored the backup from \(backup.when). Your previous portfolio was saved as a backup first.")
       await reload()
+      return true
     } catch {
-      errorMessage = error.localizedDescription
+      operationError = error.localizedDescription
+      return false
     }
   }
 
@@ -621,7 +650,7 @@ final class StatusModel: ObservableObject {
       try FileManager.default.copyItem(at: url, to: pinned)
     } catch {
       let (file, reason) = (url.lastPathComponent, error.localizedDescription)
-      errorMessage = String(localized: "Couldn't read \(file): \(reason)")
+      operationError = String(localized: "Couldn't read \(file): \(reason)")
       return
     }
     closeImport()
@@ -659,9 +688,9 @@ final class StatusModel: ObservableObject {
       let preview = try decoder.decode(ImportPreview.self, from: data)
       guard current else { return }
       importPreview = preview
-      errorMessage = nil
+      operationError = nil
     } catch {
-      if current { errorMessage = error.localizedDescription }
+      if current { operationError = error.localizedDescription }
     }
   }
 
@@ -774,12 +803,12 @@ final class StatusModel: ObservableObject {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let result = try decoder.decode(TaxExportResult.self, from: data)
-        errorMessage = nil
-        message = result.message(year: year, file: url.lastPathComponent)
+        operationError = nil
+        confirmation = .taxExport(result, year: year, file: url.lastPathComponent)
         // The export found other issues than the shown report: it's out of date.
         if result.issues != tax?.issues { loadTax(force: true) }
       } catch {
-        errorMessage = error.localizedDescription
+        operationError = error.localizedDescription
       }
     }
   }

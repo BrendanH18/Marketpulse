@@ -48,7 +48,9 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
    Old RRSP still holds investments or cash…". Charts or their empty states render
    without clipping.
 3. **Holdings.** No Old RRSP or MSFT row. Search filters. The account filter has no
-   Old RRSP. The sort toggle reorders rows. No striped empty rows below the data.
+   Old RRSP. Search for `iShares`, switch to Activity and check the full ledger is visible,
+   then return to Holdings and confirm the search is preserved. Search for `no-such-position`
+   and choose **Clear filters** to restore all rows and accounts. The sort toggle reorders rows. No striped empty rows below the data.
 4. **Activity.** BUY and FEE are negative; SELL, DEPOSIT, and DIVIDEND are positive;
    the split shows "×2". No Old RRSP rows. The header reads "+ money in, − money out".
 5. **Accounts.** Exactly the two active accounts, and a "1 archived" link (no names).
@@ -323,6 +325,6 @@ menu bar. Then:
 
 ## Reporting
 
-Post results on the PR (or the issue being verified) as a table of items 1–26 with
+Post results on the PR (or the issue being verified) as a table of items 1–28 with
 PASS / FAIL / UNVERIFIED and evidence, then any bugs with exact steps to reproduce.
 Clean up with `rm -rf "$TMPDIR/marketpulse-qa"`.

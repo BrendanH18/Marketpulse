@@ -11,7 +11,14 @@ enum CLIError: LocalizedError {
   var errorDescription: String? {
     switch self {
     case .failed(let message): return message.trimmingCharacters(in: .whitespacesAndNewlines)
-    case .launch(let message): return String(localized: "Couldn't run marketpulse: \(message)")
+    case .launch(let message):
+      let reason = String(localized: "Couldn't run marketpulse: \(message)")
+      switch CLI.resolved.source {
+      case .installer:
+        return reason + " " + String(localized: "Run the checkout installer again to refresh the saved CLI path.")
+      case .override: return reason + " " + String(localized: "Check the executable path in MARKETPULSE_CLI.")
+      default: return reason
+      }
     }
   }
 }

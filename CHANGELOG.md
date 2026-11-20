@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Holdings and Activity on Mac keep independent searches, offer a clear-filters action when
+  nothing matches, and support ⌘F. Activity also accepts account names and dates.
+
 - `backup restore --dry-run` compares account counts, transaction counts and latest transaction dates
   before replacing the ledger ([#171](https://github.com/BrendanH18/Marketpulse/issues/171)).
 - The Mac app validates backups and compares them with your current ledger before asking you
@@ -49,6 +52,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     toggle (`I`), jump to holding (`S`), movers metric cycler (`m`), tax/income
     year steppers (`-`/`+`), bulk alert controls (`U`), local backup and auto
     theme restore.
+
+### Fixed
+
+- Mac transaction entry explains which field needs attention. Form errors are shown separately
+  from refresh errors, and the portfolio window and menu bar offer a retry after a load failure.
+  A failed backup restore offers a fresh preview before the next restore attempt.
+- Privacy mode masks manually valued holdings and GIC prices, share counts in transaction
+  hints and tax details, acquisition costs, and sensitive details in transaction confirmations and errors.
+- On compact terminals the dashboard scrolls and the tax report gets the full width. Terminal
+  activity search includes full notes and account names, and failed tax and income loads can be retried.
+- Tall Mac forms, Settings pages, and menu bar portfolios scroll to fit the display.
+- Terminal forms scroll on short screens and reveal validation errors. Malformed numbers such
+  as `1,5` are rejected before saving, and `1,234.56` still reads as 1234.56.
 
 ## [3.1.0] - 2026-11-18
 
