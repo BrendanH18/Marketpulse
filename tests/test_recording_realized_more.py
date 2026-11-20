@@ -349,6 +349,8 @@ def test_19_payouts_group_sort(browse):
     assert result.exit_code == 2 and "--group-sort needs --by" in result.output
     result = browse("payouts", "--by", "symbol", "--group-sort", "amount", "--newest-first")
     assert result.exit_code == 2 and "--newest-first cannot be combined with --group-sort amount" in result.output
+    result = browse("payouts", "--by", "symbol", "--group-sort", "count", "--newest-first")
+    assert result.exit_code == 2 and "--newest-first cannot be combined with --group-sort count" in result.output
 
 
 def test_20_markdown(browse, tracker, monkeypatch):

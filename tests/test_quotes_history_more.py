@@ -204,6 +204,9 @@ def test_54_compare_correlation(cli, histories):
     histories.set_history("FLAT.TO", dict.fromkeys(DAYS, 50.0), currency="CAD")
     rows = json.loads(ok(cli("compare", "BASE.TO", "FLAT.TO", "--correlation", "--json")))
     assert {r["symbol"]: r for r in rows}["FLAT.TO"]["FLAT.TO"] is None
+    histories.set_history("SHRT.TO", dict(zip(DAYS[:2], BASE[:2], strict=True)), currency="CAD")  # one return
+    rows = json.loads(ok(cli("compare", "BASE.TO", "SHRT.TO", "--correlation", "--json")))
+    assert {r["symbol"]: r for r in rows}["SHRT.TO"]["SHRT.TO"] is None
     usage(cli("compare", "BASE.TO", "TWIN.TO", "--correlation", "--top", "1"), "--top can't be combined")
     assert cli("compare", "BASE.TO", "NOPE", "--correlation").exit_code == 1
 

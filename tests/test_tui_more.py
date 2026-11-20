@@ -282,10 +282,11 @@ def test_chart_high_low_previous_chart_and_csv(tracker, store, fake):
             await started(app, pilot)
             assert app.chart_symbol == "XEQT.TO"
             # Turning privacy on redraws the held quantity and gain in the quote line that ctrl+t copies.
-            assert "held 105" in extras.pane_text(app, "#chart-info")
+            await pilot.press("ctrl+t")
+            assert "held 105 · gain +990.00" in copied[-1]
             await pilot.press("p")
-            info = extras.pane_text(app, "#chart-info")
-            assert "held ••••" in info and "held 105" not in info
+            await pilot.press("ctrl+t")
+            assert "held •••• · gain ••••" in copied[-1] and "990" not in copied[-1]
             await pilot.press("p")
             await pilot.press("apostrophe")
             await started(app, pilot)

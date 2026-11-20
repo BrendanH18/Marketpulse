@@ -173,7 +173,9 @@ def action_privacy(app: MarketPulseApp) -> None:
     app.config.save()
     app.refresh_all_views()
     if app.chart_symbol:  # the chart's quote line shows the held quantity and gain, so redraw it with the new masks
-        app.render_chart_info(app.query_one(ChartView).quote)
+        view = app.query_one(ChartView)
+        # While a newly picked chart loads, the view still holds the previous symbol's quote.
+        app.render_chart_info(view.quote if view.symbol == app.chart_symbol else None)
     app.notify("Privacy mode on — amounts hidden" if app.privacy else "Privacy mode off")
 
 
