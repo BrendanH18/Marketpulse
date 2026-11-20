@@ -13,6 +13,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.timer import Timer
 from textual.widgets import ContentSwitcher, DataTable, Input, Static
 
 from .. import render
@@ -30,7 +31,7 @@ from ..themes import (
     theme_names,
 )
 from ..valuation import PortfolioView
-from . import actions, chart, navigation, records, workspaces
+from . import actions, chart, extras, navigation, records, workspaces
 from .commands import PortfolioCommands
 from .constants import HINTS, HOLDING_COLUMNS
 from .widgets import WORKSPACES, Canvas, ChartView, Tile, TopBar, pane
@@ -117,6 +118,7 @@ class MarketPulseApp(App):
     .buttons Button { margin-left: 1; min-width: 14; }
     OptionList { height: auto; max-height: 14; background: $background; border: none; }
     HelpScreen VerticalScroll { height: auto; max-height: 30; }
+    DetailsScreen VerticalScroll { height: auto; max-height: 30; }
     """
 
     BINDINGS = [
@@ -193,6 +195,25 @@ class MarketPulseApp(App):
         Binding("plus", "step_year(1)", show=False),
         Binding("U", "rearm_triggered", show=False),
         Binding("f2", "focus_input", show=False),
+        # Second workflow batch (81-100); none of these keys had a binding before.
+        Binding("P", "details", show=False),
+        Binding("W", "toggle_watch", show=False),
+        Binding("semicolon", "scope_account", show=False),
+        Binding("colon", "go_to", show=False),
+        Binding("percent_sign", "cycle_activity_window", show=False),
+        Binding("circumflex_accent", "chart_extreme(True)", show=False),
+        Binding("low_line", "chart_extreme(False)", show=False),
+        Binding("left_parenthesis", "jump_group(-1)", show=False),
+        Binding("right_parenthesis", "jump_group(1)", show=False),
+        Binding("ctrl+f", "find_row", show=False),
+        Binding("ctrl+g", "find_next", show=False),
+        Binding("ctrl+t", "copy_pane", show=False),
+        Binding("ctrl+r", "toggle_auto_refresh", show=False),
+        Binding("ampersand", "symbol_alerts", show=False),
+        Binding("ctrl+e", "next_issue", show=False),
+        Binding("apostrophe", "previous_chart", show=False),
+        Binding("quotation_mark", "copy_table_json", show=False),
+        Binding("ctrl+s", "save_watch_order", show=False),
     ]
 
     def __init__(self, config: Config, tracker: Tracker | None = None):
@@ -236,6 +257,12 @@ class MarketPulseApp(App):
         self.movers_mode = "day %"
         self.tax_year: int | None = None
         self.income_year: int | None = date.today().year
+        self.activity_window = "all"
+        self.alerts_symbol: str | None = None
+        self.find_text = ""
+        self.chart_history: list[str] = []
+        self.auto_refresh_paused = False
+        self._refresh_timer: Timer | None = None
         for name in theme_names():
             self.register_theme(textual_theme(palette_from_colors(name, OMARCHY_PALETTES[name])))
         if self._auto_theme:
@@ -360,7 +387,7 @@ class MarketPulseApp(App):
         self.render_store_views()
         self.render_dashboard()
         self.set_interval(1.0, self._tick)
-        self.set_interval(max(self.config.refresh_seconds, 5), self.load_data)
+        self._refresh_timer = self.set_interval(max(self.config.refresh_seconds, 5), self.load_data)
         self.load_data()
 
     def on_resize(self, event) -> None:
@@ -431,7 +458,7 @@ class MarketPulseApp(App):
         if ws == "alerts":
             key = self._selected_key(self.query_one("#alerts-table", DataTable))
             alert = next((a for a in self.tracker.store.alerts() if str(a.id) == key), None)
-            return alert.symbol if alert else ""
+            return alert.symbol if alert else (self.alerts_symbol or "")
         return ""
 
     def context_account(self) -> int | None:
@@ -991,3 +1018,70 @@ class MarketPulseApp(App):
 
     def action_focus_input(self) -> None:
         navigation.focus_workspace_input(self)
+
+    # ── actions: second workflow batch (81-100) ───────────────────────────────
+
+    def action_details(self) -> None:
+        extras.show_details(self)
+
+    def action_toggle_watch(self) -> None:
+        extras.toggle_watch(self)
+
+    def action_watch_holdings(self) -> None:
+        extras.watch_holdings(self)
+
+    def action_scope_account(self) -> None:
+        extras.scope_account(self)
+
+    def action_go_to(self) -> None:
+        extras.prompt_go_to(self)
+
+    def action_cycle_activity_window(self) -> None:
+        extras.cycle_activity_window(self)
+
+    def action_chart_extreme(self, high: bool) -> None:
+        extras.chart_extreme(self, high)
+
+    def action_jump_group(self, delta: int) -> None:
+        extras.jump_group(self, delta)
+
+    def action_find_row(self) -> None:
+        extras.prompt_find(self)
+
+    def action_find_next(self) -> None:
+        extras.find_next(self)
+
+    def action_copy_pane(self) -> None:
+        extras.copy_pane(self)
+
+    def action_toggle_auto_refresh(self) -> None:
+        extras.toggle_auto_refresh(self)
+
+    def action_symbol_alerts(self) -> None:
+        extras.symbol_alerts(self)
+
+    def action_next_issue(self) -> None:
+        extras.next_issue(self)
+
+    def action_previous_chart(self) -> None:
+        extras.previous_chart(self)
+
+    def action_copy_table_json(self) -> None:
+        extras.copy_table_json(self)
+
+    def action_copy_chart_csv(self) -> None:
+        extras.copy_chart_csv(self)
+
+    def action_save_watch_order(self) -> None:
+        symbols = extras.sorted_watch_symbols(self)
+        if symbols:
+            self.save_watch_order(symbols)
+
+    @work(thread=True, group="write")
+    def save_watch_order(self, symbols: list[str]) -> None:
+        try:
+            extras.save_watch_order(self, symbols)
+        except (OSError, sqlite3.Error) as e:
+            self.call_from_thread(self.notify, str(e), title="Watchlist not saved", severity="error")
+            return
+        self.call_from_thread(extras.watch_order_saved, self, len(symbols))

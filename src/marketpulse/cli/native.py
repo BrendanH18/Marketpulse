@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import time
 from pathlib import Path
@@ -13,7 +15,7 @@ from .. import render
 from ..brokers import PROFILE_NAMES
 from ..db import AutomationRun
 from ..requests import receipt
-from .base import App, fail, pass_app
+from .base import App, date_callback, fail, pass_app
 from .root import main
 
 
@@ -183,14 +185,31 @@ def automation() -> None:
 
 @automation.command("run")
 @click.option("--once", is_flag=True, help="Run one cycle and exit (for launchd or cron).")
+@click.option(
+    "--cycles",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Run this many cycles, --interval apart, then exit (1 if any failed).",
+)
 @click.option("--interval", type=click.IntRange(min=15), default=60, show_default=True)
 @click.option("--json", "as_json", is_flag=True, help="Emit one JSON object per cycle.")
 @click.option("--quiet", is_flag=True, help="Suppress desktop notifications.")
+@click.option(
+    "--strict", is_flag=True, help="With --once or --cycles, also exit 1 when a symbol or FX rate couldn't be quoted."
+)
 @click.pass_obj
-def automation_run(app: App, once: bool, interval: int, as_json: bool, quiet: bool) -> None:
+def automation_run(
+    app: App, once: bool, cycles: int | None, interval: int, as_json: bool, quiet: bool, strict: bool
+) -> None:
     """Run maintenance until Ctrl+C, or once for an external scheduler."""
     from ..automation import run_cycle
 
+    if once and cycles is not None:
+        raise click.UsageError("Choose either --once or --cycles.")
+    if strict and not once and cycles is None:
+        raise click.UsageError("--strict requires --once or --cycles.")
+    remaining = 1 if once else cycles
+    bad = False
     try:
         while True:
             try:
@@ -202,11 +221,15 @@ def automation_run(app: App, once: bool, interval: int, as_json: bool, quiet: bo
                 click.echo(json.dumps(report, allow_nan=False))
             else:
                 click.echo(json.dumps(report, indent=2, allow_nan=False))
-            if once:
-                # Only a failed cycle is an error; an unquotable symbol is reported, not fatal.
-                if report.get("failed") or report.get("errors"):
-                    raise click.exceptions.Exit(1)
-                break
+            # Only a failed cycle is an error; an unquotable symbol is reported, not fatal (unless --strict).
+            bad = bad or bool(report.get("failed") or report.get("errors"))
+            bad = bad or (strict and bool(report.get("quote_errors")))
+            if remaining is not None:
+                remaining -= 1
+                if remaining == 0:
+                    if bad:
+                        raise click.exceptions.Exit(1)
+                    break
             time.sleep(interval)
     except KeyboardInterrupt:
         pass
@@ -226,19 +249,164 @@ def _history_item(run: AutomationRun) -> dict:
     }
 
 
+HISTORY_CSV_FIELDS = ["id", "ran_at", "failed", "errors", "quote_error_count", "stale_count", "fired"]
+
+
+def _history_summary(items: list[dict]) -> dict:
+    """Totals over the selected runs (newest first)."""
+    failures = [i for i in items if i["failed"]]
+    return {
+        "runs": len(items),
+        "failed": len(failures),
+        "succeeded": len(items) - len(failures),
+        "quote_errors": sum(i["quote_error_count"] for i in items),
+        "alerts_fired": sum(len(i["fired"]) for i in items),
+        "first_run": items[-1]["ran_at"] if items else None,
+        "last_run": items[0]["ran_at"] if items else None,
+        "last_failure": failures[0]["ran_at"] if failures else None,
+    }
+
+
+def _show_history_summary(app: App, summary: dict) -> None:
+    app.title("Automation runs")
+    if not summary["runs"]:
+        app.console.print(Text("No automation runs match.", style="muted"))
+        return
+    lines = [
+        ("Runs", str(summary["runs"]), ""),
+        ("Succeeded", str(summary["succeeded"]), "up" if summary["succeeded"] else "muted"),
+        ("Failed", str(summary["failed"]), "down" if summary["failed"] else "muted"),
+        ("Quote errors", str(summary["quote_errors"]), "warn" if summary["quote_errors"] else "muted"),
+        ("Alerts fired", str(summary["alerts_fired"]), ""),
+        ("First run", summary["first_run"].replace("T", " "), "muted"),
+        ("Last run", summary["last_run"].replace("T", " "), "muted"),
+        (
+            "Last failure",
+            (summary["last_failure"] or "—").replace("T", " "),
+            "down" if summary["last_failure"] else "muted",
+        ),
+    ]
+    for label, value, style in lines:
+        app.console.print(Text.assemble((f"{label:<13}", "muted"), (value, style)))
+
+
 @automation.command("history")
 @click.option("--failures", "failures_only", is_flag=True, help="Only runs that recorded errors.")
+@click.option("--successes", "successes_only", is_flag=True, help="Only runs that recorded no errors.")
+@click.option("--with-alerts", is_flag=True, help="Only runs that fired at least one alert.")
+@click.option("--since", callback=date_callback, help="Only runs on or after YYYY-MM-DD (or today, -7d).")
+@click.option("--until", callback=date_callback, help="Only runs on or before YYYY-MM-DD.")
 @click.option("--limit", type=click.IntRange(min=1), help="Show at most this many runs.")
 @click.option("--json", "as_json", is_flag=True, help="Runs as JSON, newest first, with each full report.")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Runs as JSON Lines, newest first, with each full report.")
+@click.option("--csv", "as_csv", is_flag=True, help="Runs as CSV on stdout (without the full reports).")
+@click.option("--count", "count_only", is_flag=True, help="Print only the number of matching runs.")
+@click.option("--summary", is_flag=True, help="Totals over the matching runs (with --json for raw figures).")
+@click.option("--exit-code", is_flag=True, help="Exit 1 when any matching run failed.")
 @pass_app
-def automation_history(app: App, failures_only: bool, limit: int | None, as_json: bool) -> None:
+def automation_history(
+    app: App,
+    failures_only: bool,
+    successes_only: bool,
+    with_alerts: bool,
+    since: str | None,
+    until: str | None,
+    limit: int | None,
+    as_json: bool,
+    as_jsonl: bool,
+    as_csv: bool,
+    count_only: bool,
+    summary: bool,
+    exit_code: bool,
+) -> None:
     """Recent automation runs, newest first (the newest 50 are kept). Offline."""
-    items = [_history_item(run) for run in app.store.automation_runs(failures_only=failures_only, limit=limit)]
+    if failures_only and successes_only:
+        raise click.UsageError("Choose either --failures or --successes.")
+    if sum((as_json, as_jsonl, as_csv)) > 1:
+        raise click.UsageError("Choose one output format: --json, --jsonl or --csv.")
+    if count_only and (as_json or as_jsonl or as_csv or summary):
+        raise click.UsageError("--count cannot be combined with --json, --jsonl, --csv or --summary.")
+    if summary and (as_jsonl or as_csv):
+        raise click.UsageError("--summary cannot be combined with --jsonl or --csv.")
+    if since is not None and until is not None and since > until:
+        raise click.UsageError("--since must be on or before --until.")
+    selecting = successes_only or with_alerts or since is not None or until is not None
+    runs = app.store.automation_runs(failures_only=failures_only, limit=None if selecting else limit)
+    items = [
+        item
+        for item in (_history_item(run) for run in runs)
+        if (not successes_only or not item["failed"])
+        and (not with_alerts or item["fired"])
+        and (since is None or item["ran_at"][:10] >= since)
+        and (until is None or item["ran_at"][:10] <= until)
+    ][:limit]
+    _print_history(
+        app,
+        items,
+        failures_only=failures_only,
+        selecting=selecting,
+        as_json=as_json,
+        as_jsonl=as_jsonl,
+        as_csv=as_csv,
+        count_only=count_only,
+        summary=summary,
+    )
+    if exit_code and any(item["failed"] for item in items):
+        raise click.exceptions.Exit(1)
+
+
+def _print_history(
+    app: App,
+    items: list[dict],
+    *,
+    failures_only: bool,
+    selecting: bool,
+    as_json: bool,
+    as_jsonl: bool,
+    as_csv: bool,
+    count_only: bool,
+    summary: bool,
+) -> None:
+    if count_only:
+        click.echo(len(items))
+        return
+    if summary:
+        totals = _history_summary(items)
+        if as_json:
+            click.echo(json.dumps(totals, ensure_ascii=False, allow_nan=False))
+        else:
+            _show_history_summary(app, totals)
+        return
     if as_json:
         click.echo(json.dumps(items, ensure_ascii=False, allow_nan=False))
         return
+    if as_jsonl:
+        for item in items:
+            click.echo(json.dumps(item, ensure_ascii=False, allow_nan=False))
+        return
+    if as_csv:
+        stream = io.StringIO()
+        writer = csv.writer(stream, lineterminator="\n")
+        writer.writerow(HISTORY_CSV_FIELDS)
+        for item in items:
+            writer.writerow(
+                [
+                    item["id"],
+                    item["ran_at"],
+                    "true" if item["failed"] else "false",
+                    "; ".join(item["errors"]),
+                    item["quote_error_count"],
+                    "" if item["stale_count"] is None else item["stale_count"],
+                    "; ".join(item["fired"]),
+                ]
+            )
+        click.echo(stream.getvalue(), nl=False)
+        return
     if not items:
-        app.warn("No failed automation runs recorded." if failures_only else "No automation runs recorded yet.")
+        if selecting:
+            app.warn("No automation runs match these filters.")
+        else:
+            app.warn("No failed automation runs recorded." if failures_only else "No automation runs recorded yet.")
         return
     narrow = app.console.width < render.NARROW_WIDTH
     t = render.table(

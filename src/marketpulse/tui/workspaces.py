@@ -14,7 +14,7 @@ from .. import fmt, render
 from ..analytics import income_by_month, income_by_symbol
 from ..models import AssetKind, TxnType
 from ..valuation import PositionView
-from . import navigation
+from . import extras, navigation
 from .constants import HOLDING_COLUMNS, NW_RANGES
 from .widgets import Canvas, Tile, TopBar, money_tile, tile_content
 
@@ -301,6 +301,10 @@ def render_holdings(app: MarketPulseApp) -> None:
         money = fmt.money(total, v.base, privacy=app.privacy, decimals=0)
         count = f"{len(positions)} of {in_scope}" if needle else str(len(positions))
         subtitle = f"f ▸ {scope} · {count} positions · {money}"
+        moves = [x.day_change_base for x in positions if x.day_change_base is not None]
+        if moves:  # today's change of the positions listed, in the base currency like the total
+            today = sum(moves)
+            subtitle += f" · today {fmt.money(today, v.base, sign=True, privacy=app.privacy, decimals=0)}"
         if v.excluded:
             subtitle += f" · ⚠ {len(v.excluded)} excluded (! lists them)"
     if needle:
@@ -385,8 +389,11 @@ def render_activity(app: MarketPulseApp) -> None:
         "cash": {TxnType.DEPOSIT, TxnType.WITHDRAWAL},
     }
     wanted_types = mode_types.get(app.activity_filter_mode)
+    since = extras.window_start(app.activity_window)
     for t in txns:
         if app.activity_account_filter is not None and t.account_id != app.activity_account_filter:
+            continue
+        if since is not None and t.date < since:
             continue
         if wanted_types is not None and t.type not in wanted_types:
             continue
@@ -405,8 +412,12 @@ def render_activity(app: MarketPulseApp) -> None:
     if dates:
         first, last = min(dates), max(dates)
         subtitle += f" · {first}" if first == last else f" · {first} → {last}"
-    elif txns and (needle or app.activity_filter_mode != "all" or app.activity_account_filter is not None):
+    elif txns and (
+        needle or app.activity_filter_mode != "all" or app.activity_account_filter is not None or since is not None
+    ):
         subtitle += " · no match — escape clears"
+    if since is not None:
+        subtitle += f" · % ▸ {app.activity_window}"
     if app.activity_account_filter is not None:
         acct = accounts.get(app.activity_account_filter)
         if acct:
@@ -473,11 +484,15 @@ def render_alerts(app: MarketPulseApp) -> None:
         filtered_alerts = [a for a in alerts if not a.active]
     else:
         filtered_alerts = alerts
+    if app.alerts_symbol:
+        filtered_alerts = [a for a in filtered_alerts if a.symbol == app.alerts_symbol]
     if alerts:
         subtitle = f"{sum(a.active for a in alerts)} armed of {len(alerts)}"
         triggered = sum(bool(a.triggered_at) for a in alerts)
         if triggered:
             subtitle += f" · {triggered} triggered"
+        if app.alerts_symbol:
+            subtitle += f" · & ▸ {app.alerts_symbol}" + ("" if filtered_alerts else " · no match — escape clears")
         if app.alerts_filter_mode != "all":
             subtitle += f" · M ▸ {app.alerts_filter_mode}"
         order = navigation.sort_label(app, "alerts")

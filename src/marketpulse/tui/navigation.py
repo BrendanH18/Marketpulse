@@ -170,18 +170,22 @@ def clear_filter(app: MarketPulseApp) -> None:
         app.query_one("#holdings-table", DataTable).focus()
     elif ws == "activity":
         box = app.query_one("#activity-filter", Input)
-        had_extra = app.activity_filter_mode != "all" or app.activity_account_filter is not None
+        had_extra = (
+            app.activity_filter_mode != "all" or app.activity_account_filter is not None or app.activity_window != "all"
+        )
         if not (box.value or box.has_focus or had_extra):
             return
         box.value = ""
         app.activity_filter_mode = "all"
         app.activity_account_filter = None
+        app.activity_window = "all"
         app.render_activity()
         app.query_one("#activity-table", DataTable).focus()
     elif ws == "alerts":
-        if app.alerts_filter_mode == "all":
+        if app.alerts_filter_mode == "all" and not app.alerts_symbol:
             return
         app.alerts_filter_mode = "all"
+        app.alerts_symbol = None
         app.render_alerts()
         app.query_one("#alerts-table", DataTable).focus()
 
@@ -740,4 +744,6 @@ def footer_status(app: MarketPulseApp) -> Text:
     age = refresh_age(app)
     if age:
         t.append(f"{age}   ", style=p.muted)
+    if app.auto_refresh_paused:
+        t.append("auto-refresh paused   ", style=p.warn)
     return t

@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, fields, replace
 from datetime import date
 from functools import wraps
+from pathlib import Path
 from typing import Any
 
 import click
@@ -76,8 +77,42 @@ class _Ratio(click.ParamType):
         return click.FLOAT.convert(value, param, ctx)
 
 
+MAX = "max"
+_PERCENT = re.compile(r"\s*(\d+(?:\.\d+)?)\s*%\s*")
+
+
+class _Units(click.ParamType):
+    """A number of units, `all`, a share of the units held (`50%`) or, for a buy, `max`.
+
+    Words and percentages stay strings (`"all"`, `"max"`, `"50%"`) so a `--request-id`
+    fingerprint can still be written as JSON; numbers convert exactly as before.
+    """
+
+    name = "float"
+
+    def __init__(self, *, allow_max: bool = False, allow_all: bool = True) -> None:
+        self.allow_max = allow_max
+        self.allow_all = allow_all
+
+    def convert(self, value: Any, param: click.Parameter | None, ctx: click.Context | None) -> Any:
+        if isinstance(value, str):
+            word = value.strip().lower()
+            if self.allow_all and word == ALL:
+                return ALL
+            if self.allow_max and word == MAX:
+                return MAX
+            if not self.allow_max and (m := _PERCENT.fullmatch(value)):
+                pct = float(m[1])
+                if not 0 < pct <= 100:
+                    self.fail(f"{value!r} must be a percentage above 0 and at most 100.", param, ctx)
+                return f"{pct:g}%"
+        return click.FLOAT.convert(value, param, ctx)
+
+
 FLOAT_OR_ALL = _FloatOrAll()
 RATIO = _Ratio()
+BUY_UNITS = _Units(allow_max=True, allow_all=False)
+HELD_UNITS = _Units()
 
 
 @dataclass
@@ -94,6 +129,15 @@ class Extras:
     strict: bool = False
     total: float | None = None
     per_unit: bool = False
+    receipt_file: str | None = None
+    fee_pct: float | None = None
+    net: float | None = None
+    max_value: float | None = None
+    keep: float | None = None
+    withholding: float | None = None
+    require_holding: bool = False
+    leave: float | None = None
+    reverse: bool = False
 
     @property
     def plain(self) -> bool:
@@ -119,7 +163,72 @@ _FLAGS: list[tuple[str, str, str]] = [
 ]
 
 
-def recording_extras(*, total: bool = False, per_unit: bool = False):
+def _percent_option(name: str, help: str):
+    return click.option(name, type=float, default=None, metavar="PCT", help=help)
+
+
+def _amount_option(name: str, help: str):
+    return click.option(name, type=float, default=None, metavar="AMOUNT", help=help)
+
+
+# Further opt-in options, chosen per command by name (items 1–11 of the 100 CLI/TUI batch).
+_OPTIONAL: dict[str, tuple[str, Callable[[Any], Any]]] = {
+    "fee_pct": (
+        "--fee-pct",
+        _percent_option("--fee-pct", "Commission as a percentage of quantity × price, rounded to the cent."),
+    ),
+    "net": (
+        "--net",
+        _amount_option(
+            "--net",
+            "Net amount from the trade confirmation (a buy's cost or a sell's proceeds); "
+            "the fees are the difference from quantity × price.",
+        ),
+    ),
+    "max_value": (
+        "--max-value",
+        _amount_option("--max-value", "Refuse the trade when quantity × price is above AMOUNT (exit code 1)."),
+    ),
+    "keep": (
+        "--keep",
+        click.option(
+            "--keep",
+            type=float,
+            default=None,
+            metavar="UNITS",
+            help="With QUANTITY `all`, keep this many units and sell the rest.",
+        ),
+    ),
+    "withholding": (
+        "--withholding",
+        _percent_option(
+            "--withholding", "AMOUNT is gross: record what's left after PCT foreign withholding tax (e.g. 15)."
+        ),
+    ),
+    "require_holding": (
+        "--require-holding",
+        click.option(
+            "--require-holding",
+            is_flag=True,
+            help="Refuse the entry unless the account holds SYMBOL at the end of the date.",
+        ),
+    ),
+    "leave": (
+        "--leave",
+        _amount_option("--leave", "With AMOUNT `all`, leave this much cash in the account."),
+    ),
+    "reverse": (
+        "--reverse",
+        click.option(
+            "--reverse",
+            is_flag=True,
+            help="RATIO is a consolidation: old shares per new share (`10` records ×0.1).",
+        ),
+    ),
+}
+
+
+def recording_extras(*, total: bool = False, per_unit: bool = False, extra: tuple[str, ...] = ()):
     """Add the opt-in options to a recording command.
 
     They are taken out of the arguments before `retryable` fingerprints the command, so a
@@ -134,6 +243,9 @@ def recording_extras(*, total: bool = False, per_unit: bool = False):
                 values["total"] = kwargs.pop("total")
             if per_unit:
                 values["per_unit"] = kwargs.pop("per_unit")
+            values["receipt_file"] = kwargs.pop("receipt_file")
+            for name in extra:
+                values[name] = kwargs.pop(name)
             extras = Extras(**values)
             ctx = click.get_current_context()
             _check_combinations(extras, request_id=kwargs.get("request_id"))
@@ -144,6 +256,14 @@ def recording_extras(*, total: bool = False, per_unit: bool = False):
                 app.console = Console(theme=RichTheme(rich_styles(app.palette)), highlight=False, stderr=True)
             return f(*args, **kwargs)
 
+        for name in reversed(extra):
+            wrapper = _OPTIONAL[name][1](wrapper)
+        wrapper = click.option(
+            "--receipt-file",
+            default=None,
+            metavar="PATH",
+            help="Also write the JSON receipt (saved, dry run or duplicate) to PATH.",
+        )(wrapper)
         if per_unit:
             wrapper = click.option(
                 "--per-unit",
@@ -176,9 +296,27 @@ def _check_combinations(extras: Extras, *, request_id: object) -> None:
                 clash("--confirm", flag)
     if extras.total is not None and not (extras.total > 0 and math.isfinite(extras.total)):
         raise click.BadParameter("must be a positive amount.", param_hint="'--total'")
+    for name in ("net", "max_value"):
+        value = getattr(extras, name)
+        if value is not None and not (value > 0 and math.isfinite(value)):
+            raise click.BadParameter("must be a positive amount.", param_hint=f"'{_OPTIONAL[name][0]}'")
+    for name in ("keep", "leave"):
+        value = getattr(extras, name)
+        if value is not None and not (value >= 0 and math.isfinite(value)):
+            raise click.BadParameter("must be zero or more.", param_hint=f"'{_OPTIONAL[name][0]}'")
+    for name in ("fee_pct", "withholding"):
+        value = getattr(extras, name)
+        if value is not None and not (0 <= value < 100):
+            raise click.BadParameter("must be a percentage from 0 to below 100.", param_hint=f"'{_OPTIONAL[name][0]}'")
+    if extras.receipt_file is not None:
+        target = Path(extras.receipt_file).expanduser()
+        if not extras.receipt_file.strip() or target.is_dir() or not target.parent.is_dir():
+            raise click.BadParameter("must be a file in an existing folder.", param_hint="'--receipt-file'")
     if request_id is not None and not extras.plain:
         given = [flag for name, flag, _ in _FLAGS if getattr(extras, name)]
         given += ["--total"] * (extras.total is not None) + ["--per-unit"] * extras.per_unit
+        given += ["--receipt-file"] * (extras.receipt_file is not None)
+        given += [flag for name, (flag, _) in _OPTIONAL.items() if getattr(extras, name) not in (False, None)]
         clash("--request-id", given[0])
 
 
@@ -398,7 +536,18 @@ def _show(app: App, out: Outcome, ex: Extras, *, dry_run: bool) -> None:
                 app.console.print(Text(f"  cash in {acct.name}: {shown_bal} {ccy}", style="info"))
 
 
+def _write_receipt(app: App, ex: Extras, receipt: dict[str, Any]) -> None:
+    """--receipt-file: keep a JSON copy of the receipt beside the usual output."""
+    if ex.receipt_file is None:
+        return
+    try:
+        Path(ex.receipt_file).expanduser().write_text(json.dumps(receipt, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError as e:
+        app.warn(f"couldn't write the receipt to {ex.receipt_file}: {e.strerror or e}")
+
+
 def _report(app: App, out: Outcome, ex: Extras, *, dry_run: bool) -> None:
+    _write_receipt(app, ex, _receipt(app, out, dry_run=dry_run))
     if ex.json:
         click.echo(json.dumps(_receipt(app, out, dry_run=dry_run), ensure_ascii=False))
     elif ex.quiet:
@@ -460,10 +609,13 @@ def _same(app: App, txn: Transaction) -> Transaction | None:
 
 
 def _report_duplicate(app: App, same: Transaction, accounts: list[Account], describe: Describe, ex: Extras) -> None:
-    if ex.json:
+    if ex.json or ex.receipt_file is not None:
         existing = _outcome(app, same, accounts, describe)
         existing.message = f"Already recorded (#{same.id})."
-        click.echo(json.dumps(_receipt(app, existing, dry_run=False, duplicate=True), ensure_ascii=False))
+        receipt = _receipt(app, existing, dry_run=False, duplicate=True)
+        _write_receipt(app, ex, receipt)
+    if ex.json:
+        click.echo(json.dumps(receipt, ensure_ascii=False))
     elif ex.quiet:
         click.echo(str(same.id))
     else:
@@ -471,6 +623,28 @@ def _report_duplicate(app: App, same: Transaction, accounts: list[Account], desc
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
+
+
+def _max_units(app: App, acct: Account, ccy: str, day: str, price: float, fees: float, fee_pct: float | None) -> float:
+    """Buy QUANTITY `max`: the most whole units the account's cash covers, fees included."""
+    if not acct.track_cash:
+        fail(f"{acct.name} doesn't track cash, so QUANTITY `max` has no balance to spend.")
+    if price <= 0:
+        fail("QUANTITY `max` needs a positive PRICE.")
+    cash = _state_on(app, day).cash.get((acct.saved_id, ccy), 0.0)
+
+    def cost(units: int) -> float:
+        paid = round(units * price * fee_pct / 100, 2) if fee_pct is not None else fees
+        return units * price + paid
+
+    units = max(math.floor((cash - (0 if fee_pct is not None else fees)) / price + 1e-9), 0)
+    if fee_pct is not None:
+        units = max(math.floor(cash / (price * (1 + fee_pct / 100)) + 1e-9), 0)
+    while units > 0 and cost(units) > cash + 0.005:
+        units -= 1
+    if units < 1:
+        fail(f"{fmt.money(cash)} {ccy} cash in {acct.name} on {day} doesn't cover one unit at {fmt.price(price)}.")
+    return float(units)
 
 
 def _trade(
@@ -485,15 +659,32 @@ def _trade(
     currency: str,
     note: str,
 ) -> None:
+    ex = _extras()
+    if ex.keep is not None and quantity != ALL:
+        raise click.UsageError("--keep needs QUANTITY `all`.")
+    if ex.net is not None and (fees or ex.fee_pct is not None):
+        raise click.UsageError("--net works out the fees; omit -f/--fees and --fee-pct.")
+    if ex.fee_pct is not None and fees:
+        raise click.UsageError("Give -f/--fees or --fee-pct, not both.")
+    if quantity == MAX and (ex.total is not None or ex.net is not None):
+        raise click.UsageError("QUANTITY `max` can't be combined with --total or --net.")
     acct = _account(app, account)
     sym = symbol.upper()
     ccy = currency.upper()
     day = when or date.today().isoformat()
-    total = _extras().total
+    total = ex.total
     if quantity == ALL:
         quantity = _units_held(app, acct, sym, day)
-    assert isinstance(quantity, float)
+        if ex.keep is not None:
+            quantity -= ex.keep
+            if quantity <= EPSILON:
+                fail(
+                    f"{acct.name} holds only {fmt.qty(quantity + ex.keep)} {sym} on {day}, so nothing is left to sell."
+                )
+    elif isinstance(quantity, str) and quantity.endswith("%"):
+        quantity = _units_held(app, acct, sym, day) * float(quantity[:-1]) / 100
     if total is not None:
+        assert isinstance(quantity, float)
         if price is not None:
             raise click.UsageError("Give PRICE or --total, not both.")
         if quantity <= 0:
@@ -509,13 +700,35 @@ def _trade(
             if day != date.today().isoformat():
                 fail("A back-dated trade needs an explicit PRICE.")
             price = q.price
+    if quantity == MAX:
+        quantity = _max_units(app, acct, ccy, day, price, fees, ex.fee_pct)
+    assert isinstance(quantity, float)
+    fee_detail = ""
+    if ex.fee_pct is not None:
+        fees = round(quantity * price * ex.fee_pct / 100, 2)
+        fee_detail = f" (fees {fmt.money(fees)} {ccy})"
+    if ex.net is not None:
+        gross = quantity * price
+        fees = round(ex.net - gross if kind is TxnType.BUY else gross - ex.net, 2)
+        if fees < 0:
+            side = "below" if kind is TxnType.BUY else "above"
+            fail(
+                f"--net {fmt.money(ex.net)} is {side} quantity × price ({fmt.money(gross)}), "
+                "so the fees can't be worked out."
+            )
+        fee_detail = f" (fees {fmt.money(fees)} {ccy})"
+    if ex.max_value is not None and quantity * price > ex.max_value + 0.005:
+        fail(
+            f"Not recorded: {fmt.qty(quantity)} × {fmt.price(price)} is {fmt.money(quantity * price)} {ccy}, "
+            f"above --max-value {fmt.money(ex.max_value)}."
+        )
     traded = quantity
 
     def describe(txn: Transaction) -> tuple[str, list[str]]:
         state = app.store.ledger()
         h = state.holdings.get((acct.saved_id, sym))
         verb = "Bought" if kind is TxnType.BUY else "Sold"
-        msg = f"{verb} {fmt.qty(traded)} {sym} @ {fmt.price(txn.price)} {ccy} in {acct.name}"
+        msg = f"{verb} {fmt.qty(traded)} {sym} @ {fmt.price(txn.price)} {ccy} in {acct.name}{fee_detail}"
         if kind is TxnType.SELL:
             gain = next((r.gain for r in reversed(state.realized) if r.txn_id == txn.id), None)
             if gain is not None:
@@ -542,31 +755,36 @@ def _trade(
 
 @main.command()
 @click.argument("symbol")
-@click.argument("quantity", type=float)
+@click.argument("quantity", type=BUY_UNITS)
 @click.argument("price", type=float, required=False)
 @click.option("-f", "--fees", type=float, default=0.0, help="Commission; added to cost base.")
 @click.option("-c", "--currency", default="", help="Trade currency (default: the listing's).")
-@recording_extras(total=True)
+@recording_extras(total=True, extra=("fee_pct", "net", "max_value"))
 @txn_options
 @pass_app
 def buy(app: App, symbol, quantity, price, fees, currency, account, when, note) -> None:
-    """Record a buy. PRICE defaults to the live price."""
+    """Record a buy. PRICE defaults to the live price.
+
+    QUANTITY can be `max`: the most whole units the account's cash covers at PRICE,
+    fees included (accounts that track cash only).
+    """
     _trade(app, TxnType.BUY, symbol, quantity, price, account, fees, when, currency, note)
 
 
 @main.command()
 @click.argument("symbol")
-@click.argument("quantity", type=FLOAT_OR_ALL)
+@click.argument("quantity", type=HELD_UNITS)
 @click.argument("price", type=float, required=False)
 @click.option("-f", "--fees", type=float, default=0.0, help="Commission; deducted from proceeds.")
 @click.option("-c", "--currency", default="", help="Trade currency (default: the listing's).")
-@recording_extras(total=True)
+@recording_extras(total=True, extra=("fee_pct", "net", "max_value", "keep"))
 @txn_options
 @pass_app
 def sell(app: App, symbol, quantity, price, fees, currency, account, when, note) -> None:
     """Record a sell (average-cost ACB). PRICE defaults to the live price.
 
-    QUANTITY can be `all`: every unit held in the account at the end of the date.
+    QUANTITY can be `all`: every unit held in the account at the end of the date,
+    or a percentage of them such as `50%`.
     """
     _trade(app, TxnType.SELL, symbol, quantity, price, account, fees, when, currency, note)
 
@@ -581,10 +799,15 @@ def _cash_event(
     currency: str,
     note: str,
 ) -> None:
+    ex = _extras()
+    if ex.leave is not None and amount != ALL:
+        raise click.UsageError("--leave needs AMOUNT `all`.")
     acct = _account(app, account)
     day = when or date.today().isoformat()
     sym = symbol.upper()
     detail = ""
+    if ex.require_holding:
+        _units_held(app, acct, sym, day)
     if amount == ALL:  # withdraw all
         if not acct.track_cash:
             fail(f"{acct.name} doesn't track cash, so there's no balance to withdraw.")
@@ -593,12 +816,26 @@ def _cash_event(
         if balance <= 0.005:
             fail(f"No {ccy} cash in {acct.name} on {day}.")
         amount = round(balance, 2)
-    elif _extras().per_unit:
+        if ex.leave is not None:
+            amount = round(balance - ex.leave, 2)
+            if amount <= 0.005:
+                fail(
+                    f"{acct.name} has {fmt.money(balance)} {ccy} on {day}, not more than --leave {fmt.money(ex.leave)}."
+                )
+            detail = f" (leaving {fmt.money(ex.leave)} {ccy})"
+    elif ex.per_unit:
         assert isinstance(amount, float)
         units = _units_held(app, acct, sym, day)
         detail = f" ({fmt.price(amount)} × {fmt.qty(units)} units)"
         amount = round(amount * units, 2)
     assert isinstance(amount, float)
+    if ex.withholding is not None:
+        gross = amount
+        withheld = round(gross * ex.withholding / 100, 2)
+        amount = round(gross - withheld, 2)
+        if amount <= 0:
+            fail("Nothing is left after --withholding.")
+        detail += f" (gross {fmt.money(gross)} less {ex.withholding:g}% withheld: {fmt.money(withheld)})"
     txn = Transaction(
         account_id=acct.saved_id,
         type=kind,
@@ -621,7 +858,7 @@ def _cash_event(
 @click.argument("symbol")
 @click.argument("amount", type=float)
 @click.option("-c", "--currency", default="")
-@recording_extras(per_unit=True)
+@recording_extras(per_unit=True, extra=("withholding", "require_holding"))
 @txn_options
 @pass_app
 def dividend(app: App, symbol, amount, currency, account, when, note) -> None:
@@ -680,7 +917,7 @@ def deposit(app: App, amount, currency, account, when, note) -> None:
 @main.command()
 @click.argument("amount", type=FLOAT_OR_ALL)
 @click.option("-c", "--currency", default="")
-@recording_extras()
+@recording_extras(extra=("leave",))
 @txn_options
 @pass_app
 def withdraw(app: App, amount, currency, account, when, note) -> None:
@@ -718,7 +955,7 @@ def fee(app: App, amount, currency, account, when, note) -> None:
 @main.command()
 @click.argument("symbol")
 @click.argument("ratio", type=RATIO)
-@recording_extras()
+@recording_extras(extra=("reverse",))
 @txn_options
 @pass_app
 def split(app: App, symbol, ratio, account, when, note) -> None:
@@ -727,6 +964,10 @@ def split(app: App, symbol, ratio, account, when, note) -> None:
     RATIO can also be written new:old, e.g. `3:1`, `1:10` or `2-for-1`.
     """
     acct = _account(app, account)
+    if _extras().reverse:
+        if ratio <= 0:
+            fail("RATIO must be positive.")
+        ratio = 1 / ratio
     txn = Transaction(
         account_id=acct.saved_id, type=TxnType.SPLIT, date=parse_date(when), symbol=symbol, ratio=ratio, note=note
     )
@@ -826,7 +1067,7 @@ def roc(app: App, symbol, amount, currency, account, when, note) -> None:
 
 @main.command()
 @click.argument("symbol")
-@click.argument("quantity", type=FLOAT_OR_ALL)
+@click.argument("quantity", type=HELD_UNITS)
 @click.option("--from", "source", required=True, help="Source account.")
 @click.option("--to", "target", required=True, help="Destination account.")
 @click.option(
@@ -851,13 +1092,15 @@ def transfer(app: App, symbol, quantity, source, target, price, currency, when, 
     registered one is a deemed sale at market value (a loss is denied), and
     a move out of a registered account resets the cost to market value, so
     give --price for those. QUANTITY can be `all`: every unit held in the
-    source account at the end of the date.
+    source account at the end of the date, or a percentage of them (`50%`).
     """
     src, dst = _account(app, source), _account(app, target)
     day = parse_date(when)
     currency = currency.upper()
     if quantity == ALL:
         quantity = _units_held(app, src, symbol.upper(), day)
+    elif isinstance(quantity, str):  # a percentage, e.g. "50%"
+        quantity = _units_held(app, src, symbol.upper(), day) * float(quantity.rstrip("%")) / 100
     # Only a move across the registered/taxable line has a tax effect.
     crosses = src.type.registered != dst.type.registered
     if price is None and crosses:

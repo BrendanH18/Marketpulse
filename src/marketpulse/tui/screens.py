@@ -803,6 +803,31 @@ HELP = [
             ("F1", "keys for this workspace"),
         ],
     ),
+    (
+        "Tables, finding and copying",
+        [
+            ("P", "details of the selected row"),
+            (":", "go to a row number (or a date in activity)"),
+            ("ctrl+f / ctrl+g", "find a row containing text / find next"),
+            ("( / )", "previous / next group (account, month, symbol, type)"),
+            (";", "show only the selected row's account (holdings, activity)"),
+            ("%", "activity date window: all / 30d / 90d / ytd / 1y"),
+            ("ctrl+e", "next transaction with a ledger issue"),
+            ('"', "copy the table as JSON"),
+            ("ctrl+t", "copy the side pane or report as text"),
+        ],
+    ),
+    (
+        "Symbols, charts and refresh",
+        [
+            ("W", "add the selected symbol to the watchlist, or remove it"),
+            ("&", "alerts for the selected symbol"),
+            ("^ / _", "chart crosshair to the period high / low"),
+            ("'", "back to the previously charted symbol"),
+            ("ctrl+s", "save the sorted watchlist as its list order"),
+            ("ctrl+r", "pause / resume automatic refresh"),
+        ],
+    ),
 ]
 
 
@@ -877,6 +902,30 @@ class ProblemsScreen(ModalScreen[None]):
         with Vertical(classes="modal"):
             yield Label("Problems", classes="modal-title")
             yield VerticalScroll(Static(body, id="problems"))
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class DetailsScreen(ModalScreen[None]):
+    """P: every field of the selected row, including what the table truncates or leaves to other panes."""
+
+    BINDINGS = [Binding("escape,q,P", "close", "Close")]
+
+    def __init__(self, title: str, rows: list[tuple[str, str]]):
+        super().__init__()
+        self.title_text, self.rows = title, rows
+
+    def compose(self) -> ComposeResult:
+        body = Text()
+        width = max((len(label) for label, _ in self.rows), default=0) + 2
+        for label, value in self.rows:
+            body.append(f"  {label:<{width}}", style="muted")
+            body.append(f"{value}\n")
+        body.append("\nP, escape or q closes", style="muted")
+        with Vertical(classes="modal narrow"):
+            yield Label(self.title_text, classes="modal-title")
+            yield VerticalScroll(Static(body, id="details"))
 
     def action_close(self) -> None:
         self.dismiss(None)

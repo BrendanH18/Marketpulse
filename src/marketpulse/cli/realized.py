@@ -12,7 +12,7 @@ import io
 import json
 import math
 from collections import Counter, defaultdict
-from datetime import date
+from datetime import date, timedelta
 from typing import TypeVar
 
 import click
@@ -42,6 +42,9 @@ REALIZED_FIELDS = [
     "txn_id",
 ]
 PAYOUT_FIELDS = ["date", "account_id", "account", "symbol", "kind", "amount", "currency"]
+RETURN_FIELD = "return_pct"
+MONEY_FIELDS = {"proceeds", "cost", "gain", "amount", "gains", "losses"}
+GROUPINGS = ("year", "quarter", "month", "account", "symbol", "currency")
 
 
 def _filters(f):
@@ -117,6 +120,22 @@ def _filters(f):
             click.option(
                 "--symbol-prefix", callback=_nonblank, help="Match the start of recorded symbols, ignoring case."
             ),
+            click.option("--jsonl", "as_jsonl", is_flag=True, help="Print raw, unmasked rows or groups as JSON Lines."),
+            click.option(
+                "--markdown", "as_markdown", is_flag=True, help="Print rows or groups as a Markdown table (masked)."
+            ),
+            click.option(
+                "--fields",
+                callback=_field_list,
+                metavar="LIST",
+                help="Comma-separated row fields to output, in order (with --json, --csv, --jsonl or --markdown).",
+            ),
+            click.option(
+                "--last-days",
+                type=click.IntRange(min=1),
+                metavar="N",
+                help="Only rows dated in the last N days (today and the N-1 days before it).",
+            ),
         ]
     ):
         f = decorator(f)
@@ -138,6 +157,67 @@ def _normalized_items(ctx, param, values):
 
 def _dates(ctx, param, values):
     return tuple(date_callback(ctx, param, value) for value in values)
+
+
+def _field_list(ctx, param, value):
+    if value is None:
+        return None
+    names = [name.strip().lower() for name in value.split(",")]
+    if not all(names):
+        raise click.BadParameter("List field names separated by commas, e.g. date,symbol,gain.")
+    if len(set(names)) != len(names):
+        raise click.BadParameter("A field is listed twice.")
+    return tuple(names)
+
+
+def _check_fields(fields: tuple[str, ...] | None, allowed: list[str]) -> None:
+    unknown = [name for name in fields or () if name not in allowed]
+    if unknown:
+        raise click.BadParameter(
+            f"Unknown field {unknown[0]!r}. Choose from: {', '.join(allowed)}.", param_hint="'--fields'"
+        )
+
+
+def _output_mode(as_json: bool, as_csv: bool, as_jsonl: bool, as_markdown: bool) -> str | None:
+    chosen = [
+        name for name, on in (("json", as_json), ("csv", as_csv), ("jsonl", as_jsonl), ("markdown", as_markdown)) if on
+    ]
+    if len(chosen) > 1:
+        raise click.UsageError("Choose one output format: --json, --csv, --jsonl or --markdown.")
+    return chosen[0] if chosen else None
+
+
+def _last_days_since(last_days: int | None, since: str | None) -> str | None:
+    if last_days is None:
+        return since
+    if since is not None:
+        raise click.UsageError("--last-days cannot be combined with --since.")
+    return (date.today() - timedelta(days=last_days - 1)).isoformat()
+
+
+def _markdown_cell(app: App, key: str, value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and key in MONEY_FIELDS | {RETURN_FIELD, "quantity"}:
+        if app.privacy:
+            return fmt.MASK
+        return fmt.qty(value) if key == "quantity" else f"{value:.2f}"
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def _emit(app: App, mode: str, fieldnames: list[str], records: list[dict]) -> None:
+    """Print plain records as --csv, --jsonl or --markdown, keeping only `fieldnames` in order."""
+    picked = [{name: record.get(name) for name in fieldnames} for record in records]
+    if mode == "csv":
+        _echo_csv(fieldnames, picked)
+    elif mode == "jsonl":
+        for record in picked:
+            click.echo(json.dumps(record, ensure_ascii=False))
+    else:
+        click.echo("| " + " | ".join(fieldnames) + " |")
+        click.echo("|" + "|".join(" --- " for _ in fieldnames) + "|")
+        for record in picked:
+            click.echo("| " + " | ".join(_markdown_cell(app, k, v) for k, v in record.items()) + " |")
 
 
 def _selection(
@@ -171,7 +251,7 @@ def _selection(
 
 
 def _realized_summary(
-    app: App, rows: list[RealizedGain], accounts: dict[int, Account], by: str, as_json: bool, as_csv: bool
+    app: App, rows: list[RealizedGain], accounts: dict[int, Account], by: str, mode: str | None
 ) -> None:
     def key(row: RealizedGain) -> str:
         if by == "year":
@@ -183,10 +263,10 @@ def _realized_summary(
         return row.symbol
 
     records = [{"group": group, "count": count} for group, count in sorted(Counter(key(row) for row in rows).items())]
-    if as_json:
+    if mode == "json":
         click.echo(json.dumps(records, ensure_ascii=False))
-    elif as_csv:
-        _echo_csv(["group", "count"], records)
+    elif mode is not None:
+        _emit(app, mode, ["group", "count"], records)
     else:
         table = render.table(by.title(), ("Sales", "right"), title="Matching realized sales")
         for record in records:
@@ -309,19 +389,150 @@ def _realized_row(r: RealizedGain, accounts: dict[int, Account]) -> dict:
     }
 
 
-def _realized_totals(rows: list[RealizedGain]) -> dict[str, dict]:
+def _realized_totals(rows: list[RealizedGain], *, gross: bool = False) -> dict[str, dict]:
     by_currency: dict[str, list[RealizedGain]] = defaultdict(list)
     for r in rows:
         by_currency[r.currency].append(r)
-    return {
-        ccy: {
+    totals: dict[str, dict] = {}
+    for ccy, items in sorted(by_currency.items()):
+        entry = {
             "count": len(items),
             "proceeds": math.fsum(r.proceeds for r in items),
             "cost": math.fsum(r.cost for r in items),
             "gain": math.fsum(r.gain for r in items),
         }
-        for ccy, items in sorted(by_currency.items())
-    }
+        if gross:  # --gross: the gains and the losses that net to `gain`
+            entry["gains"] = math.fsum(r.gain for r in items if r.gain > 0)
+            entry["losses"] = math.fsum(r.gain for r in items if r.gain < 0)
+        totals[ccy] = entry
+    return totals
+
+
+def _return_pct(r: RealizedGain) -> float | None:
+    """Gain as a percentage of the ACB sold; none when the ACB is zero."""
+    return r.gain / r.cost * 100 if r.cost > 1e-9 else None
+
+
+def _realized_record(r: RealizedGain, accounts: dict[int, Account], with_return: bool) -> dict:
+    row = _realized_row(r, accounts)
+    if with_return:
+        row[RETURN_FIELD] = _return_pct(r)
+    return row
+
+
+def _realized_key(r: RealizedGain, by: str) -> str:
+    if by == "year":
+        return r.date[:4]
+    if by == "quarter":
+        return f"{r.date[:4]}-Q{(int(r.date[5:7]) - 1) // 3 + 1}"
+    if by == "month":
+        return r.date[:7]
+    if by == "account":
+        return str(r.account_id)  # the id keeps identically named accounts apart
+    if by == "currency":
+        return r.currency
+    return r.symbol
+
+
+def _realized_groups(rows: list[RealizedGain], by: str, accounts: dict[int, Account]) -> list[dict]:
+    grouped: dict[tuple[str, str], list[RealizedGain]] = defaultdict(list)
+    for r in rows:
+        grouped[(_realized_key(r, by), r.currency)].append(r)
+    groups: list[dict] = []
+    for (group, ccy), items in sorted(grouped.items()):
+        entry: dict = {
+            "group": group,
+            "currency": ccy,
+            "count": len(items),
+            "proceeds": math.fsum(r.proceeds for r in items),
+            "cost": math.fsum(r.cost for r in items),
+            "gain": math.fsum(r.gain for r in items),
+        }
+        if by == "account":
+            entry["account"] = accounts[int(group)].name
+        groups.append(entry)
+    return groups
+
+
+def _print_realized_totals(app: App, rows: list[RealizedGain], gross: bool) -> None:
+    columns: list[render.Column] = [
+        "Currency",
+        ("Sales", "right"),
+        ("Proceeds", "right"),
+        ("ACB", "right"),
+        ("Gain", "right"),
+    ]
+    if gross:
+        columns += [("Gains", "right"), ("Losses", "right")]
+    totals = render.table(*columns, title="Totals by currency")
+    for ccy, total in _realized_totals(rows, gross=gross).items():
+        cells = [
+            Text(ccy),
+            Text(str(total["count"])),
+            _money(app, total["proceeds"], ccy),
+            _money(app, total["cost"], ccy),
+            _money(app, total["gain"], ccy, sign=True),
+        ]
+        if gross:
+            cells += [_money(app, total["gains"], ccy, sign=True), _money(app, total["losses"], ccy, sign=True)]
+        totals.add_row(*cells)
+    app.console.print(totals)
+    app.console.print(Text(NOT_TAX, style="muted"))
+
+
+def _grouped_realized(
+    app: App,
+    rows: list[RealizedGain],
+    by: str,
+    accounts: dict[int, Account],
+    mode: str | None,
+    count_only: bool,
+    newest_first: bool,
+    limit: int | None,
+    offset: int | None,
+    page_info: bool,
+    gross: bool,
+) -> None:
+    """`realized --by`: proceeds, ACB and gain per group and native currency."""
+    groups = _realized_groups(rows, by, accounts)
+    if count_only:
+        click.echo(len(groups))
+        return
+    total = len(groups)
+    groups = _page(list(reversed(groups)) if newest_first else groups, limit, offset)
+    fieldnames = ["group", "currency", "count", "proceeds", "cost", "gain"] + (["account"] if by == "account" else [])
+    if mode == "json":
+        payload = {"by": by, "groups": groups, "totals": _realized_totals(rows, gross=gross)}
+        if page_info:
+            payload.update(_page_metadata(total, groups, limit, offset))
+        click.echo(json.dumps(payload, ensure_ascii=False))
+        return
+    if mode is not None:
+        _emit(app, mode, fieldnames, groups)
+        return
+    if not groups:
+        app.console.print(Text("No matching realized gains.", style="muted"))
+        return
+    table = render.table(
+        by.title(),
+        "Currency",
+        ("Sales", "right"),
+        ("Proceeds", "right"),
+        ("ACB", "right"),
+        ("Gain", "right"),
+        title=f"Realized gains by {by}",
+    )
+    for g in groups:
+        table.add_row(
+            Text(g.get("account", g["group"])),
+            Text(g["currency"]),
+            Text(str(g["count"])),
+            _money(app, g["proceeds"], g["currency"]),
+            _money(app, g["cost"], g["currency"]),
+            _money(app, g["gain"], g["currency"], sign=True),
+        )
+    app.console.print(table)
+    _print_realized_totals(app, rows, gross)
 
 
 @main.command()
@@ -353,6 +564,16 @@ def _realized_totals(rows: list[RealizedGain]) -> dict[str, dict]:
     type=click.Choice(["year", "month", "account", "symbol"]),
     help="Count all matching sales by this field; no monetary totals.",
 )
+@click.option(
+    "--by",
+    type=click.Choice(GROUPINGS, case_sensitive=False),
+    help="Show proceeds, ACB and gain per group and currency instead of each sale.",
+)
+@click.option("--gross", is_flag=True, help="Split each currency's total gain into gains and losses.")
+@click.option(
+    "--return", "with_return", is_flag=True, help="Add each sale's gain as a percentage of its ACB (return_pct)."
+)
+@click.option("--totals-only", is_flag=True, help="Print only the totals by currency.")
 @pass_app
 def realized(
     app: App,
@@ -400,12 +621,47 @@ def realized(
     max_txn_id,
     breakeven_only,
     summary,
+    as_jsonl,
+    as_markdown,
+    fields,
+    last_days,
+    by,
+    gross,
+    with_return,
+    totals_only,
 ) -> None:
     """Realized gains from the ledger, oldest first, totalled per native currency (offline).
 
     Not the tax report: no FX conversion and no superficial-loss rules. Use `marketpulse tax` for that."""
+    since = _last_days_since(last_days, since)
     _check_common(since, until, as_json, as_csv)
+    mode = _output_mode(as_json, as_csv, as_jsonl, as_markdown)
     ccy = _browsing_currency(currency, count_only, as_json, as_csv, limit, offset, newest_first)
+    _check_new_outputs(count_only, as_jsonl, as_markdown, fields, mode)
+    _check_fields(fields, REALIZED_FIELDS + [RETURN_FIELD])
+    by = by.lower() if by else None
+    if by and (summary or sort_by is not None or descending):
+        raise click.UsageError("--by cannot be combined with --summary, --sort or --descending.")
+    if totals_only and (
+        by
+        or summary
+        or count_only
+        or newest_first
+        or sort_by is not None
+        or descending
+        or limit is not None
+        or offset is not None
+        or page_info
+    ):
+        raise click.UsageError(
+            "--totals-only cannot be combined with grouping, counting, ordering or pagination options."
+        )
+    if gross and summary:
+        raise click.UsageError("--summary has no monetary totals for --gross to split.")
+    if with_return and (by or summary or totals_only):
+        raise click.UsageError("--return adds a column to each sale; omit --by, --summary and --totals-only.")
+    if fields and (by or summary or totals_only):
+        raise click.UsageError("--fields picks sale fields; omit --by, --summary and --totals-only.")
     _amount_range(min_gain, max_gain, "gain")
     _amount_range(min_proceeds, max_proceeds, "proceeds")
     _amount_range(min_quantity, max_quantity, "quantity")
@@ -479,7 +735,13 @@ def realized(
         symbol_prefix,
     )
     if summary:
-        _realized_summary(app, rows, accounts, summary, as_json, as_csv)
+        _realized_summary(app, rows, accounts, summary, mode)
+        return
+    if by:
+        _grouped_realized(app, rows, by, accounts, mode, count_only, newest_first, limit, offset, page_info, gross)
+        return
+    if totals_only:
+        _realized_totals_only(app, rows, mode, gross)
         return
     if count_only:
         click.echo(len(rows))
@@ -492,19 +754,27 @@ def realized(
         reverse=descending or newest_first,
     )
     rows = _page(rows, limit, offset)
-    if as_csv:
+    with_return = with_return or RETURN_FIELD in (fields or ())
+    columns = list(fields) if fields else REALIZED_FIELDS + ([RETURN_FIELD] if with_return else [])
+    if mode == "csv" and not fields and not with_return:
         _echo_csv(REALIZED_FIELDS, [_realized_row(r, accounts) for r in rows])
         return
-    if as_json:
-        payload = {"rows": [_realized_row(r, accounts) for r in rows], "totals": _realized_totals(all_rows)}
+    if mode == "json":
+        records = [_realized_record(r, accounts, with_return) for r in rows]
+        if fields:
+            records = [{name: record[name] for name in fields} for record in records]
+        payload = {"rows": records, "totals": _realized_totals(all_rows, gross=gross)}
         if page_info:
             payload.update(_page_metadata(len(all_rows), rows, limit, offset))
         click.echo(json.dumps(payload, ensure_ascii=False))
         return
+    if mode is not None:
+        _emit(app, mode, columns, [_realized_record(r, accounts, with_return) for r in rows])
+        return
     if not rows:
         app.console.print(Text("No matching realized gains.", style="muted"))
         return
-    table = render.table(
+    headers: list[render.Column] = [
         "Date",
         "Account",
         "Symbol",
@@ -512,11 +782,11 @@ def realized(
         ("Proceeds", "right"),
         ("ACB", "right"),
         ("Gain", "right"),
-        "Currency",
-        title="Realized gains",
-    )
+    ]
+    headers += [("Return", "right")] if with_return else []
+    table = render.table(*headers, "Currency", title="Realized gains")
     for r in rows:
-        table.add_row(
+        cells = [
             Text(r.date, style="muted"),
             Text(render.truncate(accounts[r.account_id].name, 22)),
             Text(r.symbol, style="bright"),
@@ -524,27 +794,42 @@ def realized(
             _money(app, r.proceeds, r.currency),
             _money(app, r.cost, r.currency),
             _money(app, r.gain, r.currency, sign=True),
-            Text(r.currency, style="muted"),
-        )
+        ]
+        if with_return:
+            cells.append(_return_cell(app, _return_pct(r)))
+        table.add_row(*cells, Text(r.currency, style="muted"))
     app.console.print(table)
-    totals = render.table(
-        "Currency",
-        ("Sales", "right"),
-        ("Proceeds", "right"),
-        ("ACB", "right"),
-        ("Gain", "right"),
-        title="Totals by currency",
-    )
-    for ccy, total in _realized_totals(all_rows).items():
-        totals.add_row(
-            Text(ccy),
-            Text(str(total["count"])),
-            _money(app, total["proceeds"], ccy),
-            _money(app, total["cost"], ccy),
-            _money(app, total["gain"], ccy, sign=True),
-        )
-    app.console.print(totals)
-    app.console.print(Text(NOT_TAX, style="muted"))
+    _print_realized_totals(app, all_rows, gross)
+
+
+def _return_cell(app: App, value: float | None) -> Text:
+    if value is None:
+        return Text(render.DASH, style="muted")
+    if app.privacy:  # a coloured or signed figure would still reveal a gain or a loss
+        return Text(fmt.MASK)
+    return render.trend(fmt.pct(value), value)
+
+
+def _realized_totals_only(app: App, rows: list[RealizedGain], mode: str | None, gross: bool) -> None:
+    """`realized --totals-only`: just the per-currency totals."""
+    totals = _realized_totals(rows, gross=gross)
+    if mode == "json":
+        click.echo(json.dumps({"totals": totals}, ensure_ascii=False))
+        return
+    if mode is not None:
+        names = ["currency", "count", "proceeds", "cost", "gain"] + (["gains", "losses"] if gross else [])
+        _emit(app, mode, names, [{"currency": ccy, **total} for ccy, total in totals.items()])
+        return
+    _print_realized_totals(app, rows, gross)
+
+
+def _check_new_outputs(
+    count_only: bool, as_jsonl: bool, as_markdown: bool, fields: tuple[str, ...] | None, mode: str | None
+) -> None:
+    if count_only and (as_jsonl or as_markdown or fields):
+        raise click.UsageError("--count cannot be combined with --jsonl, --markdown or --fields.")
+    if fields and mode is None:
+        raise click.UsageError("--fields needs --json, --csv, --jsonl or --markdown.")
 
 
 # ── income payouts ────────────────────────────────────────────────────────────
@@ -632,6 +917,11 @@ def _payout_groups(rows: list[IncomeEvent], by: str, accounts: dict[int, Account
     type=click.Choice(KINDS, case_sensitive=False),
     help="Exclude income kinds; repeat for several.",
 )
+@click.option(
+    "--group-sort",
+    type=click.Choice(["group", "amount", "count"], case_sensitive=False),
+    help="With --by, order groups by name, or by amount or count, largest first.",
+)
 @pass_app
 def payouts(
     app: App,
@@ -671,10 +961,23 @@ def payouts(
     sort_by,
     descending,
     excluded_kinds,
+    as_jsonl,
+    as_markdown,
+    fields,
+    last_days,
+    group_sort,
 ) -> None:
     """Recorded dividend, DRIP and interest income, oldest first, per native currency (offline)."""
+    since = _last_days_since(last_days, since)
     _check_common(since, until, as_json, as_csv)
+    mode = _output_mode(as_json, as_csv, as_jsonl, as_markdown)
     ccy = _browsing_currency(currency, count_only, as_json, as_csv, limit, offset, newest_first)
+    _check_new_outputs(count_only, as_jsonl, as_markdown, fields, mode)
+    _check_fields(fields, PAYOUT_FIELDS)
+    if group_sort and not by:
+        raise click.UsageError("--group-sort needs --by.")
+    if fields and by:
+        raise click.UsageError("--fields picks payout fields; omit --by.")
     _amount_range(min_amount, max_amount, "amount")
     if newest_first and (sort_by is not None or descending):
         raise click.UsageError("--newest-first cannot be combined with --sort or --descending.")
@@ -728,7 +1031,7 @@ def payouts(
         symbol_prefix,
     )
     if by:
-        _grouped_payouts(app, rows, by, accounts, as_json, as_csv, count_only, newest_first, limit, offset, page_info)
+        _grouped_payouts(app, rows, by, accounts, mode, count_only, newest_first, limit, offset, page_info, group_sort)
         return
     if count_only:
         click.echo(len(rows))
@@ -745,14 +1048,20 @@ def payouts(
         return value.casefold() if isinstance(value, str) else value
 
     rows = _page(sorted(rows, key=sort_key, reverse=descending or newest_first), limit, offset)
-    if as_csv:
+    if mode == "csv" and not fields:
         _echo_csv(PAYOUT_FIELDS, [_payout_row(e, accounts) for e in rows])
         return
-    if as_json:
-        payload = {"rows": [_payout_row(e, accounts) for e in rows], "totals": _payout_totals(all_rows)}
+    if mode == "json":
+        records = [_payout_row(e, accounts) for e in rows]
+        if fields:
+            records = [{name: record[name] for name in fields} for record in records]
+        payload = {"rows": records, "totals": _payout_totals(all_rows)}
         if page_info:
             payload.update(_page_metadata(len(all_rows), rows, limit, offset))
         click.echo(json.dumps(payload, ensure_ascii=False))
+        return
+    if mode is not None:
+        _emit(app, mode, list(fields) if fields else PAYOUT_FIELDS, [_payout_row(e, accounts) for e in rows])
         return
     if not rows:
         app.console.print(Text("No matching payouts.", style="muted"))
@@ -776,28 +1085,31 @@ def _grouped_payouts(
     rows: list[IncomeEvent],
     by: str,
     accounts: dict[int, Account],
-    as_json: bool,
-    as_csv: bool,
+    mode: str | None,
     count_only: bool,
     newest_first: bool,
     limit: int | None,
     offset: int | None,
     page_info: bool,
+    group_sort: str | None = None,
 ) -> None:
     groups = _payout_groups(rows, by, accounts)
     if count_only:
         click.echo(len(groups))
         return
+    if group_sort and group_sort.lower() != "group":
+        key = group_sort.lower()  # largest first; ties keep the group order
+        groups = sorted(groups, key=lambda g: g[key], reverse=True)
     total = len(groups)
     groups = _page(list(reversed(groups)) if newest_first else groups, limit, offset)
-    if as_csv:
-        _echo_csv(["group", "currency", "count", "amount"] + (["account"] if by == "account" else []), groups)
-        return
-    if as_json:
+    if mode == "json":
         payload = {"by": by, "groups": groups, "totals": _payout_totals(rows)}
         if page_info:
             payload.update(_page_metadata(total, groups, limit, offset))
         click.echo(json.dumps(payload, ensure_ascii=False))
+        return
+    if mode is not None:
+        _emit(app, mode, ["group", "currency", "count", "amount"] + (["account"] if by == "account" else []), groups)
         return
     if not groups:
         app.console.print(Text("No matching payouts.", style="muted"))

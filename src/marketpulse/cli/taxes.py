@@ -26,6 +26,7 @@ from ..tax import (
     T1135_NOT_REQUIRED,
     T1135_SIMPLIFIED,
     T1135_THRESHOLD,
+    T1135_UNDETERMINED,
     Disposition,
     ForeignPropertyYear,
 )
@@ -441,41 +442,252 @@ def tax(
         _warn_issues(app, _issue_dicts(report.issues, year), "this report")
 
 
+FOREIGN_ASSESSMENTS = [T1135_NOT_REQUIRED, T1135_SIMPLIFIED, T1135_DETAILED, T1135_UNDETERMINED]
+FOREIGN_YEAR_FIELDS = [
+    "year",
+    "as_of",
+    "currency",
+    "status",
+    "assessment",
+    "required",
+    "max_cost",
+    "max_cost_date",
+    "year_end_cost",
+    "gain",
+    "incomplete",
+]
+FOREIGN_HOLDING_FIELDS = [
+    "year",
+    "symbol",
+    "max_cost",
+    "max_cost_date",
+    "year_end_cost",
+    "gain",
+    "dispositions",
+    "incomplete",
+]
+
+
+def _headroom(y: ForeignPropertyYear) -> float:
+    """How far the year's highest cost stayed under the $100,000 threshold (negative: over it)."""
+    return round(T1135_THRESHOLD - y.max_cost, 2)
+
+
+def _foreign_holding_rows(found: list[ForeignPropertyYear]) -> list[dict[str, Any]]:
+    from ..desktop import foreign_property_row
+
+    return [{"year": y.year, **h} for y in found for h in foreign_property_row(y)["holdings"]]
+
+
+def _foreign_year_rows(found: list[ForeignPropertyYear], headroom: bool) -> list[dict[str, Any]]:
+    from ..desktop import foreign_property_row
+
+    rows = []
+    for y in found:
+        row = foreign_property_row(y)
+        if headroom:
+            row["headroom"] = _headroom(y)
+        rows.append(row)
+    return rows
+
+
 @tax.command("foreign-property")
 @click.option(
     "-y", "--year", type=click.IntRange(min=1900), default=None, help="One year in detail (default: every year)."
 )
+@click.option("--since-year", type=click.IntRange(min=1900), default=None, help="Only this year and later ones.")
+@click.option("--until-year", type=click.IntRange(min=1900), default=None, help="Only this year and earlier ones.")
+@click.option(
+    "--status",
+    "statuses",
+    multiple=True,
+    type=click.Choice(FOREIGN_ASSESSMENTS, case_sensitive=False),
+    help="Only years with this assessment; repeat for any.",
+)
+@click.option("--holdings", is_flag=True, help="One row per property per year instead of one per year.")
+@click.option("--headroom", is_flag=True, help="Show how far each year's highest cost stayed under $100,000.")
 @click.option("--json", "as_json", is_flag=True, help="Print raw, unmasked figures as JSON.")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Print raw, unmasked years (or --holdings) as JSON Lines.")
+@click.option(
+    "--csv",
+    "csv_path",
+    type=click.Path(dir_okay=False, allow_dash=True, path_type=Path),
+    default=None,
+    help="Write years (or --holdings) to this CSV file; '-' prints them to stdout.",
+)
+@click.option("--count", "count_only", is_flag=True, help="Print only the number of matching years (or --holdings).")
+@click.option(
+    "--exit-code", is_flag=True, help="Exit 1 when T1135 may be required in any year shown (or it's undetermined)."
+)
 @pass_app
-def tax_foreign_property(app: App, year: int | None, as_json: bool) -> None:
+def tax_foreign_property(
+    app: App,
+    year: int | None,
+    since_year: int | None,
+    until_year: int | None,
+    statuses: tuple[str, ...],
+    holdings: bool,
+    headroom: bool,
+    as_json: bool,
+    as_jsonl: bool,
+    csv_path: Path | None,
+    count_only: bool,
+    exit_code: bool,
+) -> None:
     """Whether foreign property cost may require form T1135 (an estimate, not tax advice).
 
     \b
     Totals the cost (ACB, in CAD) of property listed outside Canada held in non-registered
     accounts at the end of every day: over $100,000 at any time means T1135 is likely due."""
-    from ..desktop import foreign_property_row
+    usage = click.UsageError
+    if sum((as_json, as_jsonl, csv_path is not None)) > 1:
+        raise usage("Choose one output format: --json, --jsonl or --csv.")
+    if count_only and (as_json or as_jsonl or csv_path is not None):
+        raise usage("--count cannot be combined with --json, --jsonl or --csv.")
+    if year is not None and (since_year is not None or until_year is not None):
+        raise usage("--year cannot be combined with --since-year or --until-year.")
+    if since_year is not None and until_year is not None and since_year > until_year:
+        raise usage("--since-year must be at most --until-year.")
+    if headroom and holdings:
+        raise usage("--headroom applies to years, not --holdings.")
 
     with app.busy("Building foreign property report…"):
         found = app.tracker.foreign_property(year)
+    wanted = {s.lower() for s in statuses}
+    found = [
+        y
+        for y in found
+        if (since_year is None or y.year >= since_year)
+        and (until_year is None or y.year <= until_year)
+        and (not wanted or y.assessment in wanted)
+    ]
+    _foreign_output(
+        app,
+        found,
+        year=year,
+        filtered=bool(statuses or since_year is not None or until_year is not None),
+        holdings=holdings,
+        headroom=headroom,
+        as_json=as_json,
+        as_jsonl=as_jsonl,
+        csv_path=csv_path,
+        count_only=count_only,
+    )
+    if exit_code and any(y.assessment != T1135_NOT_REQUIRED for y in found):
+        raise click.exceptions.Exit(1)
+
+
+def _foreign_output(
+    app: App,
+    found: list[ForeignPropertyYear],
+    *,
+    year: int | None,
+    filtered: bool,
+    holdings: bool,
+    headroom: bool,
+    as_json: bool,
+    as_jsonl: bool,
+    csv_path: Path | None,
+    count_only: bool,
+) -> None:
+    rows = _foreign_holding_rows(found) if holdings else _foreign_year_rows(found, headroom)
+    if count_only:
+        click.echo(len(rows))
+        return
     if as_json:
+        if holdings:
+            click.echo(json.dumps(rows, ensure_ascii=False))
+            return
         payload = {
             "currency": "CAD",
             "threshold": T1135_THRESHOLD,
             "detailed_threshold": T1135_DETAILED_THRESHOLD,
-            "years": [foreign_property_row(y) for y in found],
+            "years": rows,
             "notes": FOREIGN_PROPERTY_NOTES,
         }
         click.echo(json.dumps(payload, ensure_ascii=False))
         return
+    if as_jsonl:
+        for row in rows:
+            click.echo(json.dumps(row, ensure_ascii=False))
+        return
+    if csv_path is not None:
+        fields = FOREIGN_HOLDING_FIELDS if holdings else FOREIGN_YEAR_FIELDS + (["headroom"] if headroom else [])
+        _write_foreign_csv(app, csv_path, fields, rows)
+        return
     app.title("Foreign property (T1135)")
-    if year is None:
-        _foreign_years(app, found)
+    if holdings:
+        _foreign_holdings(app, found)
+    elif year is None:
+        _foreign_years(app, found, headroom=headroom, filtered=filtered)
+    elif found:
+        _foreign_year(app, found[0], headroom=headroom)
     else:
-        _foreign_year(app, found[0])
+        app.console.print(Text(f"{year} doesn't match these filters.", style="muted"))
     if any(y.incomplete for y in found):
         app.warn("An FX rate was missing, so some cost is left out: these totals may be too low.")
     for note in FOREIGN_PROPERTY_NOTES:
         app.console.print(Text(note, style="muted"))
+
+
+def _write_foreign_csv(app: App, csv_path: Path, fields: list[str], rows: list[dict[str, Any]]) -> None:
+    def write(stream: TextIO, **kw: Any) -> None:
+        writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore", **kw)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {k: ("" if v is None else str(v).lower() if isinstance(v, bool) else v) for k, v in row.items()}
+            )
+
+    if str(csv_path) == "-":
+        stream = io.StringIO()
+        write(stream, lineterminator="\n")
+        click.echo(stream.getvalue(), nl=False)
+        return
+    try:
+        with csv_path.open("w", newline="", encoding="utf-8") as f:
+            write(f)
+    except OSError as e:
+        fail(f"Couldn't write {csv_path}: {e.strerror or e}")
+    app.ok(f"Exported {len(rows)} row(s) to {csv_path}")
+
+
+def _headroom_text(y: ForeignPropertyYear, privacy: bool, currency: str = "") -> Text:
+    """Headroom under the $100,000 threshold; negative (in the warning style) when the cost went over it."""
+    room = _headroom(y)
+    style = "" if privacy else "warn" if room < 0 else "muted"  # the colour would reveal the sign
+    return Text(fmt.money(room, currency, privacy=privacy), style=style)
+
+
+def _foreign_holdings(app: App, found: list[ForeignPropertyYear]) -> None:
+    if not any(y.holdings for y in found):
+        app.console.print(Text("No foreign property in non-registered accounts.", style="muted"))
+        return
+    privacy = app.privacy
+    t = render.table(
+        "Year",
+        "Symbol",
+        ("Highest cost", "right"),
+        "On",
+        ("Year-end cost", "right"),
+        ("Gain", "right"),
+        ("Sales", "right"),
+        title="Specified foreign property by holding, cost in CAD",
+    )
+    for y in found:
+        for h in y.holdings:
+            t.add_row(
+                Text(str(y.year), style="muted"),
+                Text(h.symbol + (" *" if h.incomplete else ""), style="bright"),
+                Text(fmt.money(h.max_cost, privacy=privacy)),
+                Text(h.max_cost_date or "—", style="muted"),
+                Text(fmt.money(h.year_end_cost, privacy=privacy), style="muted"),
+                _money(h.gain, privacy, sign=True) if h.dispositions else Text("—", style="muted"),
+                Text(str(h.dispositions) if h.dispositions else "—", style="muted"),
+            )
+    app.console.print(t)
+    if any(h.incomplete for y in found for h in y.holdings):
+        app.console.print(Text("* missing an FX rate", style="down"))
 
 
 def _foreign_status(y: ForeignPropertyYear) -> Text:
@@ -486,33 +698,39 @@ def _foreign_status(y: ForeignPropertyYear) -> Text:
     return Text(y.label, style=style)
 
 
-def _foreign_years(app: App, found: list[ForeignPropertyYear]) -> None:
+def _foreign_years(
+    app: App, found: list[ForeignPropertyYear], *, headroom: bool = False, filtered: bool = False
+) -> None:
     if not found:
-        app.console.print(Text("No foreign property in non-registered accounts.", style="muted"))
+        message = "No years match these filters." if filtered else "No foreign property in non-registered accounts."
+        app.console.print(Text(message, style="muted"))
         return
     privacy = app.privacy
-    t = render.table(
+    columns: list[render.Column] = [
         "Year",
         ("Highest cost", "right"),
         "On",
         ("Year-end cost", "right"),
         ("Gain", "right"),
-        "Status",
-        title="Specified foreign property, cost in CAD",
-    )
+    ]
+    if headroom:
+        columns.append(("Headroom", "right"))
+    t = render.table(*columns, "Status", title="Specified foreign property, cost in CAD")
     for y in found:
-        t.add_row(
+        cells = [
             Text(str(y.year), style="bright"),
             Text(fmt.money(y.max_cost, privacy=privacy)),
             Text(y.max_cost_date or "—", style="muted"),
             Text(fmt.money(y.year_end_cost, privacy=privacy), style="muted"),
             _money(y.gain, privacy, sign=True),
-            _foreign_status(y),
-        )
+        ]
+        if headroom:
+            cells.append(_headroom_text(y, privacy))
+        t.add_row(*cells, _foreign_status(y))
     app.console.print(t)
 
 
-def _foreign_year(app: App, y: ForeignPropertyYear) -> None:
+def _foreign_year(app: App, y: ForeignPropertyYear, *, headroom: bool = False) -> None:
     if not y.holdings:
         app.console.print(Text(f"No foreign property in non-registered accounts in {y.year}.", style="muted"))
         return
@@ -530,6 +748,8 @@ def _foreign_year(app: App, y: ForeignPropertyYear) -> None:
         )
     )
     app.console.print(_foreign_status(y))
+    if headroom:
+        app.console.print(Text.assemble(("Headroom to $100,000: ", "muted"), _headroom_text(y, privacy, "CAD")))
     t = render.table(
         "Symbol",
         ("Highest cost", "right"),

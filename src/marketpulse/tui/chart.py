@@ -10,6 +10,7 @@ from textual.widgets import Input, Static
 from .. import fmt
 from ..market import PERIODS, MarketError
 from ..models import parse_symbols
+from . import extras
 from .screens import PromptScreen
 from .widgets import ChartView
 
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 def open_chart(app: MarketPulseApp, symbol: str, *, compare: list[str] | None = None) -> None:
     if not symbol:
         return
+    extras.remember_chart(app, symbol)  # ' goes back to the symbol this replaces
     app.chart_symbol = symbol.upper()
     if compare is not None:
         app.compare = compare

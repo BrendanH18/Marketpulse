@@ -8,7 +8,7 @@ import json
 import math
 from collections import Counter
 from dataclasses import asdict, fields, replace
-from datetime import date
+from datetime import date, timedelta
 
 import click
 from rich.text import Text
@@ -138,6 +138,18 @@ def _excluded_dates(ctx: click.Context, param: click.Parameter, values: tuple[st
     default="date",
     help="Order by date, recorded amount or fees, descending unless --oldest-first is set. Ties use date then ID.",
 )
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Print raw, unmasked transaction records as JSON Lines.")
+@click.option("--ids", "ids_only", is_flag=True, help="Print only the matching transaction IDs, one per line.")
+@click.option(
+    "--totals",
+    is_flag=True,
+    help="Sum recorded amounts and fees of all matching entries by currency, before pagination (--json/--csv).",
+)
+@click.option(
+    "--last-days",
+    type=click.IntRange(min=1),
+    help="Include only entries dated within the last N days (today minus N days, through today).",
+)
 @pass_app
 def activity(
     app: App,
@@ -196,8 +208,29 @@ def activity(
     has_price,
     has_quantity,
     sort_by,
+    as_jsonl,
+    ids_only,
+    totals,
+    last_days,
 ) -> None:
     """The transaction ledger, newest first."""
+    outputs = {
+        "--jsonl": as_jsonl,
+        "--ids": ids_only,
+        "--totals": totals,
+        "--summary": summary is not None,
+        "--count": count_only,
+    }
+    if sum(outputs.values()) > 1 or ((as_jsonl or ids_only) and (as_json or as_csv)):
+        used = [name for name, on in outputs.items() if on] + [
+            name for name, on in (("--json", as_json), ("--csv", as_csv)) if on
+        ]
+        raise click.UsageError(f"Choose one output format, not {', '.join(used)}.")
+    if page_info and (as_jsonl or ids_only or totals):
+        raise click.UsageError("--page-info requires --json transaction output without --summary or --count.")
+    if last_days is not None:
+        cutoff = (date.today() - timedelta(days=last_days)).isoformat()
+        since = max(since, cutoff) if since else cutoff
     for lower, upper, label in (
         (min_amount, max_amount, "amount"),
         (min_fees, max_fees, "fees"),
@@ -297,12 +330,23 @@ def activity(
     if summary:
         _activity_summary(app, txns, accounts, summary, as_json, as_csv, summary_sort)
         return
+    if totals:
+        _activity_totals(app, txns, as_json, as_csv)
+        return
     total = len(txns)
     if sort_by == "date":
         txns.sort(key=lambda t: (t.date, t.id or 0), reverse=not oldest_first)
     else:
         txns.sort(key=lambda t: (getattr(t, sort_by), t.date, t.id or 0), reverse=not oldest_first)
     txns = txns[offset:] if show_all else txns[offset : offset + limit]
+    if ids_only:
+        for t in txns:
+            click.echo(t.saved_id)
+        return
+    if as_jsonl:
+        for t in txns:
+            click.echo(json.dumps(_transaction_json(t, accounts, generation), ensure_ascii=False))
+        return
     if as_csv:
         stream = io.StringIO(newline="")
         writer = csv.DictWriter(
@@ -396,6 +440,45 @@ def _activity_summary(
         empty_label = "(no institution)" if group == "institution" else "(no symbol)"
         label = str(row.get("account", row["group"])) or empty_label
         table.add_row(Text(label), Text(str(row["count"])))
+    app.console.print(table)
+
+
+TOTALS_FIELDS = ["currency", "entries", "amount", "fees"]
+
+
+def _activity_totals(app: App, txns: list[Transaction], as_json: bool, as_csv: bool) -> None:
+    """Recorded amounts and fees summed per native currency; never converted or mixed."""
+    sums: dict[str, dict] = {}
+    for t in txns:
+        row = sums.setdefault(t.currency, {"currency": t.currency, "entries": 0, "amount": 0.0, "fees": 0.0})
+        row["entries"] += 1
+        row["amount"] += t.amount
+        row["fees"] += t.fees
+    rows = [sums[c] for c in sorted(sums)]
+    if as_json:
+        click.echo(json.dumps(rows, ensure_ascii=False))
+        return
+    if as_csv:
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(stream, fieldnames=TOTALS_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+        click.echo(stream.getvalue(), nl=False)
+        return
+    if not rows:
+        app.console.print(Text("No matching transactions.", style="muted"))
+        return
+    table = render.table(
+        "Currency", ("Entries", "right"), ("Amount", "right"), ("Fees", "right"), title="Matching activity totals"
+    )
+    for row in rows:
+        ccy = row["currency"]
+        table.add_row(
+            Text(ccy),
+            Text(str(row["entries"])),
+            Text(fmt.money(row["amount"], ccy, privacy=app.privacy)),
+            Text(fmt.money(row["fees"], ccy, privacy=app.privacy)),
+        )
     app.console.print(table)
 
 
@@ -665,8 +748,11 @@ def _print_effect(app: App, txn_id: int, effect: list[dict]) -> None:
 @click.option(
     "-a", "--account", default=None, help="Only issues on entries in this active account (either end of a transfer)."
 )
+@click.option(
+    "--summary", is_flag=True, help="Count the reported issues by code instead of listing them (works with --json)."
+)
 @pass_app
-def txn_check(app: App, as_json: bool, codes: tuple[str, ...], account: str | None) -> None:
+def txn_check(app: App, as_json: bool, codes: tuple[str, ...], account: str | None, summary: bool) -> None:
     """Check the full ledger offline. Exit 1 if any inconsistencies are found.
 
     The whole ledger is always replayed; --code and -a only choose which issues to report
@@ -700,7 +786,19 @@ def txn_check(app: App, as_json: bool, codes: tuple[str, ...], account: str | No
             if issue["txn_id"] is not None
             and acct.id in (txns[issue["txn_id"]].account_id, txns[issue["txn_id"]].target_account_id)
         ]
-    if as_json:
+    if summary:
+        by_code = Counter(str(issue["code"]) for issue in issues)
+        rows = [{"code": code, "count": n} for code, n in sorted(by_code.items(), key=lambda kv: (-kv[1], kv[0]))]
+        if as_json:
+            click.echo(json.dumps({"ok": not issues, "codes": rows}, ensure_ascii=False))
+        elif not issues:
+            app.ok("No matching ledger issues." if filtered else "Ledger is consistent.")
+        else:
+            table = render.table("Code", ("Issues", "right"), title=f"{len(issues)} ledger issue(s) by code")
+            for row in rows:
+                table.add_row(Text(str(row["code"])), Text(str(row["count"])))
+            app.console.print(table)
+    elif as_json:
         click.echo(json.dumps({"ok": not issues, "issues": issues}, ensure_ascii=False))
     elif not issues:
         app.ok("No matching ledger issues." if filtered else "Ledger is consistent.")
