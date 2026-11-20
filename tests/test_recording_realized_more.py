@@ -416,3 +416,20 @@ def test_percentage_keeps_its_precision(cli, store):
     )
     got = receipt(cli("sell", "XEQT.TO", "33.333333%", "1", *DAY, "--dry-run", "--json"))
     assert got["quantity"] == pytest.approx(333_333.33)
+
+
+def test_receipt_file_refuses_sidecars_of_a_symlinked_ledger(cli, store, maple, tmp_path, monkeypatch):
+    data = tmp_path / "ledger-home"
+    data.mkdir()
+    real = tmp_path / "elsewhere" / "ledger.sqlite"
+    real.parent.mkdir()
+    real.write_bytes(b"")
+    (data / "marketpulse.db").symlink_to(real)
+    monkeypatch.setenv("MARKETPULSE_DATA", str(data))
+    result = cli("deposit", "1", *DAY, "--receipt-file", str(real.parent / "ledger.sqlite-wal"))
+    assert result.exit_code == 2 and "must not be the ledger database" in result.output
+
+
+def test_buy_max_settles_quickly_on_a_tiny_price(cli, store, maple):
+    result = cli("buy", "XEQT.TO", "max", "1e-20", *DAY, "--dry-run", "--json")
+    assert result.exit_code in (0, 1)  # finishes either way instead of stepping one unit at a time

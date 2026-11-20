@@ -327,12 +327,14 @@ def _check_combinations(extras: Extras, *, request_id: object) -> None:
 def _is_ledger_file(target: Path) -> bool:
     """True when TARGET is the SQLite ledger or one of its sidecar files (also through links)."""
     ledger = data_dir(create=False) / "marketpulse.db"
-    for suffix in ("", "-wal", "-shm", "-journal"):
-        candidate = Path(f"{ledger}{suffix}")
-        if target.resolve() == candidate.resolve():
-            return True
-        if target.exists() and candidate.exists() and os.path.samefile(target, candidate):
-            return True
+    # SQLite keeps its sidecars beside the real file, so check both the configured path and a symlink's target.
+    for base in {ledger, ledger.resolve()}:
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            candidate = Path(f"{base}{suffix}")
+            if target.resolve() == candidate.resolve():
+                return True
+            if target.exists() and candidate.exists() and os.path.samefile(target, candidate):
+                return True
     return False
 
 
@@ -656,11 +658,18 @@ def _max_units(app: App, acct: Account, ccy: str, day: str, price: float, fees: 
     units = max(math.floor((cash - (0 if fee_pct is not None else fees)) / price + 1e-9), 0)
     if fee_pct is not None:
         units = max(math.floor(cash / (price * (1 + fee_pct / 100)) + 1e-9), 0)
-    # The estimate ignores the fee's rounding to the cent, so settle on the exact largest count.
-    while cost(units + 1) <= cash + 1e-9:
+    # The estimate ignores the fee's rounding to the cent, which moves it by a unit or two at most:
+    # settle on the exact largest count with a few bounded steps.
+    for _ in range(3):
+        if cost(units + 1) > cash + 1e-9:
+            break
         units += 1
-    while units > 0 and cost(units) > cash + 1e-9:
+    for _ in range(3):
+        if units <= 0 or cost(units) <= cash + 1e-9:
+            break
         units -= 1
+    if units > 0 and cost(units) > cash + 1e-9:
+        fail(f"Couldn't work out how many units {fmt.money(cash)} {ccy} buys at {fmt.price(price)}; give QUANTITY.")
     if units < 1:
         fail(f"{fmt.money(cash)} {ccy} cash in {acct.name} on {day} doesn't cover one unit at {fmt.price(price)}.")
     return float(units)
