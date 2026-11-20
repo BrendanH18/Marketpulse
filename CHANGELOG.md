@@ -24,6 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   status and `desktop tax` carries it as `foreign_property`. `asset foreign SYMBOL yes|no|auto`
   corrects the listing-based rule; the setting is stored on the asset (schema version 3)
   ([#179](https://github.com/BrendanH18/Marketpulse/issues/179)).
+- One hundred more CLI and terminal app improvements
+  ([inventory](docs/cli-tui-more-hundred-improvements.md)):
+  - 80 opt-in CLI additions across `buy`, `sell`, `transfer`, `dividend`, `withdraw`,
+    `split`, `realized`, `payouts`, `holdings`, `status`, `summary`, `perf`, `income`,
+    `quote`, `chart`, `compare`, `search`, `activity`, `txn check`, `automation run`,
+    `automation history` and `tax foreign-property`, including `buy SYMBOL max`,
+    percentage sells, fee and withholding helpers, grouped realized gains, return
+    correlations, automation run filters and summaries, and T1135 headroom.
+  - 20 terminal app additions including row details (`P`), watchlist toggle (`W`),
+    account focus (`;`), go to row or date (`:`), activity date windows (`%`), chart
+    high/low (`^`/`_`), group jumps (`(`/`)`), table find (`ctrl+f`/`ctrl+g`), pane and
+    JSON copies (`ctrl+t`/`"`), paused auto-refresh (`ctrl+r`), per-symbol alerts (`&`),
+    ledger issue jumps (`ctrl+e`), previous chart (`'`), saved watchlist sort (`ctrl+s`),
+    new command palette entries and today's change in the holdings footer.
 - One hundred CLI and terminal app workflow improvements
   ([inventory](docs/cli-tui-hundred-improvements.md)):
   - 80 opt-in CLI additions across `tax`, `allocation`, `targets`, `doctor`,
