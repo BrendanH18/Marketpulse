@@ -334,7 +334,8 @@ def _compile(function: Function, field: str, argument: str | None, schema: tuple
         transform = _VALUES[name]
         return lambda row: transform(row[field])
 
-    assert argument is not None  # every remaining function requires one
+    if argument is None:
+        raise AssertionError("every remaining function requires one")
     if name == "days-from":
         if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", argument) or (origin := _date(argument)) is None:
             raise _usage(function, "requires a valid DATE as YYYY-MM-DD")

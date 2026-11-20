@@ -215,7 +215,8 @@ def _price_holding(
             price, prev = price * factor, prev * factor
         return price, prev
     if kind is AssetKind.FIXED_INCOME:
-        assert asset is not None  # only an Asset can make the kind FIXED_INCOME
+        if asset is None:
+            raise AssertionError("only an Asset can make the kind FIXED_INCOME")
         today = asset.accrual_factor(on.isoformat())
         yesterday = asset.accrual_factor((on - timedelta(days=1)).isoformat())
         purchase = asset.accrual_factor(h.first_date) if h.first_date else 1.0

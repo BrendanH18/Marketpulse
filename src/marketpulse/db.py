@@ -617,7 +617,8 @@ class Store:
                 ) from e
             finally:
                 self._conn.execute("DETACH DATABASE restored")
-        assert safety is not None
+        if safety is None:
+            raise AssertionError
         return safety
 
     @property

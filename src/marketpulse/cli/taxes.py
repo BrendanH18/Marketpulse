@@ -428,7 +428,8 @@ def tax(
         for issue in report.issues:  # stdout stays pure CSV
             click.echo(f"! {issue.date} {issue.message}", err=True)
     elif csv_file:
-        assert csv_path is not None
+        if csv_path is None:
+            raise AssertionError
         try:
             with csv_path.open("w", newline="", encoding="utf-8") as f:
                 _write_csv(f, rows, accounts, tr.base)

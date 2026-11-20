@@ -308,7 +308,8 @@ def _transfer(
     issue is raised asking for it rather than guessing.
     """
     target = txn.target_account_id
-    assert target is not None  # guaranteed by the caller
+    if target is None:
+        raise AssertionError  # guaranteed by the caller
     dst_taxable = is_taxable(accounts.get(target))
     if src_taxable and dst_taxable:
         p = pools.get(txn.symbol)

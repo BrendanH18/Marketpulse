@@ -69,7 +69,8 @@ def _exclude_dates_callback(ctx, param, values: tuple[str, ...]) -> tuple[str, .
     dates = []
     for value in values:
         normalized = date_callback(ctx, param, value)
-        assert normalized is not None  # Click supplies strings for a repeatable option.
+        if normalized is None:  # Click supplies strings for a repeatable option.
+            raise AssertionError
         dates.append(normalized)
     return tuple(dates)
 

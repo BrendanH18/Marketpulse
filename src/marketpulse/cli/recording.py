@@ -338,7 +338,8 @@ def _probe(app: App, txn: Transaction, accounts: list[Account], describe: Descri
             raise _Rollback
     except _Rollback:
         pass
-    assert found is not None
+    if found is None:
+        raise AssertionError
     found.txn = replace(found.txn, id=None)
     return found
 
@@ -492,7 +493,8 @@ def _trade(
     total = _extras().total
     if quantity == ALL:
         quantity = _units_held(app, acct, sym, day)
-    assert isinstance(quantity, float)
+    if not isinstance(quantity, float):
+        raise AssertionError
     if total is not None:
         if price is not None:
             raise click.UsageError("Give PRICE or --total, not both.")
@@ -598,7 +600,8 @@ def _cash_event(
         units = _units_held(app, acct, sym, day)
         detail = f" ({fmt.price(amount)} × {fmt.qty(units)} units)"
         amount = round(amount * units, 2)
-    assert isinstance(amount, float)
+    if not isinstance(amount, float):
+        raise AssertionError
     txn = Transaction(
         account_id=acct.saved_id,
         type=kind,

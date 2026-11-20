@@ -297,7 +297,8 @@ class MarketData:
     def _fallback_budget(self, wanted: int) -> int:
         """How many symbols the fallback may be asked for now (0 = wait), within its
         interval and daily limit. Shared by every process through the database."""
-        assert self.fallback is not None
+        if self.fallback is None:
+            raise AssertionError
         now = time.time()
         today = date.today().isoformat()
         # BEGIN IMMEDIATE: another process can't read the same budget before this one spends it.

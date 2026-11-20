@@ -186,9 +186,11 @@ def _condition(option: str, field: str, text: str) -> Predicate:
             syntax = "LOW,HIGH" if expected_length == 2 else "NUMBER"
             raise click.UsageError(f"--{option} requires FIELD={syntax} with finite numbers.")
         lower = numbers[0]
-        assert lower is not None
+        if lower is None:
+            raise AssertionError
         upper = numbers[-1]
-        assert upper is not None
+        if upper is None:
+            raise AssertionError
         if lower > upper:
             raise click.UsageError(f"--{option} requires LOW <= HIGH.")
 

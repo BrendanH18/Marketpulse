@@ -439,7 +439,8 @@ class Tracker:
                         lr = last_fx.get(lc)
                         px = px * lr / rate if lr is not None and rate else None
                 elif kind is AssetKind.FIXED_INCOME:
-                    assert asset is not None  # only an Asset can make the kind FIXED_INCOME
+                    if asset is None:
+                        raise AssertionError("only an Asset can make the kind FIXED_INCOME")
                     purchase = asset.accrual_factor(h.first_date) if h.first_date else 1.0
                     px = h.avg_cost / purchase * asset.accrual_factor(iso) if purchase else h.avg_cost
                 elif kind is AssetKind.MANUAL:
