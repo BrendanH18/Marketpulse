@@ -828,8 +828,7 @@ private struct HoldingsWorkspace: View {
         }.width(80)
         TableColumn("Price") { p in
           // A manual price or accrued GIC price can be the entire asset value.
-          let privatePrice = payload.status.privacy && p.price != nil && (p.quoteSource ?? "").isEmpty
-          let shown = privatePrice ? Format.mask : "\(Format.price(p.price)) \(p.currency)"
+          let shown = payload.masksPrice(of: p) ? Format.mask : "\(Format.price(p.price)) \(p.currency)"
           let note = quoteNote(p)
           Text(p.stale ? String(localized: "\(shown) · cached") : shown)
             .modifier(RowTint(Studio.muted)).monospacedDigit()

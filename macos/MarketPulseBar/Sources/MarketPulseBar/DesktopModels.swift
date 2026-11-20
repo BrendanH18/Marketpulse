@@ -387,6 +387,15 @@ struct DesktopPayload: Decodable {
   /// `warnings` with a code for each, in the same order. Absent from older engines.
   let warningItems: [DesktopWarning]?
 
+  /// Legacy snapshots may have asset definitions but no quote source. With neither field,
+  /// a listed market mover is still identifiable as publicly priced.
+  func masksPrice(of position: DesktopPosition) -> Bool {
+    guard status.privacy, position.price != nil else { return false }
+    if let source = position.quoteSource { return source.isEmpty }
+    if let assets { return assets.first { $0.symbol == position.symbol }.map { $0.kind != "market" } ?? false }
+    return !position.stale && !status.movers.contains { $0.symbol == position.symbol }
+  }
+
   /// `warnings` in the user's language: worded from each one's code, else the English.
   var localizedWarnings: [String] {
     if status.privacy && !warnings.isEmpty {

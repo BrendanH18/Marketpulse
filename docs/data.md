@@ -12,7 +12,8 @@ Display settings live in a separate TOML file.
 The database and backups are not encrypted by MarketPulse. Privacy mode hides
 amounts on screen; it does not redact ledger exports, `status --json`, or the
 other [CLI JSON reports](cli-workflows.md). Protect these files as you would
-other financial records.
+other financial records. Public quotes and percentage returns remain visible. Together
+they can give a viewer an estimate of a holding’s acquisition price.
 
 For offline backup filtering, inspection and read-only verification, see
 [Backup CLI tools](cli-backup-tools.md). Activity CSV exports and JSON inspection

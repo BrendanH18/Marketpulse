@@ -931,7 +931,9 @@ def _holdings_markdown(rows: list[PositionView], base: str, privacy: bool) -> st
             _md_cell(p.account.name),
             _md_cell(p.symbol),
             fmt.MASK if privacy else fmt.qty(p.quantity),
-            f"{fmt.price(p.price)} {p.currency}" if p.price is not None else "—",
+            f"{fmt.price(p.price, privacy=privacy and p.kind is not AssetKind.MARKET)} {p.currency}"
+            if p.price is not None
+            else "—",
             fmt.money(p.value_base, base, privacy=privacy),
             fmt.money(p.gain_base, base, sign=True, privacy=privacy),
             fmt.pct(p.gain_pct if p.priced else None),

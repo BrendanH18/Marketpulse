@@ -72,6 +72,15 @@ struct NativeBridgeCheck {
         #"{"id":"1:FAKE","account_id":1,"account":"TFSA","symbol":"FAKE","name":"Fictional Co","asset_class":"equity","quantity":1,"price":10,"currency":"CAD","value":10,"book":9,"gain":1,"gain_pct":11.1,"day_change_pct":null,"weight":100,"stale":true,"quote_source":"fictional","quote_age_seconds":5400.0}"#
           .utf8))
     precondition(position.quoteSource == "fictional" && position.quoteAgeSeconds == 5400)
+    // Before quote_source, the asset definitions distinguished public quotes from accrued prices.
+    var legacyJSON = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+    legacyJSON["positions"] = (legacyJSON["positions"] as! [[String: Any]]).map { fields in
+      fields.filter { $0.key != "quote_source" }
+    }
+    var legacy = try decoder.decode(DesktopPayload.self, from: JSONSerialization.data(withJSONObject: legacyJSON))
+    legacy.status.privacy = true
+    precondition(legacy.positions.contains { $0.symbol == "GIC-DEMO" && legacy.masksPrice(of: $0) })
+    precondition(legacy.positions.contains { $0.symbol == "AAPL" && !legacy.masksPrice(of: $0) })
     let ledger = try decoder.decode(
       StorageInfo.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[4])))
     let backups = ledger.backups ?? []

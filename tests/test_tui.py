@@ -422,3 +422,48 @@ def test_workspace_retry_ignores_late_failure(tracker, section, key, method):
                 assert section not in app.load_errors
 
     run(scenario())
+
+
+def test_income_history_waits_for_a_new_valuation_after_a_write(tracker, store):
+    account = store.add_account(Account(name="Fictional income"))
+    store.add_transaction(Transaction(account.saved_id, TxnType.INTEREST, amount=11, currency="CAD"))
+
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        async with app.run_test() as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("6")
+            await app.workers.wait_for_complete()
+            assert "$11.00" in extras.pane_text(app, "#income-view")
+            with patch.object(tracker, "valuation", side_effect=OSError("Fictional reload failure")):
+                await app.save_txn(Transaction(account.saved_id, TxnType.INTEREST, amount=17, currency="CAD")).wait()
+                await app.workers.wait_for_complete()
+                await pilot.press("1", "6")
+                assert "$11.00" not in extras.pane_text(app, "#income-view")
+                assert "Press r to retry" in extras.pane_text(app, "#income-hint")
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "$28.00" in extras.pane_text(app, "#income-view")
+
+    run(scenario())
+
+
+def test_detail_history_can_retry_after_bad_provider_response(tracker, fake):
+    fake.set_history("AAPL", {"2024-01-02": 100.0})
+
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        async with app.run_test():
+            await app.workers.wait_for_complete()
+            bars = tracker.market.history("AAPL", "3mo")
+            with patch.object(tracker.market, "history", side_effect=[ValueError("Bad response"), bars]) as history:
+                app.load_detail_bars("AAPL")
+                await app.workers.wait_for_complete()
+                assert "AAPL" not in app._detail_bars
+                app.load_detail_bars("AAPL")
+                app.load_detail_bars("AAPL")
+                await app.workers.wait_for_complete()
+                assert history.call_count == 2 and app._detail_bars["AAPL"] == bars
+
+    run(scenario())

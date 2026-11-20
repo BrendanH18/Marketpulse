@@ -635,6 +635,13 @@ def render_income(app: MarketPulseApp, *, refresh_history: bool = True) -> None:
     v = app.view
     if v is None:
         return
+    if app._income_ledger_changed:
+        hint = app.load_errors.get("portfolio", "Updating income history after the ledger change…")
+        app.query_one("#income-hint", Static).update(
+            Text(hint, style="warn" if "portfolio" in app.load_errors else "muted")
+        )
+        app.query_one("#income-view", Static).update("")
+        return
     if refresh_history:
         state = app.tracker.store.ledger()
         app._income_history = (

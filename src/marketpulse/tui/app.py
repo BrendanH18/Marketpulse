@@ -19,7 +19,7 @@ from textual.worker import Worker, get_current_worker
 
 from .. import render
 from ..config import Config
-from ..market import PERIODS, MarketError
+from ..market import PERIODS
 from ..models import AssetKind, Transaction
 from ..services import Tracker
 from ..themes import (
@@ -260,6 +260,7 @@ class MarketPulseApp(App):
         self._detail_key: str | None = None
         self._watch_key: str | None = None
         self._income_forecast: list | None = None
+        self._income_ledger_changed = False
         self._income_history: tuple[list[tuple[str, float]], list[tuple[str, float]]] = ([], [])
         self._tax: tuple | None = None
         self._last_error = ""
@@ -650,6 +651,7 @@ class MarketPulseApp(App):
             self.notify(problems[0], title="Market data", severity="warning")
         self._last_error = problems[0] if problems else ""
         self._set_loading(False)
+        self._income_ledger_changed = False
         self.render_market_views()
         if self.workspace == "income" and self._income_forecast is None:
             self.load_income()  # `r` clears the forecast; reload it if the user is looking at it
@@ -666,6 +668,7 @@ class MarketPulseApp(App):
             self.notify(message)
         self.workers.cancel_group(self, "tax")
         self._tax = None
+        self._income_ledger_changed = True
         self._invalidate_income()
         self.render_store_views()
         self.load_data()
@@ -768,8 +771,10 @@ class MarketPulseApp(App):
     def _fetch_detail_bars(self, symbol: str) -> None:
         try:
             bars = self.tracker.market.history(symbol, "3mo")
-        except MarketError:
-            bars = []
+        except Exception:
+            # Discard the in-flight placeholder so selecting this symbol again can retry.
+            self.call_from_thread(lambda: self._detail_bars.pop(symbol, None))
+            return
         self.call_from_thread(self._detail_loaded, symbol, bars)
 
     def _detail_loaded(self, symbol: str, bars: list) -> None:
