@@ -29,6 +29,10 @@ previews and receipts, and a searchable command catalog (`marketpulse commands`)
 Another [100 offline inspection improvements](cli-more-hundred-improvements.md)
 extend realized gains, payouts, asset metadata, snapshots and backup browsing,
 and add saved target inspection (`marketpulse targets`) and command selectors.
+[One hundred CLI and terminal app workflow improvements](cli-tui-hundred-improvements.md)
+and [one hundred more](cli-tui-more-hundred-improvements.md) add JSON Lines output,
+filters, dry runs and receipts, recording helpers, automation and T1135 reports, and
+terminal app keys for row details, find, go-to and copying.
 
 For a shared offline query and export interface across 59 datasets, see
 [Composable offline reports](cli-composable-reports.md) (`marketpulse report SOURCE`),

@@ -9,8 +9,17 @@ from textual.command import DiscoveryHit, Hit, Hits, Provider
 
 from ..market import PERIODS
 from ..themes import pretty_name, theme_names
-from . import navigation
-from .constants import ALLOC_MODES, NW_RANGES, SORT_MODES
+from . import extras, navigation
+from .constants import (
+    ACTIVITY_FILTER_MODES,
+    ACTIVITY_WINDOWS,
+    ALERT_FILTER_MODES,
+    ALLOC_MODES,
+    HOLDING_FILTER_MODES,
+    MOVERS_MODES,
+    NW_RANGES,
+    SORT_MODES,
+)
 from .widgets import WORKSPACES
 
 if TYPE_CHECKING:
@@ -40,6 +49,57 @@ class PortfolioCommands(Provider):
         entries += self._more_actions(app)
         entries += self._workflow_actions(app)
         entries += self._sort_actions(app)
+        entries += self._more_workflow_actions(app)
+        return entries
+
+    @staticmethod
+    def _more_workflow_actions(app: MarketPulseApp) -> list[tuple[str, str, object]]:
+        """Actions added in the second 100 CLI & TUI batch, plus direct choices their keys cycle through."""
+        entries: list[tuple[str, str, object]] = [
+            ("Show row details", "P · every field of the selected row", app.action_details),
+            ("Add or remove from watchlist", "W · selected symbol", app.action_toggle_watch),
+            ("Watch every held symbol", "Add market-priced holdings to the watchlist", app.action_watch_holdings),
+            ("Show only the selected account", "; · holdings or activity", app.action_scope_account),
+            ("Go to row…", ": · row number, or a date in activity", app.action_go_to),
+            ("Find in table…", "ctrl+f · ctrl+g finds next", app.action_find_row),
+            ("Find next", "ctrl+g", app.action_find_next),
+            ("Next group", ") · account, month, symbol or type", partial(app.action_jump_group, 1)),
+            ("Previous group", "( · account, month, symbol or type", partial(app.action_jump_group, -1)),
+            ("Cycle activity date window", "% · all / 30d / 90d / ytd / 1y", app.action_cycle_activity_window),
+            ("Next ledger issue", "ctrl+e · select the transaction", app.action_next_issue),
+            ("Alerts for selected symbol", "& · escape shows all", app.action_symbol_alerts),
+            ("Chart: crosshair to period high", "^", partial(app.action_chart_extreme, True)),
+            ("Chart: crosshair to period low", "_", partial(app.action_chart_extreme, False)),
+            ("Previous chart", "' · the symbol charted before", app.action_previous_chart),
+            ("Copy chart history as CSV", "date, open, high, low, close, volume", app.action_copy_chart_csv),
+            ("Copy table as JSON", '" · objects keyed by column', app.action_copy_table_json),
+            ("Copy pane as text", "ctrl+t · side pane or report", app.action_copy_pane),
+            ("Pause or resume automatic refresh", "ctrl+r · r still refreshes", app.action_toggle_auto_refresh),
+            ("Save watchlist sort as list order", "ctrl+s · watchlist", app.action_save_watch_order),
+        ]
+        entries += [
+            (f"Activity window: {w}", "% · activity dates", partial(extras.set_activity_window, app, w))
+            for w in ACTIVITY_WINDOWS
+        ]
+        modes = [
+            ("holdings", "Holdings mode", HOLDING_FILTER_MODES),
+            ("activity", "Activity mode", ACTIVITY_FILTER_MODES),
+            ("alerts", "Alerts mode", ALERT_FILTER_MODES),
+            ("dashboard", "Movers", MOVERS_MODES),
+        ]
+        entries += [
+            (f"{label}: {mode}", "M / m cycle these", partial(extras.set_filter_mode, app, ws, mode))
+            for ws, label, choices in modes
+            for mode in choices
+        ]
+        entries += [
+            (f"Tax year: {year}", "- / + · tax workspace", partial(navigation.set_tax_year, app, year))
+            for year in extras.tax_years(app)
+        ]
+        entries += [
+            (f"Income year: {year}", "- / + · income by symbol", partial(navigation.set_income_year, app, year))
+            for year in extras.income_years(app)
+        ]
         return entries
 
     @staticmethod

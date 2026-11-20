@@ -5,10 +5,12 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import re
 import time
 from contextlib import nullcontext
-from datetime import datetime
+from datetime import date, datetime
+from itertools import pairwise
 
 import click
 from rich.console import Group
@@ -24,6 +26,7 @@ from .root import main
 
 DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 CACHE_SORTS = ("symbol", "age", "change")
+MOVE_DIRECTIONS = ("up", "down")
 QUOTE_FIELDS = [
     "symbol",
     "name",
@@ -48,6 +51,18 @@ def _duration_callback(ctx, param, value: str | None) -> float | None:
     if not m or float(m.group(1)) <= 0:
         raise click.BadParameter("use a positive number with a unit: s, m, h, d or w (e.g. 30m, 2h, 3d).")
     return float(m.group(1)) * DURATION_UNITS[m.group(2)]
+
+
+def _finite_price(ctx: click.Context, param: click.Parameter, value: float | None) -> float | None:
+    if value is not None and not math.isfinite(value):
+        raise click.BadParameter("must be a finite price", ctx=ctx, param=param)
+    return value
+
+
+def _finite_percent(ctx: click.Context, param: click.Parameter, value: float | None) -> float | None:
+    if value is not None and not math.isfinite(value):
+        raise click.BadParameter("must be a finite percentage", ctx=ctx, param=param)
+    return value
 
 
 def _cache_sort_key(sort: str, now: float):
@@ -80,6 +95,29 @@ def _cache_sort_key(sort: str, now: float):
 @click.option("--csv", "as_csv", is_flag=True, help="With --cached: print cached quotes as CSV to stdout.")
 @click.option("--field", type=click.Choice(VALUE_FIELDS), help="Print one bare value per symbol, for scripts.")
 @click.option("--strict", is_flag=True, help="Exit 1 when any named symbol has no quote.")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Print one JSON quote object per line (live or --cached).")
+@click.option(
+    "--min-move",
+    type=click.FloatRange(min=0),
+    callback=_finite_percent,
+    help="Live: keep only symbols whose day change is at least this many percent either way.",
+)
+@click.option("--direction", type=click.Choice(MOVE_DIRECTIONS), help="Live: keep only rising or falling quotes.")
+@click.option("--summary", is_flag=True, help="Live: add a breadth line (up, down, unchanged, average % change).")
+@click.option(
+    "--check-above",
+    type=float,
+    callback=_finite_price,
+    help="Exit 1 unless every named symbol has a fresh quote at or above this price.",
+)
+@click.option(
+    "--check-below",
+    type=float,
+    callback=_finite_price,
+    help="Exit 1 unless every named symbol has a fresh quote at or below this price.",
+)
+@click.option("--fail-on-stale", is_flag=True, help="Exit 1 when any live quote came from the offline cache.")
+@click.option("--count", "count_only", is_flag=True, help="With --cached: print how many cached quotes match.")
 @pass_app
 def quote(
     app: App,
@@ -96,17 +134,46 @@ def quote(
     as_csv: bool,
     field: str | None,
     strict: bool,
+    as_jsonl: bool,
+    min_move: float | None,
+    direction: str | None,
+    summary: bool,
+    check_above: float | None,
+    check_below: float | None,
+    fail_on_stale: bool,
+    count_only: bool,
 ) -> None:
     """Live quotes. One symbol shows a detail card.
 
     With --cached, read only the saved offline cache; --all, --currency, --search,
-    --older-than, --newer-than, --sort, --descending and --csv refine that view.
+    --older-than, --newer-than, --sort, --descending, --csv and --count refine that view.
     --field prints bare live values; --strict exits 1 when any symbol is missing.
+    --min-move and --direction narrow live quotes; --check-above, --check-below and
+    --fail-on-stale exit 1 for scripts, and stale quotes never pass a price check.
     """
     if field and (cached or as_json):
         raise click.UsageError("--field prints live values; it can't be combined with --cached or --json.")
+    if as_jsonl and (as_json or as_csv or field):
+        raise click.UsageError("Choose one output format: --jsonl, --json, --csv or --field.")
     if strict and cached:
         raise click.UsageError("--strict applies to live quotes, not --cached.")
+    live_only = {
+        "--min-move": min_move is not None,
+        "--direction": direction is not None,
+        "--summary": summary,
+        "--check-above": check_above is not None,
+        "--check-below": check_below is not None,
+        "--fail-on-stale": fail_on_stale,
+    }
+    if cached and (live := [name for name, on in live_only.items() if on]):
+        verb = "applies" if len(live) == 1 else "apply"
+        raise click.UsageError(f"{', '.join(live)} {verb} to live quotes, not --cached.")
+    if summary and (as_json or as_jsonl or field):
+        raise click.UsageError("--summary adds a line to the table; it can't be used with --json, --jsonl or --field.")
+    if count_only and (as_json or as_csv or as_jsonl):
+        raise click.UsageError("--count prints a number; it can't be combined with --json, --jsonl or --csv.")
+    if check_above is not None and check_below is not None and check_above > check_below:
+        raise click.UsageError("--check-above must be at or below --check-below.")
     cache_opts = {
         "--all": all_cached,
         "--currency": bool(currencies),
@@ -116,6 +183,7 @@ def quote(
         "--sort": sort is not None,
         "--descending": descending,
         "--csv": as_csv,
+        "--count": count_only,
     }
     used = [name for name, on in cache_opts.items() if on]
     if used and not cached:
@@ -148,37 +216,105 @@ def quote(
             descending=descending,
             as_json=as_json,
             as_csv=as_csv,
+            as_jsonl=as_jsonl,
+            count_only=count_only,
         )
         return
-    if as_json or field:
+    if as_json or field or as_jsonl:
         quotes, errors = app.tracker.market.quotes(syms)
     else:
         with app.busy("Fetching quotes…"):
             quotes, errors = app.tracker.market.quotes(syms)
     found = any(s in quotes for s in syms)
     missing = any(s not in quotes for s in syms)
+    narrowed = min_move is not None or direction is not None
+    # Named symbols without a quote stay listed, so their errors are still shown.
+    shown = [s for s in syms if s not in quotes or _moves(quotes[s], min_move, direction)] if narrowed else syms
+    problems = _check_problems(syms, quotes, errors, check_above, check_below, fail_on_stale)
+    machine = bool(as_json or as_jsonl or field)
     if field:
-        _print_field(syms, quotes, errors, field)
-        if not found or (strict and missing):
-            click.get_current_context().exit(1)
-        return
-    if as_json:
-        click.echo(json.dumps([_quote_json(s, quotes.get(s), errors) for s in syms], ensure_ascii=False))
-        if not found or (strict and missing):
-            click.get_current_context().exit(1)
-        return
-    if len(syms) == 1:
+        _print_field(shown, quotes, errors, field, labelled=len(syms) > 1)
+    elif as_json or as_jsonl:
+        rows = [_quote_json(s, quotes.get(s), errors) for s in shown]
+        click.echo(json.dumps(rows, ensure_ascii=False) if as_json else _jsonl(rows), nl=as_json or bool(rows))
+    elif len(syms) == 1 and not narrowed:
         q = quotes.get(syms[0])
         if q is None:
             fail(f"{syms[0]}: {errors.get(syms[0], 'no data')}")
         app.console.print(render.quote_card(q))
-        return
-    app.console.print(render.quotes_table(syms, quotes, errors, width=app.console.width))
-    if strict and missing:
+    elif not shown:
+        app.console.print(Text("No quotes match --min-move/--direction.", style="muted"))
+    else:
+        app.console.print(render.quotes_table(shown, quotes, errors, width=app.console.width))
+    if summary:
+        app.console.print(_breadth([quotes[s] for s in shown if s in quotes]))
+    for message in problems:
+        if machine:
+            click.echo(f"! {message}", err=True)
+        else:
+            app.warn(message)
+    if (machine and not found) or (strict and missing) or problems:
         click.get_current_context().exit(1)
 
 
-def _print_field(syms: list[str], quotes: dict[str, Quote], errors: dict[str, str], field: str) -> None:
+def _jsonl(rows: list[dict]) -> str:
+    """JSON Lines: one compact object per line, no trailing newline (click.echo adds it)."""
+    return "\n".join(json.dumps(r, ensure_ascii=False) for r in rows)
+
+
+def _moves(q: Quote, min_move: float | None, direction: str | None) -> bool:
+    """Whether a live quote's day change passes --min-move and --direction."""
+    if min_move is not None and abs(q.change_pct) < min_move:
+        return False
+    if direction == "up":
+        return q.change > 0
+    if direction == "down":
+        return q.change < 0
+    return True
+
+
+def _check_problems(
+    syms: list[str],
+    quotes: dict[str, Quote],
+    errors: dict[str, str],
+    above: float | None,
+    below: float | None,
+    fail_on_stale: bool,
+) -> list[str]:
+    """Why a --check-above/--check-below/--fail-on-stale run fails; a stale quote never passes a price check."""
+    checking = above is not None or below is not None
+    problems = []
+    for s in syms:
+        q = quotes.get(s)
+        if q is None:
+            if checking:
+                problems.append(f"{s}: no quote to check ({errors.get(s, 'no data')}).")
+            continue
+        if q.stale and (checking or fail_on_stale):
+            problems.append(f"{s}: quote is stale (from the offline cache).")
+            continue
+        if above is not None and q.price < above:
+            problems.append(f"{s} {fmt.price(q.price)} is below {fmt.price(above)}.")
+        if below is not None and q.price > below:
+            problems.append(f"{s} {fmt.price(q.price)} is above {fmt.price(below)}.")
+    return problems
+
+
+def _breadth(quotes: list[Quote]) -> Text:
+    """`Breadth: 2 up · 1 down · 0 unchanged · average +1.23%` over the shown quotes."""
+    if not quotes:
+        return Text("Breadth: no quotes.", style="muted")
+    up = sum(q.change > 0 for q in quotes)
+    down = sum(q.change < 0 for q in quotes)
+    avg = sum(q.change_pct for q in quotes) / len(quotes)
+    line = Text(f"Breadth: {up} up · {down} down · {len(quotes) - up - down} unchanged · average ", style="muted")
+    line.append(fmt.pct(avg), style=fmt.trend_style(avg))
+    return line
+
+
+def _print_field(
+    syms: list[str], quotes: dict[str, Quote], errors: dict[str, str], field: str, *, labelled: bool
+) -> None:
     """One value per line: bare for one symbol, `SYMBOL<tab>value` for several; misses go to stderr."""
     for s in syms:
         q = quotes.get(s)
@@ -187,7 +323,7 @@ def _print_field(syms: list[str], quotes: dict[str, Quote], errors: dict[str, st
             continue
         value = getattr(q, field)
         text = "" if value is None else str(value)
-        click.echo(text if len(syms) == 1 else f"{s}\t{text}")
+        click.echo(f"{s}\t{text}" if labelled else text)
 
 
 def _cached_quotes(
@@ -203,6 +339,8 @@ def _cached_quotes(
     descending: bool,
     as_json: bool,
     as_csv: bool,
+    as_jsonl: bool = False,
+    count_only: bool = False,
 ) -> None:
     """Render the offline cache: strictly reads `quote_cache`, never the network."""
     quotes = app.store.all_cached_quotes() if all_cached else app.store.cached_quotes(syms)
@@ -232,10 +370,15 @@ def _cached_quotes(
         order = [s for s in order if s in kept or s in errors]
     shown = {q.symbol: q for q in selected}
     found = bool(shown)
-    if as_json or as_csv:
+    if count_only:
+        click.echo(len(shown))
+        return
+    if as_json or as_csv or as_jsonl:
         rows = [_quote_json(s, shown.get(s), errors) for s in order]
         if as_json:
             click.echo(json.dumps(rows, ensure_ascii=False))
+        elif as_jsonl:
+            click.echo(_jsonl(rows), nl=bool(rows))
         else:
             stream = io.StringIO()
             writer = csv.DictWriter(stream, fieldnames=QUOTE_FIELDS, lineterminator="\n")
@@ -358,6 +501,9 @@ COMPARE_FIELDS = [
 ]
 COMPARE_SORTS = ("return", "drawdown", "volatility", "symbol")
 SEARCH_FIELDS = ["symbol", "name", "exchange", "type"]
+RESAMPLES = ("week", "month")
+# Yahoo suffixes for Canadian listings: TSX, TSX Venture, CSE and Cboe Canada (NEO).
+CANADIAN_SUFFIXES = (".TO", ".V", ".CN", ".NE")
 SEARCH_LIMIT = 12  # results requested from the search endpoint, as always
 
 
@@ -373,6 +519,15 @@ def _trim(bars: list[Bar], start: str | None, end: str | None, last: int | None)
     """Keep the bars of an already-fetched series whose exchange date is in range, then the last N."""
     kept = [b for b in bars if (start is None or b.date >= start) and (end is None or b.date <= end)]
     return kept[-last:] if last else kept
+
+
+def _resample(bars: list[Bar], every: str) -> list[Bar]:
+    """Keep the last bar of each ISO week or calendar month (exchange dates), in order."""
+    last: dict[object, Bar] = {}
+    for b in bars:
+        key: object = date.fromisoformat(b.date).isocalendar()[:2] if every == "week" else b.date[:7]
+        last[key] = b
+    return list(last.values())
 
 
 def _bar_json(symbol: str, b: Bar) -> dict:
@@ -494,6 +649,12 @@ def _normalized_chart(symbol: str, bars: list[Bar], period: str, palette: Palett
 @click.option("--normalize", is_flag=True, help="Draw % change from the first bar instead of price.")
 @click.option("-w", "--width", type=click.IntRange(min=20), help="Chart width in columns (default: the terminal's).")
 @click.option("--no-card", is_flag=True, help="Leave out the quote card above the chart.")
+@click.option("--jsonl", "as_jsonl", is_flag=True, help="Print the bars (or --stats rows) as JSON Lines, no chart.")
+@click.option(
+    "--resample",
+    type=click.Choice(RESAMPLES),
+    help="With --json, --csv or --jsonl: keep each week's or month's last bar (after --from/--to/--last).",
+)
 @pass_app
 def chart(
     app: App,
@@ -510,23 +671,31 @@ def chart(
     normalize: bool,
     width: int | None,
     no_card: bool,
+    as_jsonl: bool,
+    resample: str | None,
 ) -> None:
     """Braille price chart, optionally compared against other symbols.
 
-    --json, --csv and --stats print the fetched series instead of drawing it;
-    --from, --to and --last trim that series without fetching anything else.
+    --json, --csv, --jsonl and --stats print the fetched series instead of drawing it;
+    --from, --to and --last trim that series without fetching anything else, and
+    --resample thins printed bars to one per week or month.
     """
     if as_json and as_csv:
         raise click.UsageError("Choose one output format: --json or --csv.")
+    if as_jsonl and (as_json or as_csv):
+        raise click.UsageError("Choose one output format: --json, --csv or --jsonl.")
     drawing = {"--normalize": normalize, "--width": width is not None, "--no-card": no_card}
-    if as_json or as_csv or stats:
+    if as_json or as_csv or as_jsonl or stats:
         if used := [name for name, on in drawing.items() if on]:
-            raise click.UsageError(f"{', '.join(used)} only change the drawn chart, not --json, --csv or --stats.")
+            outputs = "--json, --csv, --jsonl or --stats" if as_jsonl else "--json, --csv or --stats"
+            raise click.UsageError(f"{', '.join(used)} only change the drawn chart, not {outputs}.")
+    if resample and (stats or not (as_json or as_csv or as_jsonl)):
+        raise click.UsageError("--resample applies to --json, --csv or --jsonl bars, not --stats or the drawn chart.")
     if start and end and start > end:
         raise click.UsageError("--from must be on or before --to.")
     period = period or app.config.chart_period
     market = app.tracker.market
-    machine = as_json or as_csv
+    machine = as_json or as_csv or as_jsonl
     sym = symbol.upper()
     try:
         with nullcontext() if machine else app.busy(f"Fetching {sym} {period}…"):
@@ -541,11 +710,16 @@ def chart(
         others = {k: _trim(v, start, end, last) for k, v in others.items()}
         if fetched and not bars:
             fail(f"No {sym} {period} bars in the selected range.")
+    if resample:
+        bars = _resample(bars, resample)
+        others = {k: _resample(v, resample) for k, v in others.items()}
     q = quotes.get(sym)
     if stats:
         rows = [_series_stats(sym, bars, period), *(_series_stats(k, v, period) for k, v in others.items())]
         if as_json:
             click.echo(json.dumps(rows, ensure_ascii=False))
+        elif as_jsonl:
+            click.echo(_jsonl(rows))
         elif as_csv:
             click.echo(_csv_text(STATS_FIELDS, rows), nl=False)
         else:
@@ -562,9 +736,13 @@ def chart(
         }
         click.echo(json.dumps(payload, ensure_ascii=False))
         return
-    if as_csv:
+    if as_csv or as_jsonl:
         series = [(sym, bars), *others.items()]
-        click.echo(_csv_text(CHART_FIELDS, [_bar_json(k, b) for k, v in series for b in v]), nl=False)
+        rows = [_bar_json(k, b) for k, v in series for b in v]
+        if as_jsonl:
+            click.echo(_jsonl(rows), nl=bool(rows))
+        else:
+            click.echo(_csv_text(CHART_FIELDS, rows), nl=False)
         return
     if q and not no_card:
         app.console.print(render.quote_card(q))
@@ -643,6 +821,19 @@ def _order_compare(rows: list[dict], sort: str | None, reverse: bool, *, measure
 @click.option("--base", help="Add each return minus this compared symbol's return, in percentage points.")
 @click.option("--top", type=click.IntRange(min=1), help="Keep only the first N rows after ordering (chart too).")
 @click.option("--no-chart", is_flag=True, help="Print only the comparison table.")
+@click.option("--since", callback=date_callback, help="Measure from this date: drop fetched bars before it.")
+@click.option(
+    "--min-return",
+    type=float,
+    callback=_finite_price,
+    help="Keep only symbols whose return is at least this many percent.",
+)
+@click.option("--strict", is_flag=True, help="Exit 1 when any symbol has no history to compare.")
+@click.option(
+    "--correlation",
+    is_flag=True,
+    help="Print the correlation of bar-to-bar returns between each pair (common dates only), no chart.",
+)
 @pass_app
 def compare(
     app: App,
@@ -655,16 +846,32 @@ def compare(
     base: str | None,
     top: int | None,
     no_chart: bool,
+    since: str | None,
+    min_return: float | None,
+    strict: bool,
+    correlation: bool,
 ) -> None:
     """Compare returns, drawdown and volatility across symbols.
 
-    --sort, --reverse, --top and --base reorder and annotate the same histories;
-    --json and --csv print the rows for scripts.
+    --sort, --reverse, --top, --min-return and --base reorder and annotate the same
+    histories; --since measures from a date; --correlation prints a return-correlation
+    matrix instead; --json and --csv print the rows for scripts.
     """
     if as_json and as_csv:
         raise click.UsageError("Choose one output format: --json or --csv.")
     if no_chart and (as_json or as_csv):
         raise click.UsageError("--json and --csv never draw a chart; drop --no-chart.")
+    if correlation:
+        table_only = {
+            "--sort": sort is not None,
+            "--reverse": reverse,
+            "--base": base is not None,
+            "--top": top is not None,
+            "--min-return": min_return is not None,
+            "--no-chart": no_chart,
+        }
+        if used := [name for name, on in table_only.items() if on]:
+            raise click.UsageError(f"{', '.join(used)} can't be combined with --correlation.")
     syms = parse_symbols(" ".join(symbols))
     base_sym = None
     if base is not None:
@@ -686,9 +893,16 @@ def compare(
                     click.echo(f"! {e}", err=True)
                 else:
                     app.warn(str(e))
+    if since:
+        data = {k: _trim(v, since, None, None) for k, v in data.items()}
     data = {k: v for k, v in data.items() if v}
     if not data:
-        fail("No data retrieved.")
+        fail("No data retrieved." if not since else f"No data on or after {since}.")
+    absent = [s for s in syms if s not in data]
+    if correlation:
+        _print_correlation(app, data, period, as_json=as_json, as_csv=as_csv)
+        _strict_exit(app, absent, period, strict=strict, machine=machine)
+        return
     rows = _order_compare(
         [_compare_row(s, bars, period) for s, bars in data.items()],
         sort,
@@ -702,13 +916,19 @@ def compare(
         for r in rows:
             if r["return_pct"] is not None and base_row["return_pct"] is not None:
                 r["vs_base_pp"] = r["return_pct"] - base_row["return_pct"]
+    if min_return is not None:
+        rows = [r for r in rows if r["return_pct"] is not None and r["return_pct"] >= min_return]
+        if not rows:
+            fail(f"No symbol returned at least {min_return:g}% over {period}.")
     if top:
         rows = rows[:top]
     if as_json:
         click.echo(json.dumps(rows, ensure_ascii=False))
+        _strict_exit(app, absent, period, strict=strict, machine=True)
         return
     if as_csv:
         click.echo(_csv_text(COMPARE_FIELDS, rows), nl=False)
+        _strict_exit(app, absent, period, strict=strict, machine=True)
         return
     shown = {r["symbol"] for r in rows}
     if not no_chart:
@@ -752,6 +972,67 @@ def compare(
                 cells.append(render.trend(f"{gap:+,.2f} pp" if gap is not None else render.DASH, gap))
         t.add_row(*cells)
     app.console.print(t)
+    _strict_exit(app, absent, period, strict=strict, machine=False)
+
+
+def _strict_exit(app: App, absent: list[str], period: str, *, strict: bool, machine: bool) -> None:
+    """With --strict, name each symbol that had no history and exit 1."""
+    if not (strict and absent):
+        return
+    for s in absent:
+        message = f"{s}: no {period} history to compare."
+        if machine:
+            click.echo(f"! {message}", err=True)
+        else:
+            app.warn(message)
+    raise click.exceptions.Exit(1)
+
+
+def _return_series(bars: list[Bar], intraday: bool) -> dict:
+    """Close by bar key: the exchange date for daily and longer bars, the timestamp for intraday ones."""
+    return {(b.time if intraday else b.date): b.close for b in bars}
+
+
+def _correlation(a: dict, b: dict) -> float | None:
+    """Pearson correlation of bar-to-bar returns over the keys both series share; None if too few."""
+    keys = sorted(set(a) & set(b))
+    ra, rb = [], []
+    for k1, k2 in pairwise(keys):
+        if a[k1] and b[k1]:
+            ra.append(a[k2] / a[k1] - 1)
+            rb.append(b[k2] / b[k1] - 1)
+    if len(ra) < 3:
+        return None
+    ma, mb = sum(ra) / len(ra), sum(rb) / len(rb)
+    cov = sum((x - ma) * (y - mb) for x, y in zip(ra, rb, strict=True))
+    va = sum((x - ma) ** 2 for x in ra)
+    vb = sum((y - mb) ** 2 for y in rb)
+    if va <= 0 or vb <= 0:
+        return None
+    return max(-1.0, min(1.0, cov / math.sqrt(va * vb)))
+
+
+def _print_correlation(app: App, data: dict[str, list[Bar]], period: str, *, as_json: bool, as_csv: bool) -> None:
+    if len(data) < 2:
+        fail("--correlation needs at least two symbols with history.")
+    intraday = PERIOD_INTERVALS[period][-1] in "mh"
+    series = {s: _return_series(bars, intraday) for s, bars in data.items()}
+    syms = list(series)
+    rows: list[dict] = [{"symbol": s, **{o: _correlation(series[s], series[o]) for o in syms}} for s in syms]
+    if as_json:
+        click.echo(json.dumps(rows, ensure_ascii=False))
+        return
+    if as_csv:
+        click.echo(_csv_text(["symbol", *syms], rows), nl=False)
+        return
+    t = render.table("Symbol", *((s, "right") for s in syms), title=f"{period} return correlation")
+    for r in rows:
+        cells = [Text(r["symbol"], style="bright")]
+        for o in syms:
+            v = r[o]
+            cells.append(Text(render.DASH if v is None else f"{v:+.2f}", style="muted" if o == r["symbol"] else ""))
+        t.add_row(*cells)
+    app.console.print(t)
 
 
 def _type_key(text: str) -> str:
@@ -767,6 +1048,7 @@ def _type_key(text: str) -> str:
 @click.option("--exchange", "exchanges", multiple=True, help="Keep exchanges containing this text (repeatable).")
 @click.option("--limit", type=click.IntRange(1, SEARCH_LIMIT), help=f"Show at most N matches (1–{SEARCH_LIMIT}).")
 @click.option("--first", is_flag=True, help="Print only the top matching symbol, for scripts.")
+@click.option("--canadian", is_flag=True, help="Keep only Canadian listings (.TO, .V, .CN and .NE symbols).")
 @pass_app
 def search(
     app: App,
@@ -777,10 +1059,11 @@ def search(
     exchanges: tuple[str, ...],
     limit: int | None,
     first: bool,
+    canadian: bool,
 ) -> None:
     """Find symbols by company or fund name.
 
-    --type, --exchange and --limit narrow the same results; --json, --csv and
+    --type, --exchange, --canadian and --limit narrow the same results; --json, --csv and
     --first print them for scripts.
     """
     if as_json and as_csv:
@@ -807,6 +1090,8 @@ def search(
             if (not wanted_types or _type_key(r.type) in wanted_types)
             and (not wanted_exchanges or any(x in r.exchange.lower() for x in wanted_exchanges))
         ]
+    if canadian:
+        results = [r for r in results if r.symbol.upper().endswith(CANADIAN_SUFFIXES)]
     if limit:
         results = results[:limit]
     if as_json or as_csv:
@@ -819,6 +1104,8 @@ def search(
             click.get_current_context().exit(1)
         return
     if not results:
+        if canadian and not filtered:
+            fail("No Canadian listings match.")
         fail("No matches for --type/--exchange." if filtered else "No matches.")
     if first:
         click.echo(results[0].symbol)

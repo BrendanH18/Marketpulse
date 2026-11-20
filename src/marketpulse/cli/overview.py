@@ -8,6 +8,7 @@ import csv
 import io
 import json
 import math
+import shlex
 import string
 from collections.abc import Callable
 from datetime import date
@@ -17,6 +18,7 @@ import click
 from rich.text import Text
 
 from .. import fmt, render
+from ..models import AssetClass, AssetKind
 from ..valuation import Breakdown, PortfolioView, PositionView
 from .base import App, fail, pass_app
 from .root import main
@@ -63,6 +65,7 @@ ALLOCATION_GROUPS = {"class": "by_class", "account": "by_account", "currency": "
 INCOME_KINDS = ("dividend", "drip", "interest")
 INCOME_KIND_LABELS = {"dividend": "Dividend", "drip": "DRIP", "interest": "Interest"}
 INCOME_GROUPS = ("month", "symbol", "account", "kind")
+FORECAST_SORTS = ("annual", "yield", "yield-on-cost", "symbol")
 FORECAST_FIELDS = [
     "symbol",
     "name",
@@ -233,6 +236,33 @@ def _finite_weight(ctx: click.Context, param: click.Parameter, value: float | No
     return value
 
 
+def _iso_date(ctx: click.Context, param: click.Parameter, value: str | None) -> str | None:
+    """A YYYY-MM-DD date, returned in canonical ISO form."""
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(value.strip()).isoformat()
+    except ValueError:
+        raise click.BadParameter("Use a YYYY-MM-DD date.") from None
+
+
+def _holding_fields(ctx: click.Context, param: click.Parameter, value: str | None) -> list[str] | None:
+    """`holdings --fields`: comma-separated JSON/CSV columns, in the order given, without repeats."""
+    if value is None:
+        return None
+    names = [name.strip() for name in value.split(",") if name.strip()]
+    unknown = [name for name in names if name not in HOLDING_FIELDS]
+    if not names or unknown:
+        shown = ", ".join(unknown) if unknown else "nothing"
+        raise click.BadParameter(f"Unknown field {shown}. Choose from: {', '.join(HOLDING_FIELDS)}.")
+    return list(dict.fromkeys(names))
+
+
+def _moved(view: PortfolioView, threshold: float) -> bool:
+    """Whether today's portfolio move reaches the threshold; cached (stale) prices never count as a move."""
+    return not view.stale and abs(view.day_change_pct or 0.0) >= threshold
+
+
 @main.command()
 @click.option("--json", "as_json", is_flag=True, help="Full machine-readable payload (used by the menu bar).")
 @click.option("--waybar", is_flag=True, help="Waybar custom-module JSON (text/tooltip/class).")
@@ -252,6 +282,20 @@ def _finite_weight(ctx: click.Context, param: click.Parameter, value: float | No
 @click.option("-a", "--account", default=None, help="Only this active account (not with --json or --waybar).")
 @click.option("--accounts", "show_accounts", is_flag=True, help="Follow the summary with a table of each account.")
 @click.option("--exit-code", is_flag=True, help="Exit 1 when prices are stale or the totals leave something out.")
+@click.option("--env", "as_env", is_flag=True, help="Every --field as shell-quoted MARKETPULSE_* assignments for eval.")
+@click.option(
+    "--change-since",
+    callback=_iso_date,
+    metavar="DATE",
+    help="Add the net worth change since the last snapshot on or before DATE (plain status only).",
+)
+@click.option(
+    "--fail-on-move",
+    type=click.FloatRange(min=0),
+    callback=_finite_weight,
+    metavar="PCT",
+    help="Exit 1 when today's portfolio move is at least PCT% either way; cached prices never count.",
+)
 @pass_app
 def status(
     app: App,
@@ -263,25 +307,30 @@ def status(
     account: str | None,
     show_accounts: bool,
     exit_code: bool,
+    as_env: bool,
+    change_since: str | None,
+    fail_on_move: float | None,
 ) -> None:
     """Portfolio status at a glance."""
-    modes = [as_json, waybar, short, field_name is not None, template is not None]
+    modes = [as_json, waybar, short, field_name is not None, template is not None, as_env]
     if sum(modes) > 1:
-        raise click.UsageError("Choose one of --json, --waybar, --short, --field or --format.")
+        raise click.UsageError("Choose one of --json, --waybar, --short, --field, --format or --env.")
     if account is not None and (as_json or waybar):
         raise click.UsageError("-a/--account cannot be combined with --json or --waybar.")
     if show_accounts and any(modes):
         raise click.UsageError("--accounts only adds to the plain status.")
+    if change_since is not None and (any(modes) or account is not None):
+        raise click.UsageError("--change-since only adds to the plain, whole-portfolio status.")
     if template is not None:
         _check_template(template)
     tr = app.tracker
     if as_json:
-        if not exit_code:
+        if not exit_code and fail_on_move is None:
             click.echo(json.dumps(tr.status_payload(), ensure_ascii=False))
             return
         view = tr.valuation()
         click.echo(json.dumps(tr.status_payload(view), ensure_ascii=False))
-        _exit_if_incomplete(view)
+        _status_exit(view, exit_code, fail_on_move)
         return
     if account is not None:
         acct = app.account(account)
@@ -289,6 +338,8 @@ def status(
             fail(f"No active account '{account}'.")  # archived accounts are reported exactly like unknown ones
         view = tr.valuation(account_id=acct.saved_id)
     else:
+        # Pick the baseline before valuing: valuation records today's snapshot, which must not be its own baseline.
+        baseline = _snapshot_on_or_before(app, change_since) if change_since is not None else None
         view = tr.valuation()
     day = f"{fmt.arrow(view.day_change)} {fmt.pct(view.day_change_pct)}"
     if waybar:
@@ -322,12 +373,46 @@ def status(
         click.echo(_status_field(view, field_name))
     elif template is not None:
         click.echo(template.format_map(_template_values(view, app.privacy)))
+    elif as_env:
+        for name in STATUS_FIELDS:
+            click.echo(f"MARKETPULSE_{name.upper().replace('-', '_')}={shlex.quote(_status_field(view, name))}")
     else:
         app.console.print(render.summary(view, privacy=app.privacy))
+        if change_since is not None:
+            _print_change_since(app, view, change_since, baseline)
         if show_accounts:
             _print_status_accounts(app, view)
+    _status_exit(view, exit_code, fail_on_move)
+
+
+def _status_exit(view: PortfolioView, exit_code: bool, fail_on_move: float | None) -> None:
     if exit_code:
         _exit_if_incomplete(view)
+    if fail_on_move is not None and _moved(view, fail_on_move):
+        click.get_current_context().exit(1)
+
+
+def _snapshot_on_or_before(app: App, since: str) -> Snapshot | None:
+    """The last recorded base-currency snapshot on or before `since`."""
+    base = app.tracker.base
+    earlier = [s for s in app.tracker.store.snapshots() if s.currency == base and s.date <= since]
+    return earlier[-1] if earlier else None
+
+
+def _print_change_since(app: App, view: PortfolioView, since: str, snap: Snapshot | None) -> None:
+    """Net worth now against the last recorded snapshot (in the base currency) on or before `since`."""
+    if snap is None:
+        app.console.print(Text(f"No net worth snapshot on or before {since} to compare with.", style="muted"))
+        return
+    change = view.net_worth - snap.net_worth
+    pct = change / snap.net_worth * 100 if snap.net_worth else None
+    line = Text(f"Since {snap.date}  ", style="muted")
+    line.append_text(render.trend(fmt.money(change, view.base, sign=True, privacy=app.privacy), change))
+    line.append_text(render.trend(f" ({fmt.pct(pct)})", pct))
+    line.append(f"  from {fmt.money(snap.net_worth, view.base, privacy=app.privacy)} {view.base}", style="muted")
+    app.console.print(line)
+    if view.excluded or view.archived_with_value:
+        app.warn("Today's totals leave something out, so this change is incomplete.")
 
 
 def _status_field(view: PortfolioView, name: str) -> str:
@@ -412,6 +497,20 @@ def _print_status_accounts(app: App, view: PortfolioView) -> None:
     type=click.Choice(list(ALLOCATION_GROUPS)),
     help="Group the allocation by asset class (default), account or currency.",
 )
+@click.option(
+    "--exclude-section",
+    "excluded_sections",
+    multiple=True,
+    type=click.Choice(SUMMARY_SECTIONS),
+    help="Show every section except this one; repeat for several.",
+)
+@click.option(
+    "--min-move",
+    type=click.FloatRange(min=0),
+    callback=_finite_weight,
+    metavar="PCT",
+    help="Only movers up or down at least PCT% today.",
+)
 @pass_app
 def summary_cmd(
     app: App,
@@ -420,9 +519,18 @@ def summary_cmd(
     top: int | None,
     months: int | None,
     allocation_by: str | None,
+    excluded_sections: tuple[str, ...],
+    min_move: float | None,
 ) -> None:
     """Dashboard: net worth, returns, allocation, movers and markets."""
-    shown = [s for s in SUMMARY_SECTIONS if s in sections] if sections else list(SUMMARY_SECTIONS)
+    if sections and excluded_sections:
+        raise click.UsageError("Choose either --section or --exclude-section.")
+    if sections:
+        shown = [s for s in SUMMARY_SECTIONS if s in sections]
+    else:
+        shown = [s for s in SUMMARY_SECTIONS if s not in excluded_sections]
+        if not shown:
+            raise click.UsageError("--exclude-section leaves no section to show.")
     top = 6 if top is None else top
     months = 12 if months is None else months
     allocation_by = allocation_by or "class"
@@ -434,7 +542,10 @@ def summary_cmd(
         since = _months_before(date.today(), months).isoformat()
         snaps = [s for s in tr.store.snapshots(since) if s.currency == view.base]
     breakdown: list[Breakdown] = getattr(view, ALLOCATION_GROUPS[allocation_by])
-    movers = view.movers(top)
+    if min_move is None:
+        movers = view.movers(top)
+    else:
+        movers = [p for p in view.movers(len(view.positions)) if abs(p.day_change_pct or 0) >= min_move][:top]
     if as_json:
         payload = _summary_payload(view, perf, strip, snaps, breakdown, allocation_by, movers, shown)
         click.echo(json.dumps(payload, ensure_ascii=False))
@@ -583,6 +694,53 @@ def _summary_payload(
 @click.option("--offset", type=click.IntRange(min=0), help="Skip N matching positions after sorting.")
 @click.option("--count", "count_only", is_flag=True, help="Print only the number of matching positions.")
 @click.option("--excluded", "show_excluded", is_flag=True, help="List what the totals leave out, and why.")
+@click.option(
+    "--asset-class",
+    "asset_classes",
+    multiple=True,
+    type=click.Choice([c.value for c in AssetClass], case_sensitive=False),
+    help="Only this asset class; repeat for several.",
+)
+@click.option(
+    "--kind",
+    "kinds",
+    multiple=True,
+    type=click.Choice([k.value for k in AssetKind], case_sensitive=False),
+    help="Only this pricing kind (market, fixed_income, manual, cash); repeat for several.",
+)
+@click.option(
+    "--min-value",
+    type=click.FloatRange(min=0),
+    callback=_finite_weight,
+    metavar="AMOUNT",
+    help="Only priced positions worth at least AMOUNT in the base currency.",
+)
+@click.option(
+    "--day-move",
+    type=click.FloatRange(min=0),
+    callback=_finite_weight,
+    metavar="PCT",
+    help="Only positions up or down at least PCT% today.",
+)
+@click.option(
+    "--opened-since", callback=_iso_date, metavar="DATE", help="Only positions first bought on or after DATE."
+)
+@click.option(
+    "--fields",
+    callback=_holding_fields,
+    metavar="LIST",
+    help="Comma-separated columns for --json or --csv, in this order.",
+)
+@click.option("--markdown", is_flag=True, help="Print the matching positions as a Markdown table; honours privacy.")
+@click.option("--symbols-only", is_flag=True, help="Print each matching symbol once per line, for scripts.")
+@click.option("--subtotal", is_flag=True, help="Follow the selection with the shown priced positions' totals.")
+@click.option(
+    "--concentration-limit",
+    type=click.FloatRange(min=0, max=100, min_open=True),
+    callback=_finite_weight,
+    metavar="PCT",
+    help="Name positions weighing more than PCT% of net worth and exit 1 when there are any.",
+)
 @pass_app
 def holdings(
     app: App,
@@ -601,6 +759,16 @@ def holdings(
     offset: int | None,
     count_only: bool,
     show_excluded: bool,
+    asset_classes: tuple[str, ...],
+    kinds: tuple[str, ...],
+    min_value: float | None,
+    day_move: float | None,
+    opened_since: str | None,
+    fields: list[str] | None,
+    markdown: bool,
+    symbols_only: bool,
+    subtotal: bool,
+    concentration_limit: float | None,
 ) -> None:
     """Priced holdings with gains, day change and weights.
 
@@ -608,19 +776,41 @@ def holdings(
     cash rows and portfolio totals are left out rather than summed for a subset."""
     if (as_json and as_csv) or (count_only and (as_json or as_csv)):
         raise click.UsageError("Choose one output format; --count cannot be combined with --json or --csv.")
+    if sum([as_json, as_csv, count_only, markdown, symbols_only]) > 1:
+        raise click.UsageError("Choose one output format: --json, --csv, --count, --markdown or --symbols-only.")
     if count_only and (limit is not None or offset is not None):
         raise click.UsageError("--count cannot be combined with --limit or --offset.")
     if gainers and losers:
         raise click.UsageError("Choose either --gainers or --losers.")
     if descending and sort_by is None:
         raise click.UsageError("--descending requires --sort.")
-    filtered = any([symbol is not None, currency is not None, gainers, losers, min_weight is not None, stale_only])
+    if fields is not None and not (as_json or as_csv):
+        raise click.UsageError("--fields applies only to --json or --csv.")
+    if subtotal and (as_json or as_csv or count_only or markdown or symbols_only):
+        raise click.UsageError("--subtotal only adds to the table.")
+    filtered = any(
+        [
+            symbol is not None,
+            currency is not None,
+            gainers,
+            losers,
+            min_weight is not None,
+            stale_only,
+            bool(asset_classes),
+            bool(kinds),
+            min_value is not None,
+            day_move is not None,
+            opened_since is not None,
+        ]
+    )
     paged = limit is not None or offset is not None
-    if show_excluded and (as_csv or count_only or filtered or paged or sort_by is not None):
+    extra_output = markdown or symbols_only or fields is not None or subtotal or concentration_limit is not None
+    if show_excluded and (as_csv or count_only or filtered or paged or sort_by is not None or extra_output):
         raise click.UsageError("--excluded combines only with -a/--account and --json.")
-    machine = as_json or as_csv or count_only
+    machine = as_json or as_csv or count_only or markdown or symbols_only
+    selecting = machine or filtered or paged or sort_by is not None or subtotal
     acct = app.account(account) if account else None
-    if acct is not None and acct.archived and (machine or filtered or paged or sort_by is not None or show_excluded):
+    if acct is not None and acct.archived and (selecting or show_excluded or concentration_limit is not None):
         fail(f"No active account '{account}'.")  # archived accounts are reported exactly like unknown ones
     # The same valuation (and snapshot) as the plain table: options only choose what is shown.
     with contextlib.nullcontext() if machine else app.busy("Pricing holdings…"):
@@ -628,17 +818,20 @@ def holdings(
     if show_excluded:
         _print_excluded(app, view, as_json)
         return
-    if not (machine or filtered or paged or sort_by is not None):
+    if not selecting:
         if not view.positions and not view.cash:
             app.console.print(Text("No holdings yet — try `marketpulse buy XEQT.TO 10`.", style="muted"))
-            return
-        app.console.print(render.holdings_table(view, privacy=app.privacy, width=app.console.width))
-        app.console.print(render.summary(view, privacy=app.privacy))
-        for reason in sorted(set(view.errors.values())):
-            app.warn(reason)
+        else:
+            app.console.print(render.holdings_table(view, privacy=app.privacy, width=app.console.width))
+            app.console.print(render.summary(view, privacy=app.privacy))
+            for reason in sorted(set(view.errors.values())):
+                app.warn(reason)
+        _check_concentration(app, view.positions, concentration_limit, quiet=False)
         return
     needle = symbol.strip().casefold() if symbol is not None else None
     wanted = currency.strip().upper() if currency is not None else None
+    classes = {c.lower() for c in asset_classes}
+    kind_set = {k.lower() for k in kinds}
     matches = [
         p
         for p in view.positions
@@ -648,22 +841,36 @@ def holdings(
         and (not losers or (p.priced and p.gain is not None and p.gain < 0))
         and (min_weight is None or (p.priced and p.weight >= min_weight))
         and (not stale_only or p.stale)
+        and (not classes or p.asset_class.value in classes)
+        and (not kind_set or p.kind.value in kind_set)
+        and (min_value is None or (p.value_base is not None and p.value_base >= min_value))
+        and (day_move is None or (p.day_change_pct is not None and abs(p.day_change_pct) >= day_move))
+        and (opened_since is None or (p.first_date or "") >= opened_since)
     ]
     if count_only:
         click.echo(len(matches))
+        _check_concentration(app, matches, concentration_limit, quiet=True)
         return
     total = len(matches)
     start = offset or 0
     rows = _sort_holdings(matches, sort_by, descending)[start : start + limit if limit is not None else None]
-    if as_csv:
-        stream = io.StringIO(newline="")
-        writer = csv.DictWriter(stream, fieldnames=HOLDING_FIELDS, lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(_holding_row(p, view.base) for p in rows)
-        click.echo(stream.getvalue(), nl=False)
-        return
-    if as_json:
-        click.echo(json.dumps([_holding_row(p, view.base) for p in rows], ensure_ascii=False))
+    columns = fields or HOLDING_FIELDS
+    if as_csv or as_json or markdown or symbols_only:
+        if as_csv:
+            stream = io.StringIO(newline="")
+            writer = csv.DictWriter(stream, fieldnames=columns, lineterminator="\n", extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(_holding_row(p, view.base) for p in rows)
+            click.echo(stream.getvalue(), nl=False)
+        elif as_json:
+            data = [{k: row[k] for k in columns} for row in (_holding_row(p, view.base) for p in rows)]
+            click.echo(json.dumps(data, ensure_ascii=False))
+        elif markdown:
+            click.echo(_holdings_markdown(rows, view.base, app.privacy))
+        else:
+            for name in dict.fromkeys(p.symbol for p in rows):
+                click.echo(name)
+        _check_concentration(app, matches, concentration_limit, quiet=True)
         return
     if not rows:
         if not view.positions:
@@ -682,6 +889,8 @@ def holdings(
                 style="muted",
             )
         )
+        if subtotal:
+            app.console.print(_subtotal_text(rows, view.base, app.privacy))
     if view.stale:
         app.warn(f"Prices are {render.stale_note(view)}.")
     if view.excluded:
@@ -690,6 +899,63 @@ def holdings(
         app.warn(f"Archived {', '.join(view.archived_with_value)} still holds value, so snapshots are paused.")
     for reason in sorted(set(view.errors.values())):
         app.warn(reason)
+    _check_concentration(app, matches, concentration_limit, quiet=False)
+
+
+def _check_concentration(app: App, positions: list[PositionView], limit: float | None, *, quiet: bool) -> None:
+    """`--concentration-limit`: name each priced position over the limit (on stderr for machine output), exit 1."""
+    if limit is None:
+        return
+    over = sorted((p for p in positions if p.priced and p.weight > limit), key=lambda p: (-p.weight, p.symbol))
+    for p in over:
+        message = f"{p.symbol} in {p.account.name} is {fmt.pct(p.weight, sign=False)} of net worth, over {limit:g}%."
+        if quiet:
+            click.echo(f"! {message}", err=True)
+        else:
+            app.warn(message)
+    if over:
+        click.get_current_context().exit(1)
+
+
+def _md_cell(text: str) -> str:
+    return text.replace("|", "\\|")
+
+
+def _holdings_markdown(rows: list[PositionView], base: str, privacy: bool) -> str:
+    lines = [
+        f"| Account | Symbol | Quantity | Price | Value ({base}) | Unrealized ({base}) | Gain % | Weight |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for p in rows:
+        cells = [
+            _md_cell(p.account.name),
+            _md_cell(p.symbol),
+            fmt.MASK if privacy else fmt.qty(p.quantity),
+            f"{fmt.price(p.price)} {p.currency}" if p.price is not None else "—",
+            fmt.money(p.value_base, base, privacy=privacy),
+            fmt.money(p.gain_base, base, sign=True, privacy=privacy),
+            fmt.pct(p.gain_pct if p.priced else None),
+            fmt.pct(p.weight if p.priced else None, sign=False),
+        ]
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def _subtotal_text(rows: list[PositionView], base: str, privacy: bool) -> Text:
+    priced = [p for p in rows if p.priced]
+    value = math.fsum(p.value_base or 0.0 for p in priced)
+    book = math.fsum(p.book_base or 0.0 for p in priced)
+    gain = value - book
+    noun = "position" if len(priced) == 1 else "positions"
+    line = Text(f"Subtotal of {len(priced)} priced {noun}  ", style="muted")
+    line.append(f"value {fmt.money(value, base, privacy=privacy)} {base}")
+    line.append(f"  ·  book {fmt.money(book, base, privacy=privacy)}")
+    line.append("  ·  unrealized ")
+    line.append_text(render.trend(fmt.money(gain, base, sign=True, privacy=privacy), gain))
+    line.append_text(render.trend(f" ({fmt.pct(gain / book * 100 if book else None)})", gain))
+    if len(priced) < len(rows):
+        line.append(f"  ·  {len(rows) - len(priced)} unpriced left out", style="warn")
+    return line
 
 
 def _print_excluded(app: App, view: PortfolioView, as_json: bool) -> None:
@@ -718,15 +984,31 @@ def _print_excluded(app: App, view: PortfolioView, as_json: bool) -> None:
     type=click.Choice(list(PERF_METRICS)),
     help="Print one raw, unmasked metric for scripts; exits 1 when it isn't available yet.",
 )
+@click.option("--csv", "as_csv", is_flag=True, help="Print the raw, unmasked metrics as metric,value CSV rows.")
+@click.option("--index-csv", is_flag=True, help="Print the time-weighted index as date,level CSV rows.")
 @pass_app
-def perf(app: App, as_json: bool, metric: str | None) -> None:
+def perf(app: App, as_json: bool, metric: str | None, as_csv: bool, index_csv: bool) -> None:
     """Returns: money-weighted, time-weighted, drawdown and volatility."""
     if as_json and metric:
         raise click.UsageError("Choose either --json or --metric.")
+    if sum([as_json, metric is not None, as_csv, index_csv]) > 1:
+        raise click.UsageError("Choose one of --json, --metric, --csv or --index-csv.")
     tr = app.tracker
-    with contextlib.nullcontext() if as_json or metric else app.busy("Calculating performance…"):
+    quiet = as_json or metric or as_csv or index_csv
+    with contextlib.nullcontext() if quiet else app.busy("Calculating performance…"):
         view = tr.valuation()
         result = tr.performance(view)
+    if as_csv:
+        rows = [
+            {"metric": attr, "value": "" if value is None else value}
+            for attr in PERF_METRICS.values()
+            for value in [result.since or None if attr == "since" else getattr(result, attr)]
+        ]
+        _echo_rows(["metric", "value", "base_currency"], rows, view.base)
+        return
+    if index_csv:
+        _echo_rows(["date", "level"], [{"date": day, "level": level} for day, level in result.index], view.base)
+        return
     if metric:
         value = getattr(result, PERF_METRICS[metric])
         if value is None or value == "":
@@ -772,6 +1054,19 @@ def perf(app: App, as_json: bool, metric: str | None) -> None:
 )
 @click.option("--top", type=click.IntRange(min=1), help="Keep the N largest sources, groups or forecast rows.")
 @click.option("--forecast-only", is_flag=True, help="Only the forward 12-month estimate.")
+@click.option(
+    "--forecast-sort",
+    type=click.Choice(FORECAST_SORTS),
+    help="Order forecast rows by estimated annual income, yield or yield on cost (largest first), or symbol.",
+)
+@click.option(
+    "--min-yield",
+    type=click.FloatRange(min=0),
+    callback=_finite_weight,
+    metavar="PCT",
+    help="Only forecast rows yielding at least PCT% at today's price.",
+)
+@click.option("--stats", "show_stats", is_flag=True, help="Add the monthly average, best month and months paid.")
 @pass_app
 def income(
     app: App,
@@ -786,12 +1081,17 @@ def income(
     by: str | None,
     top: int | None,
     forecast_only: bool,
+    forecast_sort: str | None,
+    min_yield: float | None,
+    show_stats: bool,
 ) -> None:
     """Dividends and interest: monthly history, sources and forward estimate.
 
     Any option other than --no-forecast selects from active accounts only and
     lists payouts with no FX rate instead of counting them as zero."""
     selection = IncomeSelection(months, year, account, symbol, tuple(k.lower() for k in kinds), by and by.lower(), top)
+    selection.forecast_sort, selection.min_yield, selection.stats = forecast_sort, min_yield, show_stats
+    selection.active = selection.active or forecast_sort is not None or min_yield is not None or show_stats
     if not (as_json or as_csv or forecast_only or selection.active):
         from ..analytics import income_by_month, income_by_symbol
 
@@ -824,6 +1124,9 @@ class IncomeSelection:
         self.months, self.year, self.account, self.kinds, self.by, self.top = months, year, account, kinds, by, top
         self.symbol = symbol.strip().upper() if symbol is not None else None
         self.active = any(x is not None for x in (months, year, account, symbol, by, top)) or bool(kinds)
+        self.forecast_sort: str | None = None
+        self.min_yield: float | None = None
+        self.stats = False
 
     @property
     def window(self) -> int:
@@ -849,6 +1152,8 @@ def _selected_income(
         raise click.UsageError("--symbol cannot be blank.")
     if forecast_only and (no_forecast or sel.by or sel.months is not None or sel.year is not None or sel.kinds):
         raise click.UsageError("--forecast-only combines only with -a/--account, --symbol, --top, --json and --csv.")
+    if sel.stats and (as_csv or sel.by or forecast_only):
+        raise click.UsageError("--stats can't be combined with --csv, --by or --forecast-only.")
     acct_id = None
     if sel.account is not None:
         acct = app.account(sel.account)
@@ -860,6 +1165,11 @@ def _selected_income(
     wants_forecast = forecast_only or (
         not no_forecast and sel.by is None and not as_csv and (not sel.kinds or {"dividend", "drip"} & set(sel.kinds))
     )
+    if (sel.forecast_sort is not None or sel.min_yield is not None) and not wants_forecast:
+        raise click.UsageError(
+            "--forecast-sort and --min-yield need the forward estimate: drop --no-forecast, --by or "
+            "--csv (or add --forecast-only), and keep a dividend --kind."
+        )
     with contextlib.nullcontext() if as_json or as_csv else app.busy("Crunching income…"):
         view = tr.valuation(account_id=acct_id)
         forecast = tr.income_forecast(view) if wants_forecast else None
@@ -871,6 +1181,11 @@ def _selected_income(
         ]
     if forecast is not None and sel.symbol is not None:
         forecast = [r for r in forecast if r.symbol.upper() == sel.symbol]
+    if forecast is not None and sel.min_yield is not None:
+        floor = sel.min_yield
+        forecast = [r for r in forecast if r.yield_pct is not None and r.yield_pct >= floor]
+    if forecast is not None and sel.forecast_sort is not None:
+        forecast = _sort_forecast(forecast, sel.forecast_sort)
     forecast_total = sum(r.annual_base or 0 for r in forecast) if forecast is not None else None
     if forecast is not None and sel.top is not None:
         forecast = forecast[: sel.top]
@@ -939,10 +1254,44 @@ def _selected_income(
             "forecast_total": forecast_total,
             "unconverted": missing,
         }
+        if sel.stats:
+            payload["stats"] = _income_stats(months)
         click.echo(json.dumps(payload, ensure_ascii=False))
         return
     _print_income_report(app, sel, view, months, sources, sources_year, sources_total, forecast, forecast_total)
     _warn_unconverted(app, view.base, missing)
+
+
+def _sort_forecast(rows: list[IncomeForecast], by: str) -> list[IncomeForecast]:
+    """Largest first for amounts and yields, with rows missing the figure last; symbols alphabetically."""
+    if by == "symbol":
+        return sorted(rows, key=lambda r: r.symbol)
+    attr = {"annual": "annual_base", "yield": "yield_pct", "yield-on-cost": "yield_on_cost_pct"}[by]
+    present = [r for r in rows if getattr(r, attr) is not None]
+    missing = sorted((r for r in rows if getattr(r, attr) is None), key=lambda r: r.symbol)
+    return sorted(present, key=lambda r: (-getattr(r, attr), r.symbol)) + missing
+
+
+def _income_stats(months: list[tuple[str, float]]) -> dict[str, Any]:
+    """`income --stats`: the window's monthly average, its best month and how many months paid anything."""
+    paid = [(m, a) for m, a in months if a > 0]
+    best = max(paid, key=lambda item: item[1]) if paid else None
+    return {
+        "months": len(months),
+        "paying_months": len(paid),
+        "monthly_average": math.fsum(a for _, a in months) / len(months) if months else 0.0,
+        "best_month": best[0] if best else None,
+        "best_month_amount": best[1] if best else None,
+    }
+
+
+def _income_stats_text(stats: dict[str, Any], base: str, privacy: bool) -> Text:
+    line = Text(f"Monthly average {fmt.money(stats['monthly_average'], base, privacy=privacy)}", style="muted")
+    if stats["best_month"] is not None:
+        amount = fmt.money(stats["best_month_amount"], base, privacy=privacy)
+        line.append(f" · best month {stats['best_month']} ({amount})")
+    line.append(f" · {stats['paying_months']} of {stats['months']} months paid")
+    return line
 
 
 def _unconverted_row(e: IncomeEvent, accounts: dict) -> dict[str, Any]:
@@ -1062,6 +1411,8 @@ def _print_income_report(
         head.append(fmt.money(forecast_total, base, privacy=privacy), style="accent")
     app.title("Income")
     app.console.print(head)
+    if sel.stats:
+        app.console.print(_income_stats_text(_income_stats(months), base, privacy))
     app.console.print(Text(""))
     if any(values):
         # As many of the most recent months as fit the terminal, four columns each down to two.
