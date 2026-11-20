@@ -74,8 +74,8 @@ def row_details(app: MarketPulseApp) -> tuple[str, list[tuple[str, str]]] | None
             ("Pricing", pos.kind.value.replace("_", " ")),
             ("Currency", pos.currency),
             ("Quantity", fmt.MASK if priv else fmt.qty(pos.quantity)),
-            ("Average cost", fmt.price(pos.avg_cost)),
-            ("Price", fmt.price(pos.price)),
+            ("Average cost", fmt.price(pos.avg_cost, privacy=priv)),
+            ("Price", fmt.price(pos.price, privacy=priv and pos.kind is not AssetKind.MARKET)),
             ("Book value", fmt.money(pos.book, pos.currency, privacy=priv)),
             ("Market value", fmt.money(pos.market_value, pos.currency, privacy=priv)),
             ("Gain", f"{fmt.money(pos.gain, pos.currency, sign=True, privacy=priv)} ({fmt.pct(pos.gain_pct)})"),
@@ -118,7 +118,7 @@ def row_details(app: MarketPulseApp) -> tuple[str, list[tuple[str, str]]] | None
         if txn.quantity:
             rows.append(("Quantity", fmt.MASK if priv else fmt.qty(txn.quantity)))
         if txn.price:
-            rows.append(("Price", fmt.price(txn.price)))
+            rows.append(("Price", fmt.price(txn.price, privacy=priv)))
         if txn.ratio:
             rows.append(("Split ratio", f"×{txn.ratio:g}"))
         if txn.amount:

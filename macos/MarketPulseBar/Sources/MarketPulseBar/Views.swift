@@ -117,19 +117,24 @@ struct PopoverView: View {
     let p = model.palette
     VStack(alignment: .leading, spacing: 12) {
       TopBar(model: model, palette: p)
-      if let status = model.status {
-        Dashboard(status: status, palette: p, alerts: model.desktop?.alerts ?? [])
-      } else if let error = model.errorMessage {
-        Card(title: String(localized: "can't reach marketpulse"), palette: p) {
-          Text(error).foregroundStyle(p.down).fixedSize(horizontal: false, vertical: true)
-          Text("Run `marketpulse menubar install` again from a terminal.").foregroundStyle(p.muted)
+      BoundedPanel(reservedHeight: 190) {
+        VStack(alignment: .leading, spacing: 12) {
+          if let status = model.status {
+            Dashboard(status: status, palette: p, alerts: model.desktop?.alerts ?? [])
+          }
+          if let error = model.refreshError {
+            Card(title: String(localized: "can't reach marketpulse"), palette: p) {
+              Text(error).foregroundStyle(p.down).fixedSize(horizontal: false, vertical: true)
+              Button("Try again") { model.refresh() }.disabled(model.loading)
+            }
+          } else if model.status == nil {
+            HStack {
+              Spacer()
+              ProgressView().controlSize(.small)
+              Spacer()
+            }.padding(24)
+          }
         }
-      } else {
-        HStack {
-          Spacer()
-          ProgressView().controlSize(.small)
-          Spacer()
-        }.padding(24)
       }
       if model.showUpdateBanner, let update = model.availableUpdate {
         // Menu bar builds have no app menu, so the popover is where they hear of updates.

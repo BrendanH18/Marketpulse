@@ -161,11 +161,12 @@ def clear_filter(app: MarketPulseApp) -> None:
     if ws == "holdings":
         box = app.query_one("#holdings-filter", Input)
         had_mode = app.holdings_filter_mode != "all"
-        if not (box.value or box.has_class("-shown") or had_mode):
+        if not (box.value or box.has_class("-shown") or had_mode or app.account_filter is not None):
             return
         box.value = ""
         box.remove_class("-shown")
         app.holdings_filter_mode = "all"
+        app.account_filter = None
         app.render_holdings()
         app.query_one("#holdings-table", DataTable).focus()
     elif ws == "activity":

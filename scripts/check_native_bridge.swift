@@ -247,6 +247,19 @@ struct NativeBridgeCheck {
     let unknown = await request.submit { _ in throw failed }
     guard case .unknown(let warning) = unknown else { preconditionFailure("Unknown save unlocked the form") }
     precondition(warning.contains("Retry save"))
+    let oversell = NSError(
+      domain: "Fictional ledger", code: 1, userInfo: [NSLocalizedDescriptionKey: "only 12.3456 held"])
+    let privateRejected = await request.submit { args in
+      if args == request.statusArguments { return Data(#"{"recorded":false,"transaction_id":null}"#.utf8) }
+      throw oversell
+    }
+    precondition(privateRejected == .notRecorded(oversell.localizedDescription))
+    precondition(privateRejected.privateError == TransactionSaveResult.privateRejection)
+    let privateUnknown = await request.submit { _ in throw oversell }
+    guard case .unknown = privateUnknown, let privateWarning = privateUnknown.privateError else {
+      preconditionFailure("Unknown private save unlocked the form")
+    }
+    precondition(privateWarning.contains("Retry save") && !privateWarning.contains("12.3456"))
     let malformed = await request.submit { args in
       if args == request.statusArguments { return Data(#"{"recorded":true,"transaction_id":null}"#.utf8) }
       throw failed

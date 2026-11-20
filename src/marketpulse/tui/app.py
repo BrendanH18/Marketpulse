@@ -15,6 +15,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.timer import Timer
 from textual.widgets import ContentSwitcher, DataTable, Input, Static
+from textual.worker import Worker, get_current_worker
 
 from .. import render
 from ..config import Config
@@ -106,6 +107,7 @@ class MarketPulseApp(App):
         background: $background;
         padding: 1 2;
     }
+    BaseForm .modal { overflow-y: auto; }
     .modal.narrow { width: 60; }
     .modal-title { text-style: bold; color: $accent; margin-bottom: 1; }
     .field-row { height: auto; }
@@ -117,8 +119,23 @@ class MarketPulseApp(App):
     .buttons { height: auto; margin-top: 1; }
     .buttons Button { margin-left: 1; min-width: 14; }
     OptionList { height: auto; max-height: 14; background: $background; border: none; }
-    HelpScreen VerticalScroll { height: auto; max-height: 30; }
-    DetailsScreen VerticalScroll { height: auto; max-height: 30; }
+    HelpScreen .modal, DetailsScreen .modal, WorkspaceKeysScreen .modal, ProblemsScreen .modal {
+        height: 90%; max-height: 36;
+    }
+    App.-compact #tax { layout: vertical; }
+    App.-compact #pane-accts { width: 100%; height: 7; min-width: 0; }
+    App.-compact #tax .col-main { width: 100%; }
+    #dashboard { overflow-y: hidden; }
+    App.-compact #dashboard { overflow-y: auto; }
+    App.-compact #tiles { layout: grid; grid-size: 3 2; grid-rows: 5 5; height: 10; }
+    App.-compact #tile-networth { width: 1fr; column-span: 2; }
+    App.-compact #dash-panes { layout: vertical; height: auto; }
+    App.-compact #dash-panes .col-main { width: 100%; height: 22; }
+    App.-compact #dash-side { display: block; width: 100%; height: auto; }
+    App.-compact.-zoom #dash-side { display: none; }
+    App.-compact #pane-perf { height: 12; }
+    App.-compact #chart-input { width: 45%; }
+    App.-compact #chart-periods { padding: 1 0; }
     """
 
     BINDINGS = [
@@ -243,8 +260,10 @@ class MarketPulseApp(App):
         self._detail_key: str | None = None
         self._watch_key: str | None = None
         self._income_forecast: list | None = None
+        self._income_history: tuple[list[tuple[str, float]], list[tuple[str, float]]] = ([], [])
         self._tax: tuple | None = None
         self._last_error = ""
+        self.load_errors: dict[str, str] = {}
         self.last_workspace: str | None = None
         self.table_sort: dict[str, tuple[str, bool]] = {}
         self.refreshed_at: float | None = None
@@ -311,7 +330,7 @@ class MarketPulseApp(App):
     def compose(self) -> ComposeResult:
         yield TopBar(id="topbar")
         with ContentSwitcher(initial="dashboard", id="workspaces"):
-            with Vertical(id="dashboard"):
+            with VerticalScroll(id="dashboard"):
                 yield Static(id="strip")
                 with Horizontal(id="tiles"):
                     yield Tile(id="tile-networth")
@@ -319,7 +338,7 @@ class MarketPulseApp(App):
                     yield Tile(id="tile-unrealized")
                     yield Tile(id="tile-income")
                     yield Tile(id="tile-returns")
-                with Horizontal():
+                with Horizontal(id="dash-panes"):
                     with Vertical(classes="col-main"):
                         yield pane(Canvas(id="nw-chart"), title="net worth", id="pane-nw")
                         yield pane(VerticalScroll(Static(id="dash-accounts")), title="accounts", id="pane-accounts")
@@ -349,7 +368,7 @@ class MarketPulseApp(App):
                 yield Input(placeholder="filter by symbol, account, type or note…", id="activity-filter")
                 yield pane(DataTable(id="activity-table"), title="activity", id="pane-activity")
             with VerticalScroll(id="income"):
-                yield pane(Static(id="income-view"), title="income", id="pane-income")
+                yield pane(Static(id="income-hint"), Static(id="income-view"), title="income", id="pane-income")
             with Horizontal(id="tax"):
                 yield pane(DataTable(id="accounts-table"), title="accounts", id="pane-accts", classes="col-side")
                 yield pane(VerticalScroll(Static(id="tax-view")), title="tax & contribution room", classes="col-main")
@@ -383,6 +402,7 @@ class MarketPulseApp(App):
             table.add_columns(*cols)
         self._mp_ready = True
         self.set_class(self.size.width < 130, "-narrow")
+        self.set_class(self.size.width < 100, "-compact")
         self.set_workspace("dashboard")
         self.render_store_views()
         self.render_dashboard()
@@ -392,6 +412,11 @@ class MarketPulseApp(App):
 
     def on_resize(self, event) -> None:
         self.set_class(event.size.width < 130, "-narrow")
+        compact = event.size.width < 100
+        was_compact = self.has_class("-compact")
+        self.set_class(compact, "-compact")
+        if self._mp_ready and compact != was_compact and self.workspace == "dashboard":
+            self.set_workspace("dashboard")
 
     def _tick(self) -> None:
         # Shutdown removes widgets before stopping the app's timers.
@@ -487,6 +512,7 @@ class MarketPulseApp(App):
         bar.refresh()
         self._render_hints(name)
         focus = {
+            "dashboard": "#dashboard" if self.has_class("-compact") else "#pane-accounts VerticalScroll",
             "holdings": "#holdings-table",
             "watchlist": "#watch-table",
             "chart": "#chart-view",
@@ -498,7 +524,13 @@ class MarketPulseApp(App):
             self.query_one(focus).focus()
         else:
             self.set_focus(None)
-        if name == "income" and self._income_forecast is None and self.view is not None:
+        if (
+            name == "income"
+            and self._income_forecast is None
+            and self.view is not None
+            and not bar.loading
+            and "portfolio" not in self.load_errors
+        ):
             self.load_income()
         if name == "tax" and self._tax is None:
             self.load_tax()
@@ -530,16 +562,37 @@ class MarketPulseApp(App):
 
     # ── data loading ──────────────────────────────────────────────────────────
 
-    def action_refresh(self) -> None:
+    def _invalidate_income(self) -> None:
+        self.workers.cancel_group(self, "income")
         self._income_forecast = None
+        self.load_errors.pop("income", None)
+        workspaces.render_income(self, refresh_history=False)
+
+    def action_refresh(self) -> None:
+        self._invalidate_income()
         self.load_data(force=True)
+        if self.workspace == "tax":
+            self.load_tax()
         if self.workspace == "chart" and self.chart_symbol:
             self.load_chart()
 
+    def _publish_load(self, callback, *args) -> None:
+        """An exclusive worker can finish in its thread after a retry cancelled it."""
+        worker = get_current_worker()
+
+        def publish() -> None:
+            if not worker.is_cancelled:
+                callback(*args)
+
+        self.call_from_thread(publish)
+
+    def load_data(self, force: bool = False) -> Worker:
+        self._set_loading(True)
+        return self._load_data(force)
+
     @work(thread=True, exclusive=True, group="data")
-    def load_data(self, force: bool = False) -> None:
+    def _load_data(self, force: bool) -> None:
         tr = self.tracker
-        self.call_from_thread(self._set_loading, True)
         try:
             view = tr.valuation(use_cache=not force)
             perf = tr.performance(view)
@@ -547,10 +600,25 @@ class MarketPulseApp(App):
             watch = tr.watchlist_quotes(use_cache=not force)
             fired = tr.check_alerts({**view.quotes, **watch[1]}, notify=True)
         except Exception as e:  # keep the UI alive on any provider/database hiccup
-            self.call_from_thread(self.notify, str(e), title="Refresh failed", severity="error")
-            self.call_from_thread(self._set_loading, False)
+            self._publish_load(self._load_failed, "portfolio", str(e))
+            self._publish_load(self._set_loading, False)
             return
-        self.call_from_thread(self._apply_data, view, perf, strip, watch, fired)
+        self._publish_load(self._apply_data, view, perf, strip, watch, fired)
+
+    def _load_failed(self, section: str, reason: str) -> None:
+        self.load_errors[section] = (
+            f"Could not load {'the income forecast' if section == 'income' else section}. Press r to retry."
+        )
+        self.notify(self.load_errors[section] if self.privacy else reason, title="Refresh failed", severity="error")
+        if section == "portfolio":
+            if self.view is None:
+                self.render_dashboard()
+            elif self._income_forecast is None:
+                workspaces.render_income(self, refresh_history=False)
+        elif section == "tax":
+            self.render_tax()
+        else:
+            self.query_one("#income-hint", Static).update(Text(self.load_errors[section], style="warn"))
 
     def _set_loading(self, loading: bool) -> None:
         bar = self.query_one(TopBar)
@@ -558,6 +626,7 @@ class MarketPulseApp(App):
         bar.refresh()
 
     def _apply_data(self, view: PortfolioView, perf, strip, watch, fired) -> None:
+        self.load_errors.pop("portfolio", None)
         symbols, quotes, errors = watch
         prices = {s: q.price for s, q in {**view.quotes, **quotes}.items()}
         self.flash = {
@@ -595,8 +664,9 @@ class MarketPulseApp(App):
     def after_change(self, message: str | None = None) -> None:
         if message:
             self.notify(message)
+        self.workers.cancel_group(self, "tax")
         self._tax = None
-        self._income_forecast = None
+        self._invalidate_income()
         self.render_store_views()
         self.load_data()
         if self.workspace == "tax":
@@ -660,26 +730,42 @@ class MarketPulseApp(App):
         view = self.view
         if view is None:
             return
-        forecast = self.tracker.income_forecast(view)
-        self.call_from_thread(self._income_loaded, forecast)
+        try:
+            forecast = self.tracker.income_forecast(view)
+        except Exception as e:
+            self._publish_load(self._load_failed, "income", str(e))
+            return
+        self._publish_load(self._income_loaded, forecast)
 
     def _income_loaded(self, forecast) -> None:
+        self.load_errors.pop("income", None)
         self._income_forecast = forecast
         self.render_income()
 
     @work(thread=True, exclusive=True, group="tax")
     def load_tax(self) -> None:
-        years, report = self.tracker.tax_years()
-        rooms = self.tracker.room()
-        foreign = self.tracker.foreign_property()
-        self.call_from_thread(self._tax_loaded, (years, report, rooms, foreign))
+        try:
+            years, report = self.tracker.tax_years()
+            rooms = self.tracker.room()
+            foreign = self.tracker.foreign_property()
+        except Exception as e:
+            self._publish_load(self._load_failed, "tax", str(e))
+            return
+        self._publish_load(self._tax_loaded, (years, report, rooms, foreign))
 
     def _tax_loaded(self, result) -> None:
+        self.load_errors.pop("tax", None)
         self._tax = result
         self.render_tax()
 
-    @work(thread=True, exclusive=True, group="detail")
     def load_detail_bars(self, symbol: str) -> None:
+        # Holdings and Watchlist share this cache. Each symbol needs only one request.
+        if symbol not in self._detail_bars:
+            self._detail_bars[symbol] = []
+            self._fetch_detail_bars(symbol)
+
+    @work(thread=True, group="detail")
+    def _fetch_detail_bars(self, symbol: str) -> None:
         try:
             bars = self.tracker.market.history(symbol, "3mo")
         except MarketError:
@@ -698,14 +784,13 @@ class MarketPulseApp(App):
         self.render_position_detail()
         sym = key.split(":", 1)[1]
         assets = self.tracker.store.assets()
-        if sym not in self._detail_bars and (sym not in assets or assets[sym].kind is AssetKind.MARKET):
+        if sym not in assets or assets[sym].kind is AssetKind.MARKET:
             self.load_detail_bars(sym)
 
     def _show_watch(self, symbol: str) -> None:
         self._watch_key = symbol
         self.render_watch_detail()
-        if symbol not in self._detail_bars:
-            self.load_detail_bars(symbol)
+        self.load_detail_bars(symbol)
 
     @on(DataTable.RowHighlighted, "#holdings-table")
     def _holding_highlighted(self, event: DataTable.RowHighlighted) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -10,7 +11,7 @@ from textual.widgets import DataTable
 from .. import fmt, render
 from ..market import MarketError
 from ..models import AssetKind, Transaction, TxnType, parse_date, today
-from .screens import AccountForm, AssetForm, ConfirmScreen, PromptScreen, RoomForm, TransactionForm
+from .screens import AccountForm, AssetForm, ConfirmScreen, PromptScreen, RoomForm, TransactionForm, input_number
 
 if TYPE_CHECKING:
     from .app import MarketPulseApp
@@ -59,16 +60,20 @@ def save_txn(app: MarketPulseApp, txn: Transaction, restore_id: str | None = Non
             tr.update_transaction(txn, restore_id=restore_id, revision=revision)
             message = f"Updated transaction #{txn.id}"
         else:
-            saved = tr.add_transaction(txn)
-            acct = tr.store.get_account(saved.account_id)
+            seen = restore_id if restore_id is not None else tr.store.restore_id
+            acct = tr.store.get_account(txn.account_id)
+            saved = tr.add_transaction(txn, restore_id=seen)
+            private = app.privacy
             what = (
-                f"{fmt.qty(saved.quantity)} {saved.symbol} @ {fmt.price(saved.price)}"
+                f"{fmt.qty(saved.quantity, privacy=private)} {saved.symbol} @ {fmt.price(saved.price, privacy=private)}"
                 if saved.quantity
-                else f"{fmt.money(saved.gross_value)} {saved.symbol}".strip()
+                else f"{fmt.money(saved.gross_value, privacy=private)} {saved.symbol}".strip()
             )
             message = f"{saved.type.value.title()} {what} {saved.currency} → {acct.name if acct else ''}"
-    except (ValueError, MarketError) as e:
-        app.call_from_thread(app.notify, str(e), title="Not saved", severity="error")
+    except (ValueError, MarketError, sqlite3.Error, OSError) as e:
+        app.call_from_thread(
+            app.notify, "Check the entry or try again." if app.privacy else str(e), title="Not saved", severity="error"
+        )
         return
     app.call_from_thread(app.after_change, message)
 
@@ -130,7 +135,9 @@ def action_delete(app: MarketPulseApp) -> None:
         txn = next((t for t in store.transactions() if str(t.id) == key), None)
         if txn is None:
             return
-        detail = " ".join(c.plain for c in render.activity_cells(txn, store.account_map())[1:8] if c.plain != "—")
+        detail = " ".join(
+            c.plain for c in render.activity_cells(txn, store.account_map(), privacy=app.privacy)[1:8] if c.plain != "—"
+        )
         seen = txn.revision(restore_id)
 
         def done(yes: bool | None) -> None:
@@ -193,7 +200,9 @@ def action_undo(app: MarketPulseApp) -> None:
         app.notify("Nothing to undo.")
         return
     last = max(txns, key=lambda t: t.id or 0)
-    detail = " ".join(c.plain for c in render.activity_cells(last, store.account_map())[1:8] if c.plain != "—")
+    detail = " ".join(
+        c.plain for c in render.activity_cells(last, store.account_map(), privacy=app.privacy)[1:8] if c.plain != "—"
+    )
 
     def done(yes: bool | None) -> None:
         if yes and app._delete_txn(last.saved_id, restore_id, last.revision(restore_id)):
@@ -264,7 +273,7 @@ def action_value_asset(app: MarketPulseApp) -> None:
             return
         parts = value.split()
         try:
-            sym, amount = parts[0].upper(), float(parts[1].replace(",", ""))
+            sym, amount = parts[0].upper(), input_number(parts[1])
             when = parse_date(parts[2] if len(parts) > 2 else None)
             if amount <= 0:
                 raise ValueError
@@ -292,7 +301,7 @@ def action_value_asset(app: MarketPulseApp) -> None:
         except ValueError as e:
             app.notify(str(e), severity="error")
             return
-        app.after_change(f"{sym} valued at {fmt.money(amount)}")
+        app.after_change(f"{sym} valued at {fmt.money(amount, privacy=app.privacy)}")
 
     ctx_sym = app.context_symbol()
     initial_sym = ctx_sym if ctx_sym in manual else manual[0]

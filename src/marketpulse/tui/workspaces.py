@@ -81,7 +81,9 @@ def _snapshots(app: MarketPulseApp) -> list:
 def render_dashboard(app: MarketPulseApp) -> None:
     v, p, priv = app.view, app.palette, app.privacy
     if v is None:
-        app.query_one("#nw-chart", Canvas).set_builder(lambda w, h: Text("Loading portfolio…", style="muted"))
+        app.query_one("#nw-chart", Canvas).set_builder(
+            lambda w, h: Text(app.load_errors.get("portfolio", "Loading portfolio…"), style="muted")
+        )
         return
     strip = render.strip_text(app.strip)
     strip.append("   ")
@@ -402,8 +404,12 @@ def render_activity(app: MarketPulseApp) -> None:
         if exact is not None:
             if t.symbol != exact:
                 continue
-        elif needle and needle not in " ".join(c.plain.lower() for c in cells):
-            continue
+        elif needle:
+            source = accounts.get(t.account_id)
+            destination = accounts.get(t.target_account_id) if t.target_account_id is not None else None
+            full_text = [t.note, source.name if source else "", destination.name if destination else ""]
+            if needle not in " ".join([*full_text, *(c.plain for c in cells)]).lower():
+                continue
         table.add_row(*app._justify(cells, (0, 5, 6, 7, 8)), key=str(t.id))
         dates.append(t.date)
     shown = len(dates)
@@ -550,7 +556,7 @@ def render_position_detail(app: MarketPulseApp) -> None:
         ),
     ]
     if pos.price is not None:
-        price = Text(fmt.price(pos.price), style="bright")
+        price = Text(fmt.price(pos.price, privacy=priv and pos.kind is not AssetKind.MARKET), style="bright")
         if pos.day_change_pct is not None and pos.kind is AssetKind.MARKET:
             price.append(
                 f"  {fmt.arrow(pos.day_change_pct)} {fmt.pct(pos.day_change_pct)} today",
@@ -562,7 +568,7 @@ def render_position_detail(app: MarketPulseApp) -> None:
     grid.add_column(justify="right")
     for label, value in (
         ("Quantity", Text(fmt.MASK if priv else fmt.qty(pos.quantity))),
-        ("Average cost", Text(fmt.price(pos.avg_cost))),
+        ("Average cost", Text(fmt.price(pos.avg_cost, privacy=priv))),
         ("Book value", Text(fmt.money(pos.book, privacy=priv))),
         ("Market value", Text(fmt.money(pos.market_value, privacy=priv))),
         (
@@ -589,7 +595,7 @@ def render_position_detail(app: MarketPulseApp) -> None:
             lines.append(f"{t.date}  ", style="muted")
             lines.append(f"{t.type.value:<9}", style=render.TXN_STYLES.get(t.type, ""))
             detail = (
-                f"{fmt.qty(t.quantity)} @ {fmt.price(t.price)}"
+                f"{fmt.qty(t.quantity, privacy=priv)} @ {fmt.price(t.price, privacy=priv)}"
                 if t.quantity
                 else fmt.money(t.gross_value, privacy=priv)
             )
@@ -625,24 +631,30 @@ def render_watch_detail(app: MarketPulseApp) -> None:
     target.update(Group(*parts))
 
 
-def render_income(app: MarketPulseApp) -> None:
+def render_income(app: MarketPulseApp, *, refresh_history: bool = True) -> None:
     v = app.view
     if v is None:
         return
-    state = app.tracker.store.ledger()
-    months = income_by_month(state, v.fx.convert)
-    sources = income_by_symbol(state, v.fx.convert, app.income_year)
+    if refresh_history:
+        state = app.tracker.store.ledger()
+        app._income_history = (
+            income_by_month(state, v.fx.convert),
+            income_by_symbol(state, v.fx.convert, app.income_year),
+        )
+    months, sources = app._income_history
     period = "This year" if app.income_year == date.today().year else str(app.income_year or "All time")
     body = render.income_group(months, sources, app._income_forecast, v, privacy=app.privacy, source_period=period)
-    if app._income_forecast is None:
-        body = Group(body, Text("\nForward estimate loads when you open this workspace.", style="muted"))
+    hint = app.load_errors.get("income", "")
+    if not hint and app._income_forecast is None:
+        hint = app.load_errors.get("portfolio", "Forward estimate pending.")
+    app.query_one("#income-hint", Static).update(Text(hint, style="warn" if "income" in app.load_errors else "muted"))
     app.query_one("#income-view", Static).update(body)
 
 
 def render_tax(app: MarketPulseApp) -> None:
     target = app.query_one("#tax-view", Static)
-    if app._tax is None:
-        target.update(Text("Building tax report…", style="muted"))
+    if app._tax is None or "tax" in app.load_errors:
+        target.update(Text(app.load_errors.get("tax", "Building tax report…"), style="muted"))
         return
     years, report, rooms, foreign = app._tax
     tr = app.tracker

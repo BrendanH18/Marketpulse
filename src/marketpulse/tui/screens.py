@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import re
 from typing import TYPE_CHECKING, overload
 
 from rich.text import Text
@@ -39,6 +41,18 @@ class FormError(ValueError):
     pass
 
 
+def input_number(raw: str) -> float:
+    """Parse terminal input with a decimal point and optional grouped thousands."""
+    if "," in raw:
+        if not re.fullmatch(r"[+-]?\d{1,3}(?:,\d{3})+(?:\.\d*)?(?:[eE][+-]?\d+)?", raw):
+            raise ValueError("Invalid thousands grouping")
+        raw = raw.replace(",", "")
+    number = float(raw)
+    if not math.isfinite(number):
+        raise ValueError("Expected a finite number")
+    return number
+
+
 @overload
 def _num(screen: ModalScreen, selector: str, label: str, default: float = 0.0) -> float: ...
 @overload
@@ -46,13 +60,13 @@ def _num(screen: ModalScreen, selector: str, label: str, default: None) -> float
 def _num(screen: ModalScreen, selector: str, label: str, default: float | None = 0.0) -> float | None:
     """Read a numeric input. Blank gives `default` (so callers passing a
     float default always get a float back); anything unparsable is a FormError."""
-    raw = screen.query_one(selector, Input).value.strip().replace(",", "")
+    raw = screen.query_one(selector, Input).value.strip()
     if not raw:
         return default
     try:
-        return float(raw)
+        return input_number(raw)
     except ValueError:
-        raise FormError(f"{label} must be a number.") from None
+        raise FormError(f"{label} must be a number. Use a decimal point, for example 1234.56.") from None
 
 
 class BaseForm(ModalScreen):
@@ -73,7 +87,9 @@ class BaseForm(ModalScreen):
         self.action_save()
 
     def show_error(self, message: str) -> None:
-        self.query_one("#form-error", Static).update(Text(message, style="down"))
+        error = self.query_one("#form-error", Static)
+        error.update(Text(message, style="down"))
+        self.call_after_refresh(error.scroll_visible, animate=False)
 
     def buttons(self, save_label: str = "Save") -> Horizontal:
         return Horizontal(
@@ -266,7 +282,7 @@ class TransactionForm(BaseForm):
             except MarketError as e:
                 hint.append(str(e), style="warn")
         h = tr.store.ledger().holdings.get((account_id, symbol))
-        if h and h.quantity > 0:
+        if h and h.quantity > 0 and not tr.config.privacy:
             hint.append(f"   held {fmt.qty(h.quantity)} @ {fmt.price(h.avg_cost)}", style="muted")
         self.app.call_from_thread(self._set_live, symbol, price, ccy, hint)
 
@@ -649,7 +665,7 @@ class SearchScreen(ModalScreen[str | None]):
             yield Label(self.title_text, classes="modal-title")
             yield Input(placeholder="Company, fund or symbol…", id="q")
             yield OptionList(id="results")
-            yield Label("↑↓ choose · enter open · esc close", classes="hint")
+            yield Label("↑↓ choose · enter open · esc close", id="search-hint", classes="hint")
 
     def on_mount(self) -> None:
         self._show_local("")
@@ -658,7 +674,8 @@ class SearchScreen(ModalScreen[str | None]):
     def _show_local(self, query: str) -> None:
         ol = self.query_one("#results", OptionList)
         ol.clear_options()
-        q = query.upper()
+        q = query.strip().upper()
+        self.query_one("#search-hint", Label).update("↑↓ choose · enter open · esc close")
         for sym in [s for s in self.known if q in s][:8]:
             ol.add_option(Option(Text.assemble((sym, "bold"), ("  in your portfolio", "dim")), id=sym))
         if ol.option_count:
@@ -677,6 +694,7 @@ class SearchScreen(ModalScreen[str | None]):
         try:
             results = self.tracker.market.search(query, limit=10)
         except MarketError:
+            self.app.call_from_thread(self._show_remote, query, None)
             return
         self.app.call_from_thread(self._show_remote, query, results)
 
@@ -685,6 +703,11 @@ class SearchScreen(ModalScreen[str | None]):
             return
         ol = self.query_one("#results", OptionList)
         existing = {ol.get_option_at_index(i).id for i in range(ol.option_count)}
+        if results is None:
+            self.query_one("#search-hint", Label).update("Online search unavailable. Local matches are shown.")
+            return
+        if not results and not existing:
+            self.query_one("#search-hint", Label).update("No matching symbols.")
         for r in results:
             if r.symbol in existing:
                 continue

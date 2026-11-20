@@ -54,6 +54,12 @@ field catalog (`report report-fields`) and typo suggestions for sources and deri
 add a searchable command-parameter catalog and typo suggestions for summary operations,
 `--having` filters and derived-field inputs.
 
+On short terminals, transaction forms scroll to the field or validation message. Enter
+decimals with a point (for example `12.5`). Commas group thousands (`1,234.56`).
+Below 100 columns, the dashboard opens at the summary tiles. Use Page Down and Home
+to scroll it. Tax places the account list above the report.
+Press `r` to retry a failed portfolio, income or tax load.
+
 ## Accounts and transactions
 
 Create accounts before recording transactions. Names, IDs, and account types

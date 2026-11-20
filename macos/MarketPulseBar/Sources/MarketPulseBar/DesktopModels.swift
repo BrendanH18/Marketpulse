@@ -43,6 +43,18 @@ enum TransactionSaveResult: Equatable {
   case recovered
   case notRecorded(String)
   case unknown(String)
+
+  var privateError: String? {
+    switch self {
+    case .recorded, .recovered: return nil
+    case .notRecorded: return Self.privateRejection
+    case .unknown:
+      return String(
+        localized: "Couldn't confirm whether this transaction was saved. Retry save to check the same request safely.")
+    }
+  }
+
+  static var privateRejection: String { String(localized: "Check the transaction details and try again.") }
 }
 
 private struct TransactionSaveStatus: Decodable {
@@ -122,21 +134,37 @@ struct TransactionEntry {
   }
 
   func isValid(locale: Locale = .current) -> Bool {
+    validationMessage(locale: locale) == nil
+  }
+
+  func validationMessage(locale: Locale = .current) -> String? {
     func positive(_ value: String) -> Bool { (NumberInput.parse(value, locale: locale) ?? 0) > 0 }
     func nonnegative(_ value: String) -> Bool { (NumberInput.parse(value, locale: locale) ?? -1) >= 0 }
-    guard !account.isEmpty, !usesCurrency || currencyCode.isEmpty || CurrencyInput.isValid(currencyCode),
-      !needsSymbol || !symbolCode.isEmpty
-    else { return false }
-    switch type {
-    case "BUY", "SELL": return positive(quantity) && nonnegative(price) && nonnegative(fees)
-    case "DRIP": return positive(quantity) && nonnegative(price)
-    case "TRANSFER":
-      let priced =
-        priceRequired ? positive(price) : price.trimmingCharacters(in: .whitespaces).isEmpty || nonnegative(price)
-      return !target.isEmpty && target != account && positive(quantity) && priced
-    case "SPLIT": return ratio(locale: locale).map { $0 != 1 } ?? false
-    default: return positive(amount)
+    if account.isEmpty { return String(localized: "Choose an account for this transaction.") }
+    if type == "TRANSFER" && (target.isEmpty || target == account) {
+      return String(localized: "Choose a different account to receive the shares.")
     }
+    if needsSymbol && symbolCode.isEmpty { return String(localized: "Enter the asset symbol.") }
+    if usesCurrency && !currencyCode.isEmpty && !CurrencyInput.isValid(currencyCode) {
+      return String(localized: "Enter a three-letter currency code or leave it blank.")
+    }
+    switch type {
+    case "BUY", "SELL", "DRIP", "TRANSFER":
+      if !positive(quantity) { return String(localized: "Enter a quantity greater than zero.") }
+      if type == "TRANSFER" && priceRequired {
+        if !positive(price) { return String(localized: "Enter a market price greater than zero.") }
+      } else if !(type == "TRANSFER" && price.trimmingCharacters(in: .whitespaces).isEmpty) && !nonnegative(price) {
+        return String(localized: "Enter a price of zero or more.")
+      }
+      if trade && !nonnegative(fees) { return String(localized: "Enter fees of zero or more.") }
+    case "SPLIT":
+      guard let ratio = ratio(locale: locale), ratio != 1 else {
+        return String(localized: "Enter two different, positive share counts.")
+      }
+    default:
+      if !positive(amount) { return String(localized: "Enter an amount greater than zero.") }
+    }
+    return nil
   }
 
   /// The command that records this entry. User text and numbers go after `--`.
@@ -360,7 +388,12 @@ struct DesktopPayload: Decodable {
   let warningItems: [DesktopWarning]?
 
   /// `warnings` in the user's language: worded from each one's code, else the English.
-  var localizedWarnings: [String] { localizedWarnings() }
+  var localizedWarnings: [String] {
+    if status.privacy && !warnings.isEmpty {
+      return [String(localized: "Ledger warning details are hidden in privacy mode.")]
+    }
+    return localizedWarnings()
+  }
 
   func localizedWarnings(locale: Locale = .current) -> [String] {
     guard let items = warningItems, items.count == warnings.count else { return warnings }
@@ -928,7 +961,7 @@ struct TaxExportResult: Decodable {
   let issues: [TaxIssue]
 
   /// The confirmation: what was saved, and any issue that may have left a sale out.
-  func message(year: Int, file: String, locale: Locale = .current) -> String {
+  func message(year: Int, file: String, privacy: Bool = false, locale: Locale = .current) -> String {
     let one = exported == 1
     let year = String(year)  // a year, never "2,025"
     switch issues.count {
@@ -938,7 +971,10 @@ struct TaxExportResult: Decodable {
         : String(localized: "Saved \(exported) sales from \(year) to \(file)")
     case 1:
       let date = issues[0].date
-      let issue = issues[0].localizedMessage(locale: locale)
+      let issue =
+        privacy
+        ? String(localized: "Ledger warning details are hidden in privacy mode.")
+        : issues[0].localizedMessage(locale: locale)
       return one
         ? String(localized: "Saved 1 sale from \(year) to \(file). 1 issue may leave sales out of it: \(date) \(issue)")
         : String(

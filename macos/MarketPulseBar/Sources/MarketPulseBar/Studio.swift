@@ -66,3 +66,18 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
   }
 }
+
+/// Keep short panels at their natural height and let tall content scroll on smaller displays.
+struct BoundedPanel<Content: View>: View {
+  let reservedHeight: CGFloat
+  @ViewBuilder let content: Content
+
+  var body: some View {
+    let available = (NSApp.keyWindow?.screen ?? NSScreen.main)?.visibleFrame.height ?? 800
+    let limit = max(220, available - reservedHeight)
+    ViewThatFits(in: .vertical) {
+      content.fixedSize(horizontal: false, vertical: true)
+      ScrollView { content.fixedSize(horizontal: false, vertical: true) }.frame(height: limit)
+    }.frame(maxHeight: limit).fixedSize(horizontal: false, vertical: true)
+  }
+}

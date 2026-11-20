@@ -63,6 +63,7 @@ enum DesktopSheet: String, Identifiable {
 
 struct PortfolioWindow: View {
   @StateObject private var draft = PortfolioWindowDraft()
+  @FocusState private var searchFocused: Bool
   @ObservedObject var model: StatusModel
 
   var body: some View {
@@ -75,7 +76,9 @@ struct PortfolioWindow: View {
       VStack(spacing: 0) {
         header
         if let error = model.errorMessage {
-          notice(error, icon: "exclamationmark.triangle", color: Studio.red)
+          notice(
+            error, icon: "exclamationmark.triangle", color: Studio.red,
+            dismiss: model.operationError == nil ? nil : { model.operationError = nil })
         }
         if let message = model.message {
           HStack {
@@ -131,9 +134,9 @@ struct PortfolioWindow: View {
           Spacer()
         } else {
           ContentUnavailableView {
-            Label("Your portfolio is waiting", systemImage: "chart.xyaxis.line")
+            Label("Couldn’t load your portfolio", systemImage: "chart.xyaxis.line")
           } description: {
-            Text("Install the CLI from this checkout, then run marketpulse desktop install.")
+            Text("Check the error above, then try refreshing your portfolio.")
           } actions: {
             Button("Try again") { model.refresh() }
           }
@@ -296,8 +299,6 @@ struct PortfolioWindow: View {
   private var header: some View {
     HStack(alignment: .center) {
       VStack(alignment: .leading, spacing: 7) {
-        Text("PORTFOLIO / \((draft.section ?? .overview).title.localizedUppercase)")
-          .font(.system(size: 9, weight: .medium)).tracking(1.8).foregroundStyle(Studio.muted)
         Text((draft.section ?? .overview).title).font(.system(size: 28, weight: .semibold))
         Text((draft.section ?? .overview).subtitle).font(.system(size: 12)).foregroundStyle(
           Studio.muted)
@@ -305,11 +306,26 @@ struct PortfolioWindow: View {
       Spacer()
       if draft.section == .holdings || draft.section == .activity {
         HStack {
-          Image(systemName: "magnifyingglass").foregroundStyle(Studio.muted)
+          let search = draft.section == .activity ? $draft.activitySearch : $draft.holdingsSearch
+          Button {
+            searchFocused = true
+          } label: {
+            Image(systemName: "magnifyingglass").foregroundStyle(Studio.muted)
+          }.buttonStyle(.plain).keyboardShortcut("f").help("Find (⌘F)").accessibilityLabel("Find")
           TextField(
             draft.section == .activity ? String(localized: "Search activity") : String(localized: "Search holdings"),
-            text: $draft.search
-          ).textFieldStyle(.plain)
+            text: search
+          ).textFieldStyle(.plain).focused($searchFocused)
+            .onExitCommand {
+              if search.wrappedValue.isEmpty { searchFocused = false } else { search.wrappedValue = "" }
+            }
+          if !search.wrappedValue.isEmpty {
+            Button {
+              search.wrappedValue = ""
+            } label: {
+              Image(systemName: "xmark.circle.fill")
+            }.buttonStyle(.plain).help("Clear search").accessibilityLabel("Clear search")
+          }
         }.padding(10).frame(width: 210).background(
           Studio.panel, in: RoundedRectangle(cornerRadius: 8))
       } else {
@@ -328,7 +344,7 @@ struct PortfolioWindow: View {
         canEdit: model.canEdit)
     case .holdings:
       HoldingsWorkspace(
-        payload: p, search: draft.search, accountFilter: $draft.accountFilter, canEdit: model.canEdit,
+        payload: p, search: $draft.holdingsSearch, accountFilter: $draft.accountFilter, canEdit: model.canEdit,
         showSheet: { sheet, symbol in
           draft.assetSymbol = symbol
           draft.sheet = sheet
@@ -339,7 +355,7 @@ struct PortfolioWindow: View {
         showHoldings: { draft.section = .holdings })
     case .activity:
       ActivityWorkspace(
-        payload: p, model: model, search: draft.search, accountFilter: $draft.accountFilter,
+        payload: p, model: model, search: $draft.activitySearch, accountFilter: $draft.accountFilter,
         edit: { t in
           draft.editing = t
           draft.sheet = .editTransaction
@@ -388,11 +404,15 @@ struct PortfolioWindow: View {
     .overlay(alignment: .top) { Rectangle().fill(Studio.line).frame(height: 1) }
   }
 
-  private func notice(_ text: String, icon: String, color: Color) -> some View {
-    Label(text, systemImage: icon).font(.system(size: 11)).foregroundStyle(color)
-      .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 30).padding(
-        .vertical, 10
-      ).background(color.opacity(0.08))
+  private func notice(_ text: String, icon: String, color: Color, dismiss: (() -> Void)? = nil) -> some View {
+    HStack {
+      Label(text, systemImage: icon).font(.system(size: 11)).foregroundStyle(color)
+      Spacer(minLength: 0)
+      if let dismiss {
+        Button(action: dismiss) { Image(systemName: "xmark") }
+          .buttonStyle(.plain).help("Dismiss").accessibilityLabel("Dismiss message")
+      }
+    }.padding(.horizontal, 30).padding(.vertical, 10).background(color.opacity(0.08))
   }
 }
 
@@ -650,13 +670,12 @@ private struct OverviewWorkspace: View {
 private func chartDate(_ raw: String) -> Date {
   ISO8601DateFormatter().date(from: raw + "T12:00:00Z") ?? .now
 }
+private let ledgerDayParser = Date.ParseStrategy(
+  format: "\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits)", timeZone: .autoupdatingCurrent)
+
 /// A ledger day ("2026-11-05") in the user's date format, or as sent when it doesn't parse.
 private func shownDay(_ raw: String) -> String {
-  let parser = DateFormatter()
-  parser.locale = Locale(identifier: "en_US_POSIX")
-  parser.calendar = Calendar(identifier: .gregorian)
-  parser.dateFormat = "yyyy-MM-dd"
-  guard let date = parser.date(from: raw) else { return raw }
+  guard let date = try? Date(raw, strategy: ledgerDayParser) else { return raw }
   return date.formatted(date: .numeric, time: .omitted)
 }
 /// A percentage given out of 100 ("12.5"), in the user's format: "12.5%", "12,5 %".
@@ -696,19 +715,39 @@ private struct AccountFilter: View {
   }
 }
 
+private struct NoFilterResults: View {
+  let title: String
+  @Binding var search: String
+  @Binding var account: Int
+
+  var body: some View {
+    ContentUnavailableView {
+      Label(title, systemImage: "magnifyingglass")
+    } description: {
+      Text("Try another search or select a different account.")
+    } actions: {
+      Button("Clear filters") {
+        search = ""
+        account = 0
+      }
+    }
+  }
+}
+
 private struct HoldingsWorkspace: View {
   @StateObject private var draft = HoldingsWorkspaceDraft()
   let payload: DesktopPayload
-  let search: String
+  @Binding var search: String
   @Binding var accountFilter: Int
   let canEdit: Bool
   /// Opens an asset sheet, for the given symbol where it needs one.
   let showSheet: (DesktopSheet, String) -> Void
+  private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
   private var rows: [DesktopPosition] {
-    payload.positions.filter {
+    return payload.positions.filter {
       (accountFilter == 0 || $0.accountId == accountFilter)
-        && (search.isEmpty
-          || "\($0.symbol) \($0.name) \($0.account)".localizedCaseInsensitiveContains(search))
+        && (query.isEmpty
+          || "\($0.symbol) \($0.name) \($0.account) \($0.localizedAssetClass)".localizedCaseInsensitiveContains(query))
     }
     .sorted { draft.sortByValue ? ($0.value ?? 0) > ($1.value ?? 0) : $0.symbol < $1.symbol }
   }
@@ -735,11 +774,26 @@ private struct HoldingsWorkspace: View {
     return parts.isEmpty ? nil : parts.joined(separator: ". ")
   }
 
+  @ViewBuilder private func positionActions(_ p: DesktopPosition) -> some View {
+    if asset(p.symbol)?.manual == true {
+      Button("Record a valuation…") { showSheet(.valuation, p.symbol) }.disabled(!canEdit)
+    }
+    Button("Change asset class…") { showSheet(.assetClass, p.symbol) }
+      .disabled(!canEdit || payload.assets == nil)
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack {
         AccountFilter(accounts: payload.accounts, selected: $accountFilter)
         Spacer()
+        if let p = rows.first(where: { $0.id == draft.selection }) {
+          Menu {
+            positionActions(p)
+          } label: {
+            Image(systemName: "ellipsis.circle")
+          }.fixedSize().accessibilityLabel("Actions for \(p.symbol)").help("Actions for \(p.symbol)")
+        }
         Menu {
           Button("GIC or bond…") { showSheet(.fixedAsset, "") }
           Button("Property or other asset…") { showSheet(.manualAsset, "") }
@@ -752,7 +806,8 @@ private struct HoldingsWorkspace: View {
         Button(draft.sortByValue ? String(localized: "Sort: value ↓") : String(localized: "Sort: symbol A–Z")) {
           draft.sortByValue.toggle()
         }.buttonStyle(.bordered)
-        Text("\(rows.count) positions").foregroundStyle(Studio.muted)
+        Text(rows.count == 1 ? String(localized: "1 position") : String(localized: "\(rows.count) positions"))
+          .foregroundStyle(Studio.muted)
       }.font(.system(size: 11)).padding(.horizontal, 30)
       Table(rows, selection: $draft.selection) {
         TableColumn("Asset") { p in
@@ -772,7 +827,9 @@ private struct HoldingsWorkspace: View {
           ).monospacedDigit()
         }.width(80)
         TableColumn("Price") { p in
-          let shown = "\(Format.price(p.price)) \(p.currency)"
+          // A manual price or accrued GIC price can be the entire asset value.
+          let privatePrice = payload.status.privacy && p.price != nil && (p.quoteSource ?? "").isEmpty
+          let shown = privatePrice ? Format.mask : "\(Format.price(p.price)) \(p.currency)"
           let note = quoteNote(p)
           Text(p.stale ? String(localized: "\(shown) · cached") : shown)
             .modifier(RowTint(Studio.muted)).monospacedDigit()
@@ -796,18 +853,19 @@ private struct HoldingsWorkspace: View {
       }.scrollContentBackground(.hidden).alternatingRowBackgrounds(.disabled)
         .contextMenu(forSelectionType: DesktopPosition.ID.self) { ids in
           if ids.count == 1, let p = rows.first(where: { ids.contains($0.id) }) {
-            if asset(p.symbol)?.manual == true {
-              Button("Record a valuation…") { showSheet(.valuation, p.symbol) }.disabled(!canEdit)
-            }
-            Button("Change asset class…") { showSheet(.assetClass, p.symbol) }
-              .disabled(!canEdit || payload.assets == nil)
+            positionActions(p)
           }
         }
         .overlay {
           if rows.isEmpty {
-            ContentUnavailableView(
-              "No positions to show", systemImage: "chart.pie",
-              description: Text("Record a buy, or adjust your search and account filter."))
+            if query.isEmpty && accountFilter == 0 {
+              ContentUnavailableView(
+                "No positions to show", systemImage: "chart.pie",
+                description: Text("Record a buy or import transactions to see your holdings."))
+            } else {
+              NoFilterResults(
+                title: String(localized: "No matching holdings"), search: $search, account: $accountFilter)
+            }
           }
         }
     }
@@ -912,24 +970,35 @@ private struct AllocationWorkspace: View {
 private struct ActivityWorkspace: View {
   let payload: DesktopPayload
   @ObservedObject var model: StatusModel
-  let search: String
+  @Binding var search: String
   @Binding var accountFilter: Int
   let edit: (DesktopTransaction) -> Void
   @StateObject private var draft = ActivityWorkspaceDraft()
+  private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
   private var rows: [DesktopTransaction] {
-    payload.activity.filter {
+    return payload.activity.filter {
       (accountFilter == 0 || $0.accountId == accountFilter)
-        && (search.isEmpty
-          || "\($0.symbol) \($0.type) \(TransactionEntry.label($0.type)) \($0.note)"
-            .localizedCaseInsensitiveContains(search))
+        && (query.isEmpty
+          || "\($0.date) \($0.symbol) \($0.type) \(TransactionEntry.label($0.type)) \($0.note)"
+            .localizedCaseInsensitiveContains(query)
+          || accountName($0.accountId, payload).localizedCaseInsensitiveContains(query)
+          || $0.targetAccount.localizedCaseInsensitiveContains(query)
+          || shownDay($0.date).localizedCaseInsensitiveContains(query))
     }
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack {
         AccountFilter(accounts: payload.accounts, selected: $accountFilter)
+        if let id = draft.selection, let t = only([id]) {
+          Button("Edit…") { edit(t) }.disabled(!canEdit(t))
+        }
         Spacer()
-        Text("\(rows.count) transactions · + money in, − money out, in original currency").font(
+        Text(
+          rows.count == 1
+            ? String(localized: "1 transaction · + money in, − money out, in original currency")
+            : String(localized: "\(rows.count) transactions · + money in, − money out, in original currency")
+        ).font(
           .system(size: 11)
         )
         .foregroundStyle(Studio.muted)
@@ -963,7 +1032,14 @@ private struct ActivityWorkspace: View {
         }
         .overlay {
           if rows.isEmpty {
-            ContentUnavailableView("No matching activity", systemImage: "arrow.left.arrow.right")
+            if query.isEmpty && accountFilter == 0 {
+              ContentUnavailableView(
+                "No transactions yet", systemImage: "arrow.left.arrow.right",
+                description: Text("Record a transaction or import a CSV to see activity here."))
+            } else {
+              NoFilterResults(
+                title: String(localized: "No matching activity"), search: $search, account: $accountFilter)
+            }
           }
         }
     }
@@ -1126,24 +1202,27 @@ private struct WatchlistWorkspace: View {
   @StateObject private var draft = WatchlistWorkspaceDraft()
   @ObservedObject var model: StatusModel
   let addAlert: () -> Void
+  private func watch() {
+    let symbol = draft.symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    guard model.canEdit, !symbol.isEmpty else { return }
+    let original = draft.symbol
+    Task {
+      if await model.perform(["watch", "add", "--", symbol], success: String(localized: "Added to watchlist")),
+        original == draft.symbol
+      {
+        draft.symbol = ""
+      }
+    }
+  }
   var body: some View {
     ScrollView {
       VStack(spacing: 18) {
         HStack {
           TextField("Symbol, e.g. XEQT.TO", text: $draft.symbol).textFieldStyle(.roundedBorder)
             .frame(width: 240)
-          Button("Watch", systemImage: "plus") {
-            let s = draft.symbol
-            Task {
-              if await model.perform(
-                ["watch", "add", "--", s.trimmingCharacters(in: .whitespaces).uppercased()],
-                success: String(localized: "Added to watchlist"))
-              {
-                draft.symbol = ""
-              }
-            }
-          }
-          .disabled(!model.canEdit || draft.symbol.trimmingCharacters(in: .whitespaces).isEmpty)
+            .onSubmit(watch)
+          Button("Watch", systemImage: "plus", action: watch)
+            .disabled(!model.canEdit || draft.symbol.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
           Spacer()
           Button("Create alert", systemImage: "bell", action: addAlert).disabled(!model.canEdit)
         }
@@ -1322,7 +1401,9 @@ private struct TaxWorkspace: View {
         ForEach(tax.issues) { issue in
           HStack(alignment: .top) {
             Text(shownDay(issue.date)).foregroundStyle(Studio.muted).frame(width: 90, alignment: .leading)
-            Text(issue.localizedMessage).foregroundStyle(Studio.warn).textSelection(.enabled)
+            Text(
+              privacy ? String(localized: "Ledger warning details are hidden in privacy mode.") : issue.localizedMessage
+            ).foregroundStyle(Studio.warn).textSelection(.enabled)
               .fixedSize(horizontal: false, vertical: true)
           }.font(.system(size: 12))
         }
@@ -1907,7 +1988,8 @@ private final class PortfolioWindowDraft: ObservableObject {
   /// The symbol the `.valuation` and `.assetClass` sheets change.
   @Published var assetSymbol = ""
   @Published var section: Workspace? = .overview
-  @Published var search = ""
+  @Published var holdingsSearch = ""
+  @Published var activitySearch = ""
   @Published var accountFilter = 0
 }
 
