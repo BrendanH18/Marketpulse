@@ -43,7 +43,7 @@ Docs: https://docs.boat.dev/llms.txt. Prices and limits: run `boat limits`; neve
 - Public URL for a port: `boat ssh "$id" "host 3000 --private"`
 - Always pass the sandbox id. `current` does not work in a non-interactive shell.
 - When done: `boat stop "$id"` (keeps the disk for at least 14 days) or `boat delete "$id" --yes` (erases it)
-- Boat is x86_64 Linux. Run the Python checks (`uv sync`, Ruff, mypy, pytest with coverage) in Boat. These need macOS, so they run on this Mac: `swift format`, `swift build`, `scripts/check_native_bridge.py`, `scripts/build_app.py`, `scripts/qa_app.py` (both download a pinned CPython and packages, so ask before the first run on this Mac) and the [docs/qa.md](docs/qa.md) checklist, `menubar install` / `desktop install`, `scripts/benchmark_desktop.py`, and the darwin-only tests (for example `tests/test_update_check.py`), which pytest skips on Linux.
+- Boat is x86_64 Linux. Run the Python checks (`uv sync`, Ruff, mypy, pytest with coverage) in Boat. These need macOS, so they run on this Mac: `swift format`, `swift build`, `scripts/check_native_bridge.py`, `scripts/build_app.py`, `scripts/qa_app.py` (both download a pinned CPython and packages, so ask before the first run on this Mac) and the [docs/qa.md](docs/qa.md) checklist, `menubar install` / `desktop install`, `scripts/benchmark_desktop.py`, `scripts/release.py package` and `verify` (they use `ditto`, `hdiutil` and `codesign`), and the darwin-only tests (for example `tests/test_update_check.py`), which pytest skips on Linux.
 
 ## Checks
 
