@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Five offline datasets cover automation history, monthly activity, account
+  symbols, broker transaction codes and transaction CSV columns. All 197 shared
+  report operations and 15 named filter presets provide
+  [1,000 new reporting capabilities](docs/cli-offline-reporting-1000.md).
+
 - Holdings and Activity on Mac keep independent searches, offer a clear-filters action when
   nothing matches, and support ⌘F. Activity also accepts account names and dates.
 

@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shlex
 from dataclasses import asdict
 
 import click
@@ -19,7 +20,9 @@ from marketpulse.cli import (
     report_output,
     reports,
 )
+from marketpulse.cli.base import App
 from marketpulse.cli.report_operations import OPERATIONS
+from marketpulse.models import Account, Transaction, TxnType
 
 COMMANDS = ("report", "summarize")
 FAMILIES = {
@@ -37,11 +40,18 @@ FAMILIES = {
     "derive",
     "group",
 }
-# Options the catalog does not count as operations: the schema, the destination and help.
+# The shared catalog omits the schema, destination, help, and source-specific presets.
 # On `summarize`, `--group-by` only sets up the groups that its operations work on.
 HOUSEKEEPING = {
-    "report": {"--describe", "--output", "--help"},
-    "summarize": {"--describe", "--output", "--help", "--group-by"},
+    "report": {"--describe", "--output", "--help", "--preset"},
+    "summarize": {"--describe", "--output", "--help", "--group-by", "--preset"},
+}
+NEW_SOURCES = {
+    "automation-runs": ("id", "ran_at"),
+    "transaction-months": ("transactions", "month"),
+    "account-symbols": ("transactions", "symbol"),
+    "broker-transaction-codes": ("code", "profile"),
+    "transaction-csv-columns": ("position", "column"),
 }
 
 
@@ -138,6 +148,7 @@ def invocation(command, item, source="report-operations"):
         "report-operations": ("issue", "family"),
         "report-fields": ("position", "source"),
         "command-parameters": ("position", "command"),
+        **NEW_SOURCES,
     }[source]
     examples = {**EXAMPLES, "FIELD": field, "FIELD,FIELD": f"{field},{second_field}"}
     arguments = [command, source, option]
@@ -154,6 +165,8 @@ def invocation(command, item, source="report-operations"):
         arguments += ["--fields", field]
     if option == "--descending":
         arguments += ["--sort", field]
+    if source == "broker-transaction-codes" and option == "--decode-json":
+        arguments += ["--encode-json", field]
     return arguments
 
 
@@ -221,8 +234,8 @@ def test_every_operation_of_a_command_is_cataloged(command):
     assert cataloged == set(formats.type.choices) - {formats.default}
 
 
-@pytest.mark.parametrize("source", ["report-operations", "report-fields", "command-parameters"])
-def test_every_syntax_runs_on_each_command_that_lists_it(source):
+@pytest.mark.parametrize("source", ["report-operations", "report-fields", "command-parameters", *NEW_SOURCES])
+def test_every_syntax_runs_on_each_command_that_lists_it(source, report_store):
     failures = {}
     for item in OPERATIONS:
         for command in item.commands:
@@ -230,6 +243,117 @@ def test_every_syntax_runs_on_each_command_that_lists_it(source):
             if result.exit_code != 0:
                 failures[command, item.syntax] = result.output or repr(result.exception)
     assert not failures
+
+
+def test_exact_number_of_new_capabilities():
+    assert set(reports.SOURCE_PRESETS) == set(NEW_SOURCES)
+    assert set(NEW_SOURCES) <= reports.SOURCES.keys()
+    assert all(len(presets) == len(set(presets.values())) == 3 for presets in reports.SOURCE_PRESETS.values())
+    assert len(NEW_SOURCES) * len(OPERATIONS) + sum(map(len, reports.SOURCE_PRESETS.values())) == 1000
+
+
+@pytest.fixture
+def report_store(tracker, monkeypatch):
+    monkeypatch.setattr(App, "tracker", property(lambda self: tracker))
+    store = tracker.store
+    first = store.add_account(Account("Fictional First")).saved_id
+    second = store.add_account(Account("Fictional Second")).saved_id
+    store.add_transactions(
+        [
+            Transaction(first, TxnType.DEPOSIT, "2026-01-01", amount=100),
+            Transaction(first, TxnType.BUY, "2026-01-02", "FRUIT.TO", 2, 10),
+            Transaction(first, TxnType.WITHDRAWAL, "2026-02-02", amount=100),
+            Transaction(first, TxnType.TRANSFER, "2026-02-03", "FRUIT.TO", 1, target_account_id=second),
+            Transaction(second, TxnType.SELL, "2026-02-04", "FRUIT.TO", 1, 10),
+            Transaction(first, TxnType.DIVIDEND, "2026-03-01", "BERRY.TO", amount=5),
+        ]
+    )
+    store.record_automation_run({"last_run": "2026-01-02T12:00:00", "stale": False})
+    store.record_automation_run({"last_run": "2026-01-03T12:00:00", "failed": True})
+    store.record_automation_run({"last_run": "2026-01-04T12:00:00", "stale": True, "quote_errors": ["Offline"]})
+    store.record_automation_run({"last_run": "2026-01-05T12:00:00", "stale": True, "quote_errors": []})
+    return store
+
+
+@pytest.mark.parametrize("source", NEW_SOURCES)
+def test_presets_are_discoverable_and_filter_both_commands(source, report_store, fake):
+    changes = report_store._conn.total_changes
+    report_presets = json.loads(run("report", source, "--describe"))["presets"]
+    assert report_presets == json.loads(run("summarize", source, "--describe"))["presets"]
+    assert set(report_presets) == reports.SOURCE_PRESETS[source].keys()
+    unfiltered = int(run("report", source, "--count"))
+    for name, filter_args in report_presets.items():
+        named = run("report", source, "--preset", name)
+        assert named == run("report", source, *shlex.split(filter_args))
+        count = len(json.loads(named))
+        assert 0 < count < unfiltered
+        summary = run("summarize", source, "--preset", name, "--metric", "rows=count")
+        assert json.loads(summary) == [{"rows": count}]
+    assert not fake.calls
+    assert report_store._conn.total_changes == changes
+
+
+def test_presets_combine_with_each_other_and_explicit_filters(report_store):
+    assert run("report", "automation-runs", "--preset", "stale", "--preset", "quote-errors", "--count") == "1\n"
+    assert run("report", "automation-runs", "--preset", "stale", "--in", "stale=[false]", "--count") == "0\n"
+    summary = run(
+        "summarize", "automation-runs", "--preset", "stale", "--gt", "quote_error_count=2", "--metric", "rows=count"
+    )
+    assert json.loads(summary) == [{"rows": 0}]
+
+
+@pytest.mark.parametrize(
+    ("source", "preset", "field", "expected"),
+    [
+        ("transaction-months", "deposits", "month", [(1, "2026-01")]),
+        ("transaction-months", "withdrawals", "month", [(1, "2026-02")]),
+        ("transaction-months", "transfers", "month", [(1, "2026-02"), (2, "2026-02")]),
+        ("account-symbols", "buys", "symbol", [(1, "FRUIT.TO")]),
+        ("account-symbols", "sales", "symbol", [(2, "FRUIT.TO")]),
+        ("account-symbols", "dividends", "symbol", [(1, "BERRY.TO")]),
+    ],
+)
+def test_activity_presets_select_the_expected_rows(source, preset, field, expected, report_store):
+    rows = json.loads(run("report", source, "--preset", preset))
+    assert [(row["account_id"], row[field]) for row in rows] == expected
+
+
+@pytest.mark.parametrize(
+    ("preset", "ids"),
+    [("failed", [2]), ("stale", [4, 3]), ("quote-errors", [3])],
+)
+def test_automation_presets_select_the_expected_runs(preset, ids, report_store):
+    assert json.loads(run("report", "automation-runs", "--preset", preset, "--fields", "id")) == [
+        {"id": run_id} for run_id in ids
+    ]
+
+
+@pytest.mark.parametrize("source", NEW_SOURCES)
+def test_new_sources_project_only_selected_fields(source, report_store):
+    field = NEW_SOURCES[source][0]
+    baseline = json.loads(run("report", source))
+    assert baseline
+    assert json.loads(run("report", source, "--fields", field)) == [{field: row[field]} for row in baseline]
+
+
+@pytest.mark.parametrize("command", COMMANDS)
+def test_preset_discovery_and_validation_need_no_source_data(command, monkeypatch):
+    def forbidden(*args):
+        pytest.fail("Describing or rejecting a preset should not open the tracker")
+
+    monkeypatch.setattr(App, "tracker", property(forbidden))
+    assert "failed" in json.loads(run(command, "automation-runs", "--describe"))["presets"]
+    args = ["--metric", "rows=count"] if command == "summarize" else []
+    for source, message in [
+        ("automation-runs", "Choose from: failed, stale, quote-errors."),
+        ("accounts", "Source 'accounts' has no presets."),
+    ]:
+        result = CliRunner().invoke(main, [command, source, "--preset", "missing", *args])
+        assert result.exit_code == 2
+        assert message in result.output
+    result = CliRunner().invoke(main, [command, "automation-runs", "--describe", "--preset", "failed"])
+    assert result.exit_code == 2
+    assert "--describe cannot combine" in result.output
 
 
 def test_report_emits_the_catalog_without_opening_saved_data():

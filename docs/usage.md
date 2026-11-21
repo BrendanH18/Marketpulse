@@ -34,7 +34,7 @@ and [one hundred more](cli-tui-more-hundred-improvements.md) add JSON Lines outp
 filters, dry runs and receipts, recording helpers, automation and T1135 reports, and
 terminal app keys for row details, find, go-to and copying.
 
-For a shared offline query and export interface across 59 datasets, see
+For a shared offline query and export interface across 64 datasets, see
 [Composable offline reports](cli-composable-reports.md) (`marketpulse report SOURCE`),
 including [1,000 more filtering and output capabilities](cli-report-improvements.md)
 and [1,000 grouped-summary capabilities](cli-report-summaries.md)
@@ -53,6 +53,9 @@ field catalog (`report report-fields`) and typo suggestions for sources and deri
 [Two hundred command discovery improvements](cli-command-parameter-improvements.md)
 add a searchable command-parameter catalog and typo suggestions for summary operations,
 `--having` filters and derived-field inputs.
+[One thousand offline reporting improvements](cli-offline-reporting-1000.md)
+cover automation history, monthly activity, account symbols, broker transaction
+codes and transaction CSV columns, with three filter presets for each dataset.
 
 On short terminals, transaction forms scroll to the field or validation message. Enter
 decimals with a point (for example `12.5`). Commas group thousands (`1,234.56`).

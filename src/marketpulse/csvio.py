@@ -48,6 +48,7 @@ EXPORT_COLUMNS = [
     "ratio",
     "target_account",
 ]
+GENERIC_REQUIRED_COLUMNS = ("date", "type")
 
 _TYPE_KEYWORDS = [
     (("reinvest", "drip"), TxnType.DRIP),
@@ -333,7 +334,7 @@ def _row_reader(profile: brokers.BrokerProfile, headers: list[str]) -> Callable[
     convert = profile.convert
     if convert is None:
         cols = map_headers(headers)
-        missing = [f for f in ("date", "type") if f not in cols]
+        missing = [f for f in GENERIC_REQUIRED_COLUMNS if f not in cols]
         if missing:
             raise ValueError(f"CSV is missing required column(s): {', '.join(missing)}. Found: {', '.join(headers)}")
         return lambda row: {name: (row.get(col) or "").strip() for name, col in cols.items()}

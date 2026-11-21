@@ -7,6 +7,7 @@ import io
 import json
 import math
 import os
+import shlex
 import tempfile
 from contextlib import suppress
 from pathlib import Path
@@ -15,11 +16,14 @@ from typing import Any
 import click
 
 from . import (
+    report_activity,
+    report_automation,
     report_catalog,
     report_derive,
     report_filters,
     report_formats,
     report_history,
+    report_integrations,
     report_interface,
     report_ledger,
     report_output,
@@ -40,10 +44,14 @@ SOURCE_MODULES = (
     report_reference,
     report_history,
     report_interface,
+    report_automation,
+    report_activity,
+    report_integrations,
 )
 SOURCES: dict[str, tuple[str, ...]] = {
     name: schema for module in SOURCE_MODULES for name, schema in module.SOURCES.items()
 }
+SOURCE_PRESETS = {**report_automation.PRESETS, **report_activity.PRESETS, **report_integrations.PRESETS}
 FORMATS = ("json", "jsonl", "csv", "tsv", "markdown", *report_formats.FORMATS)
 
 
@@ -192,6 +200,42 @@ EXPANSION_FILTER_HELP = {
 }
 # Every FIELD=VALUE filter shared by `report` and `summarize`, in option order.
 ROW_FILTER_HELP = {**FILTER_HELP, **EXPANSION_FILTER_HELP}
+
+
+def preset_option(command):
+    return click.option(
+        "--preset",
+        multiple=True,
+        metavar="NAME",
+        help="Apply a named source filter; repeat for AND. See SOURCE --describe for available presets.",
+    )(command)
+
+
+def describe_source(source: str) -> dict[str, Any]:
+    description: dict[str, Any] = {"source": source, "fields": list(SOURCES[source])}
+    if presets := SOURCE_PRESETS.get(source):
+        description["presets"] = {
+            name: shlex.join((f"--{report_filters._spelling(option)}", argument))
+            for name, (option, argument) in presets.items()
+        }
+    return description
+
+
+def source_filters(
+    source: str, schema: tuple[str, ...], options: dict[str, tuple[str, ...]], presets: tuple[str, ...]
+) -> report_filters.Predicate:
+    available = SOURCE_PRESETS.get(source, {})
+    options = options.copy()
+    for name in presets:
+        if name not in available:
+            if not available:
+                raise click.UsageError(f"Source '{source}' has no presets.")
+            raise click.UsageError(f"Unknown preset '{name}' for '{source}'. Choose from: {', '.join(available)}.")
+        option, argument = available[name]
+        options[option] = (*options.get(option, ()), argument)
+    return report_filters.compile_filters(schema, options)
+
+
 OUTPUT_HELP = {
     "lower": "Lowercase string FIELD for output.",
     "upper": "Uppercase string FIELD for output.",
@@ -242,6 +286,7 @@ def _advanced_options(command):
 
 @main.command("report")
 @_advanced_options
+@preset_option
 @click.argument("source", type=SourceChoice(sorted(SOURCES)), metavar="SOURCE")
 @click.option(
     "--derive",
@@ -299,6 +344,7 @@ def report(
     count,
     output_format,
     page_info,
+    preset,
     describe,
     output,
     **advanced,
@@ -313,7 +359,7 @@ def report(
     derived = report_derive.DerivePlan(SOURCES[source], derive)
     schema = derived.schema
     filter_options = {name: advanced[name] for name in ROW_FILTER_HELP}
-    matches = report_filters.compile_filters(schema, filter_options)
+    matches = source_filters(source, schema, filter_options, preset)
     output_options = {name: advanced[name] for name in (*OUTPUT_HELP, "row_number")}
     output_plan = report_output.OutputPlan(schema, output_options)
     selected = _fields(fields, output_plan.schema) or list(output_plan.schema)
@@ -367,10 +413,11 @@ def report(
                 count,
                 output_format != "json",
                 page_info,
+                preset,
             )
         ):
             raise click.UsageError("--describe cannot combine with report operations.")
-        _emit(json.dumps({"source": source, "fields": list(schema)}) + "\n", output)
+        _emit(json.dumps(describe_source(source)) + "\n", output)
         return
     report_formats.validate(output_format, selected)
     if output is not None and os.path.lexists(output):
