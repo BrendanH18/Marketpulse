@@ -318,6 +318,24 @@ def test_activity_presets_select_the_expected_rows(source, preset, field, expect
     assert [(row["account_id"], row[field]) for row in rows] == expected
 
 
+@pytest.mark.parametrize(
+    ("preset", "ids"),
+    [("failed", [2]), ("stale", [4, 3]), ("quote-errors", [3])],
+)
+def test_automation_presets_select_the_expected_runs(preset, ids, report_store):
+    assert json.loads(run("report", "automation-runs", "--preset", preset, "--fields", "id")) == [
+        {"id": run_id} for run_id in ids
+    ]
+
+
+@pytest.mark.parametrize("source", NEW_SOURCES)
+def test_new_sources_project_only_selected_fields(source, report_store):
+    field = NEW_SOURCES[source][0]
+    baseline = json.loads(run("report", source))
+    assert baseline
+    assert json.loads(run("report", source, "--fields", field)) == [{field: row[field]} for row in baseline]
+
+
 @pytest.mark.parametrize("command", COMMANDS)
 def test_preset_discovery_and_validation_need_no_source_data(command, monkeypatch):
     def forbidden(*args):

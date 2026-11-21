@@ -48,6 +48,7 @@ def test_csv_catalog_follows_real_export_order_and_generic_rules(store):
     assert [row["column"] for row in rows] == headers
     assert [row["column"] for row in rows if row["required"]] == ["date", "type"]
     for row in rows:
+        assert row["aliases"] == brokers._ALIASES[row["column"]]
         assert all(brokers.map_headers([alias])[row["column"]] == alias for alias in row["aliases"])
         remaining = [header for header in headers if header != row["column"]]
         source = io.StringIO(",".join(remaining) + "\n")
@@ -72,3 +73,24 @@ def test_reference_reports_are_available_without_opening_a_tracker(monkeypatch, 
     rows = json.loads(report.output)
     assert rows and all(tuple(row) == report_integrations.SOURCES[source] for row in rows)
     assert json.loads(summary.output) == [{"rows": len(rows)}]
+
+
+def test_reference_presets_select_the_expected_rows():
+    runner = CliRunner()
+
+    def selected(source, preset):
+        result = runner.invoke(main, ["report", source, "--preset", preset])
+        assert result.exit_code == 0, result.output
+        return json.loads(result.output)
+
+    source = "transaction-csv-columns"
+    assert [row["column"] for row in selected(source, "required")] == ["date", "type"]
+    assert [row["column"] for row in selected(source, "optional")] == [
+        column for column in csvio.EXPORT_COLUMNS if column not in {"date", "type"}
+    ]
+    assert [row["column"] for row in selected(source, "account-routing")] == ["account", "target_account"]
+
+    source = "broker-transaction-codes"
+    assert [row["action"] for row in selected(source, "trade-actions")] == ["buy", "sell"]
+    assert all(row["type"] and row["reason"] is None for row in selected(source, "supported"))
+    assert all(row["reason"] and row["type"] is None for row in selected(source, "skipped"))

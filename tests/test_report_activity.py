@@ -65,6 +65,13 @@ def activity_app(tracker, monkeypatch):
 def test_activity_reports_without_replay_or_writes(source, expected, activity_app, fake, monkeypatch):
     store = activity_app.store
     changes = store._conn.total_changes
+    decode = store._txn
+
+    def decode_visible(row):
+        assert row["symbol"] != "HIDDEN.TO"
+        return decode(row)
+
+    monkeypatch.setattr(store, "_txn", decode_visible)
     monkeypatch.setattr(store, "ledger", lambda: pytest.fail("activity reports should not replay the ledger"))
     result = CliRunner().invoke(main, ["report", source])
     assert result.exit_code == 0, result.output

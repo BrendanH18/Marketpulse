@@ -898,8 +898,11 @@ class Store:
         """Read active accounts and their originating transactions from one ledger snapshot."""
         with self._read_snapshot():
             accounts = self.accounts()
-            active_ids = {account.saved_id for account in accounts}
-            transactions = [txn for txn in self.transactions() if txn.account_id in active_ids]
+            rows = self._query(
+                "SELECT t.* FROM transactions t JOIN accounts a ON a.id = t.account_id "
+                "WHERE a.archived = 0 ORDER BY t.date, t.id"
+            )
+        transactions = [self._txn(row) for row in rows]
         return accounts, transactions
 
     def _txn_params(self, txn: Transaction) -> tuple:
