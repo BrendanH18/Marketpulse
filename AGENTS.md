@@ -30,10 +30,26 @@ the app's decisions in [docs/app-plan.md](docs/app-plan.md).
    `Claiming for <agent/model>. Branch: <branch>.`
 3. Prefer issues labelled `agent-ready`. Skip `needs-decision` issues; ask the maintainer instead.
 
-## Cloud sandboxes (Boat)
+## Where checks run (local, Mac and Boat)
 
-Use a Boat sandbox for builds, tests, untrusted code, Docker, and long jobs. Never run them on this computer.
-Docs: https://docs.boat.dev/llms.txt. Prices and limits: run `boat limits`; never quote prices from memory.
+- **Python checks run locally.** The maintainer decided on 2026-11-21 that
+  MarketPulse is an exception to the rule that agent compute runs in Boat
+  sandboxes, for the Python checks only. Run `uv sync --locked --dev` and the
+  `uv run --locked` Ruff, mypy, pytest and coverage commands in [Checks](#checks)
+  on the machine you're on, with no sandbox: the full pytest suite runs offline in
+  about 2 seconds, so a sandbox would be pure overhead. On the Mac, ask before the
+  first `uv sync` there, since it installs packages.
+- **macOS checks and builds stay on the Mac**, as before: `swift format`, `swift build`,
+  `scripts/check_native_bridge.py`, `scripts/build_app.py`, `scripts/qa_app.py` (both download a pinned
+  CPython and packages, so ask before the first run on the Mac) and the [docs/qa.md](docs/qa.md) checklist,
+  `menubar install` / `desktop install`, `scripts/benchmark_desktop.py`, `scripts/release.py package` and
+  `verify` (they use `ditto`, `hdiutil` and `codesign`), and the darwin-only tests (for example
+  `tests/test_update_check.py`), which pytest skips on Linux.
+- **Ask before heavy local jobs.** Anything heavy, long-running or untrusted
+  (Docker, large data jobs, anything taking minutes) would normally go to Boat;
+  ask the maintainer before running it locally.
+
+Boat (x86_64 Linux) docs: https://docs.boat.dev/llms.txt. Prices and limits: run `boat limits`; never quote prices from memory.
 
 - Create: `id=$(boat new --json | jq -r 'select(.event=="ready") | .id')`
 - One-shot job: `boat run --push . -- npm test` (new sandbox, run, cost, delete; exits with the test exit code)
@@ -43,7 +59,6 @@ Docs: https://docs.boat.dev/llms.txt. Prices and limits: run `boat limits`; neve
 - Public URL for a port: `boat ssh "$id" "host 3000 --private"`
 - Always pass the sandbox id. `current` does not work in a non-interactive shell.
 - When done: `boat stop "$id"` (keeps the disk for at least 14 days) or `boat delete "$id" --yes` (erases it)
-- Boat is x86_64 Linux. Run the Python checks (`uv sync`, Ruff, mypy, pytest with coverage) in Boat. These need macOS, so they run on this Mac: `swift format`, `swift build`, `scripts/check_native_bridge.py`, `scripts/build_app.py`, `scripts/qa_app.py` (both download a pinned CPython and packages, so ask before the first run on this Mac) and the [docs/qa.md](docs/qa.md) checklist, `menubar install` / `desktop install`, `scripts/benchmark_desktop.py`, `scripts/release.py package` and `verify` (they use `ditto`, `hdiutil` and `codesign`), and the darwin-only tests (for example `tests/test_update_check.py`), which pytest skips on Linux.
 
 ## Checks
 
