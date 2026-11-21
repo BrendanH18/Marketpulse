@@ -303,10 +303,10 @@ def test_private_manual_price_and_full_activity_search_on_compact_terminal(track
             assert app.focused is dashboard and dashboard.scroll_y == 0
             assert dashboard.scrollable_content_region.contains_region(app.query_one("#tiles").region)
             await pilot.press("pagedown")
-            await pilot.pause()
+            await pilot.wait_for_scheduled_animations()
             assert dashboard.scroll_y > 0
             await pilot.press("home")
-            await pilot.pause()
+            await pilot.wait_for_scheduled_animations()
             assert dashboard.scroll_y == 0
             assert app.query_one("#dash-side").display
             await pilot.press("2")
