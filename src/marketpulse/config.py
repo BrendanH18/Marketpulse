@@ -18,7 +18,9 @@ _warned: set[Path] = set()
 def data_dir(*, create: bool = True) -> Path:
     base = Path(os.environ.get("MARKETPULSE_DATA") or Path.home() / ".marketpulse")
     if create:
-        base.mkdir(parents=True, exist_ok=True)
+        base.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if base.stat().st_mode & 0o7777 != 0o700:
+            base.chmod(0o700)
     return base
 
 

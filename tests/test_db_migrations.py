@@ -394,3 +394,55 @@ def test_v3_adds_the_foreign_property_setting_to_existing_assets(tmp_path, monke
     for setting in (True, False, None):
         upgraded.set_foreign_property(Asset("FICT", asset_class=AssetClass.ETF, foreign_property=setting))
         assert upgraded.assets()["FICT"].foreign_property is setting
+
+
+def test_private_permissions_survive_reopen_backup_and_restore():
+    from contextlib import closing
+    from pathlib import Path
+    from stat import S_IMODE
+
+    old_mask = os.umask(0)
+    try:
+        with closing(Store.open_default()) as first:
+            _seed(first)
+            backup = first.backup()
+            dirs = [first.path.parent, first.backup_dir]
+            files = [first.path, Path(f"{first.path}-wal"), Path(f"{first.path}-shm"), backup]
+            assert [S_IMODE(p.stat().st_mode) for p in dirs] == [0o700] * len(dirs)
+            assert [S_IMODE(p.stat().st_mode) for p in files] == [0o600] * len(files)
+            for path in dirs:
+                path.chmod(0o777)
+            for path in files:
+                path.chmod(0o666)
+            orphan = first.backup_dir / "marketpulse-20260101-000000-manual.db-journal"
+            orphan.touch(mode=0o666)
+            with closing(Store.open_default()) as reopened:
+                assert S_IMODE(orphan.stat().st_mode) == 0o600
+                assert all(S_IMODE(p.stat().st_mode) == 0o700 for p in dirs)
+                assert all(S_IMODE(p.stat().st_mode) == 0o600 for p in files)
+                os.umask(0o777)
+                restricted = reopened.backup()
+                assert S_IMODE(restricted.stat().st_mode) == 0o600
+                os.umask(0)
+                safety = reopened.restore(backup)
+                assert all(S_IMODE(p.stat().st_mode) == 0o600 for p in [*files, safety])
+    finally:
+        os.umask(old_mask)
+
+
+def test_backup_permission_error_still_opens_live_ledger(monkeypatch, caplog):
+    store = Store()
+    _seed(store)
+    store.backup()
+    store.close()
+
+    def denied(self):
+        raise PermissionError("read-only backup mount")
+
+    monkeypatch.setattr(Store, "_secure_backup_dir", denied)
+    reopened = Store.open_default()
+    try:
+        assert reopened.get_account("Main")
+        assert "Could not secure backup directory" in caplog.text
+    finally:
+        reopened.close()

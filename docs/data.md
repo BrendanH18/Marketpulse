@@ -7,6 +7,13 @@
 MarketPulse stores its ledger, account settings, asset definitions, watchlist,
 alerts, quote cache, contribution-room inputs, and portfolio snapshots in
 `~/.marketpulse/marketpulse.db`. Set `MARKETPULSE_DATA` to use a different directory.
+Use a dedicated directory. MarketPulse sets it and its managed backup directory to
+owner-only access (0700). Opening the ledger sets its database, SQLite sidecars,
+and managed backup files to owner read/write (0600). The live database and its
+sidecars must be regular files with a single hard link. If MarketPulse cannot
+secure them, startup stops. To relocate the ledger, point `MARKETPULSE_DATA`
+at its dedicated directory. If permissions on an existing managed backup
+cannot be corrected, MarketPulse logs a warning and opens the live ledger.
 Display settings live in a separate TOML file.
 
 The database and backups are not encrypted by MarketPulse. Privacy mode hides

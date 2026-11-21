@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Local ledgers and managed backups now have owner-only permissions, including existing files on startup.
+
 - Backup restore asks for a fresh confirmation if the current portfolio changes while
   the Mac preview or the interactive CLI prompt is open ([#193](https://github.com/BrendanH18/Marketpulse/issues/193)).
 
