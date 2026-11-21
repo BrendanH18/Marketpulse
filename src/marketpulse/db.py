@@ -687,6 +687,18 @@ class Store:
                     yield
 
     @contextmanager
+    def _read_snapshot(self) -> Iterator[None]:
+        """Keep related reads on the same SQLite snapshot without taking a write lock."""
+        with self._lock:
+            if self._conn.in_transaction:
+                raise RuntimeError("Transactions don't nest.")
+            self._conn.execute("BEGIN")
+            try:
+                yield
+            finally:
+                self._conn.commit()
+
+    @contextmanager
     def _write(self) -> Iterator[None]:
         """Each write commits on its own, unless it's part of an open `transaction()`."""
         with self._lock:
@@ -743,15 +755,9 @@ class Store:
     def automation_status(self) -> tuple[list[AutomationRun], AutomationRun | None]:
         """The kept runs and, if it has been pruned from them, the latest failure: read from one
         snapshot, so a run recorded or a backup restored in between can't pair two ledgers' rows."""
-        with self._lock:
-            if self._in_transaction:
-                raise RuntimeError("Transactions don't nest.")
-            self._conn.execute("BEGIN")  # deferred: a read snapshot, without taking the write lock
-            try:
-                failure = self.latest_automation_failure()
-                runs = self.automation_runs()
-            finally:
-                self._conn.commit()
+        with self._read_snapshot():
+            failure = self.latest_automation_failure()
+            runs = self.automation_runs()
         pruned = failure if failure and all(r.id != failure.id for r in runs) else None
         return runs, pruned
 
@@ -887,6 +893,14 @@ class Store:
             params.append(symbol.upper())
         sql = "SELECT * FROM transactions" + (f" WHERE {' AND '.join(where)}" if where else "")
         return [self._txn(r) for r in self._query(sql + " ORDER BY date, id", tuple(params))]
+
+    def activity_snapshot(self) -> tuple[list[Account], list[Transaction]]:
+        """Read active accounts and their originating transactions from one ledger snapshot."""
+        with self._read_snapshot():
+            accounts = self.accounts()
+            active_ids = {account.saved_id for account in accounts}
+            transactions = [txn for txn in self.transactions() if txn.account_id in active_ids]
+        return accounts, transactions
 
     def _txn_params(self, txn: Transaction) -> tuple:
         txn.date = parse_date(txn.date)

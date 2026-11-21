@@ -139,6 +139,7 @@ def _filter_options(command):
 
 @main.command("summarize")
 @_filter_options
+@reports.preset_option
 @click.argument("source", type=SourceChoice(sorted(reports.SOURCES)), metavar="SOURCE")
 @click.option(
     "--derive",
@@ -180,6 +181,7 @@ def summarize(
     limit: int | None,
     output_format: str,
     page_info: bool,
+    preset: tuple[str, ...],
     describe: bool,
     output: Path | None,
     **filters: tuple[str, ...],
@@ -209,12 +211,13 @@ def summarize(
                 limit is not None,
                 output_format != "json",
                 page_info,
+                preset,
                 any(filters.values()),
             )
         ):
             raise click.UsageError("--describe cannot combine with summary operations.")
         reports._emit(
-            json.dumps({"source": source, "fields": list(schema), "operations": report_metrics.ALL_OPERATIONS}) + "\n",
+            json.dumps({**reports.describe_source(source), "operations": report_metrics.ALL_OPERATIONS}) + "\n",
             output,
         )
         return
@@ -234,7 +237,7 @@ def summarize(
         raise click.UsageError("--totals requires --group-by.")
     report_formats.validate(output_format, fields)
     exact = [reports._condition(value, schema) for value in where]
-    matches = report_filters.compile_filters(schema, filters)
+    matches = reports.source_filters(source, schema, filters, preset)
     kept = _having(having, tuple(fields))
     if output is not None and os.path.lexists(output):
         raise click.UsageError("--output must name a new file; refusing to overwrite.")
