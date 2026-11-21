@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 import re
+import sqlite3
+from dataclasses import replace
 from typing import TYPE_CHECKING, overload
 
 from rich.text import Text
@@ -34,6 +36,8 @@ from ..models import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ..services import Tracker
 
 
@@ -341,10 +345,11 @@ class TransactionForm(BaseForm):
 
 
 class AccountForm(BaseForm):
-    def __init__(self, account: Account | None = None, base_currency: str = "CAD"):
+    def __init__(self, base_currency: str, save: Callable[[Account], object], account: Account | None = None):
         super().__init__()
         self.account = account
         self.base_currency = base_currency
+        self.save_account = save
 
     def compose(self) -> ComposeResult:
         a = self.account
@@ -383,7 +388,7 @@ class AccountForm(BaseForm):
             return self.show_error("Name is required.")
         if len(ccy) != 3:
             return self.show_error("Currency must be a 3-letter code.")
-        a = self.account or Account(name=name)
+        a = replace(self.account) if self.account is not None else Account(name=name)
         a.name = name
         a.type = self.query_one("#a-type", Select).value  # type: ignore[assignment]
         a.currency = ccy
@@ -391,7 +396,18 @@ class AccountForm(BaseForm):
         a.track_cash = self.query_one("#a-cash", Switch).value
         if self.account is not None:
             a.archived = self.query_one("#a-archived", Switch).value
-        self.dismiss(a)
+        try:
+            self.save_account(a)
+        except ValueError as e:
+            message = str(e)
+            if self.account is not None:
+                message += " If the account or ledger changed, reopen the form to review the current details."
+            self.show_error(message)
+            return
+        except (sqlite3.Error, OSError) as e:
+            self.show_error(f"Could not save the account ({e}). Resolve the storage problem, then try saving again.")
+            return
+        self.dismiss(f"Added account {a.name}" if self.account is None else f"Updated {a.name}")
 
 
 class AssetForm(BaseForm):

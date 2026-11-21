@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Terminal account forms keep your entries and show how to retry when a save fails.
 - Mac transaction entry explains which field needs attention. Form errors are shown separately
   from refresh errors, and the portfolio window and menu bar offer a retry after a load failure.
   A failed backup restore offers a fresh preview before the next restore attempt.
