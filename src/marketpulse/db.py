@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import sqlite3
 import stat
@@ -440,6 +441,23 @@ class Snapshot:
     detail: dict
 
 
+def _tighten_file(path: Path) -> None:
+    """Sidecars and pruned backups can disappear while another client opens."""
+    try:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise OSError(f"Expected a regular file with one link at {path}")
+        if stat.S_IMODE(info.st_mode) != 0o600:
+            path.chmod(0o600)
+    except FileNotFoundError:
+        pass
+
+
+def _tighten_database(path: Path) -> None:
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        _tighten_file(Path(f"{path}{suffix}"))
+
+
 class Store:
     """Thread-safe SQLite store. One connection guarded by a lock; WAL lets the
     menu bar's CLI calls read while the TUI writes."""
@@ -450,6 +468,15 @@ class Store:
         # (connecting creates an empty file). A brand-new database has nothing
         # worth backing up before it is migrated.
         existed = self.path.exists() and self.path.stat().st_size > 0
+        if str(self.path) != ":memory:":
+            if not self.path.exists():
+                try:
+                    self.path.touch(mode=0o600, exist_ok=False)
+                except FileExistsError:
+                    pass  # Another client created it first.
+            _tighten_database(self.path)
+            if path is None:
+                self._tighten_existing_backups()
         self._lock = threading.RLock()
         self._in_transaction = False
         self._changes_at_begin = 0
@@ -534,6 +561,31 @@ class Store:
     def backup_dir(self) -> Path:
         return self.path.parent / BACKUP_DIRNAME
 
+    def _tighten_existing_backups(self) -> None:
+        try:
+            if not self.backup_dir.exists():
+                return
+            self._secure_backup_dir()
+            for path in self.backup_dir.iterdir():
+                if path.name.startswith("marketpulse-") and path.name.endswith(
+                    (".db", ".db-wal", ".db-shm", ".db-journal")
+                ):
+                    try:
+                        _tighten_file(path)
+                    except OSError as e:
+                        logging.getLogger(__name__).warning("Could not secure backup %s: %s", path, e)
+        except OSError as e:
+            logging.getLogger(__name__).warning("Could not secure backup directory %s: %s", self.backup_dir, e)
+
+    def _secure_backup_dir(self) -> None:
+        directory = self.backup_dir
+        directory.mkdir(mode=0o700, exist_ok=True)
+        info = directory.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise OSError(f"Expected a backup directory at {directory}")
+        if stat.S_IMODE(info.st_mode) != 0o700:
+            directory.chmod(0o700)
+
     def backup(self, reason: str = "manual", dest: Path | str | None = None) -> Path:
         """Write a consistent copy of the database and return its path.
 
@@ -541,19 +593,26 @@ class Store:
         otherwise it goes into the backups directory under a timestamped name.
         """
         if dest is None:
+            self._secure_backup_dir()
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             target = self.backup_dir / f"marketpulse-{stamp}-{reason}.db"
             # Two backups in the same second (e.g. import right after startup):
             # add a counter rather than overwrite the first one.
             n = 2
-            while target.exists():
-                target = self.backup_dir / f"marketpulse-{stamp}-{reason}-{n}.db"
-                n += 1
+            while True:
+                try:
+                    target.touch(mode=0o600, exist_ok=False)
+                    break
+                except FileExistsError:
+                    target = self.backup_dir / f"marketpulse-{stamp}-{reason}-{n}.db"
+                    n += 1
         else:
             target = Path(dest).expanduser()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        existed = target.exists()
+            target.parent.mkdir(parents=True, exist_ok=True)
+        existed = dest is not None and target.exists()
         try:
+            if dest is None:
+                _tighten_file(target)
             copy = sqlite3.connect(target)
             try:
                 with self._lock:
