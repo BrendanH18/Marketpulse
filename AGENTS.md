@@ -18,7 +18,7 @@ the app's decisions in [docs/app-plan.md](docs/app-plan.md).
 | `src/marketpulse/` | Engine and CLI. `models.py`, `ledger.py`, `valuation.py`, `services.py` (core); `csvio.py` (import/export); `market.py` (quotes); `db.py` (SQLite, backups, migrations); `cli/`; `tui/` |
 | `src/marketpulse/desktop.py`, `automation.py` | Desktop JSON bridge and the shared refresh/backup/alert cycle |
 | `macos/MarketPulseBar/` | SwiftUI app (menu bar + portfolio window), `AppIcon.icns` |
-| `scripts/` | Bridge check, QA app builder, icon generator, README preview |
+| `scripts/` | Bridge, coverage and localization checks; QA and standalone app builders; release, benchmark, installer, icon and README-preview scripts |
 | `tests/` | pytest with isolated data, fake Yahoo transport, mocked notifications |
 | `docs/` | User guides, plan, QA checklist, roadmap |
 
@@ -30,6 +30,21 @@ the app's decisions in [docs/app-plan.md](docs/app-plan.md).
    `Claiming for <agent/model>. Branch: <branch>.`
 3. Prefer issues labelled `agent-ready`. Skip `needs-decision` issues; ask the maintainer instead.
 
+## Cloud sandboxes (Boat)
+
+Use a Boat sandbox for builds, tests, untrusted code, Docker, and long jobs. Never run them on this computer.
+Docs: https://docs.boat.dev/llms.txt. Prices and limits: run `boat limits`; never quote prices from memory.
+
+- Create: `id=$(boat new --json | jq -r 'select(.event=="ready") | .id')`
+- One-shot job: `boat run --push . -- npm test` (new sandbox, run, cost, delete; exits with the test exit code)
+- Run: `boat exec "$id" --cwd my-app "npm test"` (30 s timeout; `--timeout 0` = no limit)
+- Server: `boat exec "$id" --detach "npm run dev"`, then `boat exec "$id" --status <pid>`
+- Copy files: `boat push "$id" ./my-app` (git-tracked files, to /home/user/my-app) or clone the repo inside the sandbox
+- Public URL for a port: `boat ssh "$id" "host 3000 --private"`
+- Always pass the sandbox id. `current` does not work in a non-interactive shell.
+- When done: `boat stop "$id"` (keeps the disk for at least 14 days) or `boat delete "$id" --yes` (erases it)
+- Boat is x86_64 Linux. Run the Python checks (`uv sync`, Ruff, mypy, pytest with coverage) in Boat. These need macOS, so they run on this Mac: `swift format`, `swift build`, `scripts/check_native_bridge.py`, `scripts/build_app.py`, `scripts/qa_app.py` (both download a pinned CPython and packages, so ask before the first run on this Mac) and the [docs/qa.md](docs/qa.md) checklist, `menubar install` / `desktop install`, `scripts/benchmark_desktop.py`, `scripts/release.py package` and `verify` (they use `ditto`, `hdiutil` and `codesign`), and the darwin-only tests (for example `tests/test_update_check.py`), which pytest skips on Linux.
+
 ## Checks
 
 ```bash
@@ -40,6 +55,7 @@ uv run --locked pytest -q --cov && uv run --locked python scripts/check_coverage
 swift format lint --strict -r macos/MarketPulseBar scripts/*.swift
 swift build -c release --package-path macos/MarketPulseBar
 uv run --locked python scripts/check_native_bridge.py
+uv run --locked python scripts/build_app.py --out "$TMPDIR/mp-app"
 ```
 
 All must pass before you hand work back. Paste the results, not a summary of them.
@@ -52,16 +68,16 @@ Build the throwaway QA app on a fictional ledger and follow [docs/qa.md](docs/qa
 uv run --locked python scripts/qa_app.py --fresh && "$TMPDIR/marketpulse-qa/launch.sh"
 ```
 
-If you have computer use, run the checklist and report the PASS / FAIL / UNVERIFIED
-table. If you don't, say which items you couldn't verify. Never report a
+Run the checklist with computer use and report the PASS / FAIL / UNVERIFIED
+table. If you couldn't run it, say which items you couldn't verify. Never report a
 UI item as passing that you didn't see.
 
 ## Commands
 
 ```bash
-uv sync                                        # install (includes dev group: pytest, ruff)
+uv sync                                        # install (includes dev group: mypy, pytest, pytest-cov, ruff)
 uv run marketpulse                             # TUI (no subcommand = TUI); `mp` is an alias
-uv run pytest                                  # full suite, offline (~2s)
+uv run pytest                                  # full suite, offline
 uv run pytest tests/test_ledger.py::test_split_keeps_cost_base   # single test
 uv run pytest --cov && uv run python scripts/check_coverage.py   # financial-core coverage floors (CI gate)
 uv run ruff check . && uv run ruff format --check .   # lint; `ruff format .` applies fixes; line length 120
