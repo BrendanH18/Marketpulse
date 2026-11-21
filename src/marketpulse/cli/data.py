@@ -1143,7 +1143,7 @@ def backup_restore(
     shown = source.name if source.parent == directory else str(source.resolve())
     if dry_run or (not yes and expect_fingerprint is None):
         try:
-            preview = preview_restore(ledger, source)
+            preview = preview_restore(ledger, source, require_ready=not dry_run)
         except RestoreError as e:
             fail(str(e))
         current, saved = preview.current, preview.backup

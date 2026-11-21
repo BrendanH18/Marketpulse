@@ -12,7 +12,7 @@ from click.testing import CliRunner
 
 from marketpulse.cli import main
 from marketpulse.config import data_dir
-from marketpulse.db import SCHEMA, Store, latest_version
+from marketpulse.db import SCHEMA, Snapshot, Store, latest_version, preview_restore
 from marketpulse.models import Account, Alert, Transaction, TxnType
 
 
@@ -487,10 +487,12 @@ def test_restore_confirmation_leaves_a_legacy_live_ledger_unmodified(tmp_path):
         saved.add_account(Account(name="Fictional Maple"))
 
     runner = CliRunner()
-    preview = runner.invoke(main, ["desktop", "restore-preview", "--", str(source)], catch_exceptions=False)
-    assert preview.exit_code == 0, preview.output
+    preview = preview_restore(path, source)
+    blocked = runner.invoke(main, ["desktop", "restore-preview", "--", str(source)], catch_exceptions=False)
+    assert blocked.exit_code == 1
+    assert "Open the ledger with this version" in blocked.stderr
     before = path.read_bytes()
-    fingerprint = json.loads(preview.stdout)["fingerprint"]
+    fingerprint = preview.fingerprint
     args = ["backup", "restore", "--yes", "--expect-fingerprint", fingerprint, "--", str(source)]
     rejected = runner.invoke(main, args, catch_exceptions=False)
     assert rejected.exit_code == 1
@@ -511,5 +513,23 @@ def test_restore_confirmation_waits_for_a_legacy_json_import(tmp_path):
     result = CliRunner().invoke(main, ["backup", "restore", str(source)], input="y\n", catch_exceptions=False)
     assert result.exit_code == 1
     assert "import the legacy portfolio" in result.stderr
+    assert "Replace the ledger" not in result.stdout
     assert list(directory.iterdir()) == [legacy]
     assert legacy.read_text(encoding="utf-8") == portfolio
+
+
+def test_restore_confirmation_preserves_new_snapshot_history(tmp_path):
+    runner = CliRunner()
+    with closing(Store()) as live:
+        source = live.backup(dest=tmp_path / "selected.db")
+        preview = runner.invoke(main, ["desktop", "restore-preview", "--", str(source)], catch_exceptions=False)
+        assert preview.exit_code == 0, preview.output
+        snapshot = Snapshot("2025-01-02", 100, 90, 90, "CAD", {})
+        live.upsert_snapshot(snapshot)
+        fingerprint = json.loads(preview.stdout)["fingerprint"]
+        args = ["backup", "restore", "--yes", "--expect-fingerprint", fingerprint, "--", str(source)]
+        rejected = runner.invoke(main, args, catch_exceptions=False)
+        assert rejected.exit_code == 1
+        assert "changed since the preview" in rejected.stderr
+        assert live.snapshots() == [snapshot]
+        assert live.backups() == []

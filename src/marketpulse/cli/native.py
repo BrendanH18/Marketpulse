@@ -86,7 +86,7 @@ def desktop_restore_preview(path: Path) -> None:
     from ..db import RestoreError, preview_restore
 
     try:
-        preview = preview_restore(data_dir(create=False) / "marketpulse.db", path)
+        preview = preview_restore(data_dir(create=False) / "marketpulse.db", path, require_ready=True)
     except RestoreError as e:
         fail(str(e))
     click.echo(json.dumps({"version": 1, **asdict(preview)}))

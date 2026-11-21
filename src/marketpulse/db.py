@@ -314,6 +314,7 @@ def _restore_revision(conn: sqlite3.Connection | None) -> str:
         ("assets", "SELECT * FROM assets ORDER BY symbol"),
         ("watchlist", "SELECT * FROM watchlist ORDER BY symbol"),
         ("alerts", "SELECT * FROM alerts ORDER BY id"),
+        ("snapshots", "SELECT * FROM snapshots ORDER BY date"),
         ("room", "SELECT * FROM room ORDER BY account_type"),
         ("targets", "SELECT * FROM targets ORDER BY bucket"),
     ):
@@ -395,7 +396,7 @@ def _check_restore_preview(current: Path, staged: Path, fingerprint: str) -> str
         raise RestoreError(str(error)) from error
 
 
-def preview_restore(current: Path, source: Path) -> RestorePreview:
+def preview_restore(current: Path, source: Path, *, require_ready: bool = False) -> RestorePreview:
     """Read both summaries without running startup maintenance on the live database."""
     try:
         if current.exists() and source.is_file() and current.samefile(source):
@@ -403,7 +404,7 @@ def preview_restore(current: Path, source: Path) -> RestorePreview:
         with TemporaryDirectory(prefix="marketpulse-preview-") as scratch:
             staged = Path(scratch) / "checked.db"
             _stage_restore(_preview_copy(source, Path(scratch) / "backup"), staged)
-            before, live_revision = _current_restore_state(current, Path(scratch))
+            before, live_revision = _current_restore_state(current, Path(scratch), confirming=require_ready)
             with closing(sqlite3.connect(f"{staged.as_uri()}?mode=ro", uri=True)) as conn:
                 saved = _ledger_summary(conn)
             return RestorePreview(before, saved, _restore_fingerprint(staged, live_revision))
