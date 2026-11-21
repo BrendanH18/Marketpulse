@@ -447,7 +447,7 @@ def test_interactive_restore_checks_confirmation_without_startup_maintenance(mon
         assert [t.amount for t in live.transactions()] == [40]
         assert live.backups() == before
 
-        def confirm(_prompt):
+        def confirm(_prompt, *, err=False):
             with closing(Store(live.path)) as other:
                 other.add_transaction(Transaction(account.saved_id, TxnType.DEPOSIT, date="2024-01-03", amount=60))
             return True
@@ -459,6 +459,21 @@ def test_interactive_restore_checks_confirmation_without_startup_maintenance(mon
         assert "changed since the preview" in rejected.stderr
         assert [t.amount for t in live.transactions()] == [40, 60]
         assert live.backups() == before
+
+
+def test_interactive_json_restore_keeps_comparison_and_prompt_off_stdout(tmp_path):
+    with closing(Store()) as live:
+        source = live.backup(dest=tmp_path / "selected.db")
+        live.add_account(Account(name="Fictional Maple"))
+        result = CliRunner().invoke(
+            main, ["backup", "restore", "--json", str(source)], input="y\n", catch_exceptions=False
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.stdout)["restored"] is True
+        assert "Accounts" in result.stderr
+        assert "Transactions" in result.stderr
+        assert "Latest transaction date" in result.stderr
+        assert result.stderr.index("Latest transaction date") < result.stderr.index("Replace the ledger")
 
 
 def test_restore_confirmation_protects_a_manual_alert_rearm(tmp_path):

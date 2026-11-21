@@ -1160,18 +1160,23 @@ def backup_restore(
                 )
             )
             return
-        if not as_json:
-            click.echo(f"Restore preview: {shown}{when}")
-            table = render.table("Metric", "Current", "Backup")
-            table.add_row("Accounts", str(current.accounts), str(saved.accounts))
-            table.add_row("Transactions", str(current.transactions), str(saved.transactions))
-            table.add_row("Latest transaction date", Text(current.latest_date or "—"), Text(saved.latest_date or "—"))
+        click.echo(f"Restore preview: {shown}{when}", err=as_json)
+        table = render.table("Metric", "Current", "Backup")
+        table.add_row("Accounts", str(current.accounts), str(saved.accounts))
+        table.add_row("Transactions", str(current.transactions), str(saved.transactions))
+        table.add_row("Latest transaction date", Text(current.latest_date or "—"), Text(saved.latest_date or "—"))
+        if as_json:
+            with app.console.capture() as comparison:
+                app.console.print(table)
+            click.echo(comparison.get(), err=True, nl=False)
+        else:
             app.console.print(table)
         if dry_run:
             return
         expect_fingerprint = preview.fingerprint
     if not yes and not click.confirm(
-        f"Replace the ledger in {ledger.parent} with {shown}{when}? The current ledger is backed up first."
+        f"Replace the ledger in {ledger.parent} with {shown}{when}? The current ledger is backed up first.",
+        err=as_json,
     ):
         return
     try:
