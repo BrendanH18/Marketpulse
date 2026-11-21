@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from hashlib import file_digest
+from hashlib import file_digest, sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -150,6 +150,7 @@ class RestoreError(RuntimeError):
 # `meta` key that changes on every restore. Work that read the ledger before a restore must not
 # write what it derived from it into the restored one (see Store.restored_since).
 RESTORE_ID_KEY = "restore_id"
+LEGACY_JSON_MIGRATED_KEY = "legacy_json_migrated"
 
 # Tables every MarketPulse database has had since the baseline; a file without them isn't one.
 _CORE_TABLES = frozenset({"meta", "accounts", "transactions"})
@@ -274,13 +275,15 @@ class RestorePreview:
     fingerprint: str
 
 
-def _staged_fingerprint(path: Path) -> str:
+def _restore_fingerprint(path: Path, live_revision: str) -> str:
     with path.open("rb") as database:
-        return file_digest(database, "sha256").hexdigest()
+        digest = file_digest(database, "sha256")
+    digest.update(live_revision.encode())
+    return digest.hexdigest()
 
 
 @contextmanager
-def _prepared_restore(current: Path, source: Path, fingerprint: str | None = None) -> Iterator[Path]:
+def _prepared_restore(current: Path, source: Path) -> Iterator[Path]:
     if not source.is_file():
         raise RestoreError(f"{source} doesn't exist or isn't a file.")
     if source.resolve() == current.resolve():
@@ -289,24 +292,47 @@ def _prepared_restore(current: Path, source: Path, fingerprint: str | None = Non
         staged = Path(scratch) / "marketpulse.db"
         try:
             _stage_restore(source, staged)
-            if fingerprint is not None and _staged_fingerprint(staged) != fingerprint:
-                raise RestoreError(f"{source.name} changed since the preview. Preview it again before restoring.")
         except (OSError, sqlite3.Error) as e:
             raise RestoreError(f"{source.name} couldn't be prepared for restore: {e}") from e
         yield staged
 
 
-def _ledger_summary(path: Path) -> LedgerSummary:
-    with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as conn:
-        row = conn.execute("SELECT (SELECT COUNT(*) FROM accounts), COUNT(*), MAX(date) FROM transactions").fetchone()
-        return LedgerSummary(*row)
+def _ledger_summary(conn: sqlite3.Connection) -> LedgerSummary:
+    row = conn.execute("SELECT (SELECT COUNT(*) FROM accounts), COUNT(*), MAX(date) FROM transactions").fetchone()
+    return LedgerSummary(*row)
+
+
+def _restore_revision(conn: sqlite3.Connection | None) -> str:
+    """Hash the saved portfolio and alert state, ignoring caches and routine run logs."""
+    digest = sha256()
+    if conn is None:
+        return digest.hexdigest()
+    for table, query in (
+        ("meta", "SELECT value FROM meta WHERE key = ?"),
+        ("accounts", "SELECT * FROM accounts ORDER BY id"),
+        ("transactions", "SELECT * FROM transactions ORDER BY id"),
+        ("assets", "SELECT * FROM assets ORDER BY symbol"),
+        ("watchlist", "SELECT * FROM watchlist ORDER BY symbol"),
+        ("alerts", "SELECT * FROM alerts ORDER BY id"),
+        ("snapshots", "SELECT * FROM snapshots ORDER BY date"),
+        ("room", "SELECT * FROM room ORDER BY account_type"),
+        ("targets", "SELECT * FROM targets ORDER BY bucket"),
+    ):
+        rows = conn.execute(query, (RESTORE_ID_KEY,) if table == "meta" else ())
+        columns = [column[0] for column in rows.description]
+        for row in rows:
+            # Adding an unset nullable column (such as assets.foreign_property) during
+            # startup migration leaves the user's data unchanged.
+            values = {column: value for column, value in zip(columns, row, strict=True) if value is not None}
+            digest.update(json.dumps([table, values], sort_keys=True).encode())
+            digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def _preview_copy(source: Path, directory: Path) -> Path:
     """Keep SQLite sidecars in scratch, including when it recovers a WAL."""
     source = source.resolve(strict=True)
     directory.mkdir()
-    target = directory / source.name
     files = [source, Path(f"{source}-wal"), Path(f"{source}-journal")]
 
     def revisions() -> dict[Path, tuple[int, int, int, int]]:
@@ -322,15 +348,55 @@ def _preview_copy(source: Path, directory: Path) -> Path:
         return result
 
     # Copy a stable set of files. A concurrent write/checkpoint invalidates the copy.
-    before = revisions()
-    for path in before:
-        shutil.copyfile(path, directory / path.name)
-    if before != revisions():
-        raise RestoreError(f"{source.name} changed during preview. Please try again.")
-    return target
+    for attempt in range(3):
+        snapshot = directory / str(attempt)
+        snapshot.mkdir()
+        before = revisions()
+        try:
+            for path in before:
+                shutil.copyfile(path, snapshot / path.name)
+        except FileNotFoundError:
+            continue  # SQLite can remove a sidecar after a checkpoint.
+        if source in before and before == revisions():
+            return snapshot / source.name
+    raise RestoreError(f"Couldn't get a consistent copy of {source.name}. Please try again.")
 
 
-def preview_restore(current: Path, source: Path) -> RestorePreview:
+def _check_restore_ready(conn: sqlite3.Connection | None, directory: Path) -> None:
+    # Finish startup migrations before confirming so a restore never has to run them.
+    if conn is not None:
+        if conn.execute("PRAGMA user_version").fetchone()[0] != latest_version():
+            raise RestoreError("Open the ledger with this version of MarketPulse, then preview again.")
+        if conn.execute("SELECT 1 FROM meta WHERE key = ?", (LEGACY_JSON_MIGRATED_KEY,)).fetchone():
+            return
+    if next(_legacy_portfolios(directory), None) is not None:
+        raise RestoreError("Open MarketPulse to import the legacy portfolio, then preview again.")
+
+
+def _current_restore_state(current: Path, scratch: Path, *, confirming: bool = False) -> tuple[LedgerSummary, str]:
+    if not current.exists():
+        if confirming:
+            _check_restore_ready(None, current.parent)
+        return LedgerSummary(0, 0, None), _restore_revision(None)
+    copy = _preview_copy(current, scratch / "current")
+    with closing(sqlite3.connect(f"{copy.as_uri()}?mode=ro", uri=True)) as conn:
+        if confirming:
+            _check_restore_ready(conn, current.parent)
+        return _ledger_summary(conn), _restore_revision(conn)
+
+
+def _check_restore_preview(current: Path, staged: Path, fingerprint: str) -> str:
+    try:
+        with TemporaryDirectory(prefix="marketpulse-preview-") as scratch:
+            _, live_revision = _current_restore_state(current, Path(scratch), confirming=True)
+        if _restore_fingerprint(staged, live_revision) != fingerprint:
+            raise RestoreError("The backup or ledger changed since the preview. Preview again before restoring.")
+        return live_revision
+    except (OSError, sqlite3.Error) as error:
+        raise RestoreError(str(error)) from error
+
+
+def preview_restore(current: Path, source: Path, *, require_ready: bool = False) -> RestorePreview:
     """Read both summaries without running startup maintenance on the live database."""
     try:
         if current.exists() and source.is_file() and current.samefile(source):
@@ -338,10 +404,10 @@ def preview_restore(current: Path, source: Path) -> RestorePreview:
         with TemporaryDirectory(prefix="marketpulse-preview-") as scratch:
             staged = Path(scratch) / "checked.db"
             _stage_restore(_preview_copy(source, Path(scratch) / "backup"), staged)
-            before = LedgerSummary(0, 0, None)
-            if current.exists():
-                before = _ledger_summary(_preview_copy(current, Path(scratch) / "current"))
-            return RestorePreview(before, _ledger_summary(staged), _staged_fingerprint(staged))
+            before, live_revision = _current_restore_state(current, Path(scratch), confirming=require_ready)
+            with closing(sqlite3.connect(f"{staged.as_uri()}?mode=ro", uri=True)) as conn:
+                saved = _ledger_summary(conn)
+            return RestorePreview(before, saved, _restore_fingerprint(staged, live_revision))
     except (OSError, sqlite3.Error) as error:
         raise RestoreError(str(error)) from error
 
@@ -578,13 +644,15 @@ class Store:
 
     @classmethod
     def restore_previewed(cls, source: Path, fingerprint: str) -> tuple[Path, LedgerSummary]:
-        """Verify the copy before opening the default ledger. Restore takes its own safety backup."""
+        """Check both inputs before opening the ledger, then check the ledger again under the write lock."""
         current = data_dir(create=False) / "marketpulse.db"
-        with _prepared_restore(current, source, fingerprint) as staged, closing(cls()) as store:
-            safety = store._restore_staged(source, staged)
-            return safety, _ledger_summary(store.path)
+        with _prepared_restore(current, source) as staged:
+            live_revision = _check_restore_preview(current, staged, fingerprint)
+            with closing(cls()) as store:
+                safety = store._restore_staged(source, staged, live_revision)
+                return safety, _ledger_summary(store._conn)
 
-    def _restore_staged(self, source: Path, staged: Path) -> Path:
+    def _restore_staged(self, source: Path, staged: Path, live_revision: str | None = None) -> Path:
         try:
             Store(staged).close()  # brings the copy up to this build's schema
         except (SchemaError, sqlite3.Error) as e:
@@ -598,6 +666,8 @@ class Store:
             step = "lock"
             try:
                 with self.transaction():
+                    if live_revision is not None and _restore_revision(self._conn) != live_revision:
+                        raise RestoreError("The ledger changed since the preview. Preview again before restoring.")
                     step = "safety"
                     safety = self.backup(reason="pre-restore")
                     step = "swap"
@@ -1184,6 +1254,16 @@ class Store:
 # ── Legacy JSON migration ─────────────────────────────────────────────────────
 
 
+def _legacy_portfolios(directory: Path) -> Iterator[tuple[Path, dict]]:
+    for path in sorted(directory.glob("*.json")):
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and "positions" in data:
+            yield path, data
+
+
 def migrate_legacy_json(store: Store, directory: Path) -> list[str]:
     """Import pre-SQLite portfolio files (schema 1 and 2) as accounts, once.
 
@@ -1191,17 +1271,11 @@ def migrate_legacy_json(store: Store, directory: Path) -> list[str]:
     matching sell are closed with a zero-gain SELL at average cost, so the
     replayed ledger matches what the old app showed.
     """
-    if store.get_meta("legacy_json_migrated") is not None:
+    if store.get_meta(LEGACY_JSON_MIGRATED_KEY) is not None:
         return []
     imported = []
     watch: list[str] = []
-    for path in sorted(directory.glob("*.json")):
-        try:
-            data = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(data, dict) or "positions" not in data:
-            continue
+    for path, data in _legacy_portfolios(directory):
         name = str(data.get("name") or path.stem)
         name = "Main" if name == "default" else name
         currency = str(data.get("currency") or "CAD").upper()
@@ -1268,5 +1342,5 @@ def migrate_legacy_json(store: Store, directory: Path) -> list[str]:
         store.add_watch(watch)
     elif not store.watchlist() and not store.accounts():
         store.add_watch(DEFAULT_WATCHLIST)
-    store.set_meta("legacy_json_migrated", json.dumps(imported))
+    store.set_meta(LEGACY_JSON_MIGRATED_KEY, json.dumps(imported))
     return imported

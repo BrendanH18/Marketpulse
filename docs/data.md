@@ -127,7 +127,8 @@ In the Mac app, open **Automation › Backups** and choose **Restore…** next t
 Review the current ledger and backup account counts, transaction counts, and latest
 transaction dates before confirming. Account counts include archived accounts.
 If the backup fails validation, the app shows the error and keeps Restore unavailable.
-If the backup changes while the preview is open, open the preview again before restoring.
+If the backup or current portfolio changes while the preview is open, choose **Preview again**
+before restoring.
 From the command line:
 
 ```bash
@@ -143,6 +144,9 @@ count, and latest transaction date with your current ledger. A dash means there
 are no transactions. If there is no current database, the current counts are zero.
 The preview runs the backup integrity and version checks and skips startup
 maintenance, so it creates no daily or pre-restore backup.
+The interactive CLI shows the comparison and checks for changes while its confirmation
+prompt is open. If it asks you to upgrade the ledger or import a legacy portfolio,
+open MarketPulse with the current version before retrying the restore.
 
 A restore:
 

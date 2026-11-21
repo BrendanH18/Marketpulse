@@ -42,9 +42,10 @@ The proposed plan for December 2026 to May 2027 is in
    pass, and the #25 threat model (March to April).
 5. Broker imports and walkthroughs with real users (April to May).
 
-Until the maintainer approves the plan and files its issues, there's no open
-issue outside Later: ask the maintainer before starting work. The plan proposes
-pausing bulk "N improvements" batches and new `report`/`summarize` datasets.
+The 3.2.0 work starts with [#193](https://github.com/BrendanH18/Marketpulse/issues/193),
+which guards a backup restore against edits after the preview. File the remaining
+work as scoped issues before starting it. Bulk "N improvements" batches and
+new `report`/`summarize` datasets are paused for this milestone.
 
 ## Later
 

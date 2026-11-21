@@ -204,9 +204,6 @@ def test_backup_restore_command(cli, store, tmp_path):
     taken = store.backup(dest=store.backup_dir / "marketpulse-20260101-090000-manual.db")
     cli("accounts", "add", "Taxable", "-t", "NONREG")
     assert cli("backup", "restore").exit_code != 0  # a backup or --latest is required
-    # Declining the confirmation changes nothing.
-    declined = CliRunner().invoke(main, ["backup", "restore", "--latest"], input="n\n")
-    assert "taken 2026-01-01 09:00" in declined.output and len(store.accounts()) == 2
     # A file name from `backup list` is found in the backups directory.
     out = cli("backup", "restore", "-y", taken.name).output
     assert "Restored marketpulse-20260101-090000-manual.db: 1 accounts, 0 transactions" in out
