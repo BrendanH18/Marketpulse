@@ -35,6 +35,26 @@ The seeded ledger has two active accounts (**Everyday TFSA**, **Cash Account**),
 archived **Old RRSP** that still holds MSFT, buys, a sell, a deposit, a fee, a
 dividend, a 2:1 split, an always-firing AAPL alert, and a watchlist (NVDA, VFV.TO).
 
+## 3.2.0 CLI upgrade and rollback rehearsal
+
+In a Boat sandbox, from the 3.2.0 candidate checkout, install both CLIs into
+separate environments and run the rehearsal.
+
+```bash
+git worktree add --detach ../marketpulse-310 v3.1.0
+uv sync --locked --no-dev --python 3.11 --project ../marketpulse-310
+uv sync --locked --python 3.11
+uv run --locked python scripts/check_upgrade_rollback.py \
+  ../marketpulse-310/.venv/bin/marketpulse .venv/bin/marketpulse
+```
+
+The script creates and cleans up its own temporary data and settings. It
+checks that the migration preserves positions, cash, transaction history and
+tax dispositions, then restores the automatic pre-upgrade backup into a
+clean directory using 3.1.0. Record the output on
+[the rehearsal issue](https://github.com/BrendanH18/Marketpulse/issues/197). See the
+[rollback instructions](data.md#roll-back-from-320-to-310) for an existing ledger.
+
 ## Checklist
 
 Record PASS / FAIL / UNVERIFIED for each item, with what you actually saw (quote

@@ -187,6 +187,47 @@ Legacy MarketPulse 0.1 JSON portfolios in the data directory are imported
 automatically when eligible on first startup. The original JSON files are
 left untouched. Keep a copy of the original data and review the imported ledger.
 
+### Roll back from 3.2.0 to 3.1.0
+
+On first open of an existing 3.1.0 ledger, 3.2.0 creates a `pre-v3` backup in
+the ledger's `backups/` directory before migrating it. Look for
+`marketpulse-<timestamp>-pre-v3.db`. Restoring it recovers the ledger as it was
+before the upgrade. Keep the upgraded ledger to retain any later changes.
+
+First check the backup in a separate, empty data directory. Run these commands
+with the absolute paths to your 3.1.0 executable and the backup.
+
+```bash
+(
+  set -e
+  cli=/absolute/path/to/marketpulse-3.1.0/bin/marketpulse
+  if [ "$("$cli" --version)" != 'MarketPulse, version 3.1.0' ]; then
+    printf 'Use the MarketPulse 3.1.0 CLI to check this backup.\n' >&2
+    exit 1
+  fi
+  recovery_dir=$(mktemp -d)
+  export MARKETPULSE_DATA="$recovery_dir"
+  export MARKETPULSE_CONFIG="$recovery_dir/config.toml"
+  # If needed, copy your saved config to "$MARKETPULSE_CONFIG" here.
+  "$cli" backup restore /absolute/path/to/marketpulse-YYYYMMDD-HHMMSS-pre-v3.db --yes
+  "$cli" cash
+  "$cli" positions
+  "$cli" export
+  "$cli" tax --year 2025  # substitute a year with taxable sales
+  printf 'Recovered ledger: %s\n' "$recovery_dir"
+)
+```
+
+To roll back in place after verifying the backup, quit the Mac app and TUI
+and stop any scheduled MarketPulse jobs. Move the upgraded `marketpulse.db`
+and any `marketpulse.db-wal`, `marketpulse.db-shm` or `marketpulse.db-journal`
+files together to a private safekeeping directory. Copy the verified
+pre-upgrade backup into the original data directory
+as `marketpulse.db` with owner-only read and write permissions (`0600`). Then
+open it with 3.1.0. The 3.1.0 CLI's `backup restore` opens the destination
+ledger first, so it refuses an in-place restore while the schema 3 ledger is
+still there.
+
 ## Sharing diagnostics
 
 Use fictional or redacted records in issues. Remove account names, transaction
