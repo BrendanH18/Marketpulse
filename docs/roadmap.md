@@ -10,29 +10,41 @@ correctness**; the decisions behind the app are in the [App 1.0 plan](app-plan.m
 **GitHub issues are the source of truth** for agents and humans. This page is a
 pointer: claim and track work on the issues themselves.
 
-## Status (2026-11-18)
+## Status (2026-11-20)
 
-App 1.0 is out.
-
-- **Published:** [v3.0.0](https://github.com/BrendanH18/Marketpulse/releases/tag/v3.0.0)
-  (2026-11-14), the first release with the Mac app: a DMG and a zip for Apple
-  silicon and Intel, the wheel and sdist, the one-line installer and `SHA256SUMS`.
-  The maintainer installed the published release on a Mac, confirmed it works, and
-  closed the app epic [#32](https://github.com/BrendanH18/Marketpulse/issues/32) on
-  that basis. The [QA checklist](qa.md) was not completed for this release: the
-  partial table on #32 has item 10 passing and items 1 and 12–27 unverified.
-- **3.1.0** includes sale-date validation for manual and imported transactions
-  ([#149](https://github.com/BrendanH18/Marketpulse/issues/149)), expanded offline
-  CLI discovery, terminal app improvements, and backup integrity checks.
-  Follow [#169](https://github.com/BrendanH18/Marketpulse/issues/169) for release
-  status and see the [changelog](../CHANGELOG.md#310---2026-11-18) for the
-  full list.
+- **Published:** [v3.1.0](https://github.com/BrendanH18/Marketpulse/releases/tag/v3.1.0)
+  (2026-11-19) is the latest release, after
+  [v3.0.0](https://github.com/BrendanH18/Marketpulse/releases/tag/v3.0.0)
+  (2026-11-14), the first with the Mac app. The maintainer confirmed the
+  published 3.0.0 works on a Mac and closed the app epic
+  [#32](https://github.com/BrendanH18/Marketpulse/issues/32). No release has
+  completed the [QA checklist](qa.md): the [2026-11-20 UI audit](ui-audit-2026-11-20.md)
+  left 17 of 28 items unverified, including the clean install.
+- **Unreleased on `main`:** backup restore preview (#171, #173), `backup verify
+  --all` (#176), automation history (#180, schema version 2), the T1135 estimate
+  (#179, schema version 3), and privacy, search and recovery fixes (#186). An
+  older app refuses a ledger migrated to a newer schema, so the next release needs
+  an upgrade and rollback rehearsal. See the [changelog](../CHANGELOG.md#unreleased).
 - **Dropped:** Windows. The maintainer decided on 2026-11-14 to support macOS and
   Linux only ([#150](https://github.com/BrendanH18/Marketpulse/issues/150)).
 
 ## Next
 
-**Choose further work from what people run into** when using the released app.
+The proposed plan for December 2026 to May 2027 is in
+[plan-2026-12-to-2027-05.md](plan-2026-12-to-2027-05.md). It covers five themes:
+
+1. Release 3.2.0 and close safety gaps: restore confirmation that checks the live
+   ledger, private file permissions, and the 2027 TFSA limit (December).
+2. Tax and contribution-room correctness, released before tax slips arrive
+   (January to mid February).
+3. Mac app parity and resilience (February to March).
+4. Trust in the release: a decision on signing, attested artifacts, a complete QA
+   pass, and the #25 threat model (March to April).
+5. Broker imports and walkthroughs with real users (April to May).
+
+Until the maintainer approves the plan and files its issues, there's no open
+issue outside Later: ask the maintainer before starting work. The plan proposes
+pausing bulk "N improvements" batches and new `report`/`summarize` datasets.
 
 ## Later
 
@@ -51,8 +63,11 @@ App 1.0 is out.
 | CLI and TUI module splits | #24 |
 | Mac app: Phases 1 and 2 of the plan, and French (Canada) | #31, #33–#46, #55 |
 | App 1.0 for macOS, released as v3.0.0 | #32, #152 |
-| Offline CLI inspection, `report` and `summarize` (57 datasets, 197 shared operations) | 20 issues from #104 to #143, #145 and #153 |
+| Offline CLI inspection, `report` and `summarize` (64 datasets, 197 shared operations) | 20 issues from #104 to #143, #145, #153, #162 and PR #191 |
 | New and imported sales checked at their date | #149 |
+| MarketPulse 3.1.0 | #169 |
+| Backup restore preview and verification (unreleased) | #171, #173, #176 |
+| Automation history and T1135 estimate (unreleased) | #179, #180 |
 
 ## Closed as not planned
 
