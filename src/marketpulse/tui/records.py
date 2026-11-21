@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import replace
+from functools import partial
 from typing import TYPE_CHECKING
 
 from textual.widgets import DataTable
@@ -92,10 +93,13 @@ def action_edit(app: MarketPulseApp) -> None:
                 lambda edited: app._txn_done(edited, restore_id, seen),
             )
     elif ws == "tax":
+        tracker = app.tracker
+        restore_id = tracker.store.restore_id
         key = app._selected_key(app.query_one("#accounts-table", DataTable))
-        acct = app.tracker.store.get_account(int(key)) if key else None
+        acct = tracker.store.get_account(int(key)) if key else None
         if acct:
-            app.push_screen(AccountForm(acct, app.tracker.base), app._account_done)
+            save = partial(tracker.update_account, restore_id=restore_id, revision=acct.revision(restore_id))
+            app.push_screen(AccountForm(tracker.base, save, acct), app._account_done)
 
 
 def selected_transaction(app: MarketPulseApp) -> Transaction | None:
@@ -221,24 +225,8 @@ def _delete_txn(app: MarketPulseApp, txn_id: int, restore_id: str, revision: str
 
 
 def action_new_account(app: MarketPulseApp) -> None:
-    app.push_screen(AccountForm(None, app.tracker.base), app._account_done)
-
-
-def _account_done(app: MarketPulseApp, account) -> None:
-    if account is None:
-        return
-    store = app.tracker.store
-    try:
-        if account.id is None:
-            store.add_account(account)
-            message = f"Added account {account.name}"
-        else:
-            store.update_account(account)
-            message = f"Updated {account.name}"
-    except ValueError as e:
-        app.notify(str(e), severity="error")
-        return
-    app.after_change(message)
+    tracker = app.tracker
+    app.push_screen(AccountForm(tracker.base, tracker.store.add_account), app._account_done)
 
 
 def action_add_asset(app: MarketPulseApp) -> None:

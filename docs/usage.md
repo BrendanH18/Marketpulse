@@ -62,6 +62,9 @@ Press `r` to retry a failed portfolio, income or tax load.
 
 ## Accounts and transactions
 
+If a terminal account save fails, the form keeps your entries and shows the error.
+Address the error, then press `Ctrl+S` or select **Save** to try again.
+
 Create accounts before recording transactions. Names, IDs, and account types
 can be used with `--account`; a type must resolve to a single account.
 If you have one account, you can omit the option. With several accounts, set a

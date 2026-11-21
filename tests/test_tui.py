@@ -2,13 +2,16 @@
 
 import asyncio
 import sqlite3
+from contextlib import closing
+from dataclasses import replace
 from threading import Event
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import DataTable, Input
+from textual.widgets import DataTable, Input, Static, Switch
 
 from marketpulse import fmt
+from marketpulse.db import Store
 from marketpulse.market import MarketError
 from marketpulse.models import Account, Asset, AssetKind, Transaction, TxnType
 from marketpulse.tax import TaxReport
@@ -244,6 +247,72 @@ def test_account_archive_toggle_and_manual_value_validation(tracker, store):
             await app.workers.wait_for_complete()
             marks = [t for t in store.transactions() if t.type is TxnType.VALUATION]
             assert len(marks) == 1 and marks[0].price == 600000
+
+    run(scenario())
+
+
+@pytest.mark.parametrize("editing", [False, True], ids=["create", "edit"])
+def test_account_form_keeps_values_after_failed_save_and_retries(tracker, store, editing):
+    original = store.add_account(Account(name="Original account"))
+
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("7")
+            await app.workers.wait_for_complete()
+            await pilot.press("e" if editing else "n")
+            form = app.screen
+            assert isinstance(form, AccountForm)
+            name = form.query_one("#a-name", Input)
+            institution = form.query_one("#a-institution", Input)
+            cash = form.query_one("#a-cash", Switch)
+            name.value = "Fictional account"
+            institution.value = "Fictional institution"
+            cash.value = True
+
+            with patch.object(store, "_exec", side_effect=sqlite3.OperationalError("database is locked")):
+                await pilot.press("ctrl+s")
+
+            assert app.screen is form
+            error = form.query_one("#form-error", Static)
+            assert "database is locked" in str(error.content) and "try saving again" in str(error.content)
+            assert form.query_one(".modal").scrollable_content_region.contains_region(error.region)
+            assert (name.value, institution.value, cash.value) == ("Fictional account", "Fictional institution", True)
+            assert store.accounts() == [original]
+
+            await pilot.press("ctrl+s")
+            await app.workers.wait_for_complete()
+            assert app.screen is not form
+            saved = store.get_account("Fictional account")
+            assert saved is not None and saved.institution == "Fictional institution" and saved.track_cash
+            assert len(store.accounts()) == (1 if editing else 2)
+            assert (saved.id == original.id) == editing
+
+    run(scenario())
+
+
+def test_account_form_preserves_concurrent_edit(tracker, store):
+    original = store.add_account(Account(name="Original account"))
+    concurrent = replace(original, name="Changed elsewhere")
+
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.press("7", "e")
+            await app.workers.wait_for_complete()
+            form = app.screen
+            assert isinstance(form, AccountForm)
+            name = form.query_one("#a-name", Input)
+            name.value = "Pending edit"
+            with closing(Store(store.path)) as other:
+                other.update_account(concurrent)
+
+            await pilot.press("ctrl+s")
+            assert app.screen is form and name.value == "Pending edit"
+            assert "reopen the form" in str(form.query_one("#form-error", Static).content)
+            assert store.accounts() == [concurrent]
 
     run(scenario())
 

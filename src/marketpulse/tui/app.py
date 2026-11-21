@@ -910,8 +910,9 @@ class MarketPulseApp(App):
     def action_new_account(self) -> None:
         records.action_new_account(self)
 
-    def _account_done(self, account) -> None:
-        records._account_done(self, account)
+    def _account_done(self, message: str | None) -> None:
+        if message is not None:
+            self.after_change(message)
 
     def action_add_asset(self) -> None:
         records.action_add_asset(self)
