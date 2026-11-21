@@ -145,9 +145,12 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     archived account), the current ledger has one more transaction, and the dates match
     the latest entry in each ledger. The preview says your current portfolio is saved
     first. **Cancel** keeps the deposit and creates no pre-restore backup. Open the
-    preview again and confirm. The window reloads, says "Restored the backup from
+    preview again. With the QA CLI pointed at the same scratch ledger, edit the
+    deposit amount and confirm in the app. The app asks you to preview again, the
+    edit is retained, and there is no pre-restore backup. Choose **Preview again**
+    and confirm. The window reloads, says "Restored the backup from
     <date>…", the deposit is gone from Activity, and a "Before a restore" backup is now
-    first in the list. Restore that one and check the deposit is back. In the scratch
+    first in the list. Restore that one and check the edited deposit is back. In the scratch
     `data/backups` folder only, create `marketpulse-20000101-000000-manual.db` containing
     plain text, refresh, and select **Restore…** on that backup. The preview shows the
     validation error, Restore is unavailable, and **Cancel** closes the preview. In

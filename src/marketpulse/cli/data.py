@@ -1121,7 +1121,10 @@ def backup_restore(
         fail("Give a backup to restore, or --latest.")
     # Opening the ledger may take the daily backup, a copy of the ledger as it is now.
     started = datetime.now().replace(microsecond=0)
-    ledger = data_dir(create=False) / "marketpulse.db" if dry_run or expect_fingerprint is not None else app.store.path
+    if dry_run or not yes or expect_fingerprint is not None:
+        ledger = data_dir(create=False) / "marketpulse.db"
+    else:
+        ledger = app.store.path
     directory = ledger.parent / BACKUP_DIRNAME
     if latest:
         candidates = _restore_candidates(directory, started)
@@ -1138,13 +1141,13 @@ def backup_restore(
     when = f" (taken {taken:%Y-%m-%d %H:%M})" if taken else ""
     # A file outside the backups folder is shown in full, so it can't pass for one in it.
     shown = source.name if source.parent == directory else str(source.resolve())
-    if dry_run:
+    if dry_run or (not yes and expect_fingerprint is None):
         try:
             preview = preview_restore(ledger, source)
         except RestoreError as e:
             fail(str(e))
         current, saved = preview.current, preview.backup
-        if as_json:
+        if dry_run and as_json:
             click.echo(
                 json.dumps(
                     {
@@ -1157,13 +1160,16 @@ def backup_restore(
                 )
             )
             return
-        click.echo(f"Restore preview: {shown}{when}")
-        table = render.table("Metric", "Current", "Backup")
-        table.add_row("Accounts", str(current.accounts), str(saved.accounts))
-        table.add_row("Transactions", str(current.transactions), str(saved.transactions))
-        table.add_row("Latest transaction date", Text(current.latest_date or "—"), Text(saved.latest_date or "—"))
-        app.console.print(table)
-        return
+        if not as_json:
+            click.echo(f"Restore preview: {shown}{when}")
+            table = render.table("Metric", "Current", "Backup")
+            table.add_row("Accounts", str(current.accounts), str(saved.accounts))
+            table.add_row("Transactions", str(current.transactions), str(saved.transactions))
+            table.add_row("Latest transaction date", Text(current.latest_date or "—"), Text(saved.latest_date or "—"))
+            app.console.print(table)
+        if dry_run:
+            return
+        expect_fingerprint = preview.fingerprint
     if not yes and not click.confirm(
         f"Replace the ledger in {ledger.parent} with {shown}{when}? The current ledger is backed up first."
     ):

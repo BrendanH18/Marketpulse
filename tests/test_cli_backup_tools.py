@@ -4,15 +4,16 @@ import json
 import os
 import re
 import sqlite3
-from contextlib import closing
+from contextlib import closing, contextmanager
 from hashlib import sha256
 
 import pytest
 from click.testing import CliRunner
 
 from marketpulse.cli import main
-from marketpulse.db import Store, latest_version
-from marketpulse.models import Account, Transaction, TxnType
+from marketpulse.config import data_dir
+from marketpulse.db import SCHEMA, Store, latest_version
+from marketpulse.models import Account, Alert, Transaction, TxnType
 
 
 @pytest.fixture
@@ -374,3 +375,141 @@ def test_restore_refuses_replacement_backup_after_desktop_preview(tmp_path):
         assert restored.exit_code == 0, restored.output
         assert [t.amount for t in live.transactions()] == [40]
         assert any(live.backup_reason(path) == "pre-restore" for path in live.backups())
+
+
+@pytest.mark.parametrize("edit_at_lock", [False, True])
+def test_desktop_restore_rejects_live_edit_and_accepts_new_preview(tmp_path, monkeypatch, edit_at_lock):
+    runner = CliRunner()
+    with closing(Store()) as live:
+        account = live.add_account(Account(name="Fictional Maple"))
+        source = live.backup(dest=tmp_path / "selected.db")
+        live.add_transaction(Transaction(account.saved_id, TxnType.DEPOSIT, date="2024-01-02", amount=40))
+
+        def preview():
+            result = runner.invoke(main, ["desktop", "restore-preview", "--", str(source)], catch_exceptions=False)
+            assert result.exit_code == 0, result.output
+            return json.loads(result.stdout)
+
+        def restore(fingerprint):
+            args = ["backup", "restore", "--yes", "--expect-fingerprint", fingerprint, "--", str(source)]
+            return runner.invoke(main, args, catch_exceptions=False)
+
+        def edit():
+            with closing(sqlite3.connect(live.path)) as other, other:
+                other.execute("UPDATE transactions SET amount = 80")
+
+        first = preview()
+        before = live.backups()
+        with monkeypatch.context() as patch:
+            if edit_at_lock:
+                transaction = Store.transaction
+
+                @contextmanager
+                def edit_before_lock(store):
+                    if store.path == live.path:
+                        edit()
+                    with transaction(store):
+                        yield
+
+                patch.setattr(Store, "transaction", edit_before_lock)
+            else:
+                edit()
+            rejected = restore(first["fingerprint"])
+        assert rejected.exit_code == 1
+        assert "changed since the preview" in rejected.stderr
+        assert [t.amount for t in live.transactions()] == [80]
+        assert live.backups() == before
+
+        fresh = preview()
+        assert fresh["current"] == first["current"]
+        # Periodic refreshes shouldn't make a new preview stale.
+        live.record_automation_run({"fictional": True})
+        restored = restore(fresh["fingerprint"])
+        assert restored.exit_code == 0, restored.output
+        assert live.transactions() == []
+        (safety,) = live.backups()
+        assert live.backup_reason(safety) == "pre-restore"
+        with closing(Store(safety)) as previous:
+            assert [t.amount for t in previous.transactions()] == [80]
+
+
+def test_interactive_restore_checks_confirmation_without_startup_maintenance(monkeypatch):
+    runner = CliRunner()
+    with closing(Store()) as live:
+        account = live.add_account(Account(name="Fictional Maple"))
+        live.add_transaction(Transaction(account.saved_id, TxnType.DEPOSIT, date="2024-01-02", amount=40))
+        for day in range(1, 15):
+            live.backup(dest=live.backup_dir / f"marketpulse-202401{day:02d}-090000-daily.db")
+        before = live.backups()
+        declined = runner.invoke(main, ["backup", "restore", "--latest"], input="n\n", catch_exceptions=False)
+        assert declined.exit_code == 0
+        assert "taken 2024-01-14 09:00" in declined.output
+        assert [t.amount for t in live.transactions()] == [40]
+        assert live.backups() == before
+
+        def confirm(_prompt):
+            with closing(Store(live.path)) as other:
+                other.add_transaction(Transaction(account.saved_id, TxnType.DEPOSIT, date="2024-01-03", amount=60))
+            return True
+
+        monkeypatch.setattr("marketpulse.cli.data.click.confirm", confirm)
+        rejected = runner.invoke(main, ["backup", "restore", before[-1].name], catch_exceptions=False)
+        assert rejected.exit_code == 1
+        assert "Restore preview" in rejected.stdout
+        assert "changed since the preview" in rejected.stderr
+        assert [t.amount for t in live.transactions()] == [40, 60]
+        assert live.backups() == before
+
+
+def test_restore_confirmation_protects_a_manual_alert_rearm(tmp_path):
+    runner = CliRunner()
+    with closing(Store()) as live:
+        alert = live.add_alert(Alert("MAPLE.TO", "above", 50, triggered_at="2025-01-01T12:00:00"))
+        source = live.backup(dest=tmp_path / "selected.db")
+        preview = runner.invoke(main, ["desktop", "restore-preview", "--", str(source)], catch_exceptions=False)
+        assert preview.exit_code == 0, preview.output
+        assert runner.invoke(main, ["alerts", "rearm", str(alert.saved_id)], catch_exceptions=False).exit_code == 0
+        fingerprint = json.loads(preview.stdout)["fingerprint"]
+        args = ["backup", "restore", "--yes", "--expect-fingerprint", fingerprint, "--", str(source)]
+        result = runner.invoke(main, args, catch_exceptions=False)
+        assert result.exit_code == 1
+        assert "changed since the preview" in result.stderr
+        assert live.alerts()[0].triggered_at == ""
+
+
+def test_restore_confirmation_leaves_a_legacy_live_ledger_unmodified(tmp_path):
+    path = data_dir() / "marketpulse.db"
+    with closing(sqlite3.connect(path)) as legacy:
+        legacy.executescript(SCHEMA)
+        legacy.execute("PRAGMA user_version = 1")
+    source = tmp_path / "selected.db"
+    with closing(Store(source)) as saved:
+        saved.add_account(Account(name="Fictional Maple"))
+
+    runner = CliRunner()
+    preview = runner.invoke(main, ["desktop", "restore-preview", "--", str(source)], catch_exceptions=False)
+    assert preview.exit_code == 0, preview.output
+    before = path.read_bytes()
+    fingerprint = json.loads(preview.stdout)["fingerprint"]
+    args = ["backup", "restore", "--yes", "--expect-fingerprint", fingerprint, "--", str(source)]
+    rejected = runner.invoke(main, args, catch_exceptions=False)
+    assert rejected.exit_code == 1
+    assert "Open the ledger with this version" in rejected.stderr
+    assert path.read_bytes() == before
+    assert not (path.parent / "backups").exists()
+
+
+def test_restore_confirmation_waits_for_a_legacy_json_import(tmp_path):
+    directory = data_dir()
+    legacy = directory / "legacy.json"
+    portfolio = '{"name": "Fictional Maple", "positions": {}}'
+    legacy.write_text(portfolio, encoding="utf-8")
+    source = tmp_path / "selected.db"
+    with closing(Store(source)) as backup:
+        backup.set_meta("legacy_json_migrated", "[]")
+
+    result = CliRunner().invoke(main, ["backup", "restore", str(source)], input="y\n", catch_exceptions=False)
+    assert result.exit_code == 1
+    assert "import the legacy portfolio" in result.stderr
+    assert list(directory.iterdir()) == [legacy]
+    assert legacy.read_text(encoding="utf-8") == portfolio
