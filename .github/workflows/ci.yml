@@ -50,26 +50,6 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  quality:
-    if: github.event_name != 'schedule'
-    runs-on: namespace-profile-gitrunner
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          enable-cache: true
-      - name: Install dependencies
-        run: uv sync --locked --dev --python 3.11
-      - name: Lint
-        run: uv run --locked ruff check .
-      - name: Format check
-        run: uv run --locked ruff format --check .
-      - name: Type check
-        run: uv run --locked mypy
-
   test:
     name: Test (Python ${{ matrix.python }}, ${{ matrix.os }})
     if: github.event_name != 'schedule'
@@ -114,72 +94,24 @@ jobs:
       - name: Check core coverage floors
         run: uv run --locked python scripts/check_coverage.py
 
-  package:
-    if: github.event_name != 'schedule'
+  # The quick checks share one runner instead of taking one each: each finishes in seconds, and as
+  # separate jobs they queued for runners behind the longer test jobs. Every check is its own step and
+  # runs even when an earlier one fails, so one run still reports them all.
+  lint:
+    name: Lint, audit and package
     runs-on: namespace-profile-gitrunner
     timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          enable-cache: true
-      - name: Build source distribution and wheel
-        run: uv build --no-sources
-      - name: Verify installed package
-        run: |
-          uv venv --python 3.11 .package-smoke
-          uv pip install --python .package-smoke/bin/python dist/*.whl
-          .package-smoke/bin/marketpulse --help
-          .package-smoke/bin/marketpulse --version
-          .package-smoke/bin/mp --version
-          .package-smoke/bin/python -c 'from importlib.metadata import version; from marketpulse import __version__; assert version("marketpulse") == __version__'
-
-  shellcheck:
-    name: ShellCheck install.sh
-    if: github.event_name != 'schedule'
-    runs-on: namespace-profile-gitrunner
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: ShellCheck
-        run: |
-          shellcheck --version
-          shellcheck scripts/install.sh
-
-  audit:
-    name: Audit uv.lock
-    # Also runs weekly (the schedule above), so a newly published advisory shows up without a code change.
-    runs-on: namespace-profile-gitrunner
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          enable-cache: false # the audit reads uv.lock and installs nothing
-      - name: Check locked dependencies against the OSV advisory database
-        # `uv audit` is a preview command; the flag opts in to it explicitly.
-        run: uv audit --frozen --preview-features audit-command
-
-  changes:
-    # Pull requests build the Mac app only when they touch something it builds or checks.
-    # Pushes to main, manual runs, and the release workflow (workflow_call) always build it.
-    if: github.event_name == 'pull_request'
-    runs-on: namespace-profile-gitrunner
-    timeout-minutes: 5
     outputs:
       menubar: ${{ steps.filter.outputs.menubar }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 2 # the PR's merge commit and its base, to diff against
+          fetch-depth: 2 # on a pull request, its merge commit and its base, to diff against
       - name: Check whether the Mac app is affected
+        # Pull requests build the Mac app only when they touch something it builds or checks.
+        # Pushes to main, manual runs, and the release workflow (workflow_call) always build it.
+        if: github.event_name == 'pull_request'
         id: filter
         run: |
           git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
@@ -201,11 +133,53 @@ jobs:
             echo "menubar=false" >> "$GITHUB_OUTPUT"
             echo "::notice::No Mac app paths changed; skipping the menubar job."
           fi
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: ${{ !cancelled() }}
+        with:
+          enable-cache: ${{ github.event_name != 'schedule' }} # the weekly run only audits uv.lock and installs nothing
+      - name: Audit uv.lock against the OSV advisory database
+        # The only step the weekly schedule runs, so a newly published advisory shows up without a
+        # code change. `uv audit` is a preview command; the flag opts in to it explicitly.
+        if: ${{ !cancelled() }}
+        run: uv audit --frozen --preview-features audit-command
+      - name: ShellCheck install.sh
+        if: ${{ !cancelled() && github.event_name != 'schedule' }}
+        run: |
+          shellcheck --version
+          shellcheck scripts/install.sh
+      - name: Install dependencies
+        id: install
+        if: ${{ !cancelled() && github.event_name != 'schedule' }}
+        run: uv sync --locked --dev --python 3.11
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: uv run --locked ruff check .
+      - name: Format check
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: uv run --locked ruff format --check .
+      - name: Type check
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: uv run --locked mypy
+      - name: Build source distribution and wheel
+        # After the lint steps, which would otherwise also scan the build output and smoke venv.
+        id: build
+        if: ${{ !cancelled() && github.event_name != 'schedule' }}
+        run: uv build --no-sources
+      - name: Verify installed package
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          uv venv --python 3.11 .package-smoke
+          uv pip install --python .package-smoke/bin/python dist/*.whl
+          .package-smoke/bin/marketpulse --help
+          .package-smoke/bin/marketpulse --version
+          .package-smoke/bin/mp --version
+          .package-smoke/bin/python -c 'from importlib.metadata import version; from marketpulse import __version__; assert version("marketpulse") == __version__'
 
   menubar:
-    needs: changes
-    # `changes` runs only on pull requests; !cancelled() keeps its skip from skipping this job.
-    if: ${{ !cancelled() && github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.changes.outputs.menubar == 'true') }}
+    needs: lint
+    # The path check runs only on pull requests. !cancelled() keeps a failed lint step from skipping
+    # this job; it still runs and reports its own result.
+    if: ${{ !cancelled() && github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.lint.outputs.menubar == 'true') }}
     runs-on: namespace-profile-macos
     timeout-minutes: 20
     steps:
@@ -230,11 +204,12 @@ jobs:
 
   # The check the main ruleset requires. A job that a failed job `needs` is skipped, and a skipped
   # required check counts as passing, so this runs always() and fails if any job failed or was
-  # cancelled. Skips are allowed: `changes` runs only on pull requests, `menubar` only when the Mac
-  # app is affected, and the weekly schedule runs only `audit`. The manual desktop benchmark is left out.
+  # cancelled. Skips are allowed: `menubar` runs only when the Mac app is affected (a docs-only pull
+  # request skips it), and the weekly schedule runs only `lint`, for its uv.lock audit. The manual
+  # desktop benchmark is left out.
   ci-passed:
     name: CI passed
-    needs: [quality, test, coverage, package, shellcheck, audit, changes, menubar]
+    needs: [lint, test, coverage, menubar]
     if: always()
     runs-on: namespace-profile-gitrunner
     timeout-minutes: 5

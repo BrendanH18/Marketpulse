@@ -106,10 +106,12 @@ CI runs on [Namespace](https://namespace.so) runners:
 lint, formatting, type checks, Python tests on Linux and macOS, Python distribution
 builds with an installed-wheel smoke check, `shellcheck` on `scripts/install.sh`, `uv audit`
 on `uv.lock` (also weekly, so a new advisory shows up without a code change), and the Swift
-build. On a pull request, the Mac app job (Swift format check, Swift build, bridge check,
-standalone app build) runs only when the PR touches the app's sources, the Swift scripts, the
+build. The quick checks (lint, formatting, type checks, the package build, ShellCheck and the
+audit) are separate steps of one `lint` job, so they don't each wait for a runner of their own.
+On a pull request, the Mac app job (Swift format check, Swift build, bridge check, standalone
+app build) runs only when the PR touches the app's sources, the Swift scripts, the
 scripts it runs, the Python package (anything outside the terminal UI in `tui/`), test fixtures,
-dependencies or the CI workflow; the path list is in the `changes` job of
+dependencies or the CI workflow; the path list is in the `lint` job of
 `.github/workflows/ci.yml`. Pushes to `main` and releases always run it. The **CodeQL**
 workflow scans the Python, Swift and workflow code on pull requests, pushes to `main` and weekly.
 Dependency changes should include the updated `uv.lock`; use `uv lock` and
