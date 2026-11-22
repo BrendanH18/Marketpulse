@@ -121,7 +121,7 @@ jobs:
           # the terminal UI in tui/ is unused), the fixtures the bridge check reads, the bundled
           # backend's dependencies, and this workflow.
           app_paths='^(macos/'
-          app_paths+='|scripts/(build_app\.py|check_native_bridge\.|[^/]+\.swift$)'
+          app_paths+='|scripts/(build_app\.py|check_native_bridge\.|smoke_restore_app\.py|[^/]+\.swift$)'
           app_paths+='|src/marketpulse/'
           app_paths+='|tests/fixtures/'
           app_paths+='|\.swift-format$'
@@ -201,6 +201,10 @@ jobs:
         run: uv run --locked python scripts/check_native_bridge.py
       - name: Build standalone app with bundled backend (signs, verifies, smoke-tests)
         run: uv run --locked python scripts/build_app.py --out "$RUNNER_TEMP/app"
+      - name: Drive the packaged app's restore sheet on a fictional ledger
+        # Cancel and a stale preview must leave the scratch ledger untouched. Needs the GUI session
+        # and Accessibility permission that the Namespace macOS runners give the job's shell.
+        run: uv run --locked python scripts/smoke_restore_app.py --app "$RUNNER_TEMP/app/$(uname -m)/MarketPulse.app"
 
   # The check the main ruleset requires. A job that a failed job `needs` is skipped, and a skipped
   # required check counts as passing, so this runs always() and fails if any job failed or was

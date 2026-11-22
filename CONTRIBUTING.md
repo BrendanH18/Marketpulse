@@ -109,7 +109,8 @@ on `uv.lock` (also weekly, so a new advisory shows up without a code change), an
 build. The quick checks (lint, formatting, type checks, the package build, ShellCheck and the
 audit) are separate steps of one `lint` job, so they don't each wait for a runner of their own.
 On a pull request, the Mac app job (Swift format check, Swift build, bridge check, standalone
-app build) runs only when the PR touches the app's sources, the Swift scripts, the
+app build, and a smoke that drives the packaged app's restore sheet on a fictional ledger) runs
+only when the PR touches the app's sources, the Swift scripts, the
 scripts it runs, the Python package (anything outside the terminal UI in `tui/`), test fixtures,
 dependencies or the CI workflow; the path list is in the `lint` job of
 `.github/workflows/ci.yml`. Pushes to `main` and releases always run it. The **CodeQL**
