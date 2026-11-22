@@ -309,8 +309,9 @@ only a warning. Everything except the draft release can also be run locally:
 
 ```bash
 uv build --no-sources --out-dir dist/python
+version=$(uv run --locked python -c 'from marketpulse import __version__; print(__version__)')
 uv run --locked python scripts/build_app.py --arch arm64 --arch x86_64 \
-  --wheel dist/python/marketpulse-3.1.0-py3-none-any.whl
+  --wheel "dist/python/marketpulse-${version}-py3-none-any.whl"
 uv run --locked python scripts/release.py package --python-dist dist/python   # dist/release
 uv run --locked python scripts/release.py verify dist/release
 uv run --locked python scripts/release.py notes       # this version's release notes

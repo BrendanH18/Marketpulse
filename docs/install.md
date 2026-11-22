@@ -129,6 +129,9 @@ latest release over the old app. If you installed from the DMG, your copy is in
 don't keep two. MarketPulse makes a daily safety backup while it runs;
 to take one first, use **Automation › Back up now** in the app.
 
+When you first open 3.2.0, it migrates your 3.1.0 ledger. To go back to 3.1.0,
+restore a pre-upgrade backup. [Rollback instructions](data.md#roll-back-from-320-to-310)
+
 ## Uninstall
 
 1. If you turned on **Launch at login**, turn it off in the app's **Settings › General**

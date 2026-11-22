@@ -20,11 +20,12 @@ pointer: claim and track work on the issues themselves.
   [#32](https://github.com/BrendanH18/Marketpulse/issues/32). No release has
   completed the [QA checklist](qa.md): the [2026-11-20 UI audit](ui-audit-2026-11-20.md)
   left 17 of 28 items unverified, including the clean install.
-- **Unreleased on `main`:** backup restore preview (#171, #173), `backup verify
+- **3.2.0 release preparation:** backup restore preview (#171, #173), `backup verify
   --all` (#176), automation history (#180, schema version 2), the T1135 estimate
   (#179, schema version 3), and privacy, search and recovery fixes (#186). An
-  older app refuses a ledger migrated to a newer schema, so the next release needs
-  an upgrade and rollback rehearsal. See the [changelog](../CHANGELOG.md#unreleased).
+  older app refuses a ledger migrated to a newer schema. The CLI upgrade and
+  rollback rehearsal passed. [Rehearsal #197](https://github.com/BrendanH18/Marketpulse/issues/197) ·
+  [Changelog](../CHANGELOG.md#320)
 - **Dropped:** Windows. The maintainer decided on 2026-11-14 to support macOS and
   Linux only ([#150](https://github.com/BrendanH18/Marketpulse/issues/150)).
 
@@ -42,10 +43,11 @@ The proposed plan for December 2026 to May 2027 is in
    pass, and the #25 threat model (March to April).
 5. Broker imports and walkthroughs with real users (April to May).
 
-The 3.2.0 work starts with [#193](https://github.com/BrendanH18/Marketpulse/issues/193),
-which guards a backup restore against edits after the preview. File the remaining
-work as scoped issues before starting it. Bulk "N improvements" batches and
-new `report`/`summarize` datasets are paused for this milestone.
+The [3.2.0 release preparation issue](https://github.com/BrendanH18/Marketpulse/issues/202)
+tracks the version bump and packaging dry run. Publication and the full Mac QA
+checklist are separate. File the remaining work as scoped issues before starting
+it. Bulk "N improvements" batches and new `report`/`summarize` datasets are paused
+for this milestone.
 
 ## Later
 
