@@ -22,7 +22,8 @@ from marketpulse.cli import (
 )
 from marketpulse.cli.base import App
 from marketpulse.cli.report_operations import OPERATIONS
-from marketpulse.models import Account, Transaction, TxnType
+from marketpulse.db import Snapshot
+from marketpulse.models import Account, Alert, Quote, Transaction, TxnType
 
 COMMANDS = ("report", "summarize")
 FAMILIES = {
@@ -46,13 +47,21 @@ HOUSEKEEPING = {
     "report": {"--describe", "--output", "--help", "--preset"},
     "summarize": {"--describe", "--output", "--help", "--group-by", "--preset"},
 }
-NEW_SOURCES = {
+PREVIOUS_SOURCES = {
     "automation-runs": ("id", "ran_at"),
     "transaction-months": ("transactions", "month"),
     "account-symbols": ("transactions", "symbol"),
     "broker-transaction-codes": ("code", "profile"),
     "transaction-csv-columns": ("position", "column"),
 }
+AUDIT_SOURCES = {
+    "transaction-currency-audit": ("transaction_id", "date"),
+    "transfer-routes": ("transactions", "first_date"),
+    "watchlist-quote-coverage": ("position", "symbol"),
+    "alert-quote-coverage": ("alert_id", "symbol"),
+    "snapshot-month-coverage": ("snapshots", "month"),
+}
+PRESET_SOURCES = {**PREVIOUS_SOURCES, **AUDIT_SOURCES}
 
 
 def spelled(names):
@@ -148,7 +157,7 @@ def invocation(command, item, source="report-operations"):
         "report-operations": ("issue", "family"),
         "report-fields": ("position", "source"),
         "command-parameters": ("position", "command"),
-        **NEW_SOURCES,
+        **PRESET_SOURCES,
     }[source]
     examples = {**EXAMPLES, "FIELD": field, "FIELD,FIELD": f"{field},{second_field}"}
     arguments = [command, source, option]
@@ -234,8 +243,8 @@ def test_every_operation_of_a_command_is_cataloged(command):
     assert cataloged == set(formats.type.choices) - {formats.default}
 
 
-@pytest.mark.parametrize("source", ["report-operations", "report-fields", "command-parameters", *NEW_SOURCES])
-def test_every_syntax_runs_on_each_command_that_lists_it(source, report_store):
+@pytest.mark.parametrize("source", ["report-operations", "report-fields", "command-parameters", *PRESET_SOURCES])
+def test_every_syntax_runs_on_each_command_that_lists_it(source, populated_store):
     failures = {}
     for item in OPERATIONS:
         for command in item.commands:
@@ -245,11 +254,16 @@ def test_every_syntax_runs_on_each_command_that_lists_it(source, report_store):
     assert not failures
 
 
-def test_exact_number_of_new_capabilities():
-    assert set(reports.SOURCE_PRESETS) == set(NEW_SOURCES)
-    assert set(NEW_SOURCES) <= reports.SOURCES.keys()
-    assert all(len(presets) == len(set(presets.values())) == 3 for presets in reports.SOURCE_PRESETS.values())
-    assert len(NEW_SOURCES) * len(OPERATIONS) + sum(map(len, reports.SOURCE_PRESETS.values())) == 1000
+@pytest.mark.parametrize("sources", [PREVIOUS_SOURCES, AUDIT_SOURCES], ids=["previous", "audit"])
+def test_exact_number_of_capabilities_in_each_batch(sources):
+    assert set(sources) <= reports.SOURCES.keys()
+    presets = [reports.SOURCE_PRESETS[source] for source in sources]
+    assert all(len(group) == len(set(group.values())) == 3 for group in presets)
+    assert len(sources) * len(OPERATIONS) + sum(map(len, presets)) == 1000
+
+
+def test_all_preset_sources_are_covered_by_the_matrix():
+    assert reports.SOURCE_PRESETS.keys() == PRESET_SOURCES.keys()
 
 
 @pytest.fixture
@@ -275,9 +289,46 @@ def report_store(tracker, monkeypatch):
     return store
 
 
-@pytest.mark.parametrize("source", NEW_SOURCES)
-def test_presets_are_discoverable_and_filter_both_commands(source, report_store, fake):
-    changes = report_store._conn.total_changes
+@pytest.fixture
+def audit_store(tracker, monkeypatch):
+    monkeypatch.setattr(App, "tracker", property(lambda self: tracker))
+    store = tracker.store
+    first = store.add_account(Account("Fictional First")).saved_id
+    second = store.add_account(Account("Fictional Second")).saved_id
+    usd = store.add_account(Account("Fictional USD", currency="USD")).saved_id
+    store.add_transactions(
+        [
+            Transaction(first, TxnType.DEPOSIT, "2024-01-01", amount=100, currency="CAD"),
+            Transaction(first, TxnType.BUY, "2024-01-02", "FRUIT.TO", 4, 10),
+            Transaction(first, TxnType.TRANSFER, "2024-01-03", "FRUIT.TO", 1, target_account_id=second),
+            Transaction(first, TxnType.TRANSFER, "2024-01-04", "FRUIT.TO", 1, target_account_id=second),
+            Transaction(first, TxnType.TRANSFER, "2024-01-04", "FRUIT.TO", 1, target_account_id=usd),
+            Transaction(second, TxnType.BUY, "2024-01-05", "BERRY", 1, 10, currency="USD"),
+        ]
+    )
+    store.add_watch(["FRUIT.TO", "BERRY", "MANGO"])
+    store.cache_quotes([Quote("FRUIT.TO", 10, 9, fetched_at=1706745600), Quote("BERRY", 10, 9)])
+    store.add_alert(Alert("FRUIT.TO", "above", 10, triggered_at="2024-02-01T00:00:00+00:00"))
+    store.add_alert(Alert("MANGO", "below", 20, active=False))
+    store.upsert_snapshots(
+        [
+            Snapshot("2024-01-30", 100, 100, 100, "CAD", {}),
+            Snapshot("2024-01-31", 100, 100, 100, "CAD", {}),
+            Snapshot("2024-02-01", 100, 100, 100, "CAD", {"backfilled": True}),
+            Snapshot("2024-02-29", 100, 100, 100, "USD", {}),
+        ]
+    )
+    return store
+
+
+@pytest.fixture
+def populated_store(source, request):
+    return request.getfixturevalue("audit_store" if source in AUDIT_SOURCES else "report_store")
+
+
+@pytest.mark.parametrize("source", PRESET_SOURCES)
+def test_presets_are_discoverable_and_filter_both_commands(source, populated_store, fake):
+    changes = populated_store._conn.total_changes
     report_presets = json.loads(run("report", source, "--describe"))["presets"]
     assert report_presets == json.loads(run("summarize", source, "--describe"))["presets"]
     assert set(report_presets) == reports.SOURCE_PRESETS[source].keys()
@@ -290,7 +341,7 @@ def test_presets_are_discoverable_and_filter_both_commands(source, report_store,
         summary = run("summarize", source, "--preset", name, "--metric", "rows=count")
         assert json.loads(summary) == [{"rows": count}]
     assert not fake.calls
-    assert report_store._conn.total_changes == changes
+    assert populated_store._conn.total_changes == changes
 
 
 def test_presets_combine_with_each_other_and_explicit_filters(report_store):
@@ -328,9 +379,9 @@ def test_automation_presets_select_the_expected_runs(preset, ids, report_store):
     ]
 
 
-@pytest.mark.parametrize("source", NEW_SOURCES)
-def test_new_sources_project_only_selected_fields(source, report_store):
-    field = NEW_SOURCES[source][0]
+@pytest.mark.parametrize("source", PRESET_SOURCES)
+def test_preset_sources_project_only_selected_fields(source, populated_store):
+    field = PRESET_SOURCES[source][0]
     baseline = json.loads(run("report", source))
     assert baseline
     assert json.loads(run("report", source, "--fields", field)) == [{field: row[field]} for row in baseline]

@@ -26,9 +26,12 @@ from . import (
     report_integrations,
     report_interface,
     report_ledger,
+    report_ledger_audit,
     report_output,
     report_portfolio,
+    report_quote_coverage,
     report_reference,
+    report_snapshot_coverage,
     report_system,
 )
 from .base import App, pass_app
@@ -47,11 +50,21 @@ SOURCE_MODULES = (
     report_automation,
     report_activity,
     report_integrations,
+    report_ledger_audit,
+    report_quote_coverage,
+    report_snapshot_coverage,
 )
 SOURCES: dict[str, tuple[str, ...]] = {
     name: schema for module in SOURCE_MODULES for name, schema in module.SOURCES.items()
 }
-SOURCE_PRESETS = {**report_automation.PRESETS, **report_activity.PRESETS, **report_integrations.PRESETS}
+SOURCE_PRESETS = {
+    **report_automation.PRESETS,
+    **report_activity.PRESETS,
+    **report_integrations.PRESETS,
+    **report_ledger_audit.PRESETS,
+    **report_quote_coverage.PRESETS,
+    **report_snapshot_coverage.PRESETS,
+}
 FORMATS = ("json", "jsonl", "csv", "tsv", "markdown", *report_formats.FORMATS)
 
 

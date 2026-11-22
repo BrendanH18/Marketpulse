@@ -109,14 +109,14 @@ def test_cli_serves_each_catalog_through_the_registry(name, app):
 
 def test_registry_is_consistent_across_every_source_module():
     modules = reports.SOURCE_MODULES
-    assert len(modules) == 10
+    assert len(modules) == 13
     assert {report_ledger, report_system, report_reference} <= set(modules)
     for module in modules:
         assert isinstance(module.GROUP, str) and module.GROUP
         assert set(module.DESCRIPTIONS) == set(module.SOURCES)
         assert all(text and text.endswith(".") for text in module.DESCRIPTIONS.values())
     names = [name for module in modules for name in module.SOURCES]
-    assert len(names) == len(set(names)) == 64
+    assert len(names) == len(set(names)) == 69
     assert sum(len(module.SOURCES) for module in (report_ledger, report_system, report_reference)) == 25
     assert set(reports.SOURCES) == set(names)
 
@@ -124,14 +124,14 @@ def test_registry_is_consistent_across_every_source_module():
 def test_sources_lists_every_dataset_by_name(app):
     rows = load_source("sources", app)
     names = [row["source"] for row in rows]
-    assert len(rows) == 64
+    assert len(rows) == 69
     assert names == sorted(names) == sorted(reports.SOURCES)
     assert all(row["fields"] == list(reports.SOURCES[row["source"]]) for row in rows)
     assert all(row["field_count"] == len(row["fields"]) for row in rows)
     assert Counter(row["group"] for row in rows) == {
-        "portfolio": 13,
+        "portfolio": 15,
         "catalog": 12,
-        "ledger": 13,
+        "ledger": 16,
         "system": 6,
         "reference": 20,
     }
