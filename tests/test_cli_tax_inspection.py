@@ -303,7 +303,7 @@ def test_issues_and_exit_code(cli, ledger):
     assert cli("tax", "--exit-code").exit_code == 2
 
 
-def test_room_alone_needs_no_fx_history(cli, ledger, store, fake):
+def test_cad_only_room_needs_no_fx_history(cli, ledger, store, fake):
     assert "No contribution room recorded" in cli("tax", "--room").output
     store.set_room("TFSA", 2025, 7000)
     fake.calls.clear()
@@ -312,6 +312,26 @@ def test_room_alone_needs_no_fx_history(cli, ledger, store, fake):
     assert room["remaining"] == pytest.approx(room["starting_room"] + room["new_limits"] - room["contributions"])
     assert "Contribution room" in cli("tax", "--room").output
     assert fake.calls == []
+
+
+def test_room_commands_show_missing_historical_fx_without_partial_amounts(cli, tracker, store, fake):
+    old = store.add_account(Account(name="Old RRSP", type=AccountType.RRSP, archived=True))
+    add(store, old, TxnType.DEPOSIT, "2025-01-03", "", ccy="USD", amount=100)
+    add(store, old, TxnType.DEPOSIT, "2025-01-03", "", ccy="CAD", amount=200)
+    # A later rate cannot stand in for a missing rate on an earlier day.
+    fake.set_history("USDCAD=X", {"2025-01-06": 1.40}, currency="CAD")
+    store.set_room("RRSP", 2025, 7000)
+    for command in (("accounts", "room"), ("tax", "--room")):
+        (room,) = json.loads(cli(*command, "--json").output)
+        assert room["remaining"] is None and room["contributions"] is None
+        assert room["missing_fx"] == [{"date": "2025-01-03", "currency": "USD"}]
+        assert room["accounts"] == []
+        output = cli(*command).output
+        assert "Unavailable" in output and "USD on 2025-01-03" in output and "Old RRSP" not in output
+    tracker.config.privacy = True
+    output = cli("tax").output
+    assert "missing historical CAD exchange rates" in output and "Unavailable" in output
+    assert "2025-01-03" not in output and "7,000.00" not in output
 
 
 # ── Conflicting options ──────────────────────────────────────────────────────

@@ -61,6 +61,7 @@ EXPECTED = {
             "new_limits": 0.0,
             "remaining": 2500.0,
             "forfeited": 0.0,
+            "missing_fx": [],
             "accounts": [],
         },
         {
@@ -72,6 +73,7 @@ EXPECTED = {
             "new_limits": 0.0,
             "remaining": 9200.0,
             "forfeited": 0.0,
+            "missing_fx": [],
             "accounts": ["Fictional RRSP"],
         },
     ],
@@ -172,6 +174,22 @@ def test_report_operations_compose_over_these_sources(report_app):
     assert run(
         "report", "contribution-room", "--has-item", 'accounts="Fictional RRSP"', "--fields", "account_type"
     ) == [{"account_type": "RRSP"}]
+
+
+def test_offline_room_reports_flag_foreign_flows_even_when_history_is_available(report_app, fake):
+    store = report_app.store
+    archived = next(a for a in store.accounts(include_archived=True) if a.archived)
+    store.add_transaction(Transaction(archived.saved_id, TxnType.DEPOSIT, "2025-02-03", amount=100, currency="USD"))
+    fake.set_history("USDCAD=X", {"2025-02-03": 1.40}, currency="CAD")
+    changes = store._conn.total_changes
+    rows = run("report", "contribution-room")
+    assert rows[0] == EXPECTED["contribution-room"][0]  # unrelated CAD-only estimate is still available
+    rrsp = rows[1]
+    assert rrsp["remaining"] is None and rrsp["contributions"] is None
+    assert rrsp["missing_fx"] == [{"date": "2025-02-03", "currency": "USD"}]
+    assert rrsp["accounts"] == ["Fictional RRSP"]
+    assert run("summarize", "contribution-room", "--metric", "left=number-sum:remaining") == [{"left": "2500"}]
+    assert not fake.calls and store._conn.total_changes == changes
 
 
 @pytest.mark.parametrize("name", SOURCES)

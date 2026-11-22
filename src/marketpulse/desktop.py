@@ -55,7 +55,7 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
     valued.update({symbol: day for symbol, (day, _) in state.valuations.items()})
     warnings = warning_items(state.issues, view)
     return {
-        "version": 1,
+        "version": 2,
         "demo": False,
         "status": status,
         # Saved order includes symbols whose quotes are unavailable; status only has priced rows.
@@ -380,7 +380,7 @@ def tax_report(tracker: Tracker) -> dict:
     years, report = tracker.tax_years()
     accounts = tracker.store.account_map()
     return {
-        "version": 1,
+        "version": 2,
         "demo": False,
         "base_currency": tracker.base,
         "inclusion_rate": tracker.config.capital_gains_inclusion,

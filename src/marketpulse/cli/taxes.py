@@ -233,7 +233,7 @@ def _check_options(
 @click.option("--summary", is_flag=True, help="Per-year totals of the matching dispositions.")
 @click.option("--issues", is_flag=True, help="Only the tax report's own issues (as plain `tax` shows them).")
 @click.option("--exit-code", is_flag=True, help="With --issues, exit 1 when there are any.")
-@click.option("--room", is_flag=True, help="Only the contribution room table (no FX history is fetched).")
+@click.option("--room", is_flag=True, help="Only contribution room, fetching FX history when needed for room.")
 @pass_app
 def tax(
     app: App,

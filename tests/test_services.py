@@ -712,6 +712,54 @@ def test_archived_accounts_still_use_contribution_room(tracker, store):
     assert [a.name for a in members] == ["Fictional TFSA"]  # archived accounts stay hidden
 
 
+def test_room_values_tfsa_flows_on_their_dates_in_cad(tracker, store, fake):
+    tracker.config.base_currency = "EUR"
+    year = date.today().year
+    active = store.add_account(Account(name="Active TFSA", type=AccountType.TFSA, currency="USD"))
+    old = store.add_account(Account(name="Archived TFSA", type=AccountType.TFSA, archived=True))
+    entries = [
+        (active, TxnType.DEPOSIT, f"{year - 2}-01-02", 9000, "EUR"),  # already in the baseline
+        (active, TxnType.DEPOSIT, f"{year - 1}-01-04", 3000, ""),  # defaults to USD
+        (active, TxnType.WITHDRAWAL, f"{year - 1}-04-05", 1000, "USD"),
+        (old, TxnType.DEPOSIT, f"{year - 1}-05-01", 2000, "CAD"),
+        (active, TxnType.WITHDRAWAL, f"{year}-01-01", 200, "EUR"),  # counted next year
+    ]
+    for account, kind, day, amount, currency in entries:
+        store.add_transaction(
+            Transaction(account_id=account.saved_id, type=kind, date=day, amount=amount, currency=currency)
+        )
+    fake.set_history(
+        "USDCAD=X",
+        {f"{year - 1}-01-03": 1.25, f"{year - 1}-01-05": 1.40, f"{year - 1}-04-05": 1.50},
+        currency="CAD",
+    )
+    store.set_room("TFSA", year - 1, 10000)
+    [(status, members)] = tracker.room()
+    assert status.contributions == pytest.approx(5750)
+    assert status.withdrawals_added_back == pytest.approx(1500)
+    assert status.remaining == pytest.approx(5750 + status.new_limits)
+    assert [a.name for a in members] == ["Active TFSA"]
+    assert len(fake.calls) == 1 and "USDCAD" in fake.calls[0][0]
+
+
+def test_room_values_prebaseline_fhsa_contributions_for_lifetime_cap(tracker, store, fake):
+    year = date.today().year
+    account = store.add_account(Account(name="Fictional FHSA", type=AccountType.FHSA))
+    for day, amount, currency in [(f"{year - 1}-02-02", 20000, "USD"), (f"{year}-01-01", 1000, "CAD")]:
+        store.add_transaction(
+            Transaction(account_id=account.saved_id, type=TxnType.DEPOSIT, date=day, amount=amount, currency=currency)
+        )
+    fake.set_history("USDCAD=X", {f"{year - 1}-02-02": 1.40}, currency="CAD")
+    store.set_room("FHSA", year, 16000)
+    [(status, _)] = tracker.room()
+    assert status.contributions == 1000
+    assert status.remaining == pytest.approx(11000)  # $40,000 less $28,000 before baseline and $1,000 since
+    assert status.forfeited == pytest.approx(4000)
+    fake.offline = True
+    [(status, _)] = tracker.room()
+    assert status.remaining is None
+
+
 def test_share_entries_are_checked_in_the_order_replay_applies_them(tracker, store):
     a, b, c = (store.add_account(Account(name=n, type=AccountType.TFSA)) for n in ("A", "B", "C"))
 

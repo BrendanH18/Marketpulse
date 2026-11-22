@@ -178,6 +178,7 @@
 "Edit %@" = "Modifier %@";
 "Contribution room" = "Droits de cotisation";
 "IN CAD · FROM THE ROOM YOU ENTERED" = "EN CAD · SELON LES DROITS SAISIS";
+"Unavailable · Missing historical FX" = "Indisponible · Taux de change historiques manquants";
 "From %@ on January 1, %@" = "À partir de %@ au 1er janvier %@";
 "Not set yet" = "Pas encore défini";
 "Set…" = "Définir…";

@@ -1168,9 +1168,7 @@ private struct AccountsWorkspace: View {
               }
               Spacer()
               if let room {
-                Text(Format.money(room.remaining, "CAD", privacy: privacy)).foregroundStyle(
-                  Studio.trend(room.remaining)
-                ).monospacedDigit()
+                RoomRemaining(room: room, privacy: privacy)
               }
               Button(room == nil ? String(localized: "Set…") : String(localized: "Update…")) { setRoom(type) }
                 .disabled(!canEdit).controlSize(.small)
@@ -1185,8 +1183,7 @@ private struct AccountsWorkspace: View {
             HStack {
               Text(DesktopAccount.typeLabel(r.accountType))
               Spacer()
-              Text(Format.money(r.remaining, "CAD", privacy: privacy)).foregroundStyle(Studio.trend(r.remaining))
-                .monospacedDigit()
+              RoomRemaining(room: r, privacy: privacy)
             }
           }
           Text(
@@ -1194,6 +1191,24 @@ private struct AccountsWorkspace: View {
           ).font(.system(size: 11)).foregroundStyle(Studio.muted)
         }
       }.padding(.horizontal, 30).padding(.bottom, 24)
+    }
+  }
+}
+
+private struct RoomRemaining: View {
+  let room: ContributionRoom
+  let privacy: Bool
+
+  var body: some View {
+    if let remaining = room.remaining {
+      Text(Format.money(remaining, "CAD", privacy: privacy))
+        .foregroundStyle(privacy ? Studio.muted : Studio.trend(remaining))
+        .monospacedDigit()
+    } else {
+      let details = privacy ? "" : (room.missingFx ?? []).map { "\($0.currency) · \($0.date)" }.joined(separator: "\n")
+      Text("Unavailable · Missing historical FX")
+        .foregroundStyle(Studio.warn)
+        .help(details)
     }
   }
 }
@@ -1634,8 +1649,7 @@ private struct TaxWorkspace: View {
               .fixedSize(horizontal: false, vertical: true)
           }
           Spacer()
-          Text(Format.money(r.remaining, "CAD", privacy: privacy)).foregroundStyle(Studio.trend(r.remaining))
-            .font(.system(size: 15, weight: .medium)).monospacedDigit()
+          RoomRemaining(room: r, privacy: privacy).font(.system(size: 15, weight: .medium))
         }
       }
       if !tax.room.isEmpty {

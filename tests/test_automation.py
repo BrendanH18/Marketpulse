@@ -79,7 +79,7 @@ def test_desktop_bridge_reports_missing_prices(tracker):
         Transaction(account_id=acct.saved_id, type=TxnType.BUY, symbol="UNKNOWN", quantity=1, price=50, currency="CAD")
     )
     payload = snapshot(tracker)
-    assert payload["version"] == 1
+    assert payload["version"] == 2
     assert payload["demo"] is False
     assert payload["status"]["net_worth"] == pytest.approx(540)
     assert "Excluded from totals: UNKNOWN" in payload["warnings"]

@@ -8,7 +8,7 @@ from datetime import date
 import pytest
 
 from marketpulse import desktop, models
-from marketpulse.models import Account, Transaction, TxnType
+from marketpulse.models import Account, AccountType, Transaction, TxnType
 
 
 def test_snapshot_preserves_saved_watch_order_when_quotes_are_missing(tracker):
@@ -20,6 +20,21 @@ def test_snapshot_preserves_saved_watch_order_when_quotes_are_missing(tracker):
     assert "QA-UNPRICED" not in {row["symbol"] for row in payload["status"]["watchlist"]}
     tracker.store.move_watch("QA-MISSING", -2)
     assert desktop.snapshot(tracker)["watchlist_symbols"] == ["QA-MISSING", "QA-UNPRICED", "AAPL"]
+
+
+def test_snapshot_and_tax_payloads_share_cad_room_estimates(tracker, store, fake):
+    old = store.add_account(Account(name="Fictional old RRSP", type=AccountType.RRSP, archived=True))
+    store.set_room("RRSP", 2025, 7000)
+    store.add_transaction(Transaction(old.saved_id, TxnType.DEPOSIT, "2025-01-04", amount=100, currency="USD"))
+    current = desktop.snapshot(tracker)
+    assert current["version"] == 2 and current["status"]["version"] == 1
+    (room,) = current["room"]
+    assert room["remaining"] is None and room["missing_fx"] == [{"date": "2025-01-04", "currency": "USD"}]
+    assert "Fictional old RRSP" not in json.dumps(room)
+    assert desktop.tax_report(tracker)["room"] == current["room"]
+    fake.set_history("USDCAD=X", {"2025-01-03": 1.30}, currency="CAD")
+    assert desktop.snapshot(tracker)["room"][0]["remaining"] == pytest.approx(6870)
+    assert desktop.tax_report(tracker)["room"][0]["remaining"] == pytest.approx(6870)
 
 
 def legacy_revision(record, generation):
@@ -101,8 +116,8 @@ def test_snapshot_reuses_rows_and_keeps_archived_transactions_in_ledger_revision
     assert payload["ledger_revision"] == expected
     assert [t["id"] for t in payload["activity"]] == [txns[0].saved_id]
     assert payload["activity"][0]["revision"] == legacy_revision(txns[0], generation)
-    # One shared read for snapshot rows/replay, plus the unchanged contribution-room read.
-    assert len(reads) == 2
+    # One shared read for snapshot rows/replay. No contribution-room baseline means no extra read.
+    assert len(reads) == 1
     assert sorted(serializations) == [t.saved_id for t in txns]
 
     # A second refresh must not reuse an old row or hash, even for hidden transactions.
