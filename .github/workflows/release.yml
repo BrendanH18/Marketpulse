@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   prepare:
-    runs-on: namespace-profile-gitrunner
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -58,7 +58,7 @@ jobs:
 
   build:
     needs: prepare
-    runs-on: namespace-profile-macos
+    runs-on: macos-26
     timeout-minutes: 45
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
@@ -86,9 +86,9 @@ jobs:
           if-no-files-found: error
 
   verify-intel:
-    # The arm64 runner has no Rosetta, so the Intel app first runs here.
+    # Run the x86_64 app on an Intel Mac to verify it on its target architecture.
     needs: [prepare, build]
-    runs-on: macos-15-intel  # Namespace has no Intel macOS runners, so this stays on GitHub-hosted runners
+    runs-on: macos-15-intel
     timeout-minutes: 30
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
@@ -110,7 +110,7 @@ jobs:
     # A manual run is a dry run even when started on a tag.
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [prepare, checks, build, verify-intel]
-    runs-on: namespace-profile-gitrunner
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write

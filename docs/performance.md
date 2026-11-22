@@ -43,7 +43,7 @@ gh workflow run ci.yml --ref main -f desktop_benchmark=true
 
 The job runs the unchanged workload above with Python 3.11, seven samples
 per case, and both zero and 100 ms/request simulated waits. It uses
-`namespace-profile-macos`; the report records the actual
+`macos-26`. The report records the actual
 OS, architecture and Python version, since hosted runner images can change.
 The runner is dedicated to that benchmark job, but hosted infrastructure still
 has scheduling noise. It measures the Python engine on macOS,
