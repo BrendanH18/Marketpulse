@@ -8,7 +8,9 @@ from datetime import date
 import pytest
 
 from marketpulse import desktop, models
-from marketpulse.models import Account, Transaction, TxnType
+from marketpulse.market import MarketData
+from marketpulse.models import Account, AccountType, Transaction, TxnType
+from marketpulse.services import Tracker
 
 
 def test_snapshot_preserves_saved_watch_order_when_quotes_are_missing(tracker):
@@ -20,6 +22,50 @@ def test_snapshot_preserves_saved_watch_order_when_quotes_are_missing(tracker):
     assert "QA-UNPRICED" not in {row["symbol"] for row in payload["status"]["watchlist"]}
     tracker.store.move_watch("QA-MISSING", -2)
     assert desktop.snapshot(tracker)["watchlist_symbols"] == ["QA-MISSING", "QA-UNPRICED", "AAPL"]
+
+
+def test_snapshot_and_tax_payloads_share_cad_room_estimates(tracker, store, fake):
+    old = store.add_account(Account(name="Fictional old RRSP", type=AccountType.RRSP, archived=True))
+    store.set_room("RRSP", 2025, 7000)
+    store.add_transaction(Transaction(old.saved_id, TxnType.DEPOSIT, "2025-01-04", amount=100, currency="USD"))
+    current = desktop.snapshot(tracker)
+    assert current["version"] == 2 and current["status"]["version"] == 1
+    (room,) = current["room"]
+    assert room["remaining"] is None and room["missing_fx"] == [{"date": "2025-01-04", "currency": "USD"}]
+    assert "Fictional old RRSP" not in json.dumps(room)
+    assert desktop.tax_report(tracker)["room"] == current["room"]
+    fake.set_history("USDCAD=X", {"2025-01-03": 1.30}, currency="CAD")
+    assert desktop.snapshot(tracker)["room"][0]["remaining"] == pytest.approx(6870)
+    fake.calls.clear()
+    # Each Mac refresh opens a new tracker and market client.
+    reopened = Tracker(store, MarketData(fake, store=store), tracker.config)
+    assert desktop.snapshot(reopened)["room"][0]["remaining"] == pytest.approx(6870)
+    assert desktop.tax_report(reopened)["room"][0]["remaining"] == pytest.approx(6870)
+    assert not any("USDCAD" in url for url, _ in fake.calls)
+
+
+def test_snapshot_room_returns_missing_rates_when_shared_fx_budget_expires(tracker, store, monkeypatch):
+    account = store.add_account(Account(name="Fictional FHSA", type=AccountType.FHSA))
+    store.set_room("FHSA", 2025, 8000)
+    store.add_transaction(Transaction(account.saved_id, TxnType.DEPOSIT, "0001-01-01", amount=100, currency="EUR"))
+    store.add_transaction(Transaction(account.saved_id, TxnType.DEPOSIT, "2025-01-04", amount=100, currency="USD"))
+
+    times = iter([1.0, 2.0, 6.0])
+    attempted = []
+
+    def close(symbol, start, *, timeout):
+        attempted.append((symbol, start, timeout))
+        return {}, "CAD"
+
+    monkeypatch.setattr("marketpulse.services.monotonic", lambda: next(times))
+    monkeypatch.setattr(tracker.market, "daily_closes", close)
+    (room,) = desktop.snapshot(tracker)["room"]
+    assert attempted == [("EURCAD=X", "0001-01-01", 4.0)]
+    assert room["remaining"] is None
+    assert room["missing_fx"] == [
+        {"date": "0001-01-01", "currency": "EUR"},
+        {"date": "2025-01-04", "currency": "USD"},
+    ]
 
 
 def legacy_revision(record, generation):
@@ -101,8 +147,8 @@ def test_snapshot_reuses_rows_and_keeps_archived_transactions_in_ledger_revision
     assert payload["ledger_revision"] == expected
     assert [t["id"] for t in payload["activity"]] == [txns[0].saved_id]
     assert payload["activity"][0]["revision"] == legacy_revision(txns[0], generation)
-    # One shared read for snapshot rows/replay, plus the unchanged contribution-room read.
-    assert len(reads) == 2
+    # One shared read for snapshot rows/replay. No contribution-room baseline means no extra read.
+    assert len(reads) == 1
     assert sorted(serializations) == [t.saved_id for t in txns]
 
     # A second refresh must not reuse an old row or hash, even for hidden transactions.

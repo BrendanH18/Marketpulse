@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import json
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from time import monotonic, time
 
 from . import alerts as alerts_mod
 from . import fmt, tax
@@ -18,7 +20,16 @@ from .analytics import (
 )
 from .config import Config
 from .db import Snapshot, Store
-from .ledger import RoomStatus, contribution_room, new_issues, replay, replay_by_day, sort_key, transaction_currency
+from .ledger import (
+    RoomStatus,
+    contribution_room,
+    new_issues,
+    replay,
+    replay_by_day,
+    room_flows,
+    sort_key,
+    transaction_currency,
+)
 from .market import MarketData, MarketError
 from .models import (
     Account,
@@ -37,6 +48,8 @@ from .providers import make_fallback
 from .tax import TaxReport
 from .themes import resolve_palette
 from .valuation import PortfolioView, build_view, market_symbols
+
+FX_HISTORY_TTL = 600  # Mac refreshes use a new backend process each time.
 
 
 @dataclass
@@ -535,31 +548,68 @@ class Tracker:
                 or (t.target_account_id is not None and tax.is_taxable(accounts.get(t.target_account_id)))
             )
         ]
+        return self._historical_fx(((t.date, transaction_currency(t, accounts)) for t in relevant), base)
+
+    def _historical_fx(
+        self, dated_currencies: Iterable[tuple[str, str]], base: str, *, budget: float | None = None
+    ) -> tax.FxLookup:
         first_seen: dict[str, str] = {}
-        for t in relevant:
-            ccy = transaction_currency(t, accounts)
-            if ccy != base and (ccy not in first_seen or t.date < first_seen[ccy]):
-                first_seen[ccy] = t.date
+        for day, currency in dated_currencies:
+            ccy = currency.upper()
+            if ccy != base and (ccy not in first_seen or day < first_seen[ccy]):
+                first_seen[ccy] = day
         series: dict[str, dict[str, float]] = {}
+        deadline = monotonic() + budget if budget is not None else None
         for ccy, first in sorted(first_seen.items()):
-            start = (date.fromisoformat(first) - timedelta(days=7)).isoformat()
+            start = date.fromordinal(max(date.min.toordinal(), date.fromisoformat(first).toordinal() - 7)).isoformat()
+            symbol = f"{ccy}{base}=X"
+            cache_key = f"fx_history:{symbol}"
+            if raw := self.store.get_meta(cache_key):
+                cached = json.loads(raw)
+                if cached["start"] <= start and 0 <= time() - cached["fetched_at"] < FX_HISTORY_TTL:
+                    series[ccy] = cached["closes"]
+                    continue
+            timeout = None if deadline is None else deadline - monotonic()
+            if timeout is not None and timeout < 0.001:
+                continue  # the remaining pairs may have a cached series
             try:
-                series[ccy], _ = self.market.daily_closes(f"{ccy}{base}=X", start)
+                if timeout is None:
+                    closes, _ = self.market.daily_closes(symbol, start)
+                else:
+                    closes, _ = self.market.daily_closes(symbol, start, timeout=timeout)
             except MarketError:
                 # Offline or unknown pair: affected rows are marked incomplete
                 # and kept out of totals rather than computed with a guess.
                 series[ccy] = {}
+                continue
+            series[ccy] = closes
+            if closes:
+                self.store.set_meta(cache_key, json.dumps({"start": start, "fetched_at": time(), "closes": closes}))
         return tax.fx_lookup(series, base)
 
-    def room(self) -> list[tuple[RoomStatus, list[Account]]]:
+    def room(self, *, offline: bool = False, fx_budget: float | None = None) -> list[tuple[RoomStatus, list[Account]]]:
+        """CAD room estimates. Offline reports flag estimates that need foreign rates as unavailable."""
+        baselines = self.store.rooms()
+        if not baselines:
+            return []
         # CRA counts every contribution, so an archived account's deposits still use up room;
         # only active accounts are listed with it, since archived ones are hidden everywhere.
         accounts = self.store.accounts(include_archived=True)
         flows = self.store.ledger().flows
-        out = []
-        for acct_type, (year, amount) in sorted(self.store.rooms().items()):
+        current_year = date.today().year
+        plans = []
+        for acct_type, (year, amount) in sorted(baselines.items()):
             members = [a for a in accounts if a.type.value == acct_type]
-            status = contribution_room(acct_type, year, amount, flows, {a.saved_id for a in members})
+            ids = {a.saved_id for a in members}
+            relevant = room_flows(acct_type, year, flows, ids, current_year)
+            plans.append((acct_type, year, amount, members, ids, relevant))
+        fx = None
+        if not offline:
+            dated_currencies = ((flow.date, flow.currency) for *_, relevant in plans for flow in relevant)
+            fx = self._historical_fx(dated_currencies, "CAD", budget=fx_budget)
+        out = []
+        for acct_type, year, amount, members, ids, relevant in plans:
+            status = contribution_room(acct_type, year, amount, relevant, ids, current_year=current_year, fx=fx)
             out.append((status, [a for a in members if not a.archived]))
         return out
 

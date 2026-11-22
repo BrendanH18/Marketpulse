@@ -159,8 +159,20 @@ marketpulse tax --year 2025
 ```
 
 The balance above is fictional; enter your own verified amount. MarketPulse
-derives later room from recorded activity and its implemented annual limits.
-It cannot discover unrecorded contributions or verify your eligibility.
+derives later room in CAD from recorded cash contributions and annual limits.
+TFSA withdrawals restore room the following year, and all recorded FHSA
+contributions count toward the lifetime cap, including those before the saved
+balance. Archived accounts still count.
+
+`accounts room`, `tax`, and the app use each foreign-currency flow's historical CAD
+rate on its date, or the most recent preceding close if there was no close that
+day. When a required rate is missing, the estimate is unavailable and JSON
+includes the affected dates and currencies in `missing_fx`. `report contribution-room`
+and `summarize contribution-room` stay offline, so a row that requires FX has a
+`null` remaining amount. Live estimates reuse recently fetched rates for up to
+ten minutes. CAD-only estimates need no FX request.
+
+MarketPulse cannot discover unrecorded contributions or verify your eligibility.
 
 The tax report implements:
 

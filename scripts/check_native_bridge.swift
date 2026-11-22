@@ -8,7 +8,7 @@ struct NativeBridgeCheck {
     let decoder = JSONDecoder()
     decoder.keyDecodingStrategy = .convertFromSnakeCase
     let payload = try decoder.decode(DesktopPayload.self, from: data)
-    precondition(payload.version == 1 && payload.demo)
+    precondition(payload.version == 2 && payload.demo)
     precondition(payload.watchlistSymbols == ["AAPL", "MSFT", "NVDA", "XEQT.TO"])
     precondition(payload.accounts.count == 3 && payload.positions.count == 6)
     precondition(payload.status.history.count == 181 && payload.incomeMonths.count == 12)
@@ -113,11 +113,12 @@ struct NativeBridgeCheck {
     precondition(payload.room[0].asOfYear == year && payload.room[0].startingRoom == 18000)
     precondition(ContributionRoom.firstYear("FHSA") == 2023 && ContributionRoom.firstYear("TFSA") == 2009)
     precondition(payload.room[0].newLimits != nil && payload.room[0].contributions == 0)
+    precondition(payload.room[0].remaining == 18000 && payload.room[0].missingFx?.isEmpty == true)
 
     // The Tax workspace (`desktop tax`): the demo's superficial loss, then a gain on the rebought shares.
     let demoTax = try decoder.decode(
       TaxPayload.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[6])))
-    precondition(demoTax.version == 1 && demoTax.demo && demoTax.baseCurrency == "CAD" && demoTax.inclusionRate == 0.5)
+    precondition(demoTax.version == 2 && demoTax.demo && demoTax.baseCurrency == "CAD" && demoTax.inclusionRate == 0.5)
     let demoSales = demoTax.years.reversed().flatMap(\.rows)
     precondition(demoSales.map(\.superficial) == [true, false] && demoSales.allSatisfy(\.complete))
     precondition(
@@ -133,6 +134,10 @@ struct NativeBridgeCheck {
     let ledgerTax = try decoder.decode(
       TaxPayload.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[7])))
     precondition(!ledgerTax.demo && ledgerTax.years.map(\.year) == [2025] && ledgerTax.years[0].missingFx == 1)
+    precondition(ledgerTax.room.count == 1 && ledgerTax.room[0].accountType == "RRSP")
+    let rrsp = ledgerTax.room[0]
+    precondition(rrsp.startingRoom == 15000 && rrsp.remaining == nil && rrsp.contributions == nil)
+    precondition(rrsp.missingFx?.first?.currency == "EUR" && rrsp.missingFx?.first?.date == "2025-01-09")
     let unpriced = ledgerTax.years[0].rows.first { $0.symbol == "SAP.DE" }!
     precondition(!unpriced.complete && unpriced.proceeds == nil && unpriced.allowedGain == nil && unpriced.fx == nil)
     precondition(unpriced.note == "FX missing" && unpriced.accountLabel == "Fictional Taxable")
@@ -369,6 +374,8 @@ struct NativeBridgeCheck {
     let coded = try decoder.decode(
       DesktopPayload.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[14])))
     let items = coded.warningItems ?? []
+    precondition(coded.room.count == 1 && coded.room[0].accountType == "TFSA" && coded.room[0].remaining == nil)
+    precondition(coded.room[0].missingFx?.first?.currency == "EUR")
     precondition(items.map(\.text) == coded.warnings && items.allSatisfy { !$0.code.isEmpty })
     let expectedCodes: Set = [
       "sell_exceeds_held", "split_nothing_held", "transfer_nothing_held", "transfer_exceeds_held",

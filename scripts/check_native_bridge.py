@@ -96,6 +96,10 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     old = ledger.add_account(Account(name="Old RRSP", type=AccountType.RRSP))
     old.archived = True
     ledger.update_account(old)
+    ledger.set_room("RRSP", 2025, 15000)
+    ledger.add_transaction(
+        Transaction(account_id=old.saved_id, type=TxnType.DEPOSIT, date="2025-01-09", amount=100, currency="EUR")
+    )
     archived = Path(tmp) / "archived.json"
     archived.write_text(json.dumps(archived_accounts(ledger.account_map()), allow_nan=False))
     # The Tax workspace: a sale with no FX rate (no amounts), and one in an archived account (never named).
@@ -174,6 +178,10 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     add(cash, TxnType.BUY, "2025-01-06", "VCN.TO", 2, price=40)
     add(cash, TxnType.TRANSFER, "2025-01-07", "VCN.TO", 3, target_account_id=tfsa.saved_id)
     add(tfsa, TxnType.BUY, "2025-01-08", "AAPL", 1, price=100)
+    coded.set_room("TFSA", 2025, 7000)
+    coded.add_transaction(
+        Transaction(account_id=tfsa.saved_id, type=TxnType.DEPOSIT, date="2025-01-08", amount=100, currency="EUR")
+    )
     add(tfsa, TxnType.TRANSFER, "2025-01-09", "AAPL", 1, target_account_id=cash.saved_id)
     add(cash, TxnType.BUY, "2025-01-10", "NOPRICE", 1, price=10)
     coded.add_transaction(

@@ -51,7 +51,7 @@ the 30 new operations below.
 
 | No. | Source | Fields | Dataset |
 | --- | --- | --- | --- |
-| 1 | `contribution-room` | account_type, as_of_year, starting_room, contributions, withdrawals_added_back, new_limits, remaining, forfeited, accounts | Remaining contribution room the engine derives from saved baselines and recorded flows. |
+| 1 | `contribution-room` | account_type, as_of_year, starting_room, contributions, withdrawals_added_back, new_limits, remaining, forfeited, missing_fx, accounts | Remaining contribution room the engine derives from saved baselines and recorded flows. |
 | 2 | `snapshot-classes` | date, asset_class, value, currency | Asset-class breakdown saved with each net-worth snapshot. |
 | 3 | `alert-conditions` | value, description, percent | Alert conditions and whether their threshold is a percent. |
 | 4 | `chart-periods` | period, interval, bars_per_year | Chart periods, their bar interval and bars per year. |
@@ -63,10 +63,12 @@ the 30 new operations below.
 
 These are in the `ledger` group of `report sources` and open the tracker.
 
-- `contribution-room` has one row per account type with a saved baseline: the
-  same figures `marketpulse accounts room` shows, from the existing engine. It
-  depends on the current year, because annual limits and TFSA withdrawals are
-  added back up to it.
+- `contribution-room` has one row per account type with a saved baseline. It
+  uses the current year for annual limits and TFSA withdrawal add-backs.
+  The report stays offline. If a row needs a historical exchange rate, its
+  calculated amounts, including `remaining`, are `null`, and `missing_fx` lists
+  the affected dates and currencies. Numeric summary operations skip null values.
+  For estimates with historical FX, use `marketpulse accounts room`.
   `accounts` lists the names of the active accounts of that type. Deposits to
   archived accounts of the type still count against the room, as they do in the
   engine; their names are not listed. The saved baselines alone are in

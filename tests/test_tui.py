@@ -13,7 +13,7 @@ from textual.widgets import DataTable, Input, Static, Switch
 from marketpulse import fmt
 from marketpulse.db import Store
 from marketpulse.market import MarketError
-from marketpulse.models import Account, Asset, AssetKind, Transaction, TxnType
+from marketpulse.models import Account, AccountType, Asset, AssetKind, Transaction, TxnType
 from marketpulse.tax import TaxReport
 from marketpulse.tui import chart, extras
 from marketpulse.tui.app import MarketPulseApp
@@ -71,6 +71,25 @@ def test_every_workspace_renders_and_a_buy_can_be_recorded(tracker, store):
     run(scenario())
     bought = [t for t in store.transactions() if t.symbol == "AAPL"]
     assert len(bought) == 1 and bought[0].quantity == 3 and bought[0].currency == "USD"
+
+
+def test_tax_workspace_shows_unavailable_room_when_fx_is_missing(tracker, store):
+    rrsp = store.add_account(Account(name="Fictional RRSP", type=AccountType.RRSP))
+    store.set_room("RRSP", 2025, 7000)
+    store.add_transaction(Transaction(rrsp.saved_id, TxnType.DEPOSIT, "2025-01-03", amount=100, currency="USD"))
+
+    async def scenario():
+        app = MarketPulseApp(tracker.config, tracker=tracker)
+        async with app.run_test(size=(120, 35)) as pilot:
+            await pilot.press("7")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            with app.console.capture() as capture:
+                app.console.print(app.query_one("#tax-view", Static).content, width=80)
+            output = capture.get()
+            assert "Unavailable" in output and "USD on 2025-01-03" in output, output
+
+    run(scenario())
 
 
 def test_privacy_and_theme_cycling_persist(tracker):

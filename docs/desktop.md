@@ -176,7 +176,9 @@ v99.0.0.
   opened, the change is refused and nothing is saved. Contribution
   room for TFSA, RRSP, and FHSA shows what's left; **Set…** or **Update…** enters the
   room CRA reported for January 1 of a year (`marketpulse accounts room`), in Canadian
-  dollars.
+  dollars. Foreign-currency cash contributions and eligible TFSA withdrawals
+  use historical CAD exchange rates. Accounts and Tax show room as unavailable
+  if a required rate is missing.
 - **Watchlist:** add/remove symbols and create/delete price or daily-change alerts.
 - **Income:** recorded monthly distributions and interest, converted at current FX.
 - **Tax:** capital gains for each year with a sale in a taxable account, with the same

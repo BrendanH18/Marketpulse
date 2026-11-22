@@ -174,7 +174,7 @@ def test_desktop_tax_carries_foreign_property(tracker, ledger, store):
     payload = tax_report(tracker)
     json.dumps(payload, allow_nan=False)
     years = payload["foreign_property"]
-    assert payload["version"] == 1 and [y["year"] for y in years][-2:] == [2025, 2024]
+    assert payload["version"] == 2 and [y["year"] for y in years][-2:] == [2025, 2024]
     y2024 = next(y for y in years if y["year"] == 2024)
     assert y2024["status"] == "simplified" and y2024["holdings"][0]["symbol"] == "FICTUS"
     # The app reloads the report when a setting changes, and only then.

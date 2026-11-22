@@ -346,7 +346,7 @@ struct TargetsEntry {
   }
 }
 
-/// Version 1 of `marketpulse desktop snapshot`; separate from the stable status API.
+/// Versioned `marketpulse desktop snapshot`; separate from the stable status API.
 struct DesktopPayload: Decodable {
   let version: Int
   let demo: Bool
@@ -809,6 +809,11 @@ struct DesktopAsset: Decodable, Identifiable {
 
 /// Room CRA works out in Canadian dollars, whatever currency totals are shown in.
 struct ContributionRoom: Decodable, Identifiable {
+  struct MissingRate: Decodable {
+    let date: String
+    let currency: String
+  }
+
   /// The types the app sets room for (`marketpulse accounts room`).
   static let types = ["TFSA", "RRSP", "FHSA"]
   /// The earliest year the form offers: FHSAs began in 2023 and TFSAs in 2009. RRSP room is
@@ -819,7 +824,9 @@ struct ContributionRoom: Decodable, Identifiable {
   /// The user entered `startingRoom` as CRA's figure on January 1 of this year.
   let asOfYear: Int
   let startingRoom: Double
-  let remaining: Double
+  /// Unavailable when any required historical CAD exchange rate is missing.
+  let remaining: Double?
+  let missingFx: [MissingRate]?
   /// How `remaining` was worked out: starting room + new limits + withdrawals added back
   /// − contributions − forfeited. Absent from older engines.
   let contributions: Double?
@@ -829,7 +836,7 @@ struct ContributionRoom: Decodable, Identifiable {
   let forfeited: Double?
 }
 
-/// Version 1 of `marketpulse desktop tax`: capital gains for every year, as `marketpulse tax`
+/// Versioned `marketpulse desktop tax`: capital gains for every year, as `marketpulse tax`
 /// reports them. Loaded only when the Tax workspace opens, because it needs historical FX rates.
 struct TaxPayload: Decodable {
   let version: Int

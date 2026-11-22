@@ -4,6 +4,7 @@ from marketpulse.market import (
     BARS_PER_YEAR,
     PERIOD_INTERVALS,
     SPARK_URL,
+    CurlTransport,
     MarketData,
     MarketError,
     _market_state,
@@ -13,6 +14,21 @@ from marketpulse.market import (
 
 def spark_calls(fake):
     return [params for url, params in fake.calls if url == SPARK_URL]
+
+
+def test_budgeted_history_uses_remaining_timeout_without_retries(monkeypatch):
+    transport = CurlTransport()
+    timeouts = []
+
+    class UnavailableSession:
+        def get(self, url, *, params, headers, timeout):
+            timeouts.append(timeout)
+            raise TimeoutError("provider did not answer")
+
+    monkeypatch.setattr(transport, "_session", UnavailableSession)
+    with pytest.raises(MarketError, match="provider did not answer"):
+        MarketData(transport).daily_closes("USDCAD=X", "2025-01-01", timeout=1.5)
+    assert timeouts == [1.5]
 
 
 def test_batch_quotes_parse_and_report_missing(market):

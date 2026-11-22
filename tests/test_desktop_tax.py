@@ -52,7 +52,7 @@ def ledger(store, fake):
 def test_tax_report_matches_the_cli_report_year_by_year(tracker, ledger):
     payload = tax_report(tracker)
     json.dumps(payload, allow_nan=False)  # what the CLI emits
-    assert (payload["version"], payload["demo"], payload["base_currency"]) == (1, False, "CAD")
+    assert (payload["version"], payload["demo"], payload["base_currency"]) == (2, False, "CAD")
     years, _ = tracker.tax_years()  # what `marketpulse tax` shows
     assert [y["year"] for y in payload["years"]] == [y.year for y in years] == [2025, 2024]
     for got, want in zip(payload["years"], years, strict=True):

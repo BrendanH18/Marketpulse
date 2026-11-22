@@ -14,7 +14,6 @@ from rich.text import Text
 
 from .. import fmt, render
 from ..models import Account, AccountType, today
-from ..tax import TaxReport
 from .base import App, fail, pass_app
 from .root import main
 
@@ -655,7 +654,4 @@ def accounts_room(app: App, account_type, year, amount, dry_run: bool, as_json: 
     if not rooms:
         app.console.print(Text("No contribution room recorded yet.", style="muted"))
         return
-    app.console.print(
-        # Room only: an empty tax report (no years, no issues) renders just the room table.
-        render.tax_group([], TaxReport(), rooms, app.store.account_map(), app.config.base_currency, privacy=app.privacy)
-    )
+    app.console.print(render.room_table(rooms, privacy=app.privacy))

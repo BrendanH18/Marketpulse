@@ -810,7 +810,7 @@ def room_table(rooms: Sequence[tuple[RoomStatus, list[Account]]], *, privacy: bo
     """Contribution room per account type (`marketpulse tax`, `tax --room`)."""
     # Only FHSA room can be forfeited (carry-forward and lifetime caps), so
     # the column appears only when it has something to say.
-    capped = any(status.forfeited > 0.005 for status, _ in rooms)
+    capped = any((status.forfeited or 0.0) > 0.005 for status, _ in rooms)
     headers: list[Column] = [
         "Type",
         ("Since", "right"),
@@ -822,7 +822,8 @@ def room_table(rooms: Sequence[tuple[RoomStatus, list[Account]]], *, privacy: bo
     if capped:
         headers.append(("− Capped", "right"))
     headers.append(("Remaining", "right"))
-    t = table(*headers, title="Contribution room")
+    t = table(*headers, title="Contribution room (CAD)")
+    missing_fx = Text(style="warn")
     for status, members in rooms:
         label = Text(status.account_type, style="bright")
         others = [a.name for a in members if a.name.upper() != status.account_type]
@@ -839,16 +840,28 @@ def room_table(rooms: Sequence[tuple[RoomStatus, list[Account]]], *, privacy: bo
         if capped:
             cells.append(
                 Text(fmt.money(status.forfeited, privacy=privacy), style="warn")
-                if status.forfeited > 0.005
+                if (status.forfeited or 0.0) > 0.005
                 else Text("—", style="muted")
             )
-        cells.append(
-            Text(
-                fmt.money(status.remaining, privacy=privacy),
-                style="down bold" if status.remaining < 0 else "up bold",
+        if status.remaining is None:
+            cells.append(Text("Unavailable", style="warn"))
+            if missing_fx:
+                missing_fx.append("\n")
+            missing_fx.append(f"{status.account_type}: historical CAD exchange rates unavailable")
+            if not privacy:
+                details = ", ".join(f"{rate.currency} on {rate.date}" for rate in status.missing_fx)
+                missing_fx.append(f" ({details})")
+        else:
+            cells.append(
+                Text(
+                    fmt.money(status.remaining, privacy=privacy),
+                    style="" if privacy else "down bold" if status.remaining < 0 else "up bold",
+                )
             )
-        )
         t.add_row(*cells)
+    if missing_fx:
+        t.caption = missing_fx
+        t.columns[-1].min_width = len("Unavailable")
     return t
 
 

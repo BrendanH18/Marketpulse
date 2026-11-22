@@ -8,9 +8,10 @@ and deterministic: no I/O, no market data.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterator
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
+from math import isfinite
 
 from .models import EPSILON, Account, MessageArgs, Transaction, TxnType, guess_currency
 
@@ -413,10 +414,16 @@ def tfsa_limit(year: int) -> int:
 
 
 @dataclass
+class MissingRoomRate:
+    date: str
+    currency: str
+
+
+@dataclass
 class RoomStatus:
     """Contribution room for one account type, and how it was derived.
 
-    The columns always add up:
+    When historical FX is available, the columns add up:
         remaining = starting_room + new_limits + withdrawals_added_back
                     - contributions - forfeited
     """
@@ -424,13 +431,30 @@ class RoomStatus:
     account_type: str
     as_of_year: int
     starting_room: float
-    contributions: float
-    withdrawals_added_back: float
-    new_limits: float
-    remaining: float
+    contributions: float | None
+    withdrawals_added_back: float | None
+    new_limits: float | None
+    remaining: float | None
     # Room that existed on paper but can't be used: FHSA room above the $8,000
     # carry-forward, or above what the $40,000 lifetime limit still allows.
-    forfeited: float = 0.0
+    forfeited: float | None = 0.0
+    missing_fx: list[MissingRoomRate] = field(default_factory=list)
+
+
+def room_flows(
+    account_type: str, as_of_year: int, flows: list[CashFlow], account_ids: set[int], current_year: int
+) -> list[CashFlow]:
+    """Recorded flows that can affect the estimate, including the FHSA lifetime cap."""
+    relevant = []
+    for flow in flows:
+        if flow.account_id not in account_ids:
+            continue
+        year = int(flow.date[:4])
+        if flow.amount > 0 and year <= current_year and (year >= as_of_year or account_type == "FHSA"):
+            relevant.append(flow)
+        elif flow.amount < 0 and account_type == "TFSA" and as_of_year <= year < current_year:
+            relevant.append(flow)
+    return relevant
 
 
 def contribution_room(
@@ -441,23 +465,47 @@ def contribution_room(
     account_ids: set[int],
     *,
     current_year: int | None = None,
+    fx: Callable[[str, str], float | None] | None = None,
 ) -> RoomStatus:
-    """Remaining room given room known at Jan 1 of `as_of_year`.
+    """Remaining CAD room given room known at Jan 1 of `as_of_year`.
 
     TFSA: adds each new year's limit and prior-year withdrawals.
     FHSA: see _fhsa_room (annual limit, capped carry-forward, lifetime limit).
     RRSP and others: room is user-supplied; only contributions are subtracted.
     """
     current_year = current_year or date.today().year
-    mine = [f for f in flows if f.account_id in account_ids]
-    relevant = [f for f in mine if int(f.date[:4]) >= as_of_year]
-    contributions = sum(f.amount for f in relevant if f.amount > 0)
+    cad_flows = []
+    missing = set()
+    for flow in room_flows(account_type, as_of_year, flows, account_ids, current_year):
+        currency = flow.currency.upper()
+        if currency == "CAD":
+            cad_flows.append(flow)
+            continue
+        rate = fx(flow.date, currency) if fx else None
+        if rate is None or not isfinite(rate) or rate <= 0:
+            missing.add((flow.date, currency))
+        else:
+            cad_flows.append(replace(flow, amount=flow.amount * rate, currency="CAD"))
+    if missing:
+        return RoomStatus(
+            account_type,
+            as_of_year,
+            starting_room,
+            contributions=None,
+            withdrawals_added_back=None,
+            new_limits=None,
+            remaining=None,
+            forfeited=None,
+            missing_fx=[MissingRoomRate(day, currency) for day, currency in sorted(missing)],
+        )
+
+    contributions = sum(f.amount for f in cad_flows if f.amount > 0 and int(f.date[:4]) >= as_of_year)
     if account_type == "FHSA":
-        return _fhsa_room(as_of_year, starting_room, mine, current_year, contributions)
+        return _fhsa_room(as_of_year, starting_room, cad_flows, current_year, contributions)
     withdrawals_back = 0.0
     new_limits = 0.0
     if account_type == "TFSA":
-        withdrawals_back = sum(-f.amount for f in relevant if f.amount < 0 and int(f.date[:4]) < current_year)
+        withdrawals_back = sum(-f.amount for f in cad_flows if f.amount < 0)
         new_limits = sum(tfsa_limit(y) for y in range(as_of_year + 1, current_year + 1))
     remaining = starting_room + new_limits + withdrawals_back - contributions
     return RoomStatus(account_type, as_of_year, starting_room, contributions, withdrawals_back, new_limits, remaining)

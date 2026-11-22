@@ -35,9 +35,10 @@ SwiftUI app (macOS) ───── desktop JSON bridge ──┤
                           `marketpulse desktop` └─ SQLite in ~/.marketpulse (shared with CLI/TUI)
 ```
 
-- The app runs the bundled `marketpulse` CLI. `desktop snapshot` returns version 1
-  of the bridge payload; writes use the ordinary CLI commands. Data stays in
-  `~/.marketpulse`, so the app, CLI, and TUI share one ledger.
+- The app runs the bundled `marketpulse` CLI. `desktop snapshot` and `desktop tax`
+  return version 2 of their payloads. A room estimate that needs a missing
+  historical exchange rate has a `null` remaining amount. Writes use the ordinary
+  CLI commands. Data stays in `~/.marketpulse`, so the app, CLI, and TUI share one ledger.
 - **Bridge rules:** adding fields is fine. Removing or changing a field's meaning
   requires bumping `version` and updating every interface. `scripts/check_native_bridge.py`
   decodes a real Python payload with the app's Swift models in CI; extend it with

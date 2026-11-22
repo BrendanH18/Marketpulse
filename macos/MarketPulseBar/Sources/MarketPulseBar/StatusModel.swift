@@ -251,7 +251,7 @@ final class StatusModel: ObservableObject {
     do {
       let data = try await CLI.run(["desktop", "snapshot"] + (demo ? ["--demo"] : ["--fresh"]))
       let payload = try decoder.decode(DesktopPayload.self, from: data)
-      guard payload.version == 1 else {
+      guard payload.version == 2 else {
         throw CLIError.failed(String(localized: "Unsupported desktop bridge version. Reinstall the app."))
       }
       // An older refresh that finishes late must not overwrite data reloaded after an edit.
@@ -759,7 +759,7 @@ final class StatusModel: ObservableObject {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let payload = try decoder.decode(TaxPayload.self, from: data)
-        guard payload.version == 1 else {
+        guard payload.version == 2 else {
           throw CLIError.failed(String(localized: "Unsupported tax report version. Reinstall the app."))
         }
         guard generation == taxGeneration else { return }
