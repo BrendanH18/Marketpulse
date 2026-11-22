@@ -18,7 +18,7 @@ the app's decisions in [docs/app-plan.md](docs/app-plan.md).
 | `src/marketpulse/` | Engine and CLI. `models.py`, `ledger.py`, `valuation.py`, `services.py` (core); `csvio.py` (import/export); `market.py` (quotes); `db.py` (SQLite, backups, migrations); `cli/`; `tui/` |
 | `src/marketpulse/desktop.py`, `automation.py` | Desktop JSON bridge and the shared refresh/backup/alert cycle |
 | `macos/MarketPulseBar/` | SwiftUI app (menu bar + portfolio window), `AppIcon.icns` |
-| `scripts/` | Bridge, coverage and localization checks; QA and standalone app builders; release, benchmark, installer, icon and README-preview scripts |
+| `scripts/` | Bridge, coverage and localization checks; QA and standalone app builders; the packaged app's restore smoke (`smoke_restore_app.py`, `drive_app.swift`); release, benchmark, installer, icon and README-preview scripts |
 | `tests/` | pytest with isolated data, fake Yahoo transport, mocked notifications |
 | `docs/` | User guides, plan, QA checklist, roadmap |
 
