@@ -66,7 +66,7 @@ for this milestone.
 | CLI and TUI module splits | #24 |
 | Mac app: Phases 1 and 2 of the plan, and French (Canada) | #31, #33–#46, #55 |
 | App 1.0 for macOS, released as v3.0.0 | #32, #152 |
-| Offline CLI inspection, `report` and `summarize` (64 datasets, 197 shared operations) | 20 issues from #104 to #143, #145, #153, #162 and PR #191 |
+| Offline CLI inspection, `report` and `summarize` (69 datasets, 197 shared operations) | 20 issues from #104 to #143, #145, #153, #162, PR #191 and [#212](https://github.com/BrendanH18/Marketpulse/issues/212) |
 | New and imported sales checked at their date | #149 |
 | MarketPulse 3.1.0 | #169 |
 | Backup restore preview and verification (unreleased) | #171, #173, #176 |
