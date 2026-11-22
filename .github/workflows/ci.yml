@@ -27,8 +27,8 @@ jobs:
   desktop-benchmark:
     name: Desktop benchmark (macOS)
     if: github.event_name == 'workflow_dispatch' && inputs.desktop_benchmark
-    runs-on: namespace-profile-macos
-    timeout-minutes: 15
+    runs-on: macos-26
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,7 +41,7 @@ jobs:
       - name: Measure the fictional ledger
         env:
           BENCHMARK_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
-          BENCHMARK_RUNNER: namespace-profile-macos
+          BENCHMARK_RUNNER: macos-26
         run: uv run --locked python scripts/benchmark_desktop.py --output desktop-benchmark.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -54,14 +54,14 @@ jobs:
     name: Test (Python ${{ matrix.python }}, ${{ matrix.os }})
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        os: [namespace-profile-gitrunner]
+        os: [ubuntu-24.04]
         python: ["3.12", "3.13", "3.14"]
         include:
-          - os: namespace-profile-macos
+          - os: macos-26
             python: "3.14"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,7 +78,7 @@ jobs:
   coverage:
     name: Coverage gate (financial core)
     if: github.event_name != 'schedule'
-    runs-on: namespace-profile-gitrunner
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -99,7 +99,7 @@ jobs:
   # runs even when an earlier one fails, so one run still reports them all.
   lint:
     name: Lint, audit and package
-    runs-on: namespace-profile-gitrunner
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
       menubar: ${{ steps.filter.outputs.menubar }}
@@ -180,8 +180,8 @@ jobs:
     # The path check runs only on pull requests. !cancelled() keeps a failed lint step from skipping
     # this job; it still runs and reports its own result.
     if: ${{ !cancelled() && github.event_name != 'schedule' && (github.event_name != 'pull_request' || needs.lint.outputs.menubar == 'true') }}
-    runs-on: namespace-profile-macos
-    timeout-minutes: 20
+    runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -202,8 +202,8 @@ jobs:
       - name: Build standalone app with bundled backend (signs, verifies, smoke-tests)
         run: uv run --locked python scripts/build_app.py --out "$RUNNER_TEMP/app"
       - name: Drive the packaged app's restore sheet on a fictional ledger
-        # Cancel and a stale preview must leave the scratch ledger untouched. Needs the GUI session
-        # and Accessibility permission that the Namespace macOS runners give the job's shell.
+        # Cancel and a stale preview must leave the scratch ledger untouched. Driving the sheet
+        # requires a GUI session and Accessibility permission for the job's shell.
         run: uv run --locked python scripts/smoke_restore_app.py --app "$RUNNER_TEMP/app/$(uname -m)/MarketPulse.app"
 
   # The check the main ruleset requires. A job that a failed job `needs` is skipped, and a skipped
@@ -215,7 +215,7 @@ jobs:
     name: CI passed
     needs: [lint, test, coverage, menubar]
     if: always()
-    runs-on: namespace-profile-gitrunner
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: No job failed or was cancelled

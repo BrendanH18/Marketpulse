@@ -32,6 +32,9 @@ the app's decisions in [docs/app-plan.md](docs/app-plan.md).
 
 ## Where checks run (local, Mac and Boat)
 
+- **GitHub Actions use standard GitHub-hosted runners.** MarketPulse is public.
+  Use `ubuntu-24.04` for Linux x86_64, `macos-26` for Apple silicon, and
+  `macos-15-intel` to verify the Intel build.
 - **Python checks run locally.** The maintainer decided on 2026-11-21 that
   MarketPulse is an exception to the rule that agent compute runs in Boat
   sandboxes, for the Python checks only. Run `uv sync --locked --dev` and the

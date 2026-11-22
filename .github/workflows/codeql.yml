@@ -1,8 +1,7 @@
 name: CodeQL
 
-# Code scanning for the Python engine, the GitHub Actions workflows and the Swift app, on Namespace
-# runners. This replaces GitHub's default setup, which must stay off: while it is on, GitHub
-# rejects the results this workflow uploads.
+# Advanced CodeQL setup for the Python engine, GitHub Actions workflows and Swift app on
+# GitHub-hosted runners. Keep the repository's default setup off so GitHub accepts these results.
 
 on:
   push:
@@ -22,7 +21,7 @@ concurrency:
 jobs:
   analyze:
     name: CodeQL (${{ matrix.language }})
-    runs-on: namespace-profile-gitrunner
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -45,7 +44,7 @@ jobs:
 
   analyze-swift:
     name: CodeQL (swift)
-    runs-on: namespace-profile-macos
+    runs-on: macos-26
     timeout-minutes: 45
     permissions:
       contents: read
