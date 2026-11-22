@@ -18,7 +18,7 @@ from .analytics import (
 )
 from .config import Config
 from .db import Snapshot, Store
-from .ledger import RoomStatus, contribution_room, new_issues, replay, replay_by_day, transaction_currency
+from .ledger import RoomStatus, contribution_room, new_issues, replay, replay_by_day, sort_key, transaction_currency
 from .market import MarketData, MarketError
 from .models import (
     Account,
@@ -103,6 +103,11 @@ class Tracker:
         if acct is None:
             raise ValueError("Unknown account.")
         if txn.type is TxnType.ACB_INCREASE:
+            key = sort_key(txn)
+            earlier = [t for t in self.store.transactions(symbol=txn.symbol) if sort_key(t) < key]
+            holding = replay(earlier, self.store.account_map()).holdings.get((txn.account_id, txn.symbol))
+            if holding is not None:
+                return holding.currency
             return transaction_currency(txn, {acct.saved_id: acct})
         return self.resolve_currency(txn.symbol, acct)[0]
 
@@ -111,10 +116,10 @@ class Tracker:
         `store.restore_id` it read before doing so, so a restore since then refuses the save."""
         if restore_id is None:
             restore_id = self.store.restore_id
-        # May fetch a quote, so it stays outside the write lock below.
-        txn.currency = self.transaction_currency(txn)
         # Replay sorts by the date text, so the checks below need the stored ISO form.
         txn.date = parse_date(txn.date)
+        # May fetch a quote, so it stays outside the write lock below.
+        txn.currency = self.transaction_currency(txn)
         txn.validate()
         # The checks and the write hold the write lock together: no restore (or sale in another
         # window) can land between them.

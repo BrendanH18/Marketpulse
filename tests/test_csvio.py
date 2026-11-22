@@ -81,6 +81,8 @@ def test_dry_run_and_required_columns(store):
         ("CONT", TxnType.DEPOSIT),
         ("EFT out", TxnType.WITHDRAWAL),
         ("Distribution", TxnType.DIVIDEND),
+        ("Phantom distribution", TxnType.ACB_INCREASE),
+        ("Increase cost base", TxnType.ACB_INCREASE),
         ("hmm", None),
     ],
 )

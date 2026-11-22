@@ -51,6 +51,7 @@ EXPORT_COLUMNS = [
 GENERIC_REQUIRED_COLUMNS = ("date", "type")
 
 _TYPE_KEYWORDS = [
+    (("phantom distribution", "increase cost base", "cost base increase", "acb increase"), TxnType.ACB_INCREASE),
     (("reinvest", "drip"), TxnType.DRIP),
     (("return of capital", "roc"), TxnType.ROC),
     (("dividend", "distribution", "div"), TxnType.DIVIDEND),

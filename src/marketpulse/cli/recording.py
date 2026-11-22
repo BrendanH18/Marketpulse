@@ -369,8 +369,8 @@ def _units_held(app: App, acct: Account, sym: str, day: str) -> float:
 def _normalize(app: App, txn: Transaction) -> None:
     """Fill in what `Tracker.add_transaction` would: the currency and the ISO date."""
     try:
-        txn.currency = app.tracker.transaction_currency(txn)
         txn.date = parse_date(txn.date)
+        txn.currency = app.tracker.transaction_currency(txn)
     except ValueError as e:
         fail(str(e))
 
@@ -1111,7 +1111,7 @@ def roc(app: App, symbol, amount, currency, account, when, note) -> None:
 @main.command()
 @click.argument("symbol")
 @click.argument("amount", type=float)
-@click.option("-c", "--currency", default="", help="Currency of AMOUNT (must match the holding).")
+@click.option("-c", "--currency", default="", help="Currency of AMOUNT (defaults to the holding's on DATE).")
 @recording_extras()
 @txn_options
 @pass_app

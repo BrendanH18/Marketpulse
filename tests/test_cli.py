@@ -89,6 +89,20 @@ def test_non_cash_acb_cli_and_csv_round_trip(cli, store, fake, tmp_path):
         restored.close()
 
 
+def test_acb_increase_defaults_to_the_currency_held_on_its_date(cli, store, fake):
+    assert cli("accounts", "add", "Fictional Taxable", "-c", "CAD").exit_code == 0
+    assert cli("buy", "MAPLE", "10", "10", "-c", "USD", "-d", "2024-01-02").exit_code == 0
+    assert cli("sell", "MAPLE", "10", "20", "-c", "USD", "-d", "2024-01-03").exit_code == 0
+    assert cli("buy", "MAPLE", "10", "10", "-c", "CAD", "-d", "2024-01-04").exit_code == 0
+    fake.calls.clear()
+
+    saved = cli("acb-increase", "MAPLE", "25", "-d", "2024-01-03", "--json")
+    assert saved.exit_code == 0, saved.output
+    assert json.loads(saved.stdout)["currency"] == "USD"
+    assert store.ledger().realized[0].cost == 125
+    assert fake.calls == []
+
+
 @pytest.mark.parametrize(
     "command",
     [
