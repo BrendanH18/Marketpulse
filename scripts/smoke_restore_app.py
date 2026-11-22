@@ -106,9 +106,13 @@ def main() -> None:
         driver = scratch / "drive_app"
         run("swiftc", "-O", ROOT / "scripts" / "drive_app.swift", "-o", driver)
         defaults = scratch / "defaults.plist"
-        had_defaults = run("defaults", "export", BUNDLE_ID, defaults, check=False, capture_output=True).returncode == 0
-        # Launched directly rather than with `open`, so it gets exactly this environment.
-        process = subprocess.Popen([str(binary)], env=env, cwd="/")
+        domains = run("defaults", "domains", capture_output=True, text=True).stdout.strip().split(", ")
+        had_defaults = BUNDLE_ID in domains
+        if had_defaults:
+            run("defaults", "export", BUNDLE_ID, defaults)  # stops here, before launch, if it can't be saved
+        # Launched directly rather than with `open`, so it gets exactly this environment. English for
+        # this process only, since the driver finds controls by their English labels.
+        process = subprocess.Popen([str(binary), "-AppleLanguages", "(en)"], env=env, cwd="/")
         try:
 
             def drive(command: str, argument: str) -> None:
