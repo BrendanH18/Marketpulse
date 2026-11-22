@@ -108,9 +108,6 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2 # on a pull request, its merge commit and its base, to diff against
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          enable-cache: ${{ github.event_name != 'schedule' }} # the weekly run only audits uv.lock and installs nothing
       - name: Check whether the Mac app is affected
         # Pull requests build the Mac app only when they touch something it builds or checks.
         # Pushes to main, manual runs, and the release workflow (workflow_call) always build it.
@@ -136,6 +133,10 @@ jobs:
             echo "menubar=false" >> "$GITHUB_OUTPUT"
             echo "::notice::No Mac app paths changed; skipping the menubar job."
           fi
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: ${{ !cancelled() }}
+        with:
+          enable-cache: ${{ github.event_name != 'schedule' }} # the weekly run only audits uv.lock and installs nothing
       - name: Audit uv.lock against the OSV advisory database
         # The only step the weekly schedule runs, so a newly published advisory shows up without a
         # code change. `uv audit` is a preview command; the flag opts in to it explicitly.
