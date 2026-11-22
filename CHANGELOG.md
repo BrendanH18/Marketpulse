@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0]
+
+MarketPulse previews backup restores before replacing your ledger, checks
+managed backups in bulk, and keeps a history of automation runs. It also adds
+a T1135 foreign-property estimate and improves privacy and search on the Mac.
+
 ### Added
 
 - Five offline datasets cover automation history, monthly activity, account
   symbols, broker transaction codes and transaction CSV columns. All 197 shared
   report operations and 15 named filter presets provide
-  [1,000 new reporting capabilities](docs/cli-offline-reporting-1000.md).
+  [1,000 new reporting capabilities](https://github.com/BrendanH18/Marketpulse/blob/v3.2.0/docs/cli-offline-reporting-1000.md).
 
 - Holdings and Activity on Mac keep independent searches, offer a clear-filters action when
   nothing matches, and support ⌘F. Activity also accepts account names and dates.
@@ -33,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrects the listing-based rule; the setting is stored on the asset (schema version 3)
   ([#179](https://github.com/BrendanH18/Marketpulse/issues/179)).
 - One hundred more CLI and terminal app improvements
-  ([inventory](docs/cli-tui-more-hundred-improvements.md)):
+  ([inventory](https://github.com/BrendanH18/Marketpulse/blob/v3.2.0/docs/cli-tui-more-hundred-improvements.md)):
   - 80 opt-in CLI additions across `buy`, `sell`, `transfer`, `dividend`, `withdraw`,
     `split`, `realized`, `payouts`, `holdings`, `status`, `summary`, `perf`, `income`,
     `quote`, `chart`, `compare`, `search`, `activity`, `txn check`, `automation run`,
@@ -47,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     ledger issue jumps (`ctrl+e`), previous chart (`'`), saved watchlist sort (`ctrl+s`),
     new command palette entries and today's change in the holdings footer.
 - One hundred CLI and terminal app workflow improvements
-  ([inventory](docs/cli-tui-hundred-improvements.md)):
+  ([inventory](https://github.com/BrendanH18/Marketpulse/blob/v3.2.0/docs/cli-tui-hundred-improvements.md)):
   - 80 opt-in CLI additions across `tax`, `allocation`, `targets`, `doctor`,
     `provider`, `commands`, `theme`, `config`, `accounts`, `watch`, `alerts`,
     `positions`, `cash`, `snapshots`, `asset`, `import`, `export` and `backup`.
@@ -76,6 +82,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tall Mac forms, Settings pages, and menu bar portfolios scroll to fit the display.
 - Terminal forms scroll on short screens and reveal validation errors. Malformed numbers such
   as `1,5` are rejected before saving, and `1,234.56` still reads as 1234.56.
+
+### Upgrade notes
+
+- Before upgrading, use **Automation › Back up now** in the Mac app or run
+  `marketpulse backup now` in the CLI.
+- The first 3.2.0 launch migrates a 3.1.0 ledger from schema 1 to schema 3 and
+  creates an automatic `pre-v3` backup. To return to 3.1.0, verify and restore
+  a pre-upgrade backup. Keep a copy of the upgraded ledger to preserve any
+  changes made after the upgrade. [Rollback guide](https://github.com/BrendanH18/Marketpulse/blob/v3.2.0/docs/data.md#roll-back-from-320-to-310)
 
 ## [3.1.0] - 2026-11-18
 
@@ -706,7 +721,8 @@ Initial 2.0 overhaul: transaction ledger engine, SQLite store, Yahoo market
 client, Omarchy-styled Textual TUI, and native macOS menu bar companion.
 See PR [#3](https://github.com/BrendanH18/Marketpulse/pull/3).
 
-[Unreleased]: https://github.com/BrendanH18/Marketpulse/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/BrendanH18/Marketpulse/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/BrendanH18/Marketpulse/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/BrendanH18/Marketpulse/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/BrendanH18/Marketpulse/compare/v2.1.0...v3.0.0
 [2.1.0]: https://github.com/BrendanH18/Marketpulse/compare/08b9aff...v2.1.0

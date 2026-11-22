@@ -157,6 +157,9 @@ marketpulse backup
 uv tool install --python 3.11 --reinstall git+https://github.com/BrendanH18/Marketpulse.git@v3.1.0
 ```
 
+Upgrading to 3.2.0 migrates a 3.1.0 ledger. If you need to go back to 3.1.0,
+restore a pre-upgrade backup. [Rollback instructions](docs/data.md#roll-back-from-320-to-310)
+
 On an unpinned `@main` or editable install, pull or reinstall from `@main`
 instead when you want tip-of-tree rather than a release tag.
 
