@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date
+from datetime import date, timedelta
 from itertools import groupby
 from typing import TYPE_CHECKING, Any
 
@@ -26,7 +26,7 @@ SOURCES = {
     ),
 }
 DESCRIPTIONS = {
-    "snapshot-month-coverage": "Saved snapshot counts, gaps, currencies and backfilled days per populated month.",
+    "snapshot-month-coverage": "Saved snapshot counts, gaps, currencies and backfilled days by calendar month.",
 }
 PRESETS = {
     "snapshot-month-coverage": {
@@ -53,17 +53,22 @@ def load_source(name: str, app: App) -> list[dict[str, Any]]:
         return []
     history_first = snapshots[0][0]
     history_last = snapshots[-1][0]
+    by_month = {
+        month: [snapshot for _, snapshot in entries]
+        for month, entries in groupby(snapshots, key=lambda pair: pair[0].replace(day=1))
+    }
     rows = []
-    for first_day, entries in groupby(snapshots, key=lambda pair: pair[0].replace(day=1)):
-        month_snapshots = [snapshot for _, snapshot in entries]
+    first_day = history_first.replace(day=1)
+    while True:
+        month_snapshots = by_month.get(first_day, [])
         last_day = first_day.replace(day=monthrange(first_day.year, first_day.month)[1])
         expected_days = (min(last_day, history_last) - max(first_day, history_first)).days + 1
         rows.append(
             {
                 "snapshots": len(month_snapshots),
                 "month": first_day.isoformat()[:7],
-                "first_date": month_snapshots[0].date,
-                "last_date": month_snapshots[-1].date,
+                "first_date": month_snapshots[0].date if month_snapshots else None,
+                "last_date": month_snapshots[-1].date if month_snapshots else None,
                 "expected_days": expected_days,
                 "missing_days": expected_days - len(month_snapshots),
                 "currencies": sorted({snapshot.currency for snapshot in month_snapshots}),
@@ -73,4 +78,7 @@ def load_source(name: str, app: App) -> list[dict[str, Any]]:
                 ),
             }
         )
+        if last_day >= history_last:
+            break
+        first_day = last_day + timedelta(days=1)
     return rows

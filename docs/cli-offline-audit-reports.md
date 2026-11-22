@@ -12,7 +12,7 @@ give **1,000 new reporting capabilities**. The two commands share this count.
 | `transfer-routes` | One directed route between two active accounts, with the date range, number of transfers, transferred symbols, and effective transaction currencies. | `same-currency` and `cross-currency` compare the two accounts' currencies. `repeat` keeps routes with at least two transfers. |
 | `watchlist-quote-coverage` | One watched symbol in watchlist order, with any saved quote's provider, currency, and fetch time. | `cached`, `uncached`, and `missing-fetch-time`. The last preset requires a saved quote with an unknown fetch time. |
 | `alert-quote-coverage` | One saved alert with its active state, recorded trigger time, and any saved quote's provider, currency, and fetch time. | `active` keeps alerts eligible for evaluation, `uncached` keeps alerts whose symbols lack a saved quote, and `triggered` keeps alerts with a recorded trigger time. |
-| `snapshot-month-coverage` | One month with saved net-worth snapshots, with observed dates, expected and missing days, currencies, and the number of backfilled days. | `gaps` keeps months missing at least one expected day, `backfilled` keeps months with backfilled snapshots, and `mixed-currency` keeps months saved in more than one currency. |
+| `snapshot-month-coverage` | One calendar month within the saved snapshot history, with observed dates, expected and missing days, currencies, and the number of backfilled days. | `gaps` keeps months missing at least one expected day, `backfilled` keeps months with backfilled snapshots, and `mixed-currency` keeps months saved in more than one currency. |
 
 `SOURCE --describe` lists the fields, preset names, and their equivalent CLI
 filters. Presets combine with other filters using AND and select rows before
@@ -51,7 +51,8 @@ thresholds as inactive. These queries make no provider calls.
 Snapshot coverage counts calendar days from the earliest through the latest
 saved snapshot with a valid `YYYY-MM-DD` date, inclusive. The first and last
 months count only days inside that range. Rows with invalid dates are skipped.
-Months without any valid snapshots are omitted. Backfilled days count only
+An empty month within the range has null observed dates, an empty currency
+list, and every calendar day counted as missing. Backfilled days count only
 snapshots explicitly marked as backfilled.
 
 The datasets follow [normal report startup](cli-composable-reports.md#capability-inventory).

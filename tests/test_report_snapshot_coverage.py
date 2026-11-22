@@ -1,5 +1,10 @@
 """Saved snapshots can be audited by calendar month without repricing the portfolio."""
 
+import json
+
+from click.testing import CliRunner
+
+from marketpulse.cli import main
 from marketpulse.cli.base import App
 from marketpulse.cli.report_snapshot_coverage import SOURCES, load_source
 from marketpulse.db import Snapshot
@@ -7,7 +12,7 @@ from marketpulse.db import Snapshot
 SOURCE = "snapshot-month-coverage"
 
 
-def test_monthly_snapshot_coverage_clips_edges_and_omits_empty_months(tracker, fake):
+def test_monthly_snapshot_coverage_clips_edges_and_includes_empty_months(tracker, fake):
     app = App()
     app._tracker = tracker
     store = tracker.store
@@ -47,6 +52,16 @@ def test_monthly_snapshot_coverage_clips_edges_and_omits_empty_months(tracker, f
             "backfilled_days": 1,
         },
         {
+            "snapshots": 0,
+            "month": "2024-03",
+            "first_date": None,
+            "last_date": None,
+            "expected_days": 31,
+            "missing_days": 31,
+            "currencies": [],
+            "backfilled_days": 0,
+        },
+        {
             "snapshots": 2,
             "month": "2024-04",
             "first_date": "2024-04-02",
@@ -60,6 +75,16 @@ def test_monthly_snapshot_coverage_clips_edges_and_omits_empty_months(tracker, f
     assert all(tuple(row) == SOURCES[SOURCE] for row in rows)
     assert store._conn.total_changes == changes
     assert not fake.calls
+
+
+def test_gaps_preset_finds_a_fully_missing_month(tracker, monkeypatch):
+    monkeypatch.setattr(App, "tracker", property(lambda self: tracker))
+    tracker.store.upsert_snapshots([Snapshot(day, 100, 90, 80, "CAD", {}) for day in ("2025-01-31", "2025-03-01")])
+
+    result = CliRunner().invoke(main, ["report", SOURCE, "--preset", "gaps", "--fields", "month,missing_days"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == [{"month": "2025-02", "missing_days": 28}]
 
 
 def test_monthly_snapshot_coverage_for_empty_and_single_day_history(tracker):
