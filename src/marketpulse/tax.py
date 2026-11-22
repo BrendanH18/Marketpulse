@@ -39,10 +39,12 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_right
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from itertools import groupby
+from math import prod
 
 from .ledger import LedgerIssue, replay, sort_key, transaction_currency
 from .models import EPSILON, Account, Asset, AssetClass, AssetKind, Transaction, TxnType
@@ -86,7 +88,7 @@ class Disposition:
     complete: bool = True
     denied: float = 0.0  # part of a loss that is disallowed (>= 0), base currency
     denied_reason: str = ""  # DENIED_SUPERFICIAL | DENIED_REGISTERED | ""
-    # Superficial-loss working, kept for display (see _superficial_denial):
+    # Superficial-loss working in sale-date units, kept for display (see _superficial_denial):
     acquired_in_window: float = 0.0  # units bought 30 days either side, any account
     held_after_window: float = 0.0  # units held (all accounts) at the end of day +30
     window_open: bool = False  # day +30 is still in the future: the figure can still change
@@ -230,9 +232,9 @@ def compute(
             d = Disposition(txn.date, txn.account_id, txn.symbol, qty, proceeds, acb, ccy, fx, txn.id, "sale", complete)
             report.dispositions.append(d)
             if d.gain < -EPSILON:
-                _superficial_denial(d, ordered, accounts, today)
+                taxable_fraction = _superficial_denial(d, ordered, accounts, today)
                 if d.denied > EPSILON:
-                    _attach_denied_loss(d, p, ordered, accounts)
+                    _attach_denied_loss(d, p, taxable_fraction)
 
         elif t is TxnType.SPLIT and taxable:
             # A split changes the unit count, never the cost: ACB per unit falls.
@@ -386,8 +388,8 @@ def _transfer(
 
 def _superficial_denial(
     d: Disposition, ordered: Sequence[Transaction], accounts: dict[int, Account], today: str
-) -> None:
-    """Work out how much of a capital loss is a superficial loss.
+) -> float:
+    """Set the denied loss and return the taxable fraction of replacement purchases.
 
     CRA's rule (Income Tax Act s.54, as applied in Folio S3-F4-C1 and the
     usual worked examples): a loss is superficial if you, or someone
@@ -408,29 +410,56 @@ def _superficial_denial(
     sale_day = date.fromisoformat(d.date)
     lo = (sale_day - timedelta(days=SUPERFICIAL_WINDOW_DAYS)).isoformat()
     hi = (sale_day + timedelta(days=SUPERFICIAL_WINDOW_DAYS)).isoformat()
+    cutoff = min(hi, today)
     same = [t for t in ordered if t.symbol == d.symbol]
 
-    # P: acquisitions in the window. Only BUY and DRIP are acquisitions;
-    # a transfer between your own accounts isn't.
-    acquired = sum(t.quantity for t in same if t.type in (TxnType.BUY, TxnType.DRIP) and lo <= t.date <= hi)
+    # Count purchases in the units at the start of the window, then convert
+    # to sale-date units. Multiply the scale once per split across accounts.
+    scale = sale_scale = cutoff_scale = 1.0
+    acquired = taxable = 0.0
+    window = (t for t in same if lo <= t.date <= hi)
+    for day, entries in groupby(window, key=lambda t: t.date):
+        split_accounts: dict[float, Counter[int]] = defaultdict(Counter)
+        buys = []
+        for t in entries:
+            if t.type is TxnType.SPLIT:
+                split_accounts[t.ratio][t.account_id] += 1
+            elif t.type in (TxnType.BUY, TxnType.DRIP):
+                buys.append(t)
+        # Use the most occurrences in any one account. One row per account
+        # describes one split, while repeated rows in an account compound.
+        splits = [(ratio, max(counts.values()), counts) for ratio, counts in split_accounts.items()]
+        for t in buys:
+            # Ledger replay applies a same-day split to purchases in that account.
+            # Purchases elsewhere are already in the new units for that split.
+            buy_scale = scale * prod(ratio ** (count - counts[t.account_id]) for ratio, count, counts in splits)
+            quantity = t.quantity / buy_scale
+            acquired += quantity
+            if is_taxable(accounts.get(t.account_id)):
+                taxable += quantity
+        # On a split day, sells and end-of-day holdings use post-split units.
+        scale *= prod(ratio**count for ratio, count, _ in splits)
+        if day <= d.date:
+            sale_scale = scale
+        if day <= cutoff:
+            cutoff_scale = scale
 
     # B: units held across every account at the end of day +30. The window
     # may still be open (sale less than 30 days ago), in which case today's
     # holdings are the best estimate and the row is marked provisional.
-    held = sum(h.quantity for h in replay(list(same), accounts, until=min(hi, today)).open_holdings())
+    held = sum(h.quantity for h in replay(same, accounts, until=cutoff).open_holdings())
 
-    d.acquired_in_window = acquired
-    d.held_after_window = held
+    d.acquired_in_window = acquired * sale_scale
+    d.held_after_window = held * (sale_scale / cutoff_scale)
     d.window_open = hi > today
-    fraction = min(d.quantity, acquired, held) / d.quantity if d.quantity > EPSILON else 0.0
+    fraction = min(d.quantity, d.acquired_in_window, d.held_after_window) / d.quantity if d.quantity > EPSILON else 0.0
     if fraction > EPSILON:
         d.denied = -d.gain * fraction
         d.denied_reason = DENIED_SUPERFICIAL
+    return taxable / acquired if d.acquired_in_window > EPSILON else 0.0
 
 
-def _attach_denied_loss(
-    d: Disposition, p: AcbPool, ordered: Sequence[Transaction], accounts: dict[int, Account]
-) -> None:
+def _attach_denied_loss(d: Disposition, p: AcbPool, taxable_fraction: float) -> None:
     """Add a denied superficial loss to the cost of the replacement shares.
 
     The denied loss isn't gone: it goes into the ACB of the substituted
@@ -445,13 +474,7 @@ def _attach_denied_loss(
       bought *before* it), the amount is added now. Otherwise it waits in
       `pending_denied` and is added to the next taxable purchase.
     """
-    sale_day = date.fromisoformat(d.date)
-    lo = (sale_day - timedelta(days=SUPERFICIAL_WINDOW_DAYS)).isoformat()
-    hi = (sale_day + timedelta(days=SUPERFICIAL_WINDOW_DAYS)).isoformat()
-    buys = [t for t in ordered if t.symbol == d.symbol and t.type in (TxnType.BUY, TxnType.DRIP) and lo <= t.date <= hi]
-    total = sum(t.quantity for t in buys)
-    in_taxable = sum(t.quantity for t in buys if is_taxable(accounts.get(t.account_id)))
-    carried = d.denied * (in_taxable / total) if total > EPSILON else 0.0
+    carried = d.denied * taxable_fraction
     if carried <= EPSILON:
         return
     if p.quantity > EPSILON:

@@ -159,7 +159,10 @@ The tax report implements:
 - A pooled adjusted cost base (ACB) across taxable accounts holding an identical symbol.
 - Purchase costs and sale proceeds converted using each transaction date's FX rate.
 - Proportional superficial-loss estimates using recorded purchases and holdings
-  around the sale date, including registered accounts.
+  around the sale date, including registered accounts. The report expresses
+  share counts in sale-date units when the window spans a stock split. Record
+  the split with the same effective date and ratio in each account that held
+  the shares at the time.
 - Deemed dispositions for supported in-kind transfers across taxable and
   registered accounts. Registered replacement purchases can permanently deny a loss.
 

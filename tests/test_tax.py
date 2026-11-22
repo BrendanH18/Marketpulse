@@ -199,6 +199,101 @@ def test_partial_repurchase_denies_a_proportional_share():
     assert report.pools["X"].acb == pytest.approx(30 * 8 + 60)
 
 
+def test_buying_after_a_forward_split_uses_sale_date_units():
+    txns = [
+        txn(TxnType.BUY, "2024-01-01", qty=15, price=100),
+        txn(TxnType.SELL, "2024-03-01", qty=10, price=80),  # $200 loss on 10 pre-split shares
+        txn(TxnType.SPLIT, "2024-03-08", ratio=2),
+        txn(TxnType.BUY, "2024-03-15", qty=10, price=40),  # equivalent to 5 pre-split shares
+    ]
+    report = run(txns)
+    (d,) = report.dispositions
+    # 20 shares remain at the end of the window, equivalent to 10 on the sale date.
+    assert (d.acquired_in_window, d.held_after_window) == (5, 10)
+    assert d.denied == pytest.approx(100) and d.allowed_gain == pytest.approx(-100)
+    assert report.pools["X"].acb == pytest.approx(500 + 400 + 100)
+
+
+def test_buying_before_a_split_and_selling_after_compares_post_split_units():
+    txns = [
+        txn(TxnType.BUY, "2024-01-01", qty=20, price=100),
+        txn(TxnType.BUY, "2024-03-01", qty=5, price=100, account=TFSA),
+        txn(TxnType.SPLIT, "2024-03-08", ratio=2),
+        txn(TxnType.SPLIT, "2024-03-08", ratio=2, account=TFSA),
+        txn(TxnType.SELL, "2024-03-12", qty=20, price=40),  # $200 loss on 20 post-split shares
+    ]
+    (d,) = run(txns).dispositions
+    # The five acquired shares became ten by the sale, so half the loss is denied.
+    assert (d.acquired_in_window, d.held_after_window) == (10, 30)
+    assert d.denied == pytest.approx(100)
+
+
+def test_reverse_split_does_not_reduce_the_equivalent_shares_still_held():
+    txns = [
+        txn(TxnType.BUY, "2024-01-01", qty=10, price=100),
+        txn(TxnType.SELL, "2024-03-01", qty=10, price=80),
+        txn(TxnType.BUY, "2024-03-08", qty=10, price=80, account=TFSA),
+        txn(TxnType.SPLIT, "2024-03-15", ratio=0.5, account=TFSA),
+    ]
+    (d,) = run(txns).dispositions
+    # Five post-split shares represent all ten shares sold, so the $200 loss is fully denied.
+    assert (d.acquired_in_window, d.held_after_window) == (10, 10)
+    assert d.denied == pytest.approx(200)
+
+
+def test_split_replacement_acb_uses_comparable_units_across_accounts():
+    txns = [
+        txn(TxnType.BUY, "2024-01-01", qty=10, price=100),
+        txn(TxnType.SELL, "2024-03-01", qty=10, price=80),
+        txn(TxnType.BUY, "2024-03-08", qty=2, price=80),
+        txn(TxnType.BUY, "2024-03-08", qty=4, price=80, account=TFSA),
+        txn(TxnType.SPLIT, "2024-03-08", ratio=2),
+        txn(TxnType.SPLIT, "2024-03-08", ratio=2, account=TFSA),
+        txn(TxnType.BUY, "2024-03-15", qty=8, price=40),
+    ]
+    report = run(txns)
+    (d,) = report.dispositions
+    # Same-day buys are before the split in ledger order. The two split entries describe
+    # the same event. Six of the ten sale-date replacement shares are taxable.
+    assert (d.acquired_in_window, d.held_after_window) == (10, 10)
+    assert d.denied == pytest.approx(200)
+    assert report.pools["X"].acb == pytest.approx(160 + 320 + 120)
+
+
+def test_split_day_purchase_in_an_account_without_a_split_uses_post_split_units():
+    txns = [
+        txn(TxnType.BUY, "2024-01-01", qty=10, price=100),
+        txn(TxnType.BUY, "2024-01-01", qty=1, price=100, account=TFSA),
+        txn(TxnType.SELL, "2024-03-01", qty=10, price=80),
+        txn(TxnType.SPLIT, "2024-03-08", ratio=2, account=TFSA),
+        txn(TxnType.BUY, "2024-03-08", qty=10, price=40),
+    ]
+    report = run(txns)
+    (d,) = report.dispositions
+    # The taxable account was empty at the split. Its ten new shares represent
+    # five sale-date shares while the TFSA still holds one in sale-date units.
+    assert d.denied == pytest.approx(100)
+    assert (d.acquired_in_window, d.held_after_window) == (5, 6)
+    assert report.pools["X"].acb == pytest.approx(400 + 100)
+
+
+def test_multiple_same_day_splits_in_one_account_are_each_counted():
+    txns = [
+        txn(TxnType.BUY, "2024-01-01", qty=10, price=100),
+        txn(TxnType.BUY, "2024-01-01", qty=3, price=100, account=TFSA),
+        txn(TxnType.SELL, "2024-03-01", qty=10, price=80),
+        txn(TxnType.SPLIT, "2024-03-08", ratio=2, account=TFSA),
+        txn(TxnType.SPLIT, "2024-03-08", ratio=2, account=TFSA),
+        txn(TxnType.BUY, "2024-03-15", qty=20, price=20),
+    ]
+    report = run(txns)
+    (d,) = report.dispositions
+    # Two successive 2-for-1 splits mean 20 shares now represent five on the sale date.
+    assert d.denied == pytest.approx(100)
+    assert (d.acquired_in_window, d.held_after_window) == (5, 8)
+    assert report.pools["X"].acb == pytest.approx(400 + 100)
+
+
 def test_rebuying_in_a_tfsa_denies_the_loss_permanently():
     txns = [
         txn(TxnType.BUY, "2024-01-01", qty=10, price=100),
