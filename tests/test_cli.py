@@ -1,3 +1,4 @@
+import io
 import json
 import sqlite3
 from dataclasses import asdict, replace
@@ -10,7 +11,9 @@ from click.testing import CliRunner
 
 from marketpulse.cli import App, main
 from marketpulse.config import Config, config_path
-from marketpulse.models import Account
+from marketpulse.csvio import import_transactions
+from marketpulse.db import Store
+from marketpulse.models import Account, TxnType
 
 
 @pytest.fixture
@@ -39,6 +42,51 @@ def test_trading_flow(cli, store):
     assert "BUY" in cli("activity").output
     assert "Deleted transaction" in cli("undo", "-y").output
     assert len(store.transactions()) == 2
+
+
+def test_non_cash_acb_cli_and_csv_round_trip(cli, store, fake, tmp_path):
+    assert cli("accounts", "add", "Fictional Taxable", "--track-cash").exit_code == 0
+    assert cli("buy", "MAPLE.TO", "10", "10", "-c", "CAD", "-d", "2024-01-02").exit_code == 0
+    fake.calls.clear()
+    wrong_date = cli("acb-increase", "MAPLE.TO", "25", "-d", "2024-01-01")
+    assert wrong_date.exit_code == 1 and "nothing held" in wrong_date.output
+    wrong_currency = cli("acb-increase", "MAPLE.TO", "25", "-d", "2024-01-03", "-c", "USD")
+    assert wrong_currency.exit_code == 1 and "holding's currency (CAD)" in wrong_currency.output
+
+    saved = cli("acb-increase", "MAPLE.TO", "25", "-d", "2024-01-03", "--json")
+    assert saved.exit_code == 0, saved.output
+    row = json.loads(saved.stdout)
+    assert row["type"] == "ACB_INCREASE"
+    assert row["after"]["position"]["quantity"] == 10 and row["after"]["position"]["book"] == 125
+    assert store.ledger().cash_balances() == {(row["account_id"], "CAD"): -100}
+    assert fake.calls == []
+
+    conflicting = cli("buy", "MAPLE.TO", "1", "10", "-c", "USD", "-d", "2024-01-01")
+    assert conflicting.exit_code == 1 and "would no longer add up" in conflicting.output
+    csv_text = (
+        "date,account,type,symbol,quantity,price,amount,currency\n"
+        "2024-01-01,Fictional Taxable,BUY,MAPLE.TO,1,10,,USD\n"
+        "2024-01-04,Fictional Taxable,ACB_INCREASE,MAPLE.TO,,,-25,CAD\n"
+        "2024-01-05,Fictional Taxable,ACB_INCREASE,MAPLE.TO,1,25,,CAD\n"
+    )
+    preview = import_transactions(store, io.StringIO(csv_text), dry_run=True)
+    result = import_transactions(store, io.StringIO(csv_text), expect_fingerprint=preview.fingerprint)
+    assert preview.issues == result.issues
+    assert [i.code for i in result.issues] == ["breaks_later_entry", "amount_negative", "amount_not_positive"]
+    assert result.added == 0 and len(store.transactions()) == 2
+
+    exported = cli("export")
+    assert exported.exit_code == 0 and ",ACB_INCREASE,MAPLE.TO," in exported.stdout
+    restored = Store(tmp_path / "restored.db")
+    try:
+        out = import_transactions(restored, io.StringIO(exported.stdout))
+        assert not out.issues
+        buy, adjustment = restored.transactions()
+        assert adjustment.type is TxnType.ACB_INCREASE and adjustment.amount == 25
+        holding = restored.ledger().holdings[(buy.account_id, buy.symbol)]
+        assert (holding.quantity, holding.book) == (10, 125)
+    finally:
+        restored.close()
 
 
 @pytest.mark.parametrize(

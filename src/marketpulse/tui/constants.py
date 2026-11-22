@@ -59,6 +59,7 @@ TXN_CHOICES = [
     ("SPLIT", "Split", "Stock split"),
     ("TRANSFER", "Transfer in-kind", "Move shares between accounts"),
     ("ROC", "Return of capital", "Reduces the ACB"),
+    ("ACB_INCREASE", "Increase cost base", "Adjusts the ACB without moving cash or shares"),
     ("FEE", "Fee", "Account or management fee"),
     ("VALUATION", "Valuation", "Mark a manual asset at a price"),
 ]

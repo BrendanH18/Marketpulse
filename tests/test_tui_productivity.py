@@ -3,7 +3,7 @@
 import asyncio
 import time
 
-from textual.widgets import DataTable, Input, Static
+from textual.widgets import DataTable, Input, OptionList, Select, Static
 
 from marketpulse import fmt
 from marketpulse.models import Account, AccountType, Transaction, TxnType
@@ -283,7 +283,7 @@ def test_chart_selected_and_symbol_transactions(tracker, store):
 
 
 def test_transaction_type_picker(tracker, store):
-    seed(store)
+    birch, _ = seed(store)
 
     async def scenario():
         app = MarketPulseApp(tracker.config, tracker=tracker)
@@ -298,6 +298,26 @@ def test_transaction_type_picker(tracker, store):
             form = app.screen
             assert isinstance(form, TransactionForm) and form.kind is TxnType.DEPOSIT
             await pilot.press("escape")
+
+            # An ACB increase has an amount and a symbol, with trade inputs hidden.
+            await pilot.press("N")
+            options = app.screen.query_one("#txn-types", OptionList)
+            options.highlighted = options.get_option_index("ACB_INCREASE")
+            await pilot.press("enter")
+            await pilot.pause()
+            form = app.screen
+            assert isinstance(form, TransactionForm) and form.kind is TxnType.ACB_INCREASE
+            assert form.query_one("#f-amount", Input).display
+            assert not form.query_one("#f-quantity", Input).display
+            form.query_one("#f-account", Select).value = birch.saved_id
+            form.query_one("#f-symbol", Input).value = "XEQT.TO"
+            form.query_one("#f-currency", Input).value = "CAD"
+            form.query_one("#f-amount", Input).value = "5"
+            await pilot.pause()
+            form.action_save()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            assert any(t.type is TxnType.ACB_INCREASE and t.amount == 5 for t in store.transactions())
 
     run(scenario())
 

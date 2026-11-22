@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Record non-cash increases to a holding's adjusted cost base with `marketpulse acb-increase` or **Increase cost base** in the terminal app. The adjustment affects later gains without adding cash or shares. Existing ledgers get an automatic pre-upgrade backup before moving to schema version 4.
+
 ### Fixed
 
 - Superficial-loss estimates use sale-date share counts across stock splits, including when allocating denied losses to taxable cost basis.

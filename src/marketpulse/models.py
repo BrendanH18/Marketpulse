@@ -94,6 +94,7 @@ class TxnType(StrEnum):
     FEE = "FEE"  # account-level fee: amount
     SPLIT = "SPLIT"  # quantity multiplied by ratio, cost base unchanged
     ROC = "ROC"  # return of capital: amount reduces cost base
+    ACB_INCREASE = "ACB_INCREASE"  # non-cash increase in cost base: amount
     TRANSFER = "TRANSFER"  # move quantity (at cost) to target_account
     VALUATION = "VALUATION"  # mark a manual asset at price (no quantity change)
 
@@ -114,6 +115,7 @@ class TxnType(StrEnum):
             TxnType.WITHDRAWAL,
             TxnType.FEE,
             TxnType.ROC,
+            TxnType.ACB_INCREASE,
         }
 
 
@@ -341,7 +343,7 @@ class Transaction:
     @property
     def cash_direction(self) -> int:
         """+1 when money comes into the account, -1 when it leaves, 0 for share-only entries
-        (DRIP, splits, transfers, valuations) that move no cash."""
+        (DRIP, splits, transfers, ACB increases, valuations) that move no cash."""
         return _CASH_DIRECTION.get(self.type, 0)
 
     def validate(self) -> None:
@@ -356,6 +358,8 @@ class Transaction:
             raise CodedError("Price cannot be negative.", "price_negative")
         if t.uses_amount and self.amount < 0:
             raise CodedError("Amount cannot be negative.", "amount_negative")
+        if t is TxnType.ACB_INCREASE and not self.amount:
+            raise CodedError("Amount must be positive.", "amount_not_positive")
         if self.fees < 0:
             raise CodedError("Fees cannot be negative.", "fees_negative")
         if t is TxnType.SPLIT and self.ratio <= 0:

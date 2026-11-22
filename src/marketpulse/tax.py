@@ -29,8 +29,7 @@ Scope and known simplifications (tax figures are estimates; the README says
 so and `marketpulse tax` prints it):
 - One pool per Yahoo symbol. The same share listed under two symbols (a
   .TO and a .NE line, say) is treated as two properties.
-- Phantom/reinvested distributions that raise ACB (box 42 / T3 adjustments)
-  are not modelled unless you record them yourself.
+- ACB increases from non-cash distributions and T3 adjustments are entered manually.
 - Superficial losses are computed with CRA's proportional formula; see
   `_superficial_denial` for the exact rule and its approximations.
 """
@@ -117,7 +116,7 @@ class AcbPool:
     # account so a per-account SPLIT or TRANSFER touches the right shares.
     quantity_by_account: dict[int, float] = field(default_factory=lambda: defaultdict(float))
     acb: float = 0.0  # total ACB of the pool, base currency
-    # Set when some purchase in the pool had no FX rate; cleared when the pool
+    # Set when a purchase or adjustment in the pool had no FX rate; cleared when the pool
     # is fully sold (a fresh pool starts clean).
     incomplete: bool = False
     # A superficial loss whose replacement shares haven't been bought yet in
@@ -241,6 +240,13 @@ def compute(
             p = pools.get(txn.symbol)
             if p and txn.account_id in p.quantity_by_account:
                 p.quantity_by_account[txn.account_id] *= txn.ratio
+
+        elif t is TxnType.ACB_INCREASE and taxable:
+            p = pools.get(txn.symbol)
+            if p is not None and p.quantity_by_account.get(txn.account_id, 0.0) > EPSILON:
+                fx = rate(txn, ccy)
+                p.incomplete |= fx is None
+                p.acb += txn.amount * (fx or 0.0)
 
         elif t is TxnType.ROC and taxable:
             # Return of capital reduces ACB. If it would push ACB below zero,
