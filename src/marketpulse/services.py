@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
-from time import monotonic
+from time import monotonic, time
 
 from . import alerts as alerts_mod
 from . import fmt, tax
@@ -47,6 +48,8 @@ from .providers import make_fallback
 from .tax import TaxReport
 from .themes import resolve_palette
 from .valuation import PortfolioView, build_view, market_symbols
+
+FX_HISTORY_TTL = 600  # Mac refreshes use a new backend process each time.
 
 
 @dataclass
@@ -559,18 +562,29 @@ class Tracker:
         deadline = monotonic() + budget if budget is not None else None
         for ccy, first in sorted(first_seen.items()):
             start = date.fromordinal(max(date.min.toordinal(), date.fromisoformat(first).toordinal() - 7)).isoformat()
+            symbol = f"{ccy}{base}=X"
+            cache_key = f"fx_history:{symbol}"
+            if raw := self.store.get_meta(cache_key):
+                cached = json.loads(raw)
+                if cached["start"] <= start and 0 <= time() - cached["fetched_at"] < FX_HISTORY_TTL:
+                    series[ccy] = cached["closes"]
+                    continue
             timeout = None if deadline is None else deadline - monotonic()
             if timeout is not None and timeout < 0.001:
-                break
+                continue  # the remaining pairs may have a cached series
             try:
                 if timeout is None:
-                    series[ccy], _ = self.market.daily_closes(f"{ccy}{base}=X", start)
+                    closes, _ = self.market.daily_closes(symbol, start)
                 else:
-                    series[ccy], _ = self.market.daily_closes(f"{ccy}{base}=X", start, timeout=timeout)
+                    closes, _ = self.market.daily_closes(symbol, start, timeout=timeout)
             except MarketError:
                 # Offline or unknown pair: affected rows are marked incomplete
                 # and kept out of totals rather than computed with a guess.
                 series[ccy] = {}
+                continue
+            series[ccy] = closes
+            if closes:
+                self.store.set_meta(cache_key, json.dumps({"start": start, "fetched_at": time(), "closes": closes}))
         return tax.fx_lookup(series, base)
 
     def room(self, *, offline: bool = False, fx_budget: float | None = None) -> list[tuple[RoomStatus, list[Account]]]:

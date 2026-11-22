@@ -169,7 +169,8 @@ rate on its date, or the most recent preceding close if there was no close that
 day. When a required rate is missing, the estimate is unavailable and JSON
 includes the affected dates and currencies in `missing_fx`. `report contribution-room`
 and `summarize contribution-room` stay offline, so a row that requires FX has a
-`null` remaining amount. CAD-only estimates need no FX request.
+`null` remaining amount. Live estimates reuse recently fetched rates for up to
+ten minutes. CAD-only estimates need no FX request.
 
 MarketPulse cannot discover unrecorded contributions or verify your eligibility.
 

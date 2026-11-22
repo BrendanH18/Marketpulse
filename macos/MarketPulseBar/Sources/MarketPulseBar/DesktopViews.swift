@@ -1206,7 +1206,7 @@ private struct RoomRemaining: View {
         .monospacedDigit()
     } else {
       let details = privacy ? "" : (room.missingFx ?? []).map { "\($0.currency) · \($0.date)" }.joined(separator: "\n")
-      Text("Unavailable · Missing historical FX")
+      Text("Historical exchange rates unavailable")
         .foregroundStyle(Studio.warn)
         .help(details)
     }

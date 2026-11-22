@@ -742,7 +742,9 @@ def test_room_values_tfsa_flows_on_their_dates_in_cad(tracker, store, fake):
     assert len(fake.calls) == 1 and "USDCAD" in fake.calls[0][0]
 
 
-def test_room_values_prebaseline_fhsa_contributions_for_lifetime_cap(tracker, store, fake):
+def test_room_values_prebaseline_fhsa_contributions_for_lifetime_cap(tracker, store, fake, monkeypatch):
+    clock = 1000
+    monkeypatch.setattr("marketpulse.services.time", lambda: clock)
     year = date.today().year
     account = store.add_account(Account(name="Fictional FHSA", type=AccountType.FHSA))
     for day, amount, currency in [(f"{year - 1}-02-02", 20000, "USD"), (f"{year}-01-01", 1000, "CAD")]:
@@ -756,6 +758,9 @@ def test_room_values_prebaseline_fhsa_contributions_for_lifetime_cap(tracker, st
     assert status.remaining == pytest.approx(11000)  # $40,000 less $28,000 before baseline and $1,000 since
     assert status.forfeited == pytest.approx(4000)
     fake.offline = True
+    [(cached, _)] = tracker.room()
+    assert cached == status
+    clock += 600
     [(status, _)] = tracker.room()
     assert status.remaining is None
 

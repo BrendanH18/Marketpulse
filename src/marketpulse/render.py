@@ -847,7 +847,7 @@ def room_table(rooms: Sequence[tuple[RoomStatus, list[Account]]], *, privacy: bo
             cells.append(Text("Unavailable", style="warn"))
             if missing_fx:
                 missing_fx.append("\n")
-            missing_fx.append(f"{status.account_type}: missing historical CAD exchange rates")
+            missing_fx.append(f"{status.account_type}: historical CAD exchange rates unavailable")
             if not privacy:
                 details = ", ".join(f"{rate.currency} on {rate.date}" for rate in status.missing_fx)
                 missing_fx.append(f" ({details})")

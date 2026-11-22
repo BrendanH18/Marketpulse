@@ -8,7 +8,9 @@ from datetime import date
 import pytest
 
 from marketpulse import desktop, models
+from marketpulse.market import MarketData
 from marketpulse.models import Account, AccountType, Transaction, TxnType
+from marketpulse.services import Tracker
 
 
 def test_snapshot_preserves_saved_watch_order_when_quotes_are_missing(tracker):
@@ -34,7 +36,12 @@ def test_snapshot_and_tax_payloads_share_cad_room_estimates(tracker, store, fake
     assert desktop.tax_report(tracker)["room"] == current["room"]
     fake.set_history("USDCAD=X", {"2025-01-03": 1.30}, currency="CAD")
     assert desktop.snapshot(tracker)["room"][0]["remaining"] == pytest.approx(6870)
-    assert desktop.tax_report(tracker)["room"][0]["remaining"] == pytest.approx(6870)
+    fake.calls.clear()
+    # Each Mac refresh opens a new tracker and market client.
+    reopened = Tracker(store, MarketData(fake, store=store), tracker.config)
+    assert desktop.snapshot(reopened)["room"][0]["remaining"] == pytest.approx(6870)
+    assert desktop.tax_report(reopened)["room"][0]["remaining"] == pytest.approx(6870)
+    assert not any("USDCAD" in url for url, _ in fake.calls)
 
 
 def test_snapshot_room_returns_missing_rates_when_shared_fx_budget_expires(tracker, store, monkeypatch):

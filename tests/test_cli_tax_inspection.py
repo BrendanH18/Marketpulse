@@ -330,7 +330,7 @@ def test_room_commands_show_missing_historical_fx_without_partial_amounts(cli, t
         assert "Unavailable" in output and "USD on 2025-01-03" in output and "Old RRSP" not in output
     tracker.config.privacy = True
     output = cli("tax").output
-    assert "missing historical CAD exchange rates" in output and "Unavailable" in output
+    assert "historical CAD exchange rates unavailable" in output and "Unavailable" in output
     assert "2025-01-03" not in output and "7,000.00" not in output
 
 
