@@ -75,6 +75,34 @@ def test_registered_holdings_stay_out_of_the_pool():
     assert d.account_id == QT and d.acb == pytest.approx(100) and d.gain == pytest.approx(0)
 
 
+@pytest.mark.parametrize("adjustment_fx", [1.5, None])
+def test_non_cash_acb_increase_updates_the_taxable_pool_at_historical_fx(adjustment_fx):
+    # Two taxable accounts have 20 units and a combined CAD 300 in cost.
+    # The USD 20 adjustment adds CAD 30 at its own date's exchange rate.
+    # Selling half the pool for CAD 200 then uses CAD 165 of ACB instead of 150.
+    adjustment = txn(TxnType.ACB_INCREASE, "2024-04-02", amount=20, ccy="USD", account=QT)
+    txns = [
+        txn(TxnType.BUY, "2024-01-01", qty=10, price=10, ccy="USD", account=QT),
+        txn(TxnType.BUY, "2024-01-02", qty=10, price=20, account=WS),
+        txn(TxnType.BUY, "2024-01-02", qty=5, price=10, account=TFSA),
+        adjustment,
+        txn(adjustment.type, "2024-04-02", amount=100, account=TFSA),
+        txn(TxnType.SELL, "2024-06-01", qty=10, price=20, account=WS),
+    ]
+
+    def fx(day, ccy):
+        return adjustment_fx if (day, ccy) == (adjustment.date, "USD") else 1.0
+
+    report = run(txns, fx)
+    (sale,) = report.dispositions
+    assert sale.complete is (adjustment_fx is not None)
+    if sale.complete:
+        assert (sale.acb, sale.gain) == pytest.approx((165, 35))
+    else:
+        (year,) = capital_gains(report)
+        assert year.missing_fx == [sale] and year.net_gain == 0
+
+
 def test_single_cad_account_matches_the_per_account_ledger():
     txns = [
         txn(TxnType.BUY, "2024-01-01", qty=10, price=30, fees=5),

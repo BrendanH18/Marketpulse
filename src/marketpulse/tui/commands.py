@@ -247,6 +247,7 @@ class PortfolioCommands(Provider):
             ("Record split", "Stock split", partial(app.action_trade, "SPLIT")),
             ("Transfer in-kind", "Move shares between accounts", partial(app.action_trade, "TRANSFER")),
             ("Record return of capital", "Reduces the ACB", partial(app.action_trade, "ROC")),
+            ("Increase cost base", "Raises ACB without moving cash", partial(app.action_trade, "ACB_INCREASE")),
             ("Record fee", "Account or management fee", partial(app.action_trade, "FEE")),
             ("Record valuation", "Mark a manual asset at a price", partial(app.action_trade, "VALUATION")),
             ("New account", "TFSA, RRSP, FHSA, non-registered…", app.action_new_account),

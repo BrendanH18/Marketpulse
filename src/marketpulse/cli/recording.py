@@ -368,13 +368,9 @@ def _units_held(app: App, acct: Account, sym: str, day: str) -> float:
 
 def _normalize(app: App, txn: Transaction) -> None:
     """Fill in what `Tracker.add_transaction` would: the currency and the ISO date."""
-    if not txn.currency:
-        acct = app.store.get_account(txn.account_id)
-        if acct is None:
-            fail("Unknown account.")
-        txn.currency, _ = app.tracker.resolve_currency(txn.symbol, acct)
     try:
         txn.date = parse_date(txn.date)
+        txn.currency = app.tracker.transaction_currency(txn)
     except ValueError as e:
         fail(str(e))
 
@@ -1109,6 +1105,36 @@ def roc(app: App, symbol, amount, currency, account, when, note) -> None:
         currency=currency.upper(),
         note=note,
     )
+    _finish(app, txn, [acct], describe)
+
+
+@main.command()
+@click.argument("symbol")
+@click.argument("amount", type=float)
+@click.option("-c", "--currency", default="", help="Currency of AMOUNT (defaults to the holding's on DATE).")
+@recording_extras()
+@txn_options
+@pass_app
+def acb_increase(app: App, symbol, amount, currency, account, when, note) -> None:
+    """Increase a holding's cost base by AMOUNT without adding shares or cash."""
+    acct = _account(app, account)
+    txn = Transaction(
+        account_id=acct.saved_id,
+        type=TxnType.ACB_INCREASE,
+        date=when or date.today().isoformat(),
+        symbol=symbol,
+        amount=amount,
+        currency=currency,
+        note=note,
+    )
+
+    def describe(saved: Transaction) -> tuple[str, list[str]]:
+        return (
+            f"ACB increase of {fmt.money(saved.amount)} {saved.currency} "
+            f"for {saved.symbol} in {acct.name} on {saved.date}",
+            [],
+        )
+
     _finish(app, txn, [acct], describe)
 
 

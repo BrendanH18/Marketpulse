@@ -290,15 +290,16 @@ def test_import_aliases_number_each_fields_headers(app):
 
 def test_import_type_keywords_keep_matching_order(app):
     rows = load_source("import-type-keywords", app)
-    assert rows[0] == {"position": 1, "keyword": "reinvest", "type": "DRIP"}
-    assert {"position": 5, "keyword": "dividend", "type": "DIVIDEND"} in rows
+    assert rows[0] == {"position": 1, "keyword": "phantom distribution", "type": "ACB_INCREASE"}
     assert [row["position"] for row in rows] == list(range(1, len(rows) + 1))
     assert len(rows) == sum(len(keywords) for keywords, _ in csvio._TYPE_KEYWORDS)
     position = {row["keyword"]: row["position"] for row in rows}
+    assert position["phantom distribution"] < position["reinvest"] < position["dividend"] < position["distribution"]
     assert position["transfer in cash"] < position["transfer"] < position["buy"] < position["sell"]
     # The importer reads every listed word as the listed type, and the earlier of two matches wins.
     assert all(csvio.parse_type(row["keyword"]) == row["type"] for row in rows)
     assert csvio.parse_type("Dividend Reinvestment") == "DRIP"
+    assert csvio.parse_type("Phantom distribution reinvestment") == "ACB_INCREASE"
 
 
 def test_exchange_suffixes_give_the_currency_the_engine_assumes(app):

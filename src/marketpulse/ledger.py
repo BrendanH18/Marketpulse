@@ -128,13 +128,14 @@ def sort_key(txn: Transaction) -> tuple:
         TxnType.DRIP: 1,
         TxnType.SPLIT: 2,
         TxnType.TRANSFER: 3,
-        TxnType.ROC: 4,
-        TxnType.DIVIDEND: 5,
-        TxnType.INTEREST: 5,
-        TxnType.VALUATION: 5,
-        TxnType.SELL: 6,
-        TxnType.FEE: 7,
-        TxnType.WITHDRAWAL: 8,
+        TxnType.ACB_INCREASE: 4,
+        TxnType.ROC: 5,
+        TxnType.DIVIDEND: 6,
+        TxnType.INTEREST: 6,
+        TxnType.VALUATION: 6,
+        TxnType.SELL: 7,
+        TxnType.FEE: 8,
+        TxnType.WITHDRAWAL: 9,
     }
     return (txn.date, order[txn.type], txn.id or 0)
 
@@ -233,6 +234,31 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
                 state.realized.append(RealizedGain(txn.date, acct, txn.symbol, 0.0, excess, 0.0, ccy, txn.id))
         if tracks_cash:
             state.cash[cash_key] += txn.amount
+
+    elif t is TxnType.ACB_INCREASE:
+        h = state.holdings.get((acct, txn.symbol))
+        if h is None or h.quantity <= EPSILON:
+            state.issues.append(
+                LedgerIssue(
+                    txn.id,
+                    txn.date,
+                    f"ACB increase for {txn.symbol} with nothing held",
+                    "acb_increase_nothing_held",
+                    {"symbol": txn.symbol},
+                )
+            )
+        elif h.currency != ccy:
+            state.issues.append(
+                LedgerIssue(
+                    txn.id,
+                    txn.date,
+                    f"Enter the ACB increase for {txn.symbol} in the holding's currency ({h.currency})",
+                    "acb_increase_wrong_currency",
+                    {"symbol": txn.symbol, "currency": h.currency},
+                )
+            )
+        else:
+            h.book += txn.amount
 
     elif t is TxnType.TRANSFER:
         h = state.holdings.get((acct, txn.symbol))

@@ -51,6 +51,28 @@ def test_new_database_is_stamped_with_the_latest_version(tmp_path):
     assert store.backups() == []  # nothing to protect in a brand-new file
 
 
+def test_acb_increase_schema_prevents_opening_with_older_build(tmp_path, monkeypatch):
+    path = tmp_path / "acb.db"
+    prior_migrations = {version: step for version, step in db.MIGRATIONS.items() if version <= 3}
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "MIGRATIONS", prior_migrations)
+        previous = Store(path)
+        _seed(previous)
+        original = previous.transactions()
+        previous.close()
+
+    upgraded = Store(path)
+    assert upgraded.transactions() == original
+    (backup,) = upgraded.backups()
+    assert Store.backup_reason(backup) == f"pre-v{latest_version()}"
+    assert _user_version(backup) == 3
+    upgraded.close()
+
+    monkeypatch.setattr(db, "MIGRATIONS", prior_migrations)
+    with pytest.raises(db.SchemaError, match="Upgrade MarketPulse"):
+        Store(path)
+
+
 def test_unversioned_2_0_database_is_adopted_as_baseline(tmp_path, baseline):
     path = tmp_path / "old.db"
     store = Store(path)

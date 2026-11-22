@@ -130,6 +130,8 @@ CREATE TABLE IF NOT EXISTS automation_runs (
 """,
     # 3: per-asset T1135 setting. NULL decides by listing, 1 counts as foreign property, 0 doesn't.
     3: "ALTER TABLE assets ADD COLUMN foreign_property INTEGER",
+    # Older versions cannot read ACB_INCREASE transactions, even though the tables are unchanged.
+    4: "SELECT 1;",
 }
 
 # Where automatic backups go and how many to keep (see Store.backup).

@@ -119,6 +119,7 @@ _TYPE_LABELS = {
     TxnType.FEE: "Fee",
     TxnType.SPLIT: "Split",
     TxnType.ROC: "Return of capital",
+    TxnType.ACB_INCREASE: "Increase cost base",
     TxnType.TRANSFER: "Transfer in-kind",
     TxnType.VALUATION: "Valuation (manual asset)",
 }
@@ -330,7 +331,7 @@ class TransactionForm(BaseForm):
                 fees=_num(self, "#f-fees", "Fees") if k in (TxnType.BUY, TxnType.SELL) else 0.0,
                 ratio=_num(self, "#f-ratio", "Ratio") if k is TxnType.SPLIT else 0.0,
                 currency=self.query_one("#f-currency", Input).value.strip().upper()
-                or (self.live_currency if symbol == self.symbol else ""),
+                or (self.live_currency if symbol == self.symbol and k is not TxnType.ACB_INCREASE else ""),
                 note=self.query_one("#f-note", Input).value.strip(),
                 target_account_id=target if isinstance(target, int) and k is TxnType.TRANSFER else None,
             )

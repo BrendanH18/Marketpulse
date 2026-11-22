@@ -94,11 +94,19 @@ deletes the latest transaction after confirmation.
 
 `drip` records a reinvested dividend: new shares at a price, counted as income. `split`
 takes the new shares per old share: `2` for a 2-for-1 split, `0.1` for a 1-for-10
-consolidation; the cost base doesn't change. `roc` records a return of capital (box 42 of
+consolidation; the cost base doesn't change. `roc` records a return of capital (positive box 42 of
 a T3 slip), which lowers the cost base; once that reaches zero, the rest counts as a
 capital gain. In non-registered accounts that is the cost base pooled across all of them,
 as `marketpulse tax` works it out; `roc` says so when it can tell without exchange rates. A split, or a transfer (below), is checked against what the account held on
 its date, and refused if the shares weren't there or a later sale needs them.
+
+For a negative T3 box 42 amount or a phantom distribution that increases
+adjusted cost base without changing unit count, record the positive increase
+in the holding's currency. For example, a CAD 25 increase on a CAD holding
+can be recorded with `marketpulse acb-increase XEQT.TO 25 -a "My Taxable" -d 2025-12-31 -c CAD`.
+In the terminal app, press `N` and choose **Increase cost base**. Use the
+adjustment's effective date. This entry changes book cost and taxable pooled
+ACB without adding income, cash, or shares.
 
 To fix a mistake, find the entry's id with `marketpulse activity`, then change it with
 `marketpulse txn edit ID` (`--date`, `--account`, `--symbol`, `--quantity`, `--price`,

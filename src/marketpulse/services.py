@@ -18,7 +18,7 @@ from .analytics import (
 )
 from .config import Config
 from .db import Snapshot, Store
-from .ledger import RoomStatus, contribution_room, new_issues, replay, replay_by_day, transaction_currency
+from .ledger import RoomStatus, contribution_room, new_issues, replay, replay_by_day, sort_key, transaction_currency
 from .market import MarketData, MarketError
 from .models import (
     Account,
@@ -96,33 +96,48 @@ class Tracker:
         except MarketError:
             return guess_currency(symbol, account.currency), None
 
+    def transaction_currency(self, txn: Transaction) -> str:
+        if txn.currency:
+            return txn.currency
+        acct = self.store.get_account(txn.account_id)
+        if acct is None:
+            raise ValueError("Unknown account.")
+        if txn.type is TxnType.ACB_INCREASE:
+            key = sort_key(txn)
+            earlier = [t for t in self.store.transactions(symbol=txn.symbol) if sort_key(t) < key]
+            holding = replay(earlier, self.store.account_map()).holdings.get((txn.account_id, txn.symbol))
+            if holding is not None:
+                return holding.currency
+            return transaction_currency(txn, {acct.saved_id: acct})
+        return self.resolve_currency(txn.symbol, acct)[0]
+
     def add_transaction(self, txn: Transaction, *, restore_id: str | None = None) -> Transaction:
         """Record `txn`. A caller that looked up its account or holdings first passes the
         `store.restore_id` it read before doing so, so a restore since then refuses the save."""
         if restore_id is None:
             restore_id = self.store.restore_id
-        if not txn.currency:
-            acct = self.store.get_account(txn.account_id)
-            if acct is None:
-                raise ValueError("Unknown account.")
-            # May fetch a quote, so it stays outside the write lock below.
-            txn.currency, _ = self.resolve_currency(txn.symbol, acct)
         # Replay sorts by the date text, so the checks below need the stored ISO form.
         txn.date = parse_date(txn.date)
+        # May fetch a quote, so it stays outside the write lock below.
+        txn.currency = self.transaction_currency(txn)
         txn.validate()
         # The checks and the write hold the write lock together: no restore (or sale in another
         # window) can land between them.
         with self.store.atomic():
             self._refuse_if_restored(restore_id)
-            if txn.type in (TxnType.SELL, TxnType.TRANSFER, TxnType.SPLIT):
-                # Judged at the entry's own date, so a backdated sale (or move, or split) of shares
-                # that weren't there yet, or that a later sale needs, is refused, and one of shares
-                # held then but sold or consolidated since is accepted. The id it will get sorts it
-                # after entries already on that day, as replay will.
+            before: list[Transaction] | None = None
+            if txn.type in (TxnType.SELL, TxnType.TRANSFER, TxnType.SPLIT, TxnType.ACB_INCREASE):
                 before = self.store.transactions()
+            elif txn.type in (TxnType.BUY, TxnType.DRIP):
+                history = self.store.transactions(symbol=txn.symbol)
+                if any(t.type is TxnType.ACB_INCREASE and t.date >= txn.date for t in history):
+                    before = history
+            if before is not None:
+                # Replay checks holdings at the entry's own date and reports any later entry
+                # that would stop adding up. Give the probe the same relative order as the saved row.
                 probe_id = max((t.id or 0 for t in before), default=0) + 1
                 self._refuse_new_issues(before, [*before, replace(txn, id=probe_id)], probe_id, "recorded")
-            elif txn.type in (TxnType.DRIP, TxnType.ROC):
+            if txn.type in (TxnType.DRIP, TxnType.ROC):
                 # Both change the cost base, which is kept in the holding's own currency.
                 h = self.store.ledger().holdings.get((txn.account_id, txn.symbol))
                 if h and h.currency and h.currency != txn.currency:
@@ -146,11 +161,7 @@ class Tracker:
         txn_id = txn.saved_id
         # Replay sorts by the date text, so it must already be in the stored ISO form.
         txn.date = parse_date(txn.date)
-        if not txn.currency:
-            acct = self.store.get_account(txn.account_id)
-            if acct is None:
-                raise ValueError("Unknown account.")
-            txn.currency, _ = self.resolve_currency(txn.symbol, acct)
+        txn.currency = self.transaction_currency(txn)
         txn.validate()
         with self.store.atomic():
             self._refuse_if_restored(restore_id, retry="try again")

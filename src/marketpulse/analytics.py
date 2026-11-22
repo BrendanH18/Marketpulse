@@ -23,6 +23,7 @@ def external_flows(transactions: Sequence[Transaction], accounts: dict[int, Acco
     Accounts with recorded deposits/withdrawals (or cash tracking) use those.
     Otherwise the account is treated as fully invested: buys are money in,
     sell proceeds and cash distributions are money out.
+    ACB increases only change book value.
     """
     cash_based = {t.account_id for t in transactions if t.type in (TxnType.DEPOSIT, TxnType.WITHDRAWAL)}
     cash_based |= {a.saved_id for a in accounts.values() if a.track_cash}

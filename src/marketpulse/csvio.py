@@ -51,6 +51,7 @@ EXPORT_COLUMNS = [
 GENERIC_REQUIRED_COLUMNS = ("date", "type")
 
 _TYPE_KEYWORDS = [
+    (("phantom distribution", "increase cost base", "cost base increase", "acb increase"), TxnType.ACB_INCREASE),
     (("reinvest", "drip"), TxnType.DRIP),
     (("return of capital", "roc"), TxnType.ROC),
     (("dividend", "distribution", "div"), TxnType.DIVIDEND),
@@ -438,11 +439,14 @@ def _import(
                 {"account": acct.name},
             )
         symbol = get("symbol").upper()
-        qty, price, cash, fees = (magnitude(fields, f) for f in ("quantity", "price", "amount", "fees"))
+        qty, price, fees = (magnitude(fields, f) for f in ("quantity", "price", "fees"))
+        cash = parse_number(get("amount"), "amount") or 0.0
+        if txn_type is not TxnType.ACB_INCREASE:
+            cash = abs(cash)
         ratio = parse_number(get("ratio"), "ratio") or 0.0
         if txn_type in (TxnType.BUY, TxnType.SELL) and not price and qty and cash:
             price = cash / qty
-        if txn_type.uses_amount and not cash and qty and price:
+        if txn_type is not TxnType.ACB_INCREASE and txn_type.uses_amount and not cash and qty and price:
             cash = qty * price
         if choices := get("symbol_choices").upper().split():
             # A row imported before under one of its listings is that listing (a re-import
@@ -544,7 +548,7 @@ def _import(
 
 
 # Entries that can fall short of what's held on their date.
-_CHECKED_TYPES = (TxnType.SELL, TxnType.TRANSFER, TxnType.SPLIT)
+_CHECKED_TYPES = (TxnType.SELL, TxnType.TRANSFER, TxnType.SPLIT, TxnType.ACB_INCREASE)
 
 
 def _short_rows(
@@ -553,7 +557,7 @@ def _short_rows(
     """The file's rows to keep, and an issue for each one left out because it falls short at its
     date (a sale of shares bought later) or would leave another entry short.
 
-    A sale, transfer or split is kept when, with the rows kept so far, every entry still adds up
+    A sale, transfer, split or ACB increase is kept when, with the rows kept so far, every entry still adds up
     at its own date: the check recording it by hand makes. Problems the ledger already had are
     left alone. A preview runs this same import, so it reports the same rows."""
     first_id = max((t.id or 0 for t in stored), default=0) + 1
@@ -563,7 +567,13 @@ def _short_rows(
     # transfers of that symbol link it to. Each such group is judged on its own entries: cheaper,
     # and a row in an unrelated account can't change what happens to another account's rows.
     groups: dict[tuple[str, int], tuple[list[Transaction], list[tuple[int, Transaction]]]] = {}
-    for symbol in sorted({t.symbol for _, t in probes if t.type in _CHECKED_TYPES}):
+    adjusted = {t.symbol for t in stored if t.type is TxnType.ACB_INCREASE}
+    symbols = {
+        t.symbol
+        for _, t in probes
+        if t.type in _CHECKED_TYPES or (t.type in (TxnType.BUY, TxnType.DRIP) and t.symbol in adjusted)
+    }
+    for symbol in sorted(symbols):
         mine = [t for t in stored if t.symbol == symbol]
         rows_of = [(line, t) for line, t in probes if t.symbol == symbol]
         group = _linked_accounts([*mine, *(t for _, t in rows_of)])
@@ -573,8 +583,15 @@ def _short_rows(
             groups.setdefault((symbol, group(t.account_id)), ([], []))[1].append((line, t))
     left_out: dict[int | None, RowIssue] = {}
     for mine, rows_of in groups.values():
-        if any(t.type in _CHECKED_TYPES for _, t in rows_of):
-            left_out |= _short_rows_of(mine, rows_of, accounts)
+        # A backdated purchase can change the currency of a holding before an
+        # already-recorded increase, making the adjustment invalid.
+        checked = (
+            (*_CHECKED_TYPES, TxnType.BUY, TxnType.DRIP)
+            if any(t.type is TxnType.ACB_INCREASE for t in mine)
+            else _CHECKED_TYPES
+        )
+        if any(t.type in checked for _, t in rows_of):
+            left_out |= _short_rows_of(mine, rows_of, accounts, checked)
     kept = [row for row, (_, probe) in zip(rows, probes, strict=True) if probe.id not in left_out]
     return kept, sorted(left_out.values(), key=lambda i: i.line)
 
@@ -596,7 +613,10 @@ def _linked_accounts(entries: list[Transaction]) -> Callable[[int], int]:
 
 
 def _short_rows_of(
-    stored: list[Transaction], probes: list[tuple[int, Transaction]], accounts: dict[int, Account]
+    stored: list[Transaction],
+    probes: list[tuple[int, Transaction]],
+    accounts: dict[int, Account],
+    checked: tuple[TxnType, ...],
 ) -> dict[int | None, RowIssue]:
     """`_short_rows` for one symbol's entries: the rows left out, by the id they'd have had."""
     known = {i.txn_id for i in replay(stored, accounts).issues}
@@ -620,10 +640,10 @@ def _short_rows_of(
         left.append(row)
         new = problems([*stored, *(t for _, t in kept)])
     if new:
-        # 2. An entry already in the ledger falls short. Judge the sales, transfers and splits in
-        # date order, each with the rows accepted before it, as recording them by hand would.
-        accepted = [r for r in kept if r[1].type not in _CHECKED_TYPES]  # can't leave anything short
-        for row in sorted((r for r in kept if r[1].type in _CHECKED_TYPES), key=lambda r: sort_key(r[1])):
+        # 2. A saved entry no longer adds up. Judge the checked rows in date order,
+        # each with the rows accepted before it, as recording them by hand would.
+        accepted = [r for r in kept if r[1].type not in checked]
+        for row in sorted((r for r in kept if r[1].type in checked), key=lambda r: sort_key(r[1])):
             if issues := problems([*stored, *(t for _, t in accepted), row[1]]):
                 found[row[1].id] = issues[0]
                 left.append(row)
