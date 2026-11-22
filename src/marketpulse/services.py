@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from time import monotonic
 
 from . import alerts as alerts_mod
 from . import fmt, tax
@@ -546,24 +547,33 @@ class Tracker:
         ]
         return self._historical_fx(((t.date, transaction_currency(t, accounts)) for t in relevant), base)
 
-    def _historical_fx(self, dated_currencies: Iterable[tuple[str, str]], base: str) -> tax.FxLookup:
+    def _historical_fx(
+        self, dated_currencies: Iterable[tuple[str, str]], base: str, *, budget: float | None = None
+    ) -> tax.FxLookup:
         first_seen: dict[str, str] = {}
         for day, currency in dated_currencies:
             ccy = currency.upper()
             if ccy != base and (ccy not in first_seen or day < first_seen[ccy]):
                 first_seen[ccy] = day
         series: dict[str, dict[str, float]] = {}
+        deadline = monotonic() + budget if budget is not None else None
         for ccy, first in sorted(first_seen.items()):
-            start = (date.fromisoformat(first) - timedelta(days=7)).isoformat()
+            start = date.fromordinal(max(date.min.toordinal(), date.fromisoformat(first).toordinal() - 7)).isoformat()
+            timeout = None if deadline is None else deadline - monotonic()
+            if timeout is not None and timeout < 0.001:
+                break
             try:
-                series[ccy], _ = self.market.daily_closes(f"{ccy}{base}=X", start)
+                if timeout is None:
+                    series[ccy], _ = self.market.daily_closes(f"{ccy}{base}=X", start)
+                else:
+                    series[ccy], _ = self.market.daily_closes(f"{ccy}{base}=X", start, timeout=timeout)
             except MarketError:
                 # Offline or unknown pair: affected rows are marked incomplete
                 # and kept out of totals rather than computed with a guess.
                 series[ccy] = {}
         return tax.fx_lookup(series, base)
 
-    def room(self, *, offline: bool = False) -> list[tuple[RoomStatus, list[Account]]]:
+    def room(self, *, offline: bool = False, fx_budget: float | None = None) -> list[tuple[RoomStatus, list[Account]]]:
         """CAD room estimates. Offline reports flag estimates that need foreign rates as unavailable."""
         baselines = self.store.rooms()
         if not baselines:
@@ -582,7 +592,7 @@ class Tracker:
         fx = None
         if not offline:
             dated_currencies = ((flow.date, flow.currency) for *_, relevant in plans for flow in relevant)
-            fx = self._historical_fx(dated_currencies, "CAD")
+            fx = self._historical_fx(dated_currencies, "CAD", budget=fx_budget)
         out = []
         for acct_type, year, amount, members, ids, relevant in plans:
             status = contribution_room(acct_type, year, amount, relevant, ids, current_year=current_year, fx=fx)

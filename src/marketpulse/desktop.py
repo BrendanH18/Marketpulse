@@ -27,6 +27,9 @@ from .services import Tracker
 from .tax import T1135_NOT_REQUIRED, Disposition, ForeignPropertyYear, is_foreign_property
 from .valuation import PortfolioView
 
+# Keep optional room lookups short relative to the Mac's 120-second bridge watchdog.
+ROOM_FX_BUDGET_SECONDS = 5.0
+
 
 def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
     # Read before anything the app shows: a restore during the snapshot then makes its activity
@@ -101,7 +104,7 @@ def snapshot(tracker: Tracker, *, fresh: bool = False) -> dict:
         else [],
         "assets": [asset_row(a, valued) for a in tracker.store.assets().values()],
         "income_months": [{"date": d, "value": v} for d, v in income_by_month(state, view.fx.convert)],
-        "room": [asdict(r) for r, _ in tracker.room()],
+        "room": [asdict(r) for r, _ in tracker.room(fx_budget=ROOM_FX_BUDGET_SECONDS)],
         "alerts": [{**asdict(a), "description": a.describe()} for a in tracker.store.alerts()],
         "automation": cycle.report,
         # Yahoo, then the fallback provider when one is set up, with each one's latest attempt.
@@ -416,7 +419,7 @@ def tax_report(tracker: Tracker) -> dict:
             for y in years
         ],
         "issues": [issue_row(i) for i in report.issues],
-        "room": [asdict(r) for r, _ in tracker.room()],
+        "room": [asdict(r) for r, _ in tracker.room(fx_budget=ROOM_FX_BUDGET_SECONDS)],
         "notes": TAX_NOTES,
         # Specified foreign property cost (form T1135), newest year first, always in CAD.
         "foreign_property": [foreign_property_row(y) for y in tracker.foreign_property()],
@@ -472,7 +475,7 @@ class DemoMarket(MarketData):
                 )
         return out, {s: "No demo quote" for s in symbols if s not in out}
 
-    def daily_closes(self, symbol: str, start: str) -> tuple[dict[str, float], str]:
+    def daily_closes(self, symbol: str, start: str, *, timeout: float | None = None) -> tuple[dict[str, float], str]:
         """A fictional, gently rising USD/CAD rate, so the demo's tax report has trade-date FX."""
         if symbol != "USDCAD=X":
             raise MarketError(f"No demo history for {symbol}")

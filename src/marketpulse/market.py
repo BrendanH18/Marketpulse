@@ -113,11 +113,14 @@ class CurlTransport:
             session = self._local.session = curl_requests.Session(impersonate="chrome", timeout=self.timeout)
         return session
 
-    def get_json(self, url: str, params: dict[str, Any]) -> dict:
+    def get_json(self, url: str, params: dict[str, Any], *, timeout: float | None = None) -> dict:
+        # A caller with a wall-clock budget gets a single attempt within its remaining time.
+        attempts = self.attempts if timeout is None else 1
+        options = {} if timeout is None else {"timeout": timeout}
         last: Exception = MarketError("no attempts made")
-        for attempt in range(self.attempts):
+        for attempt in range(attempts):
             try:
-                resp = self._session().get(url, params=params, headers=self.headers or None)
+                resp = self._session().get(url, params=params, headers=self.headers or None, **options)
             except Exception as e:  # curl errors: DNS, timeouts, resets
                 last = MarketError(f"network error: {e}")
             else:
@@ -134,7 +137,7 @@ class CurlTransport:
                         return resp.json()
                     except ValueError:
                         raise MarketError(f"{self.service} returned HTTP {resp.status_code}") from None
-            if attempt < self.attempts - 1:
+            if attempt < attempts - 1:
                 time.sleep(self.backoff * (2**attempt))
         raise last
 
@@ -474,8 +477,12 @@ class MarketData:
 
     # ── history ───────────────────────────────────────────────────────────────
 
-    def _chart(self, symbol: str, params: dict[str, Any]) -> dict:
-        payload = self.transport.get_json(CHART_URL.format(symbol=urlquote(symbol.upper(), safe="")), params)
+    def _chart(self, symbol: str, params: dict[str, Any], *, timeout: float | None = None) -> dict:
+        url = CHART_URL.format(symbol=urlquote(symbol.upper(), safe=""))
+        if timeout is not None and isinstance(self.transport, CurlTransport):
+            payload = self.transport.get_json(url, params, timeout=timeout)
+        else:
+            payload = self.transport.get_json(url, params)
         if err := _yahoo_error(payload, "chart"):
             raise MarketError(f"{symbol.upper()}: {err}")
         result = ((payload.get("chart") or {}).get("result") or [None])[0]
@@ -530,12 +537,14 @@ class MarketData:
             self._history_cache[key] = (bars, time.monotonic() + ttl)
         return bars
 
-    def daily_closes(self, symbol: str, start: str) -> tuple[dict[str, float], str]:
+    def daily_closes(self, symbol: str, start: str, *, timeout: float | None = None) -> tuple[dict[str, float], str]:
         """Daily closes keyed by ISO date from `start` to today, plus the currency."""
         # A day early, in UTC, so exchanges east of Greenwich keep their first session
         t0 = int(datetime.combine(date.fromisoformat(start), datetime.min.time(), tzinfo=UTC).timestamp())
         t0 -= 86400
-        result = self._chart(symbol, {"period1": t0, "period2": int(time.time()) + 86400, "interval": "1d"})
+        result = self._chart(
+            symbol, {"period1": t0, "period2": int(time.time()) + 86400, "interval": "1d"}, timeout=timeout
+        )
         currency = (result.get("meta") or {}).get("currency") or "USD"
         currency = _MINOR_UNITS.get(currency, (currency, 1.0))[0]
         return {b.date: b.close for b in self._bars(result)}, currency

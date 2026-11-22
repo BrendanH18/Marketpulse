@@ -37,6 +37,30 @@ def test_snapshot_and_tax_payloads_share_cad_room_estimates(tracker, store, fake
     assert desktop.tax_report(tracker)["room"][0]["remaining"] == pytest.approx(6870)
 
 
+def test_snapshot_room_returns_missing_rates_when_shared_fx_budget_expires(tracker, store, monkeypatch):
+    account = store.add_account(Account(name="Fictional FHSA", type=AccountType.FHSA))
+    store.set_room("FHSA", 2025, 8000)
+    store.add_transaction(Transaction(account.saved_id, TxnType.DEPOSIT, "0001-01-01", amount=100, currency="EUR"))
+    store.add_transaction(Transaction(account.saved_id, TxnType.DEPOSIT, "2025-01-04", amount=100, currency="USD"))
+
+    times = iter([1.0, 2.0, 6.0])
+    attempted = []
+
+    def close(symbol, start, *, timeout):
+        attempted.append((symbol, start, timeout))
+        return {}, "CAD"
+
+    monkeypatch.setattr("marketpulse.services.monotonic", lambda: next(times))
+    monkeypatch.setattr(tracker.market, "daily_closes", close)
+    (room,) = desktop.snapshot(tracker)["room"]
+    assert attempted == [("EURCAD=X", "0001-01-01", 4.0)]
+    assert room["remaining"] is None
+    assert room["missing_fx"] == [
+        {"date": "0001-01-01", "currency": "EUR"},
+        {"date": "2025-01-04", "currency": "USD"},
+    ]
+
+
 def legacy_revision(record, generation):
     fields = json.dumps({**asdict(record), "generation": generation}, sort_keys=True, default=str)
     return hashlib.sha256(fields.encode()).hexdigest()[:16]
