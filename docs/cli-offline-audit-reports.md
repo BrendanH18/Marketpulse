@@ -49,9 +49,10 @@ alert state. The `active` field and preset follow the same validation as
 thresholds as inactive. These queries make no provider calls.
 
 Snapshot coverage counts calendar days from the earliest through the latest
-saved snapshot, inclusive. The first and last months count only days inside
-that range. Months without any saved snapshots are omitted. Backfilled days
-count only snapshots explicitly marked as backfilled.
+saved snapshot with a valid `YYYY-MM-DD` date, inclusive. The first and last
+months count only days inside that range. Rows with invalid dates are skipped.
+Months without any valid snapshots are omitted. Backfilled days count only
+snapshots explicitly marked as backfilled.
 
 The datasets follow [normal report startup](cli-composable-reports.md#capability-inventory).
 As with other script output, reports show raw names and symbols when display

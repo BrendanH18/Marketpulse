@@ -5,9 +5,12 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date
 from itertools import groupby
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .base import App
+
+if TYPE_CHECKING:
+    from ..db import Snapshot
 
 GROUP = "ledger"
 SOURCES = {
@@ -37,22 +40,28 @@ PRESETS = {
 def load_source(name: str, app: App) -> list[dict[str, Any]]:
     if name not in SOURCES:
         raise KeyError(name)
-    snapshots = app.store.snapshots()
+    # Keep canonical dates so the store's ascending text order is chronological.
+    snapshots: list[tuple[date, Snapshot]] = []
+    for snapshot in app.store.snapshots():
+        try:
+            day = date.fromisoformat(snapshot.date)
+        except (TypeError, ValueError):
+            continue
+        if day.isoformat() == snapshot.date:
+            snapshots.append((day, snapshot))
     if not snapshots:
         return []
-    history_first = date.fromisoformat(snapshots[0].date)
-    history_last = date.fromisoformat(snapshots[-1].date)
+    history_first = snapshots[0][0]
+    history_last = snapshots[-1][0]
     rows = []
-    # The store returns one snapshot per ISO date in ascending order.
-    for month, entries in groupby(snapshots, key=lambda snapshot: snapshot.date[:7]):
-        month_snapshots = list(entries)
-        first_day = date.fromisoformat(f"{month}-01")
+    for first_day, entries in groupby(snapshots, key=lambda pair: pair[0].replace(day=1)):
+        month_snapshots = [snapshot for _, snapshot in entries]
         last_day = first_day.replace(day=monthrange(first_day.year, first_day.month)[1])
         expected_days = (min(last_day, history_last) - max(first_day, history_first)).days + 1
         rows.append(
             {
                 "snapshots": len(month_snapshots),
-                "month": month,
+                "month": first_day.isoformat()[:7],
                 "first_date": month_snapshots[0].date,
                 "last_date": month_snapshots[-1].date,
                 "expected_days": expected_days,

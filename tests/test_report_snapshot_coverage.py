@@ -81,3 +81,33 @@ def test_monthly_snapshot_coverage_for_empty_and_single_day_history(tracker):
             "backfilled_days": 0,
         }
     ]
+
+
+def test_monthly_snapshot_coverage_ignores_invalid_saved_dates(tracker):
+    app = App()
+    app._tracker = tracker
+    tracker.store.upsert_snapshots(
+        [
+            Snapshot(day, 100, 90, 80, currency, detail)
+            for day, currency, detail in [
+                ("0000-01-01", "USD", {"backfilled": True}),
+                ("2024-01-31", "CAD", {}),
+                ("2024-02-01", "CAD", {}),
+                ("2024-02-15x", "USD", {"backfilled": True}),
+                ("2024-02-29", "CAD", {}),
+                ("2024-02-30", "USD", {"backfilled": True}),
+                ("2024-03-01", "CAD", {}),
+                ("20240301", "USD", {"backfilled": True}),
+                ("unknown", "USD", {"backfilled": True}),
+            ]
+        ]
+    )
+
+    rows = load_source(SOURCE, app)
+
+    assert [(row["month"], row["snapshots"], row["missing_days"]) for row in rows] == [
+        ("2024-01", 1, 0),
+        ("2024-02", 2, 27),
+        ("2024-03", 1, 0),
+    ]
+    assert all(row["currencies"] == ["CAD"] and row["backfilled_days"] == 0 for row in rows)
