@@ -441,6 +441,13 @@ class RoomStatus:
     missing_fx: list[MissingRoomRate] = field(default_factory=list)
 
 
+@dataclass
+class RoomFlow:
+    flow: CashFlow
+    role: str
+    cad_amount: float | None
+
+
 def room_flows(
     account_type: str, as_of_year: int, flows: list[CashFlow], account_ids: set[int], current_year: int
 ) -> list[CashFlow]:
@@ -466,6 +473,7 @@ def contribution_room(
     *,
     current_year: int | None = None,
     fx: Callable[[str, str], float | None] | None = None,
+    details: list[RoomFlow] | None = None,
 ) -> RoomStatus:
     """Remaining CAD room given room known at Jan 1 of `as_of_year`.
 
@@ -478,14 +486,22 @@ def contribution_room(
     missing = set()
     for flow in room_flows(account_type, as_of_year, flows, account_ids, current_year):
         currency = flow.currency.upper()
-        if currency == "CAD":
-            cad_flows.append(flow)
-            continue
-        rate = fx(flow.date, currency) if fx else None
+        rate = 1.0 if currency == "CAD" else fx(flow.date, currency) if fx else None
         if rate is None or not isfinite(rate) or rate <= 0:
             missing.add((flow.date, currency))
+            cad_amount = None
         else:
-            cad_flows.append(replace(flow, amount=flow.amount * rate, currency="CAD"))
+            cad_amount = flow.amount if currency == "CAD" else flow.amount * rate
+            cad_flows.append(flow if currency == "CAD" else replace(flow, amount=cad_amount, currency="CAD"))
+        if details is not None:
+            year = int(flow.date[:4])
+            if flow.amount < 0:
+                role = "withdrawal_added_back"
+            elif year < as_of_year:
+                role = "fhsa_current_year" if year == current_year else "fhsa_lifetime_cap"
+            else:
+                role = "contribution"
+            details.append(RoomFlow(flow, role, cad_amount))
     if missing:
         return RoomStatus(
             account_type,

@@ -21,6 +21,7 @@ from .analytics import (
 from .config import Config
 from .db import Snapshot, Store
 from .ledger import (
+    RoomFlow,
     RoomStatus,
     contribution_room,
     new_issues,
@@ -587,7 +588,13 @@ class Tracker:
                 self.store.set_meta(cache_key, json.dumps({"start": start, "fetched_at": time(), "closes": closes}))
         return tax.fx_lookup(series, base)
 
-    def room(self, *, offline: bool = False, fx_budget: float | None = None) -> list[tuple[RoomStatus, list[Account]]]:
+    def room(
+        self,
+        *,
+        offline: bool = False,
+        fx_budget: float | None = None,
+        details: dict[str, list[RoomFlow]] | None = None,
+    ) -> list[tuple[RoomStatus, list[Account]]]:
         """CAD room estimates. Offline reports flag estimates that need foreign rates as unavailable."""
         baselines = self.store.rooms()
         if not baselines:
@@ -609,7 +616,12 @@ class Tracker:
             fx = self._historical_fx(dated_currencies, "CAD", budget=fx_budget)
         out = []
         for acct_type, year, amount, members, ids, relevant in plans:
-            status = contribution_room(acct_type, year, amount, relevant, ids, current_year=current_year, fx=fx)
+            breakdown: list[RoomFlow] | None = None
+            if details is not None:
+                breakdown = details[acct_type] = []
+            status = contribution_room(
+                acct_type, year, amount, relevant, ids, current_year=current_year, fx=fx, details=breakdown
+            )
             out.append((status, [a for a in members if not a.archived]))
         return out
 

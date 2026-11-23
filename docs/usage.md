@@ -167,6 +167,13 @@ TFSA withdrawals restore room the following year, and all recorded FHSA
 contributions count toward the lifetime cap, including those before the saved
 balance. Archived accounts still count.
 
+Run `marketpulse tax --room --details` to see the recorded cash flows used in
+each estimate, with their original currencies and CAD amounts. Withdrawals are
+shown as negative cash flows, even when they add back TFSA room. The FHSA
+lifetime-cap label identifies contributions made before the saved balance.
+Archived account names are hidden and privacy mode masks amounts in the terminal.
+Add `--json` for unmasked amounts and a `flows` array on each room row.
+
 `accounts room`, `tax`, and the app use each foreign-currency flow's historical CAD
 rate on its date, or the most recent preceding close if there was no close that
 day. When a required rate is missing, the estimate is unavailable and JSON

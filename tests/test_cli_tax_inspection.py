@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -334,6 +335,111 @@ def test_room_commands_show_missing_historical_fx_without_partial_amounts(cli, t
     assert "2025-01-03" not in output and "7,000.00" not in output
 
 
+def test_room_details_match_tfsa_and_fhsa_estimates(cli, store, fake):
+    year = date.today().year
+    tfsa = store.add_account(Account(name="Maple TFSA", type=AccountType.TFSA))
+    fhsa = store.add_account(Account(name="Birch FHSA", type=AccountType.FHSA))
+    store.set_room("TFSA", year - 1, 7000)
+    store.set_room("FHSA", year, 16000)
+    add(store, tfsa, TxnType.DEPOSIT, f"{year - 1}-01-02", "", ccy="USD", amount=100)
+    add(store, tfsa, TxnType.WITHDRAWAL, f"{year - 1}-03-02", "", ccy="USD", amount=80)
+    add(store, tfsa, TxnType.WITHDRAWAL, f"{year}-01-02", "", ccy="EUR", amount=50)
+    add(store, fhsa, TxnType.DEPOSIT, f"{year - 1}-02-02", "", amount=35000)
+    add(store, fhsa, TxnType.DEPOSIT, f"{year}-01-02", "", amount=1000)
+    fake.set_history("USDCAD=X", {f"{year - 1}-01-02": 1.25, f"{year - 1}-03-02": 1.5}, currency="CAD")
+
+    summaries = rows(cli, "--room")
+    detailed = rows(cli, "--room", "--details")
+    fhsa_details, tfsa_details = [room.pop("flows") for room in detailed]
+    assert detailed == summaries
+    assert detailed[0]["remaining"] == 4000
+    assert detailed[1]["contributions"] == 125 and detailed[1]["withdrawals_added_back"] == 120
+    assert tfsa_details == [
+        {
+            "date": f"{year - 1}-01-02",
+            "account": "Maple TFSA",
+            "role": "contribution",
+            "amount": 100,
+            "currency": "USD",
+            "cad_amount": 125,
+        },
+        {
+            "date": f"{year - 1}-03-02",
+            "account": "Maple TFSA",
+            "role": "withdrawal_added_back",
+            "amount": -80,
+            "currency": "USD",
+            "cad_amount": -120,
+        },
+    ]
+    assert [(f["role"], f["cad_amount"]) for f in fhsa_details] == [
+        ("fhsa_lifetime_cap", 35000),
+        ("contribution", 1000),
+    ]
+    assert {url.rsplit("/", 1)[-1] for url, _ in fake.calls} == {"USDCAD%3DX"}
+    output = cli("tax", "--room", "--details").output
+    assert "Withdrawal added back" in output and "-120.00" in output
+    assert "FHSA lifetime cap" in output and "35,000.00" in output
+
+
+def test_room_details_anonymize_archived_accounts_and_mask_terminal_amounts(cli, tracker, store):
+    tfsa = store.add_account(Account(name="Old Cedar TFSA", type=AccountType.TFSA, archived=True))
+    add(store, tfsa, TxnType.DEPOSIT, "2025-01-03", "", ccy="USD", amount=123.45)
+    add(store, tfsa, TxnType.DEPOSIT, "2025-01-04", "", amount=234.56)
+    store.set_room("TFSA", 2025, 7000)
+    tracker.config.privacy = True
+
+    (room,) = rows(cli, "--room", "--details")
+    assert room["remaining"] is None
+    assert room["flows"] == [
+        {
+            "date": "2025-01-03",
+            "account": None,
+            "role": "contribution",
+            "amount": 123.45,
+            "currency": "USD",
+            "cad_amount": None,
+        },
+        {
+            "date": "2025-01-04",
+            "account": None,
+            "role": "contribution",
+            "amount": 234.56,
+            "currency": "CAD",
+            "cad_amount": 234.56,
+        },
+    ]
+    output = cli("tax", "--room", "--details").output
+    assert "Archived account" in output and "Missing rate" in output and "••••" in output
+    assert all(secret not in output for secret in ("Old Cedar TFSA", "123.45", "234.56"))
+
+
+@pytest.mark.parametrize("width", [45, 65, 80, 110, 160])
+def test_room_details_preserve_amounts_and_literal_currency(cli, store, monkeypatch, width):
+    year = date.today().year - 1
+    day = f"{year}-03-12"
+    tfsa = store.add_account(Account(name="Maple Retirement Savings Account Holdings", type=AccountType.TFSA))
+    store.set_room("TFSA", year, 70000)
+    add(store, tfsa, TxnType.WITHDRAWAL, day, "", amount=52345.67)
+    add(store, tfsa, TxnType.DEPOSIT, day, "", ccy="[/]", amount=123.45)
+    monkeypatch.setenv("COLUMNS", str(width))
+
+    details = cli("tax", "--room", "--details").output.split("TFSA cash flows", 1)[1]
+    assert day in details and details.count("-52,345.67") == 2
+    assert "[/]" in details and "Missing rate" in details
+
+
+def test_room_details_explain_fhsa_deposit_with_next_year_baseline(cli, store):
+    year = date.today().year
+    fhsa = store.add_account(Account(name="Birch FHSA", type=AccountType.FHSA))
+    store.set_room("FHSA", year + 1, 16000)
+    add(store, fhsa, TxnType.DEPOSIT, f"{year}-01-02", "", amount=1000)
+
+    (room,) = rows(cli, "--room", "--details")
+    assert room["remaining"] == 15000 and room["forfeited"] == 0
+    assert room["flows"][0]["role"] == "fhsa_current_year"
+
+
 # ── Conflicting options ──────────────────────────────────────────────────────
 
 
@@ -347,6 +453,7 @@ def test_room_commands_show_missing_historical_fx_without_partial_amounts(cli, t
         ("--summary", "--sort", "gain"),
         ("--room", "--symbol", "VFV"),
         ("--room", "-y", "2024"),
+        ("--details",),
         ("--issues", "--csv", "-"),
         ("--page-info",),
     ],
