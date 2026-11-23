@@ -331,8 +331,10 @@ marketpulse automation run --once --json --quiet
 Continuous execution retries failed cycles at the next interval. One-shot runs
 exit nonzero only when the cycle fails (for example, the backup couldn't be
 written). A symbol or exchange rate the provider can't quote is listed under
-`quote_errors` and doesn't fail the run. Use one worker per ledger to
-avoid duplicate alert notifications. Automation does not create ledger entries.
+`quote_errors` and doesn't fail the run. If the app refresh and an automation
+command overlap on the same ledger, the second cycle waits for the first to
+finish before checking quotes, alerts and backups. The Mac app's two-minute
+backend timeout includes that wait. Automation does not create ledger entries.
 Backups are local; see [data and restoration](data.md) for retention and recovery.
 
 Every cycle, whether from the app's refreshes or `automation run`, is kept in the

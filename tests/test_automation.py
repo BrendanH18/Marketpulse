@@ -1,15 +1,24 @@
 import json
+import multiprocessing
+import os
 import sqlite3
+from contextlib import closing
 from datetime import date
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
+from marketpulse import alerts
 from marketpulse.alerts import notify
 from marketpulse.automation import run_cycle
 from marketpulse.cli import main
+from marketpulse.config import Config
+from marketpulse.db import Store
 from marketpulse.desktop import snapshot
+from marketpulse.market import CurlTransport, MarketData
 from marketpulse.models import Account, AccountType, Alert, Transaction, TxnType
+from marketpulse.services import Tracker
 
 
 def test_windows_notifications_are_a_noop(monkeypatch):
@@ -46,6 +55,89 @@ def test_cycle_records_snapshot_backs_up_and_checks_alert_only_symbols(tracker, 
     assert len(tracker.store.backups()) == 1
     assert len(notifications) == 1
     assert json.loads(tracker.store.get_meta("automation_last_run"))["errors"] == []
+
+
+def _desktop_refresh_paused_before_backup(fake, backup_due, release, results):
+    backup = Store.backup
+
+    def pause_before_copy(store, *args, **kwargs):
+        backup_due.set()
+        if not release.wait(10):
+            raise TimeoutError("Test never released the desktop backup")
+        return backup(store, *args, **kwargs)
+
+    with closing(Store()) as store, patch.object(Store, "backup", pause_before_copy):
+        tracker = Tracker(store, MarketData(transport=fake, store=store), Config())
+        with patch.object(alerts, "notify") as sent:
+            report = snapshot(tracker)["automation"]
+        results.put(("desktop", report, sent.call_count))
+
+
+def _scheduled_automation(fake, opened, finished, results):
+    open_default = Store.open_default
+
+    def signal_after_startup_backup():
+        store = open_default()
+        opened.set()
+        return store
+
+    with (
+        patch.object(Store, "open_default", signal_after_startup_backup),
+        patch.object(CurlTransport, "get_json", fake.get_json),
+        patch.object(alerts, "notify") as sent,
+    ):
+        result = CliRunner().invoke(main, ["automation", "run", "--once", "--json"])
+    assert result.exit_code == 0, result.output
+    results.put(("scheduled", json.loads(result.output), sent.call_count))
+    finished.set()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="cross-process automation locking uses POSIX file locks")
+def test_overlapping_desktop_and_scheduled_cycles_share_one_daily_backup(fake, tmp_path):
+    fake.set_quote("MSFT", 400)
+    with closing(Store()) as store:
+        holding(store)
+        store.add_alert(Alert("MSFT", "above", 390))
+
+    ctx = multiprocessing.get_context("spawn")
+    due, release, opened, finished = (ctx.Event() for _ in range(4))
+    results = ctx.Queue()
+    desktop = ctx.Process(target=_desktop_refresh_paused_before_backup, args=(fake, due, release, results))
+    scheduled = ctx.Process(target=_scheduled_automation, args=(fake, opened, finished, results))
+    desktop.start()
+    try:
+        assert due.wait(10), "desktop did not reach the daily backup"
+        scheduled.start()
+        assert opened.wait(10), "scheduled command could not finish opening the same ledger"
+        with closing(Store(tmp_path / "another.db")) as other:
+            assert run_cycle(Tracker(other, MarketData(transport=fake), Config())).report["errors"] == []
+        finished_while_desktop_waited = finished.wait(0.2)
+        release.set()
+        reports = {}
+        for _ in range(2):
+            source, report, sent = results.get(timeout=10)
+            reports[source] = (report, sent)
+        for process in (desktop, scheduled):
+            process.join(10)
+            assert process.exitcode == 0
+    finally:
+        release.set()
+        for process in (desktop, scheduled):
+            if process.pid is not None:
+                if process.is_alive():
+                    process.kill()
+                process.join(10)
+        results.close()
+
+    with closing(Store()) as store:
+        assert len(store.backups()) == 1
+        assert len(store.automation_runs()) == 2
+    assert not finished_while_desktop_waited
+    assert reports["desktop"][0]["backup"] == reports["scheduled"][0]["backup"]
+    assert reports["desktop"][0]["fired"] == ["MSFT ≥ 390.00"]
+    assert reports["desktop"][1] == 1
+    assert reports["scheduled"][0]["fired"] == []
+    assert reports["scheduled"][1] == 0
 
 
 def test_stale_cycle_does_not_record_snapshot_or_fire_alert(tracker, fake, notifications):

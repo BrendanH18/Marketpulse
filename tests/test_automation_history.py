@@ -97,17 +97,23 @@ def test_history_is_pruned_to_the_newest_50(store):
     assert [run.ran_at for run in store.automation_runs(limit=2)] == [runs[0].ran_at, runs[1].ran_at]
 
 
-def test_a_cycle_that_raises_is_recorded_too(cli, tracker, monkeypatch):
-    def boom(*args, **kwargs):
-        raise RuntimeError("fictional provider meltdown")
+@pytest.mark.parametrize("error_source", ["lock", "cycle"])
+def test_a_cycle_that_raises_is_recorded_too(cli, tracker, monkeypatch, error_source):
+    error = "fictional lock failure" if error_source == "lock" else "fictional provider meltdown"
 
-    monkeypatch.setattr("marketpulse.automation._run_cycle", boom)
+    def boom(*args, **kwargs):
+        raise OSError(error)
+
+    if error_source == "lock":
+        monkeypatch.setattr(tracker.store, "automation_lock", boom)
+    else:
+        monkeypatch.setattr("marketpulse.automation._run_cycle", boom)
     result = cli("automation", "run", "--once", "--json", "--quiet")
     assert result.exit_code == 1
     # The printed report is unchanged; the history adds when it happened.
-    assert json.loads(result.output) == {"errors": ["fictional provider meltdown"], "failed": True}
+    assert json.loads(result.output) == {"errors": [error], "failed": True}
     (run,) = tracker.store.automation_runs()
-    assert run.failed and run.report["errors"] == ["fictional provider meltdown"]
+    assert run.failed and run.report["errors"] == [error]
     datetime.fromisoformat(run.ran_at)
 
 
