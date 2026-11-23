@@ -39,15 +39,19 @@ Trust comes from how releases are produced instead:
 - **Checked before release.** `scripts/release.py verify` checks every file against
   `SHA256SUMS`, opens each zip and DMG, checks the app's version, architecture,
   bundled engine, and signature, and runs each app on a Mac of that architecture.
-  Only then does the workflow create a *draft* release, which the maintainer
-  reviews and publishes. The workflow won't replace the files of a published release.
+  After verification, the workflow records signed build provenance for each
+  release asset and creates a *draft* release for the maintainer to review and
+  publish. The workflow won't replace the files of a published release.
 - **Verified on install.** [`scripts/install.sh`](scripts/install.sh), attached to
   each release, downloads with `curl` and installs nothing unless the zip matches
   `SHA256SUMS` and the app inside has MarketPulse's bundle ID, the requested
   version, and a valid signature (`codesign --verify --deep --strict`).
 
-To verify a download yourself, run `shasum -a 256 -c SHA256SUMS --ignore-missing`
-in the download folder ([install guide](docs/install.md#verify-a-download)).
+To verify the provenance of a new download, use GitHub CLI to check the signed
+claim against the MarketPulse release workflow and tag. For older releases or
+checksum-only verification, run `shasum -a 256 -c SHA256SUMS --ignore-missing`
+in the download folder. [Download verification](docs/install.md#verify-a-download)
+
 `SHA256SUMS` is published on the same release as the files it covers, so it detects
 damaged or truncated downloads and files altered on their own, but not someone who
 can replace both: a compromised GitHub account or release, or a mirror you download

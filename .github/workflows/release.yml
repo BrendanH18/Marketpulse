@@ -2,7 +2,8 @@ name: Release
 
 # Pushing a v* tag builds the unsigned macOS apps and opens a draft GitHub Release with them.
 # Running it by hand (Actions > Release > Run workflow) is a dry run: it builds and verifies the
-# same artifacts and uploads them to the run, but creates no release. See CONTRIBUTING.md.
+# same artifacts, records their provenance, and uploads them to the run without creating a release.
+# See CONTRIBUTING.md.
 
 on:
   push:
@@ -106,10 +107,28 @@ jobs:
       - name: Verify the downloaded artifacts and run the Intel app
         run: uv run --locked python scripts/release.py verify dist/release --version "$VERSION" --require-smoke x86_64
 
+  attest:
+    needs: [prepare, checks, verify-intel]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: marketpulse-${{ needs.prepare.outputs.version }}
+          path: dist/release
+      - name: Attest the verified release files
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/release/*
+
   publish:
     # A manual run is a dry run even when started on a tag.
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [prepare, checks, build, verify-intel]
+    needs: [prepare, attest]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
