@@ -22,6 +22,11 @@ other [CLI JSON reports](cli-workflows.md). Protect these files as you would
 other financial records. Public quotes and percentage returns remain visible. Together
 they can give a viewer an estimate of a holding’s acquisition price.
 
+On a shared machine, use separate OS accounts. To protect against device loss,
+keep the ledger and its copies on encrypted storage. Files copied outside the
+managed data directory depend on the destination's access controls.
+[Local portfolio data threat model](adr/0003-local-data-threat-model.md)
+
 For offline backup filtering, inspection and read-only verification, see
 [Backup CLI tools](cli-backup-tools.md). Activity CSV exports and JSON inspection
 also contain unmasked data; see [Reporting tools](cli-reporting-tools.md).
@@ -119,8 +124,9 @@ at all.
 | `pre-restore` | Right before a restore replaces the ledger | Until removed manually |
 
 Default backups live in the data directory's `backups/` folder. A backup written
-to an explicit path is not included in `backup list`. Local backups do not
-protect against losing the disk; copy important backups to another location.
+to an explicit path is not included in `backup list`. The destination's own
+permissions apply to that copy, so choose a private folder on encrypted storage.
+Copy important backups to another location to protect against disk loss.
 The database backup does not include the TOML configuration file.
 `backup list --json` returns the same newest-first inventory as a JSON array,
 including absolute paths, reasons, sizes in bytes, and timestamps parsed from
