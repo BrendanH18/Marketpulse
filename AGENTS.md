@@ -27,7 +27,7 @@ the app's decisions in [docs/app-plan.md](docs/app-plan.md).
 1. Read this file, then the issue you're working on **including its latest comments**.
    A `Handoff` comment means another agent started; continue from it.
 2. If the issue is unclaimed, claim it with a comment:
-   `Claiming for <agent/model>. Branch: <branch>.`
+   `Claiming for <agent/model>.`
 3. Prefer issues labelled `agent-ready`. Skip `needs-decision` issues; ask the maintainer instead.
 
 ## Where checks run (local, Mac and Boat)
@@ -48,35 +48,51 @@ the app's decisions in [docs/app-plan.md](docs/app-plan.md).
   `menubar install` / `desktop install`, `scripts/benchmark_desktop.py`, `scripts/release.py package` and
   `verify` (they use `ditto`, `hdiutil` and `codesign`), and the darwin-only tests (for example
   `tests/test_update_check.py`), which pytest skips on Linux.
-- **Ask before heavy local jobs.** Anything heavy, long-running or untrusted
-  (Docker, large data jobs, anything taking minutes) would normally go to Boat;
-  ask the maintainer before running it locally.
+- **Heavy jobs go to Boat.** Anything heavy, long-running or untrusted (Docker,
+  large data jobs, anything taking minutes) runs in a Boat sandbox, not on the Mac
+  or the Raspberry Pi. The macOS-only work above stays on the Mac.
 
 Boat (x86_64 Linux) docs: https://docs.boat.dev/llms.txt. Prices and limits: run `boat limits`; never quote prices from memory.
 
-- Create: `id=$(boat new --json | jq -r 'select(.event=="ready") | .id')`
-- One-shot job: `boat run --push . -- npm test` (new sandbox, run, cost, delete; exits with the test exit code)
-- Run: `boat exec "$id" --cwd my-app "npm test"` (30 s timeout; `--timeout 0` = no limit)
-- Server: `boat exec "$id" --detach "npm run dev"`, then `boat exec "$id" --status <pid>`
-- Copy files: `boat push "$id" ./my-app` (git-tracked files, to /home/user/my-app) or clone the repo inside the sandbox
-- Public URL for a port: `boat ssh "$id" "host 3000 --private"`
+- Create: `id=$(boat new --name marketpulse-<purpose> --json | jq -r 'select(.event=="ready") | .id')`
+- One-shot job: `boat run --push . -- sh -c 'uv sync --locked --dev && uv run --locked pytest -q'` (new sandbox, run, cost, delete; exits with the job's exit code)
+- Copy files: `boat push "$id" .` (git-tracked files, to /home/user/<checkout folder>) or clone the repo inside the sandbox
+- Run: `boat exec "$id" --cwd <checkout folder> "uv run --locked pytest -q"` (30 s timeout; `--timeout 0` = no limit)
+- Long job: `boat exec "$id" --detach "<command>"`, then `boat exec "$id" --status <pid>`
 - Always pass the sandbox id. `current` does not work in a non-interactive shell.
 - When done: `boat stop "$id"` (keeps the disk for at least 14 days) or `boat delete "$id" --yes` (erases it)
 
 ## Checks
 
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) is the gate, and it runs the
+full suite once on each pushed commit: Ruff lint and format, mypy, pytest on Linux
+(Python 3.12–3.14) and macOS (3.14, including the darwin-only tests), the coverage
+floors, the package build and install smoke, and, when the Mac app is affected, the
+`menubar` job (Swift format, `swift build`, the bridge check, the standalone app build
+with its smoke test, and the restore-sheet drive). The maintainer decided on
+2026-11-22 that agents don't rerun all of that themselves:
+
+- While working, run targeted checks: the tests that cover the code you changed, and
+  lint and type checks for what you touched.
+- When a CI job fails, reproduce that job or test (on the Mac for a macOS job) and fix it.
+- In your hand-off report, say which targeted checks you ran, with their results, and
+  CI's result for your latest commit. A CI run that hasn't finished isn't a pass.
+
+CI doesn't run the [native app QA checklist](docs/qa.md); for app changes it stays
+required, as described in [Verifying app changes](#verifying-app-changes).
+
 ```bash
 uv sync --locked --dev
-uv run --locked ruff check . && uv run --locked ruff format --check . && uv run --locked mypy
+uv run --locked pytest -q tests/test_ledger.py     # the tests that cover your change
+uv run --locked ruff check <paths> && uv run --locked ruff format --check <paths> && uv run --locked mypy
+# financial-core changes: the coverage floors
 uv run --locked pytest -q --cov && uv run --locked python scripts/check_coverage.py
-# macOS, for app or bridge changes:
+# macOS, to reproduce the menubar job for app or bridge changes:
 swift format lint --strict -r macos/MarketPulseBar scripts/*.swift
 swift build -c release --package-path macos/MarketPulseBar
 uv run --locked python scripts/check_native_bridge.py
 uv run --locked python scripts/build_app.py --out "$TMPDIR/mp-app"
 ```
-
-All must pass before you hand work back. Paste the results, not a summary of them.
 
 ## Verifying app changes
 
@@ -86,21 +102,21 @@ Build the throwaway QA app on a fictional ledger and follow [docs/qa.md](docs/qa
 uv run --locked python scripts/qa_app.py --fresh && "$TMPDIR/marketpulse-qa/launch.sh"
 ```
 
-Run the checklist with computer use and report the PASS / FAIL / UNVERIFIED
-table. If you couldn't run it, say which items you couldn't verify. Never report a
-UI item as passing that you didn't see.
+For a change to the native app, run only the checklist items the change touches;
+run the full checklist at release time. The maintainer decided this on 2026-11-22.
+Computer use goes through Codex with GPT-6.2 Astra (`gpt-6.2-astra`); an agent that
+isn't that one delegates the checklist run to it. Report the PASS / FAIL / UNVERIFIED
+table for the items you ran. If you couldn't run an item, say so. Never report a UI
+item as passing that you didn't see.
 
 ## Commands
 
 ```bash
-uv sync                                        # install (includes dev group: mypy, pytest, pytest-cov, ruff)
-uv run marketpulse                             # TUI (no subcommand = TUI); `mp` is an alias
-uv run pytest                                  # full suite, offline
-uv run pytest tests/test_ledger.py::test_split_keeps_cost_base   # single test
-uv run pytest --cov && uv run python scripts/check_coverage.py   # financial-core coverage floors (CI gate)
-uv run ruff check . && uv run ruff format --check .   # lint; `ruff format .` applies fixes; line length 120
+uv sync --locked --dev                         # install (includes dev group: mypy, pytest, pytest-cov, ruff)
+uv run --locked marketpulse                    # TUI (no subcommand = TUI); `mp` is an alias
+uv run --locked pytest tests/test_ledger.py::test_split_keeps_cost_base   # single test
+uv run --locked ruff format .                  # apply Ruff formatting; line length 120
 swift format -i -r macos/MarketPulseBar scripts/*.swift          # format Swift (.swift-format: 2 spaces, 120 columns)
-swift build -c release --package-path macos/MarketPulseBar       # menu bar app
 ```
 
 The main ruleset requires the `CI passed` job in `.github/workflows/ci.yml`, which fails when any other CI job failed or was cancelled: add any new CI job to its `needs`.
@@ -125,7 +141,7 @@ Python package in `src/marketpulse/` (Python ≥3.11, deps: click, rich, textual
 - **TUI (`tui/`):** one `App` with a `ContentSwitcher` of 8 workspaces (not Screens); modals live in `screens.py`. `app.py` owns layout, state, lifecycle, and Textual `@on`/`@work` entry points. Typed helpers in `workspaces.py` render views, `chart.py` handles chart interaction, `records.py` handles transaction/account/asset edits, `actions.py` handles watchlists, alerts, CSV, and app actions, `navigation.py` handles keyboard navigation, table sorting and filtering, clipboard copies and the footer status, and `extras.py` holds row details, find, go-to, grouping and other per-workspace extras. `commands.py` owns command-palette discovery; `constants.py` holds workspace hints and display choices. Helpers receive the app; entry points forward to them so Textual dispatch and worker ownership stay on the app. Network/DB work runs in `@work(thread=True)` workers that hand results back via `call_from_thread`. `Canvas` widgets take a `(width, height) -> renderable` builder so charts reflow on resize. `MarketPulseApp` sets `config`/`palette` *before* `super().__init__()` because Textual requests theme variables during construction; avoid attribute names that shadow `App` internals (e.g. `_ready`).
 - **CLI (`cli/`):** one Click group, `main` in `cli/root.py`; each module (`accounts.py`, `recording.py`, `native.py`…) adds one area's commands, and `cli/__init__.py` imports them all. `App` (in `cli/base.py`, with `fail` and the shared options) is the context object; it lazily opens the `Tracker`. Account resolution for `-a` is `Store.get_account` (id, case-insensitive name, or unique account type). Table renderers take `width` and drop low-priority columns under 110 columns.
 - **Offline reports (`cli/reports.py`, `cli/summaries.py`):** `report SOURCE` and `summarize SOURCE` share the dataset adapters registered in `reports.SOURCE_MODULES`; each `report_*` adapter module exposes `GROUP`, `SOURCES` (ordered field schemas), `DESCRIPTIONS` and `load_source`. Adapters are read-only, offline and hide archived accounts. `report_derive.py` computes `--derive` columns after loading and before filters. The dataset × operation matrices in `tests/` parametrize over `reports.SOURCES`, so a new dataset or operation extends them; `docs/cli-report-derived-datasets.md` is checked against the code.
-- **Report discovery:** `report report-fields` catalogs source names, groups and ordered field positions directly from `reports.SOURCE_MODULES`, including its own schema, without opening the tracker. The 200-improvement inventory for #162 is in `docs/cli-discovery-improvements.md` (197 dataset/operation combinations and three CLI typo-suggestion improvements).
+- **Report discovery:** `report report-fields` catalogs source names, groups and ordered field positions directly from `reports.SOURCE_MODULES`, including its own schema, without opening the tracker.
 - **Native app (`macos/MarketPulseBar`, `menubar.py`, `desktop.py`):** the Swift app (menu bar + portfolio window) refreshes with `marketpulse desktop snapshot`, the versioned desktop JSON bridge built in `desktop.py` (decoded with `convertFromSnakeCase` in `DesktopModels.swift`). If that fails, the menu bar falls back to `marketpulse status --json` (`Tracker.status_payload`, `Models.swift`), a separate stable contract. Writes shell out to ordinary CLI commands with user text after `--`. Changing either payload requires updating the Swift models and `scripts/check_native_bridge.*`. `menubar install` builds with SwiftPM, assembles `~/Applications/MarketPulse Bar.app`, and stores the CLI path in `defaults` (`dev.marketpulse.bar cliPath`). Don't use SwiftUI `@State` — the Command Line Tools toolchain lacks the macro plugin; use `ObservableObject` state instead.
 - **Tax in the app:** tax loads on demand through `desktop tax`, invalidates on the snapshot's `ledger_revision`, and exports through `desktop tax-csv`. Tax includes anonymized archived taxable entries as the engine requires; ordinary portfolio views still hide archived accounts.
 - **Platforms:** macOS (app, CLI, TUI) and Linux (CLI, TUI). There is no Windows build ([ADR 0002](docs/adr/0002-no-windows-build.md)); the engine keeps its portability code (explicit UTF-8, `tzdata` on Windows), but nothing is built or tested there.
@@ -166,12 +182,11 @@ handoff block in your response for the maintainer to post:
 ```markdown
 ### Handoff — <agent/model>, <YYYY-MM-DD>
 **Status:** in progress | blocked | ready for review
-**Branch / PR:** `<branch>` / #<pr>
 **Done:**
 - …
 **Next steps (in order):**
 1. …
-**Verified:** <commands run and results; QA items checked>
+**Verified:** <targeted checks run and results; CI result; QA items checked>
 **Not verified / known issues:** …
 **Gotchas:** <anything surprising: environment quirks, failed approaches, decisions made>
 **Open questions for the maintainer:** …

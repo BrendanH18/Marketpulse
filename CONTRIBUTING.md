@@ -93,7 +93,7 @@ uv run --locked python scripts/build_app.py                 # dist/app/<arch>/Ma
 uv run --locked python scripts/build_app.py --arch arm64 --arch x86_64
 ```
 
-For changes you can see in the app, also run the [QA checklist](docs/qa.md) against a
+For changes you can see in the app, also run the [QA checklist](docs/qa.md) items they touch against a
 throwaway copy of the app on a fictional ledger
 (`uv run --locked python scripts/qa_app.py --fresh`; add `--bundled` for changes to
 the bundle or how the app finds its backend). AI agents should read
