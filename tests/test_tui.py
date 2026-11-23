@@ -292,6 +292,8 @@ def test_account_form_keeps_values_after_failed_save_and_retries(tracker, store,
 
             with patch.object(store, "_exec", side_effect=sqlite3.OperationalError("database is locked")):
                 await pilot.press("ctrl+s")
+            # The error scroll is scheduled after layout and needs a repaint.
+            await pilot.pause()
 
             assert app.screen is form
             error = form.query_one("#form-error", Static)
