@@ -155,6 +155,37 @@ def test_backup_is_a_complete_consistent_copy(store, tmp_path):
     assert store.backup(dest=tmp_path / "elsewhere.db") == tmp_path / "elsewhere.db"
 
 
+@pytest.mark.parametrize("mask", [0o022, 0o777])
+@pytest.mark.parametrize("via_symlink", [False, True])
+def test_new_explicit_backup_is_private_and_overwrite_preserves_mode(store, tmp_path, mask, via_symlink):
+    from contextlib import closing
+    from stat import S_IMODE
+
+    _seed(store)
+    target = tmp_path / "elsewhere.db"
+    destination = target
+    if via_symlink:
+        destination = tmp_path / "linked.db"
+        destination.symlink_to(target)
+
+    previous = os.umask(mask)
+    try:
+        assert store.backup(dest=destination) == destination
+    finally:
+        os.umask(previous)
+    assert S_IMODE(target.stat().st_mode) == 0o600
+    target.chmod(0o640)
+    store.add_account(Account(name="Added after first backup"))
+    assert store.backup(dest=destination) == destination
+    assert S_IMODE(target.stat().st_mode) == 0o640
+    assert destination.is_symlink() == via_symlink
+    with closing(sqlite3.connect(target)) as copy:
+        assert copy.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert copy.execute("SELECT name FROM accounts ORDER BY id DESC LIMIT 1").fetchone() == (
+            "Added after first backup",
+        )
+
+
 def test_same_second_backups_do_not_overwrite(store):
     _seed(store)
     first, second = store.backup(reason="daily"), store.backup(reason="daily")
@@ -362,13 +393,20 @@ def test_restore_reports_a_failed_safety_backup_and_leaves_no_partial_file(store
     _unchanged_after(store, taken, "Couldn't back up the current ledger first.*No space left")
 
 
-def test_a_failed_backup_leaves_no_partial_copy_behind(store):
+@pytest.mark.parametrize("explicit", [False, True], ids=["managed", "explicit-symlink"])
+def test_a_failed_backup_leaves_no_partial_copy_behind(store, tmp_path, explicit):
     _seed(store)
+    target = tmp_path / "failed.db"
+    destination = tmp_path / "failed-link.db" if explicit else None
+    if destination is not None:
+        destination.symlink_to(target)
     with pytest.raises(RuntimeError, match="Back up before writing"):
         with store.transaction():
             store.add_account(Account(name="Pending"))
-            store.backup(reason="manual")  # the copy file is opened before this is refused
+            store.backup(dest=destination)  # the copy file is opened before this is refused
     assert store.backups() == []
+    if destination is not None:
+        assert destination.is_symlink() and not target.exists()
 
 
 # ── real migrations ───────────────────────────────────────────────────────────

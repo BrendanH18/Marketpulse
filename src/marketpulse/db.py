@@ -623,6 +623,7 @@ class Store:
         With `dest`, the copy goes exactly there (and is never pruned);
         otherwise it goes into the backups directory under a timestamped name.
         """
+        existed = False
         if dest is None:
             self._secure_backup_dir()
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -637,14 +638,21 @@ class Store:
                 except FileExistsError:
                     target = self.backup_dir / f"marketpulse-{stamp}-{reason}-{n}.db"
                     n += 1
+            copy_path = target
         else:
             target = Path(dest).expanduser()
             target.parent.mkdir(parents=True, exist_ok=True)
-        existed = dest is not None and target.exists()
+            # SQLite follows destination symlinks. Reserve the same file with
+            # private permissions before SQLite opens it, even for a new referent.
+            copy_path = target.resolve()
+            try:
+                copy_path.touch(mode=0o600, exist_ok=False)
+            except FileExistsError:
+                existed = True
         try:
-            if dest is None:
-                _tighten_file(target)
-            copy = sqlite3.connect(target)
+            if not existed:
+                _tighten_file(copy_path)
+            copy = sqlite3.connect(copy_path)
             try:
                 with self._lock:
                     if self._in_transaction:
@@ -666,7 +674,7 @@ class Store:
         except BaseException:
             # A partial copy (full disk, say) would be listed, and offered for restore, as a good backup.
             if not existed:
-                target.unlink(missing_ok=True)
+                copy_path.unlink(missing_ok=True)
             raise
         if dest is None and reason in self._AUTO_REASONS:
             self.prune_backups(reason)

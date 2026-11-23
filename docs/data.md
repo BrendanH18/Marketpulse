@@ -124,8 +124,9 @@ at all.
 | `pre-restore` | Right before a restore replaces the ledger | Until removed manually |
 
 Default backups live in the data directory's `backups/` folder. A backup written
-to an explicit path is not included in `backup list`. The destination's own
-permissions apply to that copy, so choose a private folder on encrypted storage.
+to an explicit path is not included in `backup list`. New files are owner
+read/write (0600). Overwriting a file keeps its existing permissions. Choose a
+private folder on encrypted storage for copies you keep outside the data directory.
 Copy important backups to another location to protect against disk loss.
 The database backup does not include the TOML configuration file.
 `backup list --json` returns the same newest-first inventory as a JSON array,
