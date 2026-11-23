@@ -3,7 +3,7 @@
 import csv
 import io
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -313,6 +313,50 @@ def test_cad_only_room_needs_no_fx_history(cli, ledger, store, fake):
     assert room["remaining"] == pytest.approx(room["starting_room"] + room["new_limits"] - room["contributions"])
     assert "Contribution room" in cli("tax", "--room").output
     assert fake.calls == []
+
+
+def test_room_counts_in_kind_transfers_at_recorded_market_value(cli, store, fake):
+    today = date.today()
+    year = today.year
+    day = today.isoformat()
+    source = store.add_account(Account(name="Fictional taxable"))
+    tfsa = store.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA, track_cash=False))
+    other = store.add_account(Account(name="Second TFSA", type=AccountType.TFSA))
+    fhsa = store.add_account(Account(name="Fictional FHSA", type=AccountType.FHSA))
+    store.set_room("TFSA", year, 7000)
+    store.set_room("FHSA", year, 8000)
+    store.add_transaction(Transaction(source.saved_id, TxnType.BUY, day, "AAPL", quantity=20, price=50, currency="USD"))
+    for origin, target, symbol, quantity, price, currency in (
+        (source, tfsa, "AAPL", 4, 100, "USD"),
+        (source, fhsa, "AAPL", 2, 0, "USD"),
+        (tfsa, other, "AAPL", 1, 110, "USD"),
+    ):
+        store.add_transaction(
+            Transaction(
+                origin.saved_id,
+                TxnType.TRANSFER,
+                day,
+                symbol,
+                quantity=quantity,
+                price=price,
+                currency=currency,
+                target_account_id=target.saved_id,
+            )
+        )
+    store.add_transaction(Transaction(tfsa.saved_id, TxnType.BUY, day, "AAPL", quantity=1, price=80, currency="USD"))
+    fake.set_history("USDCAD=X", {(today - timedelta(days=1)).isoformat(): 1.25}, currency="CAD")
+
+    fhsa_room, tfsa_room = rows(cli, "--room", "--details")
+    assert tfsa_room["remaining"] == 6500
+    assert [(f["role"], f["amount"], f["cad_amount"]) for f in tfsa_room["flows"]] == [
+        ("in_kind_contribution", 400, 500),
+    ]
+    assert fhsa_room["remaining"] is None and fhsa_room["missing_transfer_values"] == 1
+    assert fhsa_room["missing_fx"] == []
+    assert fhsa_room["flows"][0]["amount"] is None
+    output = cli("tax", "--room", "--details").output
+    assert "In-kind contribution" in output and "Missing transfer price" in output
+    assert store.ledger().flows == []
 
 
 def test_room_commands_show_missing_historical_fx_without_partial_amounts(cli, tracker, store, fake):

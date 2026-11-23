@@ -8,12 +8,12 @@ and deterministic: no I/O, no market data.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field, replace
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from math import isfinite
 
-from .models import EPSILON, Account, MessageArgs, Transaction, TxnType, guess_currency
+from .models import EPSILON, Account, AccountType, MessageArgs, Transaction, TxnType, guess_currency
 
 
 @dataclass
@@ -67,6 +67,16 @@ class CashFlow:
 
 
 @dataclass
+class InKindContribution:
+    """Shares contributed to a registered plan, valued in the transfer currency."""
+
+    date: str
+    account_id: int
+    amount: float | None
+    currency: str
+
+
+@dataclass
 class LedgerIssue:
     txn_id: int | None
     date: str
@@ -84,6 +94,7 @@ class LedgerState:
     realized: list[RealizedGain] = field(default_factory=list)
     income: list[IncomeEvent] = field(default_factory=list)
     flows: list[CashFlow] = field(default_factory=list)
+    in_kind_contributions: list[InKindContribution] = field(default_factory=list)
     fees: dict[str, float] = field(default_factory=lambda: defaultdict(float))  # ccy -> total fees paid
     issues: list[LedgerIssue] = field(default_factory=list)
     valuations: dict[str, tuple[str, float]] = field(default_factory=dict)  # symbol -> (date, price)
@@ -294,6 +305,15 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
             dest.first_date = txn.date
         dest.quantity += qty
         dest.book += moved_book
+        source = accounts.get(acct)
+        target = accounts.get(txn.target_account_id)
+        if source and not source.type.registered and target and target.type in (AccountType.TFSA, AccountType.FHSA):
+            value = qty * txn.price
+            state.in_kind_contributions.append(
+                InKindContribution(
+                    txn.date, txn.target_account_id, value if value > 0 and isfinite(value) else None, ccy
+                )
+            )
 
     elif t in (TxnType.DIVIDEND, TxnType.INTEREST):
         state.income.append(IncomeEvent(txn.date, acct, txn.symbol, t, txn.amount, ccy))
@@ -439,26 +459,32 @@ class RoomStatus:
     # carry-forward, or above what the $40,000 lifetime limit still allows.
     forfeited: float | None = 0.0
     missing_fx: list[MissingRoomRate] = field(default_factory=list)
+    missing_transfer_values: int = 0
 
 
 @dataclass
 class RoomFlow:
-    flow: CashFlow
+    flow: CashFlow | InKindContribution
     role: str
     cad_amount: float | None
 
 
 def room_flows(
-    account_type: str, as_of_year: int, flows: list[CashFlow], account_ids: set[int], current_year: int
-) -> list[CashFlow]:
+    account_type: str,
+    as_of_year: int,
+    flows: Iterable[CashFlow | InKindContribution],
+    account_ids: set[int],
+    current_year: int,
+) -> list[CashFlow | InKindContribution]:
     """Recorded flows that can affect the estimate, including the FHSA lifetime cap."""
     relevant = []
     for flow in flows:
         if flow.account_id not in account_ids:
             continue
         year = int(flow.date[:4])
-        if flow.amount > 0 and year <= current_year and (year >= as_of_year or account_type == "FHSA"):
-            relevant.append(flow)
+        if isinstance(flow, InKindContribution) or flow.amount > 0:
+            if year <= current_year and (year >= as_of_year or account_type == "FHSA"):
+                relevant.append(flow)
         elif flow.amount < 0 and account_type == "TFSA" and as_of_year <= year < current_year:
             relevant.append(flow)
     return relevant
@@ -468,7 +494,7 @@ def contribution_room(
     account_type: str,
     as_of_year: int,
     starting_room: float,
-    flows: list[CashFlow],
+    flows: Iterable[CashFlow | InKindContribution],
     account_ids: set[int],
     *,
     current_year: int | None = None,
@@ -484,25 +510,31 @@ def contribution_room(
     current_year = current_year or date.today().year
     cad_flows = []
     missing = set()
+    missing_values = 0
     for flow in room_flows(account_type, as_of_year, flows, account_ids, current_year):
         currency = flow.currency.upper()
-        rate = 1.0 if currency == "CAD" else fx(flow.date, currency) if fx else None
-        if rate is None or not isfinite(rate) or rate <= 0:
-            missing.add((flow.date, currency))
-            cad_amount = None
+        cad_amount = None
+        if flow.amount is None:
+            missing_values += 1
         else:
-            cad_amount = flow.amount if currency == "CAD" else flow.amount * rate
-            cad_flows.append(flow if currency == "CAD" else replace(flow, amount=cad_amount, currency="CAD"))
+            rate = 1.0 if currency == "CAD" else fx(flow.date, currency) if fx else None
+            if rate is None or not isfinite(rate) or rate <= 0:
+                missing.add((flow.date, currency))
+            else:
+                cad_amount = flow.amount * rate
+                cad_flows.append(CashFlow(flow.date, flow.account_id, cad_amount, "CAD"))
         if details is not None:
             year = int(flow.date[:4])
-            if flow.amount < 0:
+            if isinstance(flow, CashFlow) and flow.amount < 0:
                 role = "withdrawal_added_back"
             elif year < as_of_year:
                 role = "fhsa_current_year" if year == current_year else "fhsa_lifetime_cap"
             else:
                 role = "contribution"
+            if isinstance(flow, InKindContribution):
+                role = f"in_kind_{role}"
             details.append(RoomFlow(flow, role, cad_amount))
-    if missing:
+    if missing or missing_values:
         return RoomStatus(
             account_type,
             as_of_year,
@@ -513,6 +545,7 @@ def contribution_room(
             remaining=None,
             forfeited=None,
             missing_fx=[MissingRoomRate(day, currency) for day, currency in sorted(missing)],
+            missing_transfer_values=missing_values,
         )
 
     contributions = sum(f.amount for f in cad_flows if f.amount > 0 and int(f.date[:4]) >= as_of_year)
@@ -544,7 +577,7 @@ def _fhsa_room(
     `as_of_year`).
 
     Not modelled: withdrawals never restore FHSA room (correct: they don't),
-    RRSP-to-FHSA transfers (they use room but aren't deposits), and the
+    direct RRSP-to-FHSA transfers (they use room), and the
     account's 15-year / age-71 closing date.
     """
     by_year: dict[int, float] = defaultdict(float)

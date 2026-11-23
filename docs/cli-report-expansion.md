@@ -51,7 +51,7 @@ the 30 new operations below.
 
 | No. | Source | Fields | Dataset |
 | --- | --- | --- | --- |
-| 1 | `contribution-room` | account_type, as_of_year, starting_room, contributions, withdrawals_added_back, new_limits, remaining, forfeited, missing_fx, accounts | Remaining contribution room the engine derives from saved baselines and recorded flows. |
+| 1 | `contribution-room` | account_type, as_of_year, starting_room, contributions, withdrawals_added_back, new_limits, remaining, forfeited, missing_fx, accounts, missing_transfer_values | Remaining contribution room the engine derives from saved baselines and recorded flows. |
 | 2 | `snapshot-classes` | date, asset_class, value, currency | Asset-class breakdown saved with each net-worth snapshot. |
 | 3 | `alert-conditions` | value, description, percent | Alert conditions and whether their threshold is a percent. |
 | 4 | `chart-periods` | period, interval, bars_per_year | Chart periods, their bar interval and bars per year. |

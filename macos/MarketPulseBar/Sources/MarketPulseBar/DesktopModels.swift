@@ -824,9 +824,10 @@ struct ContributionRoom: Decodable, Identifiable {
   /// The user entered `startingRoom` as CRA's figure on January 1 of this year.
   let asOfYear: Int
   let startingRoom: Double
-  /// Unavailable when any required historical CAD exchange rate is missing.
+  /// Unavailable when a required exchange rate or transfer price is missing.
   let remaining: Double?
   let missingFx: [MissingRate]?
+  let missingTransferValues: Int?
   /// How `remaining` was worked out: starting room + new limits + withdrawals added back
   /// − contributions − forfeited. Absent from older engines.
   let contributions: Double?

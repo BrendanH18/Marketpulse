@@ -20,6 +20,7 @@ SOURCES: dict[str, tuple[str, ...]] = {
         "forfeited",
         "missing_fx",
         "accounts",
+        "missing_transfer_values",
     ),
     "snapshot-classes": ("date", "asset_class", "value", "currency"),
 }
@@ -33,10 +34,12 @@ def load_source(name: str, app: App) -> list[dict[str, Any]]:
     """Return raw script rows without pricing holdings, recording snapshots or contacting providers."""
     if name == "contribution-room":
         # The engine counts archived accounts' contributions, as CRA does, and lists only active members.
-        return [
-            {**asdict(status), "accounts": [a.name for a in members]}
-            for status, members in app.tracker.room(offline=True)
-        ]
+        room_rows = []
+        for status, members in app.tracker.room(offline=True):
+            row = asdict(status)
+            row["accounts"] = [a.name for a in members]
+            room_rows.append({field: row[field] for field in SOURCES[name]})
+        return room_rows
     if name == "snapshot-classes":
         rows: list[dict[str, Any]] = []
         for snapshot in app.store.snapshots():

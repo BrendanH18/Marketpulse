@@ -21,6 +21,8 @@ from .analytics import (
 from .config import Config
 from .db import Snapshot, Store
 from .ledger import (
+    CashFlow,
+    InKindContribution,
     RoomFlow,
     RoomStatus,
     contribution_room,
@@ -602,7 +604,9 @@ class Tracker:
         # CRA counts every contribution, so an archived account's deposits still use up room;
         # only active accounts are listed with it, since archived ones are hidden everywhere.
         accounts = self.store.accounts(include_archived=True)
-        flows = self.store.ledger().flows
+        ledger = self.store.ledger()
+        flows: list[CashFlow | InKindContribution] = [*ledger.flows, *ledger.in_kind_contributions]
+        flows.sort(key=lambda flow: flow.date)
         current_year = date.today().year
         plans = []
         for acct_type, (year, amount) in sorted(baselines.items()):
@@ -612,7 +616,9 @@ class Tracker:
             plans.append((acct_type, year, amount, members, ids, relevant))
         fx = None
         if not offline:
-            dated_currencies = ((flow.date, flow.currency) for *_, relevant in plans for flow in relevant)
+            dated_currencies = (
+                (flow.date, flow.currency) for *_, relevant in plans for flow in relevant if flow.amount is not None
+            )
             fx = self._historical_fx(dated_currencies, "CAD", budget=fx_budget)
         out = []
         for acct_type, year, amount, members, ids, relevant in plans:

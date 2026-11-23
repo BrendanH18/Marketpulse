@@ -823,7 +823,7 @@ def room_table(rooms: Sequence[tuple[RoomStatus, list[Account]]], *, privacy: bo
         headers.append(("− Capped", "right"))
     headers.append(("Remaining", "right"))
     t = table(*headers, title="Contribution room (CAD)")
-    missing_fx = Text(style="warn")
+    warnings = Text(style="warn")
     for status, members in rooms:
         label = Text(status.account_type, style="bright")
         others = [a.name for a in members if a.name.upper() != status.account_type]
@@ -845,12 +845,18 @@ def room_table(rooms: Sequence[tuple[RoomStatus, list[Account]]], *, privacy: bo
             )
         if status.remaining is None:
             cells.append(Text("Unavailable", style="warn"))
-            if missing_fx:
-                missing_fx.append("\n")
-            missing_fx.append(f"{status.account_type}: historical CAD exchange rates unavailable")
-            if not privacy:
-                details = ", ".join(f"{rate.currency} on {rate.date}" for rate in status.missing_fx)
-                missing_fx.append(f" ({details})")
+            reasons = []
+            if status.missing_transfer_values:
+                reasons.append("enter the market price on each unpriced in-kind transfer")
+            if status.missing_fx:
+                fx = "historical CAD exchange rates unavailable"
+                if not privacy:
+                    details = ", ".join(f"{rate.currency} on {rate.date}" for rate in status.missing_fx)
+                    fx += f" ({details})"
+                reasons.append(fx)
+            if warnings:
+                warnings.append("\n")
+            warnings.append(f"{status.account_type}: {', '.join(reasons)}")
         else:
             cells.append(
                 Text(
@@ -859,8 +865,8 @@ def room_table(rooms: Sequence[tuple[RoomStatus, list[Account]]], *, privacy: bo
                 )
             )
         t.add_row(*cells)
-    if missing_fx:
-        t.caption = missing_fx
+    if warnings:
+        t.caption = warnings
         t.columns[-1].min_width = len("Unavailable")
     return t
 

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Count in-kind share contributions to TFSAs and FHSAs at their recorded market value in room estimates. The estimate identifies transfers that still need a price.
 - See which cash flows affect contribution room, including their original currencies, CAD amounts and any missing rates, with `marketpulse tax --room --details`.
 - See the estimated T1135 filing status and peak recorded cost in CAD in the Mac Tax workspace, including years with foreign property and no taxable sales.
 - Audit saved transaction currencies, transfer routes, quote coverage for watched symbols and alerts, and monthly snapshot gaps with `report` and `summarize`. The five datasets support 197 shared operations and 15 named filter presets, for [1,000 new offline reporting capabilities](docs/cli-offline-audit-reports.md).

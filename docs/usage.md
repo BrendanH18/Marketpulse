@@ -167,7 +167,14 @@ TFSA withdrawals restore room the following year, and all recorded FHSA
 contributions count toward the lifetime cap, including those before the saved
 balance. Archived accounts still count.
 
-Run `marketpulse tax --room --details` to see the recorded cash flows used in
+Share transfers into a TFSA or FHSA from a non-registered account count at the
+market price recorded on the transfer, even when the destination does not track
+cash. Direct transfers between accounts of the same plan and purchases inside
+the plan leave contribution room alone. A relevant transfer without a price makes
+the estimate unavailable until you add the price. Room JSON counts these transfers
+in `missing_transfer_values`.
+
+Run `marketpulse tax --room --details` to see the recorded flows used in
 each estimate, with their original currencies and CAD amounts. Withdrawals are
 shown as negative cash flows, even when they add back TFSA room. The FHSA
 lifetime-cap label identifies contributions made before the saved balance.

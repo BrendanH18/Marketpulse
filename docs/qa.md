@@ -259,6 +259,16 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     year picker if they fall in different years), the first marked superficial, and
     **Denied losses** explains it ("bought 15 within 30 days … held 65"); **Export CSV…**
     is disabled.
+    - **In-kind contribution:** In the scratch ledger, record a purchase of 10
+      XEQT.TO at CAD 40 in Spending. Transfer 3 shares to the TFSA with a
+      CAD 42 market price. Confirm both Accounts and Tax show $126 less room,
+      matching `marketpulse tax --room --details` against the same scratch data.
+      In the same scratch ledger, run `marketpulse transfer XEQT.TO 1 --from
+      Spending --to TFSA --price 0 --currency CAD --quiet` to simulate a transfer
+      saved without a market price. Both views should ask for that price.
+      Run `marketpulse txn edit ID --price 42` with the ID printed by the
+      transfer command. Confirm the remaining room
+      reappears with another $42 deducted.
     - **Foreign property (T1135):** Add a CAD-denominated buy of a foreign-listed
       security in the scratch taxable account, dated January 2 of the year before the
       sale. Switch to that earlier year. Confirm the estimate appears, the year is

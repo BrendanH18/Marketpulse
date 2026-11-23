@@ -234,7 +234,7 @@ def _check_options(
 @click.option("--issues", is_flag=True, help="Only the tax report's own issues (as plain `tax` shows them).")
 @click.option("--exit-code", is_flag=True, help="With --issues, exit 1 when there are any.")
 @click.option("--room", is_flag=True, help="Only contribution room, fetching FX history when needed for room.")
-@click.option("--details", is_flag=True, help="With --room, show the cash flows used in the estimate.")
+@click.option("--details", is_flag=True, help="With --room, show the cash flows and in-kind transfers used.")
 @pass_app
 def tax(
     app: App,
@@ -818,6 +818,9 @@ _ROOM_FLOW_ROLES = {
     "withdrawal_added_back": "Withdrawal added back",
     "fhsa_lifetime_cap": "FHSA lifetime cap",
     "fhsa_current_year": "Current-year FHSA deposit",
+    "in_kind_contribution": "In-kind contribution",
+    "in_kind_fhsa_lifetime_cap": "In-kind contribution toward the FHSA lifetime cap",
+    "in_kind_fhsa_current_year": "Current-year in-kind FHSA contribution",
 }
 
 
@@ -826,7 +829,7 @@ class _RoomFlowRow:
     date: str
     account: str | None
     role: str
-    amount: float
+    amount: float | None
     currency: str
     cad_amount: float | None
 
@@ -874,17 +877,19 @@ def _show_room(app: App, as_json: bool, *, details: bool) -> None:
 
 def _show_room_flows(app: App, account_type: str, flows: list[_RoomFlowRow]) -> None:
     if not flows:
-        app.console.print(Text(f"{account_type}: No recorded cash flows used in the estimate.", style="muted"))
+        app.console.print(Text(f"{account_type}: No recorded flows used in the estimate.", style="muted"))
         return
-    app.console.print(Text(f"{account_type} cash flows", style="title"))
+    heading = "flows" if any(flow.role.startswith("in_kind_") for flow in flows) else "cash flows"
+    app.console.print(Text(f"{account_type} {heading}", style="title"))
     for flow in flows:
         account = flow.account or "Archived account"
         amount = fmt.money(flow.amount, privacy=app.privacy)
-        cad = (
-            Text("Missing rate", style="warn")
-            if flow.cad_amount is None
-            else Text(fmt.money(flow.cad_amount, privacy=app.privacy))
-        )
+        if flow.amount is None:
+            cad = Text("Missing transfer price", style="warn")
+        elif flow.cad_amount is None:
+            cad = Text("Missing rate", style="warn")
+        else:
+            cad = Text(fmt.money(flow.cad_amount, privacy=app.privacy))
         app.console.print(
             Text.assemble(
                 f"\n{flow.date}  {account}\n{_ROOM_FLOW_ROLES[flow.role]}\nNative  {amount} {flow.currency}\nCAD     ",
