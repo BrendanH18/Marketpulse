@@ -98,8 +98,9 @@ Python source distribution, `install.sh`, or `SHA256SUMS` in place of the DMG.
 A failed verification leaves the file's provenance unverified.
 Older releases predate attestations. Verify those downloads with their checksums.
 
-Every release lists a SHA-256 checksum for each file in `SHA256SUMS`. In Terminal, in the
-folder you downloaded to (usually `cd ~/Downloads`):
+For checksum verification, download `SHA256SUMS` from the same release into
+the folder with your downloaded asset. Open that folder in Terminal
+(usually `cd ~/Downloads`) and run:
 
 ```bash
 shasum -a 256 -c SHA256SUMS --ignore-missing
