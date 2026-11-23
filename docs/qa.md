@@ -2,9 +2,10 @@
 
 [Back to the README](../README.md) · [App plan](app-plan.md) · [Native app guide](desktop.md)
 
-Use this before merging any change to the native app, and to verify a release. It
-works for a person or for an agent with computer use (screenshots, mouse, and
-keyboard). Everything runs against a fictional scratch ledger: never test against a
+For a change to the native app, run only the items the change touches; to verify a
+release, run the full checklist. It works for a person or for an agent with computer
+use (screenshots, mouse, and keyboard); agents run it through Codex with GPT-6.2 Astra
+(`gpt-6.2-astra`). Everything runs against a fictional scratch ledger: never test against a
 real portfolio, and never toggle **Launch at login** on the QA app.
 
 ## Set up
@@ -361,6 +362,6 @@ menu bar. Then:
 
 ## Reporting
 
-Post results on the PR (or the issue being verified) as a table of items 1–28 with
+Post results on the PR (or the issue being verified) as a table of the items you ran (all of 1–28 for a release) with
 PASS / FAIL / UNVERIFIED and evidence, then any bugs with exact steps to reproduce.
 Clean up with `rm -rf "$TMPDIR/marketpulse-qa"`.
