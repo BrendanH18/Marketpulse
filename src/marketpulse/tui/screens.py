@@ -75,6 +75,13 @@ def _num(screen: ModalScreen, selector: str, label: str, default: float | None =
         raise FormError(f"{label} must be a number. Use a decimal point, for example 1234.56.") from None
 
 
+class FormErrorText(Static):
+    def on_resize(self) -> None:
+        # The error can wrap after the form's first scroll has already run.
+        if self.content:
+            self.scroll_visible(animate=False)
+
+
 class BaseForm(ModalScreen):
     BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("ctrl+s", "save", "Save")]
 
@@ -99,7 +106,7 @@ class BaseForm(ModalScreen):
 
     def buttons(self, save_label: str = "Save") -> Horizontal:
         return Horizontal(
-            Static("", id="form-error", classes="error"),
+            FormErrorText("", id="form-error", classes="error"),
             Button(f"{save_label}  ^s", variant="primary", id="save"),
             Button("Cancel  esc", id="cancel"),
             classes="buttons",
