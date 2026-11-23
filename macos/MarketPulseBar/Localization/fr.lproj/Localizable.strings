@@ -222,7 +222,16 @@
 "Export is available for your own portfolio." = "L’exportation est offerte pour votre propre portefeuille.";
 "Save %@'s sales as a spreadsheet for your accountant" = "Enregistrer les ventes de %@ dans un tableur pour votre comptable";
 "No sales in taxable accounts yet" = "Aucune vente dans un compte non enregistré pour l’instant";
+"No sales in taxable accounts this year" = "Aucune vente dans un compte non enregistré cette année";
 "When you sell in a non-registered account, that year's capital gain or loss appears here, worked out with pooled cost base and each trade day's exchange rate. Gains in a TFSA, RRSP, or FHSA aren't taxed, so they aren't listed." = "Quand vous vendez dans un compte non enregistré, le gain ou la perte en capital de l’année apparaît ici, calculé selon le PBR moyen et le taux de change de chaque jour d’opération. Les gains dans un CELI, un REER ou un CELIAPP ne sont pas imposables, alors ils ne sont pas listés.";
+"Foreign property (T1135)" = "Biens étrangers (T1135)";
+"Peak recorded cost of %@ in CAD" = "Coût maximal inscrit de %@ en CAD";
+"The estimate is incomplete because an exchange rate is missing." = "L’estimation est incomplète, car il manque un taux de change.";
+"Based on the adjusted cost base in your non-registered accounts. Estimate only." = "Estimation fondée sur le prix de base rajusté dans vos comptes non enregistrés.";
+"Filing likely required under the detailed method" = "Déclaration probablement requise selon la méthode détaillée";
+"Filing likely required under the simplified method" = "Déclaration probablement requise selon la méthode simplifiée";
+"Filing likely not required" = "Déclaration probablement non requise";
+"Filing requirement undetermined" = "Obligation de produire la déclaration indéterminée";
 "Needs attention" = "À vérifier";
 "MAY CHANGE THESE FIGURES" = "PEUT MODIFIER CES MONTANTS";
 "Net capital gain" = "Gain en capital net";

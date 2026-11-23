@@ -1375,11 +1375,14 @@ private struct TaxWorkspace: View {
   }
 
   @ViewBuilder private func report(_ tax: TaxPayload) -> some View {
-    let year = tax.years.first { $0.year == draft.year } ?? tax.years.first
+    let foreignProperty = tax.foreignProperty ?? []
+    let years = Set(tax.years.map(\.year) + foreignProperty.map(\.year)).sorted(by: >)
+    let selectedYear = years.first { $0 == draft.year } ?? tax.years.first?.year ?? years.first
+    let year = tax.years.first { $0.year == selectedYear }
     HStack(spacing: 12) {
-      if let year {
-        Picker("Tax year", selection: Binding(get: { year.year }, set: { draft.year = $0 })) {
-          ForEach(tax.years) { Text(String($0.year)).tag($0.year) }
+      if let selectedYear {
+        Picker("Tax year", selection: Binding(get: { selectedYear }, set: { draft.year = $0 })) {
+          ForEach(years, id: \.self) { Text(String($0)).tag($0) }
         }.frame(width: 170)
       }
       Spacer()
@@ -1400,11 +1403,18 @@ private struct TaxWorkspace: View {
               : String(localized: "Save \(String(year.year))'s sales as a spreadsheet for your accountant"))
       }
     }.font(.system(size: 11))
+    if let property = foreignProperty.first(where: { $0.year == selectedYear }) {
+      foreignPropertyReport(property)
+    }
     if let year {
       yearReport(year, tax)
     } else {
       ContentUnavailableView {
-        Label("No sales in taxable accounts yet", systemImage: "percent")
+        Label(
+          selectedYear == nil
+            ? String(localized: "No sales in taxable accounts yet")
+            : String(localized: "No sales in taxable accounts this year"),
+          systemImage: "percent")
       } description: {
         Text(
           "When you sell in a non-registered account, that year's capital gain or loss appears here, worked out with pooled cost base and each trade day's exchange rate. Gains in a TFSA, RRSP, or FHSA aren't taxed, so they aren't listed."
@@ -1431,6 +1441,39 @@ private struct TaxWorkspace: View {
       }
     }.font(.system(size: 11)).foregroundStyle(Studio.muted).frame(maxWidth: .infinity, alignment: .leading)
       .fixedSize(horizontal: false, vertical: true)
+  }
+
+  private func foreignPropertyReport(_ year: ForeignPropertyYear) -> some View {
+    Surface(String(localized: "Foreign property (T1135)")) {
+      VStack(alignment: .leading, spacing: 8) {
+        Text(privacy ? Format.mask : foreignPropertyAssessment(year))
+          .font(.system(size: 13, weight: .medium))
+        Text("Peak recorded cost of \(Format.money(year.maxCost, year.currency, privacy: privacy)) in CAD")
+          .font(.system(size: 12)).foregroundStyle(Studio.muted)
+        if year.incomplete {
+          Label(
+            "The estimate is incomplete because an exchange rate is missing.",
+            systemImage: "exclamationmark.triangle"
+          ).font(.system(size: 12)).foregroundStyle(Studio.warn)
+        }
+        Text("Based on the adjusted cost base in your non-registered accounts. Estimate only.")
+          .font(.system(size: 11)).foregroundStyle(Studio.muted)
+      }.fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  private func foreignPropertyAssessment(_ year: ForeignPropertyYear) -> String {
+    let fallback = year.incomplete && year.status == "not_required" ? "undetermined" : year.status
+    switch year.assessment ?? fallback {
+    case "detailed":
+      return String(localized: "Filing likely required under the detailed method")
+    case "simplified":
+      return String(localized: "Filing likely required under the simplified method")
+    case "not_required":
+      return String(localized: "Filing likely not required")
+    default:
+      return String(localized: "Filing requirement undetermined")
+    }
   }
 
   @ViewBuilder private func yearReport(_ year: TaxYearReport, _ tax: TaxPayload) -> some View {
