@@ -376,6 +376,7 @@ struct NativeBridgeCheck {
     let items = coded.warningItems ?? []
     precondition(coded.room.count == 1 && coded.room[0].accountType == "TFSA" && coded.room[0].remaining == nil)
     precondition(coded.room[0].missingFx?.first?.currency == "EUR")
+    precondition(coded.room[0].missingTransferValues == 1)
     precondition(items.map(\.text) == coded.warnings && items.allSatisfy { !$0.code.isEmpty })
     let expectedCodes: Set = [
       "sell_exceeds_held", "split_nothing_held", "transfer_nothing_held", "transfer_exceeds_held",

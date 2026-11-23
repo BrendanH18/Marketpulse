@@ -68,6 +68,24 @@ def test_snapshot_room_returns_missing_rates_when_shared_fx_budget_expires(track
     ]
 
 
+def test_unpriced_in_kind_contribution_is_unavailable_in_both_desktop_payloads(tracker, store):
+    source = store.add_account(Account(name="Taxable"))
+    tfsa = store.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA))
+    store.set_room("TFSA", 2025, 7000)
+    store.add_transaction(Transaction(source.saved_id, TxnType.BUY, "2025-01-02", "XEQT.TO", quantity=10, price=40))
+    transfer = store.add_transaction(
+        Transaction(
+            source.saved_id, TxnType.TRANSFER, "2025-01-03", "XEQT.TO", quantity=3, target_account_id=tfsa.saved_id
+        )
+    )
+    (room,) = desktop.snapshot(tracker)["room"]
+    assert room["remaining"] is None and room["missing_transfer_values"] == 1 and not room["missing_fx"]
+    assert desktop.tax_report(tracker)["room"] == [room]
+    store.update_transaction(replace(transfer, price=42))
+    (priced,) = desktop.tax_report(tracker)["room"]
+    assert priced["contributions"] == 126 and priced["missing_transfer_values"] == 0
+
+
 def legacy_revision(record, generation):
     fields = json.dumps({**asdict(record), "generation": generation}, sort_keys=True, default=str)
     return hashlib.sha256(fields.encode()).hexdigest()[:16]

@@ -1206,9 +1206,16 @@ private struct RoomRemaining: View {
         .monospacedDigit()
     } else {
       let details = privacy ? "" : (room.missingFx ?? []).map { "\($0.currency) · \($0.date)" }.joined(separator: "\n")
-      Text("Historical exchange rates unavailable")
-        .foregroundStyle(Studio.warn)
-        .help(details)
+      VStack(alignment: .trailing, spacing: 2) {
+        let missingTransferPrice = (room.missingTransferValues ?? 0) > 0
+        if missingTransferPrice {
+          Text("Enter the market price on in-kind transfers")
+        }
+        if !missingTransferPrice || room.missingFx?.isEmpty == false {
+          Text("Historical exchange rates unavailable").help(details)
+        }
+      }
+      .foregroundStyle(Studio.warn)
     }
   }
 }

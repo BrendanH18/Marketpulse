@@ -63,6 +63,7 @@ EXPECTED = {
             "forfeited": 0.0,
             "missing_fx": [],
             "accounts": [],
+            "missing_transfer_values": 0,
         },
         {
             "account_type": "RRSP",
@@ -75,6 +76,7 @@ EXPECTED = {
             "forfeited": 0.0,
             "missing_fx": [],
             "accounts": ["Fictional RRSP"],
+            "missing_transfer_values": 0,
         },
     ],
     # In date order; the backfilled snapshot has no breakdown, and the account names are left out.
