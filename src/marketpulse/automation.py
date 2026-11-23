@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -18,17 +19,18 @@ class Cycle:
 
 
 def run_cycle(tracker: Tracker, *, fresh: bool = False, notify: bool = True) -> Cycle:
-    """`_run_cycle`, recording a cycle that raised in the automation history before re-raising,
-    so a crash in an app refresh or in `automation run` is kept like any other failure."""
-    try:
-        return _run_cycle(tracker, fresh=fresh, notify=notify)
-    except Exception as e:
-        report = {"last_run": datetime.now().isoformat(timespec="seconds"), "errors": [str(e)], "failed": True}
+    """Wait for any active cycle on this ledger and record failures before releasing it."""
+    with ExitStack() as locks:
         try:
-            tracker.store.record_automation_run(report)
-        except Exception:
-            pass  # the ledger itself is unusable, so there's nowhere to keep it
-        raise
+            locks.enter_context(tracker.store.automation_lock())
+            return _run_cycle(tracker, fresh=fresh, notify=notify)
+        except Exception as e:
+            report = {"last_run": datetime.now().isoformat(timespec="seconds"), "errors": [str(e)], "failed": True}
+            try:
+                tracker.store.record_automation_run(report)
+            except Exception:
+                pass  # the ledger itself is unusable, so there's nowhere to keep it
+            raise
 
 
 def _run_cycle(tracker: Tracker, *, fresh: bool, notify: bool) -> Cycle:

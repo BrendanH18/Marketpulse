@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import sqlite3
 import stat
@@ -497,12 +498,40 @@ class Store:
         store = cls()
         migrate_legacy_json(store, store.path.parent)
         try:
-            store.auto_backup()
+            with store.automation_lock(wait=False) as acquired:
+                if acquired:
+                    store.auto_backup()
         except (OSError, sqlite3.Error):
             # A failed backup (full disk, read-only dir) must never stop the
             # app from opening; `marketpulse doctor` reports the backup age.
             pass
         return store
+
+    @contextmanager
+    def automation_lock(self, *, wait: bool = True) -> Iterator[bool]:
+        """Serialize automation and startup backups without holding a SQLite write lock."""
+        if os.name != "posix" or str(self.path) == ":memory:":
+            yield True
+            return
+
+        import fcntl
+
+        # Keep the file in place so every opener locks the same inode, even after a process exits.
+        path = self.path.with_name(f".{self.path.name}.automation.lock")
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError(f"Expected a regular automation lock file at {path}")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                if wait:
+                    raise
+                yield False
+            else:
+                yield True
+        finally:
+            os.close(fd)
 
     # ── schema version & migrations ───────────────────────────────────────────
 
