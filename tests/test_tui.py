@@ -270,8 +270,14 @@ def test_account_archive_toggle_and_manual_value_validation(tracker, store):
     run(scenario())
 
 
-@pytest.mark.parametrize("editing", [False, True], ids=["create", "edit"])
-def test_account_form_keeps_values_after_failed_save_and_retries(tracker, store, editing):
+@pytest.mark.parametrize(
+    ("editing", "scroll_before_layout"),
+    [(False, False), (True, False), (True, True)],
+    ids=["create", "edit", "edit-scroll-before-layout"],
+)
+def test_account_form_keeps_values_after_failed_save_and_retries(
+    tracker, store, monkeypatch, editing, scroll_before_layout
+):
     original = store.add_account(Account(name="Original account"))
 
     async def scenario():
@@ -283,6 +289,17 @@ def test_account_form_keeps_values_after_failed_save_and_retries(tracker, store,
             await pilot.press("e" if editing else "n")
             form = app.screen
             assert isinstance(form, AccountForm)
+            error = form.query_one("#form-error", Static)
+            if scroll_before_layout:
+                schedule = form.call_after_refresh
+
+                def schedule_callback(callback, *args, **kwargs):
+                    if callback == error.scroll_visible:
+                        callback(*args, **kwargs)
+                        return True
+                    return schedule(callback, *args, **kwargs)
+
+                monkeypatch.setattr(form, "call_after_refresh", schedule_callback)
             name = form.query_one("#a-name", Input)
             institution = form.query_one("#a-institution", Input)
             cash = form.query_one("#a-cash", Switch)
@@ -294,7 +311,6 @@ def test_account_form_keeps_values_after_failed_save_and_retries(tracker, store,
                 await pilot.press("ctrl+s")
 
             assert app.screen is form
-            error = form.query_one("#form-error", Static)
             assert "database is locked" in str(error.content) and "try saving again" in str(error.content)
             modal = form.query_one(".modal")
             # The error scroll runs after the updated layout, then repaints the viewport.
@@ -305,6 +321,13 @@ def test_account_form_keeps_values_after_failed_save_and_retries(tracker, store,
             assert modal.scrollable_content_region.contains_region(error.region)
             assert (name.value, institution.value, cash.value) == ("Fictional account", "Fictional institution", True)
             assert store.accounts() == [original]
+
+            if scroll_before_layout:
+                modal.scroll_home(animate=False, immediate=True)
+                await pilot.pause()
+                await pilot.resize_terminal(64, 24)
+                await pilot.pause()
+                assert modal.scroll_offset.y == 0
 
             await pilot.press("ctrl+s")
             await app.workers.wait_for_complete()
