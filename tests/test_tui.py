@@ -322,6 +322,13 @@ def test_account_form_keeps_values_after_failed_save_and_retries(
             assert (name.value, institution.value, cash.value) == ("Fictional account", "Fictional institution", True)
             assert store.accounts() == [original]
 
+            if scroll_before_layout:
+                modal.scroll_home(animate=False, immediate=True)
+                await pilot.pause()
+                await pilot.resize_terminal(64, 24)
+                await pilot.pause()
+                assert modal.scroll_offset.y == 0
+
             await pilot.press("ctrl+s")
             await app.workers.wait_for_complete()
             assert app.screen is not form

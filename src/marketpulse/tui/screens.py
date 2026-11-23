@@ -13,6 +13,7 @@ from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.geometry import Size
 from textual.screen import ModalScreen
 from textual.suggester import SuggestFromList
 from textual.timer import Timer
@@ -76,9 +77,17 @@ def _num(screen: ModalScreen, selector: str, label: str, default: float | None =
 
 
 class FormErrorText(Static):
+    _screen_size_at_update: Size | None = None
+
+    def show(self, message: str) -> None:
+        self._screen_size_at_update = self.screen.size
+        self.update(Text(message, style="down"))
+
     def on_resize(self) -> None:
+        screen_size = self._screen_size_at_update
+        self._screen_size_at_update = None
         # The error can wrap after the form's first scroll has already run.
-        if self.content:
+        if screen_size == self.screen.size:
             self.scroll_visible(animate=False)
 
 
@@ -100,8 +109,8 @@ class BaseForm(ModalScreen):
         self.action_save()
 
     def show_error(self, message: str) -> None:
-        error = self.query_one("#form-error", Static)
-        error.update(Text(message, style="down"))
+        error = self.query_one("#form-error", FormErrorText)
+        error.show(message)
         self.call_after_refresh(error.scroll_visible, animate=False)
 
     def buttons(self, save_label: str = "Save") -> Horizontal:
