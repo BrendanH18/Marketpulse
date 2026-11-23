@@ -258,6 +258,19 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     year picker if they fall in different years), the first marked superficial, and
     **Denied losses** explains it ("bought 15 within 30 days … held 65"); **Export CSV…**
     is disabled.
+    - **Foreign property (T1135):** Add a CAD-denominated buy of a foreign-listed
+      security in the scratch taxable account, dated January 2 of the year before the
+      sale. Switch to that earlier year. Confirm the estimate appears, the year is
+      listed once, the capital-gains area says "No sales in taxable accounts this
+      year", and the CSV export button is absent. Match the peak recorded cost in
+      CAD against `marketpulse tax foreign-property --year YYYY` with the same
+      scratch data and config. With privacy on, the cost and filing status both
+      show ••••.
+    - Record a foreign holding in the scratch ledger using a fictional trade currency
+      with no exchange rate. Recalculate and verify that the estimate warns about
+      the missing rate. If the recorded cost is below the filing threshold, the
+      status is "Filing requirement undetermined". Repeat in French and check the
+      translated labels and warning.
 
 24. **Transfers, DRIPs, splits, and return of capital.** Press ⌘N and choose **Transfer in
     kind**. The account picker becomes **From account**, with a **To account** picker that

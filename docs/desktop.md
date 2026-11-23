@@ -187,7 +187,11 @@ v99.0.0.
   denied losses with the reason (a superficial loss shows what was bought back and
   still held), and gains by security; expand a security to see each sale and its full
   fractional quantity. Sales missing an exchange rate are flagged and left out of the
-  totals. Contribution room
+  totals. **Foreign property (T1135)** shows the estimated filing status and peak
+  recorded cost in CAD. The year picker includes years with foreign property even
+  when there were no taxable sales. A missing exchange rate can make the cost
+  incomplete, and privacy mode masks both the amount and the filing status.
+  Contribution room
   shows how what's left was worked out. **Export CSV…** saves the year's sales for
   your accountant (`marketpulse tax --year YYYY --csv FILE`). The report loads when
   you open the workspace and again after the portfolio changes; **Recalculate**
