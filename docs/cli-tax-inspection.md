@@ -24,6 +24,7 @@ fictional accounts.
 
 - `--json` and `--csv` are exclusive; `--count` can't be combined with `--json`, `--csv` or paging; `--page-info` requires `--json`.
 - `--summary`, `--issues` and `--room` are exclusive, and can't be combined with `--count`, `--csv`, `--sort`, `--descending` or paging. `--issues` and `--room` take no disposition filters, and `--room` takes no `--year`. `--exit-code` requires `--issues`.
+- `--details` requires `--room`. It shows the cash flows used in each estimate. With `--json` it adds `flows` to each room row. Flow fields are `date`, `account` (null when archived), `role`, signed native `amount`, `currency` and signed `cad_amount` (null when the rate is missing). The roles are `contribution`, `withdrawal_added_back`, `fhsa_lifetime_cap` (earlier contributions that count toward the cap), and `fhsa_current_year` (a contribution that reduces current FHSA room and counts toward the cap when the saved baseline is next year).
 - `--gains-only` and `--losses-only` are exclusive, and `--incomplete` can't be combined with them or `--denied` (those rows have no known gain).
 - A blank `--symbol` is a usage error. When nothing matches, the table says so and JSON prints `[]`; the exit status stays 0.
 

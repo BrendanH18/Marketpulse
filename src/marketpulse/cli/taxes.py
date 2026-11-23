@@ -17,7 +17,7 @@ from rich.text import Text
 
 from .. import fmt, render
 from ..analytics import TaxYear, disposition_note
-from ..ledger import LedgerIssue
+from ..ledger import LedgerIssue, RoomFlow
 from ..models import EPSILON, Account
 from ..tax import (
     FOREIGN_PROPERTY_NOTES,
@@ -234,6 +234,7 @@ def _check_options(
 @click.option("--issues", is_flag=True, help="Only the tax report's own issues (as plain `tax` shows them).")
 @click.option("--exit-code", is_flag=True, help="With --issues, exit 1 when there are any.")
 @click.option("--room", is_flag=True, help="Only contribution room, fetching FX history when needed for room.")
+@click.option("--details", is_flag=True, help="With --room, show the cash flows used in the estimate.")
 @pass_app
 def tax(
     app: App,
@@ -267,6 +268,7 @@ def tax(
     issues: bool,
     exit_code: bool,
     room: bool,
+    details: bool,
 ) -> None:
     """Capital gains (pooled ACB, trade-date FX), superficial losses and contribution room.
 
@@ -285,6 +287,8 @@ def tax(
                 f"{', '.join(given)} belongs to plain `tax`; put options after `{ctx.invoked_subcommand}`."
             )
         return
+    if details and not room:
+        raise click.UsageError("--details requires --room.")
     stdout_csv = csv_path is not None and str(csv_path) == "-"
     csv_file = csv_path is not None and not stdout_csv
     if any(not s.strip() for s in symbols):
@@ -344,7 +348,7 @@ def tax(
     )
     tr = app.tracker
     if room:
-        _show_room(app, as_json)
+        _show_room(app, as_json, details=details)
         return
     acct = None
     if account:
@@ -809,10 +813,49 @@ def _default_report(app: App, year: int | None) -> None:
     app.console.print(NOTE)
 
 
-def _show_room(app: App, as_json: bool) -> None:
-    rooms = app.tracker.room()
+_ROOM_FLOW_ROLES = {
+    "contribution": "Contribution",
+    "withdrawal_added_back": "Withdrawal added back",
+    "fhsa_lifetime_cap": "FHSA lifetime cap",
+    "fhsa_current_year": "Current-year FHSA deposit",
+}
+
+
+@dataclass
+class _RoomFlowRow:
+    date: str
+    account: str | None
+    role: str
+    amount: float
+    currency: str
+    cad_amount: float | None
+
+
+def _room_flow_rows(details: list[RoomFlow], members: list[Account]) -> list[_RoomFlowRow]:
+    names = {a.saved_id: a.name for a in members}
+    return [
+        _RoomFlowRow(
+            detail.flow.date,
+            names.get(detail.flow.account_id),
+            detail.role,
+            detail.flow.amount,
+            detail.flow.currency.upper(),
+            detail.cad_amount,
+        )
+        for detail in details
+    ]
+
+
+def _show_room(app: App, as_json: bool, *, details: bool) -> None:
+    breakdown: dict[str, list[RoomFlow]] | None = {} if details else None
+    rooms = app.tracker.room(details=breakdown)
     if as_json:
-        payload = [{**asdict(status), "accounts": [a.name for a in members]} for status, members in rooms]
+        payload = []
+        for status, members in rooms:
+            row = {**asdict(status), "accounts": [a.name for a in members]}
+            if breakdown is not None:
+                row["flows"] = [asdict(f) for f in _room_flow_rows(breakdown[status.account_type], members)]
+            payload.append(row)
         click.echo(json.dumps(payload, ensure_ascii=False))
     elif not rooms:
         app.console.print(
@@ -823,6 +866,31 @@ def _show_room(app: App, as_json: bool) -> None:
         )
     else:
         app.console.print(render.room_table(rooms, privacy=app.privacy))
+        if breakdown is not None:
+            for status, members in rooms:
+                flows = _room_flow_rows(breakdown[status.account_type], members)
+                _show_room_flows(app, status.account_type, flows)
+
+
+def _show_room_flows(app: App, account_type: str, flows: list[_RoomFlowRow]) -> None:
+    if not flows:
+        app.console.print(Text(f"{account_type}: No recorded cash flows used in the estimate.", style="muted"))
+        return
+    app.console.print(Text(f"{account_type} cash flows", style="title"))
+    for flow in flows:
+        account = flow.account or "Archived account"
+        amount = fmt.money(flow.amount, privacy=app.privacy)
+        cad = (
+            Text("Missing rate", style="warn")
+            if flow.cad_amount is None
+            else Text(fmt.money(flow.cad_amount, privacy=app.privacy))
+        )
+        app.console.print(
+            Text.assemble(
+                f"\n{flow.date}  {account}\n{_ROOM_FLOW_ROLES[flow.role]}\nNative  {amount} {flow.currency}\nCAD     ",
+                cad,
+            )
+        )
 
 
 def _show_issues(app: App, found: list[LedgerIssue], year: int | None, as_json: bool, exit_code: bool) -> None:
