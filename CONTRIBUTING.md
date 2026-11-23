@@ -280,8 +280,9 @@ commit is on `main` and CI is green.
    bundled backend both report the tag's version, the architecture, and the
    signature, and runs each app on its target architecture. Apple silicon runs on
    `macos-26` and Intel runs on `macos-15-intel`.
-   Only then does it create a **draft** release whose notes are that version's
-   CHANGELOG section plus download and checksum instructions.
+   After CI and both architecture checks pass, the workflow records signed build
+   provenance for each release asset, including `SHA256SUMS`. It then creates a
+   **draft** release with that version's CHANGELOG section and download instructions.
 
 8. Review the draft release on GitHub (assets, notes) and publish it. Re-running
    the workflow for the same tag replaces the draft's files; it refuses once the
@@ -296,16 +297,19 @@ commit is on `main` and CI is green.
    marketpulse --version
    ```
 
-   Download one of the release zips, check it against `SHA256SUMS`, and open the app.
+   Download one of the release zips, verify its provenance against the release tag
+   and check `SHA256SUMS`, then open the app. [Download verification](docs/install.md#verify-a-download).
    Run the one-line install from the [install guide](docs/install.md) on a fresh macOS
    user account ([QA item 16](docs/qa.md#checklist)); the `latest` URL only resolves
    once the release is published.
 
 **Dry run.** Before tagging, run the workflow from **Actions › Release › Run
 workflow** on the release branch (or `gh workflow run release.yml --ref <branch>`).
-It builds and verifies the same artifacts and attaches them to the run as
-`marketpulse-<version>`, but creates no release; a missing CHANGELOG section is
-only a warning. Everything except the draft release can also be run locally:
+It builds and verifies the same artifacts, attaches them to the run as
+`marketpulse-<version>`, and records their provenance for that branch. For a
+download from the run, use `--source-ref refs/heads/<branch>` in the verification
+command. The dry run creates no release. A missing CHANGELOG section is a warning.
+Packaging and local verification can also run on a Mac:
 
 ```bash
 uv build --no-sources --out-dir dist/python

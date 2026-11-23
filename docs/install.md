@@ -52,8 +52,7 @@ this project's GitHub releases. See [why the app is unsigned](#why-the-app-is-un
    **Assets**, download the DMG for your Mac: `MarketPulse-<version>-macos-arm64.dmg` for
    Apple silicon (M1 and later), or `-x86_64.dmg` for Intel. Not sure? Choose
    **About This Mac** from the Apple menu: "Chip: Apple M…" means Apple silicon; "Processor: … Intel" means Intel.
-2. Optional but recommended: also download `SHA256SUMS` and
-   [check the download](#verify-a-download).
+2. Optional but recommended: [verify the download's provenance or checksum](#verify-a-download).
 3. Open the DMG and drag **MarketPulse** onto the **Applications** shortcut. Open the app
    from Applications, not from the DMG window.
 4. macOS stops the first launch because the app isn't notarized by Apple:
@@ -81,6 +80,23 @@ The zip on each release has the same app; double-click it to unpack, move the ap
 Applications, and follow step 4.
 
 ## Verify a download
+
+For releases that include provenance, use the authenticated [GitHub CLI](https://cli.github.com/)
+in the download folder to check that the file came from MarketPulse's release workflow at
+the expected tag. Replace `vX.Y.Z` with the release tag and use the filename you downloaded.
+
+```bash
+tag=vX.Y.Z
+gh attestation verify "MarketPulse-${tag#v}-macos-arm64.dmg" \
+  --repo BrendanH18/Marketpulse \
+  --signer-workflow BrendanH18/Marketpulse/.github/workflows/release.yml \
+  --source-ref "refs/tags/$tag" --deny-self-hosted-runners
+```
+
+The same command accepts a zip, wheel, the uploaded `marketpulse-<version>.tar.gz`
+Python source distribution, `install.sh`, or `SHA256SUMS` in place of the DMG.
+A failed verification leaves the file's provenance unverified.
+Older releases predate attestations. Verify those downloads with their checksums.
 
 Every release lists a SHA-256 checksum for each file in `SHA256SUMS`. In Terminal, in the
 folder you downloaded to (usually `cd ~/Downloads`):
