@@ -24,15 +24,35 @@ SOURCES = {
         "currencies",
         "backfilled_days",
     ),
+    "snapshot-changes": (
+        "date",
+        "previous_date",
+        "gap_days",
+        "currency",
+        "same_currency",
+        "net_worth",
+        "previous_net_worth",
+        "change",
+        "change_pct",
+        "contributions_change",
+        "market_change",
+        "backfilled",
+    ),
 }
 DESCRIPTIONS = {
     "snapshot-month-coverage": "Saved snapshot counts, gaps, currencies and backfilled days by calendar month.",
+    "snapshot-changes": "Change in saved net worth and contributions since the previous saved snapshot.",
 }
 PRESETS = {
     "snapshot-month-coverage": {
         "gaps": ("gt", "missing_days=0"),
         "backfilled": ("gt", "backfilled_days=0"),
         "mixed-currency": ("min_length", "currencies=2"),
+    },
+    "snapshot-changes": {
+        "gains": ("gt", "change=0"),
+        "losses": ("lt", "change=0"),
+        "gaps": ("gt", "gap_days=1"),
     },
 }
 

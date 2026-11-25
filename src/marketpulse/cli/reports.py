@@ -23,10 +23,13 @@ from . import (
     report_filters,
     report_formats,
     report_history,
+    report_holding_periods,
+    report_income_calendar,
     report_integrations,
     report_interface,
     report_ledger,
     report_ledger_audit,
+    report_ledger_quality,
     report_output,
     report_portfolio,
     report_quote_coverage,
@@ -53,6 +56,9 @@ SOURCE_MODULES = (
     report_ledger_audit,
     report_quote_coverage,
     report_snapshot_coverage,
+    report_ledger_quality,
+    report_income_calendar,
+    report_holding_periods,
 )
 SOURCES: dict[str, tuple[str, ...]] = {
     name: schema for module in SOURCE_MODULES for name, schema in module.SOURCES.items()
@@ -64,6 +70,9 @@ SOURCE_PRESETS = {
     **report_ledger_audit.PRESETS,
     **report_quote_coverage.PRESETS,
     **report_snapshot_coverage.PRESETS,
+    **report_ledger_quality.PRESETS,
+    **report_income_calendar.PRESETS,
+    **report_holding_periods.PRESETS,
 }
 FORMATS = ("json", "jsonl", "csv", "tsv", "markdown", *report_formats.FORMATS)
 

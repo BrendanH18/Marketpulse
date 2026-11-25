@@ -109,7 +109,7 @@ def test_cli_serves_each_catalog_through_the_registry(name, app):
 
 def test_registry_is_consistent_across_every_source_module():
     modules = reports.SOURCE_MODULES
-    assert len(modules) == 13
+    assert len(modules) == 16
     assert {report_ledger, report_system, report_reference} <= set(modules)
     for module in modules:
         assert isinstance(module.GROUP, str) and module.GROUP
