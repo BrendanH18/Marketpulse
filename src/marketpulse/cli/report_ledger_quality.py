@@ -102,7 +102,8 @@ def _duplicates(accounts: dict[int, Account], transactions: list[Transaction]) -
                 "amount": first.amount,
                 "fees": first.fees,
                 "currency": transaction_currency(first, accounts),
-                "target_account_id": target_id,  # as recorded, even when the target is archived or removed
+                # Like the `transactions` dataset, an archived or removed target stays hidden.
+                "target_account_id": target_id if target is not None else None,
                 "target_account": target.name if target is not None else None,
                 "notes_differ": len({txn.note.strip() for txn in entries}) > 1,
             }

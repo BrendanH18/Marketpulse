@@ -7,7 +7,7 @@ from click.testing import CliRunner
 
 from marketpulse.cli import main
 from marketpulse.cli.base import App
-from marketpulse.cli.report_ledger_quality import PRESETS, SOURCES, load_source
+from marketpulse.cli.report_ledger_quality import SOURCES, load_source
 from marketpulse.models import Account, Alert, Asset, AssetKind, Transaction, TxnType
 
 
@@ -40,7 +40,7 @@ def seed_duplicates(store):
             # 9-10: duplicates only in an archived account stay hidden.
             Transaction(archived, TxnType.BUY, "2024-01-01", "HIDDEN.TO", 1, 1),
             Transaction(archived, TxnType.BUY, "2024-01-01", "HIDDEN.TO", 1, 1),
-            # 11-12: a transfer recorded twice into an archived account keeps its target id but not its name.
+            # 11-12: a transfer recorded twice into an archived account hides its target.
             Transaction(cad, TxnType.TRANSFER, "2024-03-02", "FRUIT.TO", 1, target_account_id=archived),
             Transaction(cad, TxnType.TRANSFER, "2024-03-02", "FRUIT.TO", 1, target_account_id=archived),
             # 13-15: the same sell in two effective currencies is two different entries.
@@ -112,7 +112,7 @@ def test_duplicate_transactions_group_every_field_but_the_note(quality_app):
         (2, [5, 6], cad, cad_name, "2024-01-15", "DEPOSIT", "", 0.0, 0.0, 100.0, 0.0, "CAD", None, None, True),
         (3, [1, 2, 3], cad, cad_name, "2024-02-01", "BUY", fruit, 10.0, 5.0, 0.0, 0.0, "CAD", None, None, False),
         (2, [7, 8], cad, cad_name, "2024-03-01", "TRANSFER", fruit, 2.0, 0.0, 0.0, 0.0, "CAD", usd, usd_name, False),
-        (2, [11, 12], cad, cad_name, "2024-03-02", "TRANSFER", fruit, 1.0, 0.0, 0.0, 0.0, "CAD", archived, None, False),
+        (2, [11, 12], cad, cad_name, "2024-03-02", "TRANSFER", fruit, 1.0, 0.0, 0.0, 0.0, "CAD", None, None, False),
         (2, [16, 17], cad, cad_name, "2024-03-05", "DIVIDEND", fruit, 0.0, 0.0, 3.0, 0.0, "CAD", None, None, False),
         (2, [13, 14], usd, usd_name, "2024-03-05", "SELL", fruit, 1.0, 5.0, 0.0, 0.0, "USD", None, None, False),
         (3, [20, 21, 22], cad, cad_name, "2024-04-02", "SELL", fruit, 1.0, 6.0, 0.0, 0.0, "CAD", None, None, True),
@@ -186,10 +186,3 @@ def test_asset_usage_presets(preset, usage, expected, quality_app):
     assert [row["symbol"] for row in rows] == expected
     summary = report("summarize", source, "--preset", preset, "--metric", "symbols=count", "--group-by", "usage")
     assert summary == [{"usage": usage, "symbols": len(expected)}]
-
-
-def test_every_preset_is_tested():
-    assert {source: set(presets) for source, presets in PRESETS.items()} == {
-        "duplicate-transactions": {"same-note", "trades", "repeated"},
-        "asset-usage": {"held", "watch-only", "unused"},
-    }

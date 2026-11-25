@@ -11,7 +11,7 @@ give **1,000 new reporting capabilities**. The two commands share this count.
 | `duplicate-transactions` | A group of two or more transactions in one active account with the same date, type, symbol, quantity, price, amount, fees, input currency, split ratio and transfer target. | `same-note` keeps groups whose notes also match, `trades` keeps buys and sells, and `repeated` keeps groups of three or more. |
 | `asset-usage` | A symbol with a saved asset entry, a transaction in an active account, a current holding, a watchlist entry or an alert, with where it is used. | `held`, `watch-only` for symbols that are only watched or alerted, and `unused` for asset entries nothing else refers to. |
 | `income-calendar` | Dividend, reinvested dividend and interest payments for one year, account, symbol and currency, with the months paid. | `monthly` keeps rows paid in all 12 months, `reinvested` keeps rows with a reinvested dividend, and `single-payment` keeps rows with one payment. |
-| `holding-periods` | One period an active account held a symbol, from the first shares to the last, with the days held. | `open`, `closed`, and `under-a-year` for periods closed within 365 days. |
+| `holding-periods` | One period an active account held a symbol, from the first shares to the last, with the days held. | `open`, `closed`, and `under-a-year` for periods closed in fewer than 365 days. |
 | `snapshot-changes` | A saved net-worth snapshot compared with the previous one: days between them and the change in net worth and contributions. | `gains`, `losses`, and `gaps` for snapshots more than one day after the previous one. |
 
 `SOURCE --describe` lists the fields, preset names, and their equivalent CLI
@@ -25,8 +25,8 @@ marketpulse report duplicate-transactions --fields transactions,transaction_ids,
 # List saved assets that nothing else uses.
 marketpulse report asset-usage --preset unused --fields symbol,kind,name
 
-# Total income by year for holdings that paid in every month.
-marketpulse summarize income-calendar --preset monthly --group-by year --metric paid=number-sum:amount
+# Total income by year and currency for holdings that paid in every month.
+marketpulse summarize income-calendar --preset monthly --group-by year --group-by currency --metric paid=number-sum:amount
 
 # Show positions closed within a year, longest first.
 marketpulse report holding-periods --preset under-a-year --sort days_held --descending
@@ -40,8 +40,8 @@ marketpulse report snapshot-changes --preset losses --sort change --limit 5
 **Duplicate transactions.** The note doesn't count toward a match, and
 `notes_differ` says whether the notes, ignoring surrounding spaces, differ. An
 explicit currency matches the same currency inferred from the symbol or account.
-`transaction_ids` lists the saved ids in ascending order. `target_account` is
-null unless the transfer target is an active account. Rows are ordered by date,
+`transaction_ids` lists the saved ids in ascending order. `target_account_id`
+and `target_account` are null unless the transfer target is an active account. Rows are ordered by date,
 account and the first transaction id. A match isn't necessarily a mistake: two
 identical purchases on the same day are possible.
 
