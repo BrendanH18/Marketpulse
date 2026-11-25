@@ -199,6 +199,17 @@ def test_snapshot_changes_leave_percent_empty_after_zero_net_worth(tracker):
     ]
 
 
+def test_snapshot_change_percent_follows_the_change_from_a_negative_net_worth(tracker):
+    app = App()
+    app._tracker = tracker
+    tracker.store.upsert_snapshots(
+        [Snapshot("2024-01-01", -100, 0, 0, "CAD", {}), Snapshot("2024-01-02", -50, 0, 0, "CAD", {})]
+    )
+
+    [row] = load_source(CHANGES, app)
+    assert (row["change"], row["change_pct"]) == (50.0, 50.0)
+
+
 def test_snapshot_changes_need_two_valid_snapshots(tracker):
     app = App()
     app._tracker = tracker

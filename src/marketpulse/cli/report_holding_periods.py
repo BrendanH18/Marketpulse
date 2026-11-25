@@ -53,11 +53,13 @@ def _days(opened: str, closed: str) -> int | None:
 
 
 def _episodes(store: Store) -> list[dict[str, Any]]:
-    accounts = {a.saved_id: a for a in store.accounts()}
-    everyone = store.account_map()  # replay sees archived accounts too, exactly as `Store.ledger` does
+    with store._read_snapshot():  # one snapshot, so a restore in between can't pair two ledgers' rows
+        accounts = {a.saved_id: a for a in store.accounts()}
+        everyone = store.account_map()  # replay sees archived accounts too, exactly as `Store.ledger` does
+        saved = store.transactions()
     state = LedgerState()
     episodes: dict[tuple[int, str], list[dict[str, Any]]] = {}
-    for txn in sorted(store.transactions(), key=sort_key):
+    for txn in sorted(saved, key=sort_key):
         # A transfer changes two positions: the source account's and the target account's.
         keys = [(txn.account_id, txn.symbol)]
         if txn.type is TxnType.TRANSFER and txn.target_account_id is not None:

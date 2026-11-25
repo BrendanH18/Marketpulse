@@ -6,8 +6,8 @@ import math
 from collections import Counter, defaultdict
 from typing import Any
 
-from ..ledger import transaction_currency
-from ..models import Account, Transaction
+from ..ledger import LedgerState, replay, transaction_currency
+from ..models import Account, Alert, Asset, Transaction
 from .base import App
 
 GROUP = "ledger"
@@ -112,8 +112,14 @@ def _duplicates(accounts: dict[int, Account], transactions: list[Transaction]) -
     return rows
 
 
-def _asset_usage(app: App, accounts: dict[int, Account], transactions: list[Transaction]) -> list[dict[str, Any]]:
-    store = app.store
+def _asset_usage(
+    accounts: dict[int, Account],
+    transactions: list[Transaction],
+    ledger: LedgerState,
+    saved_assets: dict[str, Asset],
+    watchlist: list[str],
+    saved_alerts: list[Alert],
+) -> list[dict[str, Any]]:
     used: dict[str, list[Transaction]] = defaultdict(list)
     account_ids: dict[str, set[int]] = defaultdict(set)
     for txn in transactions:
@@ -125,14 +131,14 @@ def _asset_usage(app: App, accounts: dict[int, Account], transactions: list[Tran
 
     # The `holdings` dataset's replay: every account, so a position moved in from an archived account counts.
     quantity: dict[str, float] = defaultdict(float)
-    for h in store.ledger().open_holdings():  # above EPSILON per account, so float noise is not held
+    for h in ledger.open_holdings():  # above EPSILON per account, so float noise is not held
         if h.account_id in accounts:
             quantity[h.symbol] += h.quantity
             account_ids[h.symbol].add(h.account_id)
 
-    assets = {symbol.upper(): asset for symbol, asset in store.assets().items()}
-    watched = {symbol.strip().upper() for symbol in store.watchlist()}
-    alerts = Counter(alert.symbol.strip().upper() for alert in store.alerts())
+    assets = {symbol.upper(): asset for symbol, asset in saved_assets.items()}
+    watched = {symbol.strip().upper() for symbol in watchlist}
+    alerts = Counter(alert.symbol.strip().upper() for alert in saved_alerts)
     symbols = {*assets, *used, *quantity, *watched, *alerts} - {""}
 
     rows = []
@@ -172,8 +178,17 @@ def load_source(name: str, app: App) -> list[dict[str, Any]]:
     """Read saved data only: no replay is written back, no quote is fetched and no snapshot is recorded."""
     if name not in SOURCES:
         raise KeyError(name)
-    active_accounts, transactions = app.store.activity_snapshot()
-    accounts = {account.saved_id: account for account in active_accounts}
+    store = app.store
     if name == "duplicate-transactions":
-        return _duplicates(accounts, transactions)
-    return _asset_usage(app, accounts, transactions)
+        active_accounts, transactions = store.activity_snapshot()
+        return _duplicates({account.saved_id: account for account in active_accounts}, transactions)
+    # One snapshot for every read, so a restore in between can't pair two ledgers' rows.
+    with store._read_snapshot():
+        active_accounts = store.accounts()
+        everyone = store.account_map()
+        saved = store.transactions()
+        saved_assets, watchlist, saved_alerts = store.assets(), store.watchlist(), store.alerts()
+    accounts = {account.saved_id: account for account in active_accounts}
+    transactions = [txn for txn in saved if txn.account_id in accounts]
+    ledger = replay(saved, everyone)
+    return _asset_usage(accounts, transactions, ledger, saved_assets, watchlist, saved_alerts)

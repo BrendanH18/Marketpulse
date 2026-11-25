@@ -121,7 +121,8 @@ def _changes(snapshots: list[tuple[date, Snapshot]]) -> list[dict[str, Any]]:
             contributions_change = round(raw_contributions, 6)
             market_change = round(raw_change - raw_contributions, 6)
             if previous.net_worth:
-                change_pct = round(raw_change / previous.net_worth * 100, 6)
+                # Against the magnitude, so a gain from a negative net worth is still positive.
+                change_pct = round(raw_change / abs(previous.net_worth) * 100, 6)
         rows.append(
             {
                 "date": snapshot.date,

@@ -8,6 +8,7 @@ from click.testing import CliRunner
 from marketpulse.cli import main
 from marketpulse.cli.base import App
 from marketpulse.cli.report_ledger_quality import SOURCES, load_source
+from marketpulse.db import Store
 from marketpulse.models import Account, Alert, Asset, AssetKind, Transaction, TxnType
 
 
@@ -186,3 +187,23 @@ def test_asset_usage_presets(preset, usage, expected, quality_app):
     assert [row["symbol"] for row in rows] == expected
     summary = report("summarize", source, "--preset", preset, "--metric", "symbols=count", "--group-by", "usage")
     assert summary == [{"usage": usage, "symbols": len(expected)}]
+
+
+def test_asset_usage_reads_saved_data_from_one_snapshot(quality_app, monkeypatch):
+    store = quality_app.store
+    store.add_account(Account("Fictional Cash"))
+    accounts = store.accounts
+    other = Store(store.path)
+
+    def read_then_watch(**kwargs):
+        active = accounts(**kwargs)
+        if not kwargs:  # the first read of active accounts; `account_map` follows with archived ones
+            other.add_watch(["LATECO"])
+        return active
+
+    monkeypatch.setattr(store, "accounts", read_then_watch)
+    try:
+        assert "LATECO" not in {row["symbol"] for row in load_source("asset-usage", quality_app)}
+        assert "LATECO" in store.watchlist()
+    finally:
+        other.close()

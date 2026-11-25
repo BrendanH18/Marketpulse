@@ -9,6 +9,7 @@ from click.testing import CliRunner
 from marketpulse.cli import main, report_ledger
 from marketpulse.cli.base import App
 from marketpulse.cli.report_holding_periods import PRESETS, SOURCES, load_source
+from marketpulse.db import Store
 from marketpulse.models import Account, Transaction, TxnType
 
 SOURCE = "holding-periods"
@@ -157,3 +158,25 @@ def test_no_rows_without_positions(tracker, fake):
     with pytest.raises(KeyError):
         load_source("holding-period", app)
     assert not fake.calls
+
+
+def test_episodes_read_accounts_and_transactions_from_one_snapshot(tracker, fake, monkeypatch):
+    app = App()
+    app._tracker = tracker
+    store = tracker.store
+    cash = store.add_account(Account(CASH)).saved_id
+    accounts = store.accounts
+    other = Store(store.path)
+
+    def read_then_buy(**kwargs):
+        active = accounts(**kwargs)
+        if not kwargs:  # the first read of active accounts; `account_map` follows with archived ones
+            other.add_transactions([Transaction(cash, BUY, "2024-01-02", "FRUIT", 1, 5)])
+        return active
+
+    monkeypatch.setattr(store, "accounts", read_then_buy)
+    try:
+        assert load_source(SOURCE, app) == []
+        assert len(store.transactions()) == 1
+    finally:
+        other.close()

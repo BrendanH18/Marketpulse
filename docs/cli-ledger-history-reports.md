@@ -71,8 +71,9 @@ opens a period on the transfer date.
 
 **Snapshot changes.** Each saved snapshot with a valid date is compared with
 the previous one. When the two were saved in different currencies,
-`same_currency` is false and every change is null. `change_pct` is a percentage
-of the previous net worth, and null when that was zero. `market_change` is the
+`same_currency` is false and every change is null. `change_pct` is the change as a
+percentage of the previous net worth's size, so it has the change's sign, and
+is null when the previous net worth was zero. `market_change` is the
 change in net worth less the change in contributions. `backfilled` is true for
 snapshots marked as backfilled.
 
