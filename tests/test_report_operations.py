@@ -23,7 +23,7 @@ from marketpulse.cli import (
 from marketpulse.cli.base import App
 from marketpulse.cli.report_operations import OPERATIONS
 from marketpulse.db import Snapshot
-from marketpulse.models import Account, Alert, Quote, Transaction, TxnType
+from marketpulse.models import Account, Alert, Asset, Quote, Transaction, TxnType
 
 COMMANDS = ("report", "summarize")
 FAMILIES = {
@@ -61,7 +61,14 @@ AUDIT_SOURCES = {
     "alert-quote-coverage": ("alert_id", "symbol"),
     "snapshot-month-coverage": ("snapshots", "month"),
 }
-PRESET_SOURCES = {**PREVIOUS_SOURCES, **AUDIT_SOURCES}
+HISTORY_SOURCES = {
+    "duplicate-transactions": ("transactions", "date"),
+    "asset-usage": ("transactions", "symbol"),
+    "income-calendar": ("payments", "symbol"),
+    "holding-periods": ("episode", "opened"),
+    "snapshot-changes": ("gap_days", "date"),
+}
+PRESET_SOURCES = {**PREVIOUS_SOURCES, **AUDIT_SOURCES, **HISTORY_SOURCES}
 
 
 def spelled(names):
@@ -254,7 +261,9 @@ def test_every_syntax_runs_on_each_command_that_lists_it(source, populated_store
     assert not failures
 
 
-@pytest.mark.parametrize("sources", [PREVIOUS_SOURCES, AUDIT_SOURCES], ids=["previous", "audit"])
+@pytest.mark.parametrize(
+    "sources", [PREVIOUS_SOURCES, AUDIT_SOURCES, HISTORY_SOURCES], ids=["previous", "audit", "history"]
+)
 def test_exact_number_of_capabilities_in_each_batch(sources):
     assert set(sources) <= reports.SOURCES.keys()
     presets = [reports.SOURCE_PRESETS[source] for source in sources]
@@ -322,7 +331,42 @@ def audit_store(tracker, monkeypatch):
 
 
 @pytest.fixture
+def history_store(tracker, monkeypatch):
+    monkeypatch.setattr(App, "tracker", property(lambda self: tracker))
+    store = tracker.store
+    first = store.add_account(Account("Fictional First")).saved_id
+    monthly = [
+        Transaction(first, TxnType.DIVIDEND, f"2024-{month:02d}-15", "FRUIT.TO", amount=1) for month in range(1, 13)
+    ]
+    store.add_transactions(
+        [
+            Transaction(first, TxnType.DEPOSIT, "2024-01-01", amount=1000, note="Opening"),
+            Transaction(first, TxnType.DEPOSIT, "2024-01-01", amount=1000, note="Imported"),
+            *(Transaction(first, TxnType.BUY, "2024-01-02", "FRUIT.TO", 1, 10) for _ in range(3)),
+            Transaction(first, TxnType.BUY, "2024-02-01", "BERRY.TO", 1, 5),
+            Transaction(first, TxnType.SELL, "2024-03-01", "BERRY.TO", 1, 6),
+            *monthly,
+            Transaction(first, TxnType.INTEREST, "2024-06-30", amount=1),
+            Transaction(first, TxnType.INTEREST, "2024-12-31", amount=1),
+            Transaction(first, TxnType.DRIP, "2025-01-15", "FRUIT.TO", 0.1, 10),
+        ]
+    )
+    store.upsert_asset(Asset("KIWI", name="Fictional Kiwi Fund"))
+    store.add_watch(["FRUIT.TO", "MANGO"])
+    store.upsert_snapshots(
+        [
+            Snapshot("2024-01-01", 500, 500, 500, "CAD", {}),
+            Snapshot("2024-01-02", 498, 500, 500, "CAD", {"backfilled": True}),
+            Snapshot("2024-01-05", 510, 500, 500, "CAD", {}),
+        ]
+    )
+    return store
+
+
+@pytest.fixture
 def populated_store(source, request):
+    if source in HISTORY_SOURCES:
+        return request.getfixturevalue("history_store")
     return request.getfixturevalue("audit_store" if source in AUDIT_SOURCES else "report_store")
 
 

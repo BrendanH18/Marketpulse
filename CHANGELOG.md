@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Find likely duplicate transactions, see how each saved symbol is used, check which months each holding paid income, list holding periods from opening to closing, and compare each saved snapshot with the previous one with `report` and `summarize`. The five datasets support 197 shared operations and 15 named filter presets, for [1,000 new offline reporting capabilities](docs/cli-ledger-history-reports.md).
 - Count in-kind share contributions to TFSAs and FHSAs at their recorded market value in room estimates. The estimate identifies transfers that still need a price.
 - See which cash flows affect contribution room, including their original currencies, CAD amounts and any missing rates, with `marketpulse tax --room --details`.
 - See the estimated T1135 filing status and peak recorded cost in CAD in the Mac Tax workspace, including years with foreign property and no taxable sales.
