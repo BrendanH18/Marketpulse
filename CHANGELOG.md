@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Audit saved transaction currencies, transfer routes, quote coverage for watched symbols and alerts, and monthly snapshot gaps with `report` and `summarize`. The five datasets support 197 shared operations and 15 named filter presets, for [1,000 new offline reporting capabilities](docs/cli-offline-audit-reports.md).
 - Record non-cash increases to a holding's adjusted cost base with `marketpulse acb-increase` or **Increase cost base** in the terminal app. The adjustment affects later gains without adding cash or shares. Existing ledgers get an automatic pre-upgrade backup before moving to schema version 4.
 - Verify release downloads against the MarketPulse release workflow and expected tag using GitHub CLI artifact attestations.
+- Pool identical property listed under two symbols, such as a fund's CAD and USD lines, into one adjusted cost base with `marketpulse tax link SYMBOL POOL` (`tax links` and `tax unlink` manage the links). Sales use the combined cost, a purchase of either line can make a loss on the other superficial, and the T1135 estimate shows the pool once. Existing ledgers get an automatic pre-upgrade backup before moving to schema version 5.
 
 ### Fixed
 

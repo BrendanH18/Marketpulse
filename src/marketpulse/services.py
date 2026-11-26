@@ -518,7 +518,8 @@ class Tracker:
         """Capital gains by year, plus the full report (issues, open pools)."""
         txns = self.store.transactions()
         accounts = self.store.account_map()
-        report = tax.compute(txns, accounts, self._tax_fx(txns, accounts, self.base))
+        fx = self._tax_fx(txns, accounts, self.base)
+        report = tax.compute(txns, accounts, fx, identical=self.store.identical_property())
         return capital_gains(report, inclusion_rate=self.config.capital_gains_inclusion), report
 
     def foreign_property(self, year: int | None = None) -> list[tax.ForeignPropertyYear]:
@@ -530,9 +531,10 @@ class Tracker:
         accounts = self.store.account_map()
         fx = self._tax_fx(txns, accounts, "CAD")
         assets = self.store.assets()
+        identical = self.store.identical_property()
         if year is not None:
-            return [tax.foreign_property(txns, accounts, assets, fx, year)]
-        return tax.foreign_property_years(txns, accounts, assets, fx)
+            return [tax.foreign_property(txns, accounts, assets, fx, year, identical=identical)]
+        return tax.foreign_property_years(txns, accounts, assets, fx, identical=identical)
 
     def _tax_fx(self, txns: list[Transaction], accounts: dict[int, Account], base: str) -> tax.FxLookup:
         """Trade-date FX into `base` for the tax engine.

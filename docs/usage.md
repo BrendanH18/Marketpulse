@@ -205,6 +205,33 @@ The tax report implements:
 - Deemed dispositions for supported in-kind transfers across taxable and
   registered accounts. Registered replacement purchases can permanently deny a loss.
 
+#### Identical property under two symbols
+
+Each symbol has its own cost base unless you link it to another. Link symbols that
+list the same units, such as a fund's CAD and USD lines or a share listed in Toronto
+and New York, so that they share one pooled ACB:
+
+```bash
+marketpulse tax link FICT-U.TO FICT.TO   # FICT-U.TO shares FICT.TO's cost base
+marketpulse tax links                    # list the links (--json for scripts)
+marketpulse tax unlink FICT-U.TO         # give FICT-U.TO its own cost base again
+```
+
+A sale of either line then uses the combined average cost of both, with each
+purchase converted at its own date's rate. Buying either line within 30 days of
+a loss on the other can make that loss superficial. Units of the two lines count
+one for one, and splits and transfers stay with the line they're recorded on.
+Record a split on each line you hold with the same date and ratio; the tax report
+flags a split dated differently on the two lines.
+The T1135 estimate shows a linked pool once, under the second symbol (the pool),
+and decides whether it is foreign from that symbol and its `asset foreign` setting.
+
+Both symbols must already be in your ledger. A symbol links to one pool symbol,
+which can't itself be linked to another. Link
+only listings of the same security, not merely similar funds. A broker journal
+between the two lines is recorded as you'd record it otherwise. Links are saved
+in the ledger (schema version 5) and included in backups.
+
 To give a year's sales to an accountant, save them as CSV. Each row has the date,
 account, units, trading currency and FX rate, proceeds, ACB, the gain or loss, any
 denied loss, and the gain or loss as reported, in your base currency. Without
