@@ -27,8 +27,11 @@ Tracker can hand it historical Yahoo rates.
 
 Scope and known simplifications (tax figures are estimates; the README says
 so and `marketpulse tax` prints it):
-- One pool per Yahoo symbol. The same share listed under two symbols (a
-  .TO and a .NE line, say) is treated as two properties.
+- One pool per Yahoo symbol, unless you link symbols as identical property
+  (`marketpulse tax link`): the same units listed under two symbols (a fund's
+  CAD and USD lines, or a share cross-listed in Toronto and New York) then
+  share one pool, and a purchase of either line counts for superficial losses.
+  Linked units are treated as interchangeable one for one.
 - ACB increases from non-cash distributions and T3 adjustments are entered manually.
 - Superficial losses are computed with CRA's proportional formula; see
   `_superficial_denial` for the exact rule and its approximations.
@@ -39,7 +42,7 @@ from __future__ import annotations
 import re
 from bisect import bisect_right
 from collections import Counter, defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from itertools import groupby
@@ -52,7 +55,11 @@ from .models import EPSILON, Account, Asset, AssetClass, AssetKind, Transaction,
 # on that date, or None if unknown. Must return 1.0 for the base currency.
 FxLookup = Callable[[str, str], float | None]
 
-# Called with (ISO date, open pools by symbol) once the last transaction of each ledger date
+# Linked symbols: {symbol: the pool symbol it shares an ACB pool with}. Symbols not in it are
+# their own pool. See `pool_symbol`.
+IdenticalProperty = Mapping[str, str]
+
+# Called with (ISO date, open pools by pool symbol) once the last transaction of each ledger date
 # has been applied. The pools are the engine's own: read them, never change them.
 DayObserver = Callable[[str, dict[str, "AcbPool"]], None]
 
@@ -91,6 +98,10 @@ class Disposition:
     acquired_in_window: float = 0.0  # units bought 30 days either side, any account
     held_after_window: float = 0.0  # units held (all accounts) at the end of day +30
     window_open: bool = False  # day +30 is still in the future: the figure can still change
+    pool: str = ""  # the ACB pool the units came from: `symbol`, or the symbol it is linked to
+
+    def __post_init__(self) -> None:
+        self.pool = self.pool or self.symbol
 
     @property
     def gain(self) -> float:
@@ -111,10 +122,10 @@ class Disposition:
 class AcbPool:
     """The pooled cost base of one security across every taxable account."""
 
-    symbol: str
-    # Units held per account. The pool is shared, but quantities stay per
-    # account so a per-account SPLIT or TRANSFER touches the right shares.
-    quantity_by_account: dict[int, float] = field(default_factory=lambda: defaultdict(float))
+    symbol: str  # the pool symbol: the security's own, or the one its identical lines link to
+    # Units held per (account, symbol). The pool is shared, but quantities stay per account
+    # and listing so a SPLIT or TRANSFER of one line in one account touches the right shares.
+    holdings: dict[tuple[int, str], float] = field(default_factory=lambda: defaultdict(float))
     acb: float = 0.0  # total ACB of the pool, base currency
     # Set when a purchase or adjustment in the pool had no FX rate; cleared when the pool
     # is fully sold (a fresh pool starts clean).
@@ -125,23 +136,26 @@ class AcbPool:
 
     @property
     def quantity(self) -> float:
-        return sum(q for q in self.quantity_by_account.values() if q > EPSILON)
+        return sum(q for q in self.holdings.values() if q > EPSILON)
 
     @property
     def acb_per_unit(self) -> float:
         q = self.quantity
         return self.acb / q if q > EPSILON else 0.0
 
-    def remove(self, account_id: int, quantity: float) -> float:
-        """Take `quantity` units out of `account_id` at the pooled average
-        cost and return the ACB that leaves with them."""
+    def held(self, account_id: int, symbol: str) -> float:
+        return self.holdings.get((account_id, symbol), 0.0)
+
+    def remove(self, account_id: int, symbol: str, quantity: float) -> float:
+        """Take `quantity` units of `symbol` out of `account_id` at the pooled
+        average cost and return the ACB that leaves with them."""
         total = self.quantity
         share = self.acb * (quantity / total) if total > EPSILON else 0.0
-        self.quantity_by_account[account_id] -= quantity
+        self.holdings[(account_id, symbol)] -= quantity
         self.acb -= share
         if self.quantity <= EPSILON:
             # Fully sold: drop float dust and start the next pool fresh.
-            self.quantity_by_account.clear()
+            self.holdings.clear()
             self.acb = 0.0
             self.incomplete = False
         return share
@@ -150,13 +164,18 @@ class AcbPool:
 @dataclass
 class TaxReport:
     dispositions: list[Disposition] = field(default_factory=list)
-    pools: dict[str, AcbPool] = field(default_factory=dict)  # open pools after the replay, by symbol
+    pools: dict[str, AcbPool] = field(default_factory=dict)  # open pools after the replay, by pool symbol
     issues: list[LedgerIssue] = field(default_factory=list)
 
 
 def is_taxable(account: Account | None) -> bool:
     """Gains in this account are reported. Unknown accounts are skipped, not guessed."""
     return account is not None and not account.type.registered
+
+
+def pool_symbol(symbol: str, identical: IdenticalProperty | None) -> str:
+    """The pool a symbol's units go into: the symbol it is linked to, or its own."""
+    return identical.get(symbol, symbol) if identical else symbol
 
 
 def compute(
@@ -166,6 +185,7 @@ def compute(
     *,
     today: str | None = None,
     on_day: DayObserver | None = None,
+    identical: IdenticalProperty | None = None,
 ) -> TaxReport:
     """Replay the ledger through pooled ACB and return every taxable event.
 
@@ -173,23 +193,28 @@ def compute(
     open; it defaults to the real date and is a parameter so tests are stable.
     `on_day`, if given, sees the pools at the end of every ledger date (see
     `foreign_property`); it only observes, so the report is the same with or without it.
+    `identical` links symbols listing the same units into one pool (see `pool_symbol`).
     """
     today = today or date.today().isoformat()
     report = TaxReport()
     pools = report.pools
     ordered = sorted(transactions, key=sort_key)
 
+    def key(symbol: str) -> str:
+        return pool_symbol(symbol, identical)
+
     def pool(symbol: str) -> AcbPool:
-        if symbol not in pools:
-            pools[symbol] = AcbPool(symbol)
-        return pools[symbol]
+        k = key(symbol)
+        if k not in pools:
+            pools[k] = AcbPool(k)
+        return pools[k]
 
     def rate(txn: Transaction, ccy: str) -> float | None:
         return fx_on(txn.date, ccy)
 
-    def acquire(p: AcbPool, account_id: int, quantity: float, cost: float, known: bool) -> None:
-        """Add units to the pool at `cost` (base currency)."""
-        p.quantity_by_account[account_id] += quantity
+    def acquire(p: AcbPool, account_id: int, symbol: str, quantity: float, cost: float, known: bool) -> None:
+        """Add units of `symbol` to the pool at `cost` (base currency)."""
+        p.holdings[(account_id, symbol)] += quantity
         p.acb += cost
         p.incomplete |= not known
         if p.pending_denied > EPSILON:
@@ -215,35 +240,37 @@ def compute(
             # has no commission, and its value was taxed as a dividend, so it
             # enters the pool at quantity x price like any purchase.
             cost_native = txn.quantity * txn.price + txn.fees
-            acquire(pool(txn.symbol), txn.account_id, txn.quantity, cost_native * (fx or 0.0), fx is not None)
+            acquire(
+                pool(txn.symbol), txn.account_id, txn.symbol, txn.quantity, cost_native * (fx or 0.0), fx is not None
+            )
 
         elif t is TxnType.SELL and taxable:
             p = pool(txn.symbol)
-            held = p.quantity_by_account.get(txn.account_id, 0.0)
-            qty = min(txn.quantity, held)
+            qty = min(txn.quantity, p.held(txn.account_id, txn.symbol))
             if qty <= EPSILON:
                 # Selling what isn't held is already reported by ledger.replay().
                 continue
             fx = rate(txn, ccy)
             complete = fx is not None and not p.incomplete
-            acb = p.remove(txn.account_id, qty)
+            acb = p.remove(txn.account_id, txn.symbol, qty)
             proceeds = (qty * txn.price - txn.fees) * (fx or 0.0)
             d = Disposition(txn.date, txn.account_id, txn.symbol, qty, proceeds, acb, ccy, fx, txn.id, "sale", complete)
+            d.pool = p.symbol
             report.dispositions.append(d)
             if d.gain < -EPSILON:
-                taxable_fraction = _superficial_denial(d, ordered, accounts, today)
+                taxable_fraction = _superficial_denial(d, ordered, accounts, today, key)
                 if d.denied > EPSILON:
                     _attach_denied_loss(d, p, taxable_fraction)
 
         elif t is TxnType.SPLIT and taxable:
             # A split changes the unit count, never the cost: ACB per unit falls.
-            p = pools.get(txn.symbol)
-            if p and txn.account_id in p.quantity_by_account:
-                p.quantity_by_account[txn.account_id] *= txn.ratio
+            p = pools.get(key(txn.symbol))
+            if p and (txn.account_id, txn.symbol) in p.holdings:
+                p.holdings[(txn.account_id, txn.symbol)] *= txn.ratio
 
         elif t is TxnType.ACB_INCREASE and taxable:
-            p = pools.get(txn.symbol)
-            if p is not None and p.quantity_by_account.get(txn.account_id, 0.0) > EPSILON:
+            p = pools.get(key(txn.symbol))
+            if p is not None and p.held(txn.account_id, txn.symbol) > EPSILON:
                 fx = rate(txn, ccy)
                 p.incomplete |= fx is None
                 p.acb += txn.amount * (fx or 0.0)
@@ -251,7 +278,7 @@ def compute(
         elif t is TxnType.ROC and taxable:
             # Return of capital reduces ACB. If it would push ACB below zero,
             # ACB is set to zero and the excess is a capital gain that year.
-            p = pools.get(txn.symbol)
+            p = pools.get(key(txn.symbol))
             if p is None or p.quantity <= EPSILON:
                 continue
             fx = rate(txn, ccy)
@@ -275,11 +302,12 @@ def compute(
                         txn.id,
                         "roc",
                         fx is not None and not p.incomplete,
+                        pool=p.symbol,
                     )
                 )
 
         elif t is TxnType.TRANSFER and txn.target_account_id is not None:
-            _transfer(txn, ccy, taxable, accounts, pools, pool, acquire, fx_on, report)
+            _transfer(txn, ccy, taxable, accounts, pools.get(key(txn.symbol)), pool, acquire, fx_on, report)
 
     if on_day is not None and day:
         on_day(day, pools)
@@ -295,9 +323,9 @@ def _transfer(
     ccy: str,
     src_taxable: bool,
     accounts: dict[int, Account],
-    pools: dict[str, AcbPool],
+    p: AcbPool | None,  # the symbol's pool, if it has one yet
     pool: Callable[[str], AcbPool],
-    acquire: Callable[[AcbPool, int, float, float, bool], None],
+    acquire: Callable[[AcbPool, int, str, float, float, bool], None],
     fx_on: FxLookup,
     report: TaxReport,
 ) -> None:
@@ -318,24 +346,23 @@ def _transfer(
     target = txn.target_account_id
     assert target is not None  # guaranteed by the caller
     dst_taxable = is_taxable(accounts.get(target))
+    sym = txn.symbol
     if src_taxable and dst_taxable:
-        p = pools.get(txn.symbol)
         if p is None:
             return
-        qty = min(txn.quantity, p.quantity_by_account.get(txn.account_id, 0.0))
-        p.quantity_by_account[txn.account_id] -= qty
-        p.quantity_by_account[target] += qty
+        qty = min(txn.quantity, p.held(txn.account_id, sym))
+        p.holdings[(txn.account_id, sym)] -= qty
+        p.holdings[(target, sym)] += qty
         return
 
     fx = fx_on(txn.date, ccy)
     priced = txn.price > 0
     if src_taxable and not dst_taxable:
-        p = pools.get(txn.symbol)
-        qty = min(txn.quantity, p.quantity_by_account.get(txn.account_id, 0.0)) if p else 0.0
+        qty = min(txn.quantity, p.held(txn.account_id, sym)) if p else 0.0
         if p is None or qty <= EPSILON:
             return
         complete = fx is not None and not p.incomplete
-        acb = p.remove(txn.account_id, qty)
+        acb = p.remove(txn.account_id, sym, qty)
         if not priced:
             report.issues.append(
                 LedgerIssue(
@@ -360,6 +387,7 @@ def _transfer(
             txn.id,
             "deemed",
             complete,
+            pool=p.symbol,
         )
         if d.gain < -EPSILON:
             d.denied, d.denied_reason = -d.gain, DENIED_REGISTERED
@@ -381,8 +409,9 @@ def _transfer(
         # oversells) but mark the pool incomplete, which keeps its sales out
         # of the yearly totals until the price is filled in.
         acquire(
-            pool(txn.symbol),
+            pool(sym),
             target,
+            sym,
             txn.quantity,
             txn.quantity * txn.price * (fx or 0.0),
             priced and fx is not None,
@@ -393,7 +422,11 @@ def _transfer(
 
 
 def _superficial_denial(
-    d: Disposition, ordered: Sequence[Transaction], accounts: dict[int, Account], today: str
+    d: Disposition,
+    ordered: Sequence[Transaction],
+    accounts: dict[int, Account],
+    today: str,
+    key: Callable[[str], str] = str,
 ) -> float:
     """Set the denied loss and return the taxable fraction of replacement purchases.
 
@@ -410,6 +443,9 @@ def _superficial_denial(
     registered ones included. That's the classic trap: selling at a loss in
     a non-registered account and rebuying in your TFSA.
 
+    "The same property" is every symbol in the sale's pool (`key` maps a symbol to its pool),
+    so buying the other listing of identical units counts, one unit for one.
+
     Affiliated persons (a spouse, a corporation you control) are outside
     MarketPulse's view, so a clean result here isn't proof: the report says so.
     """
@@ -417,28 +453,31 @@ def _superficial_denial(
     lo = (sale_day - timedelta(days=SUPERFICIAL_WINDOW_DAYS)).isoformat()
     hi = (sale_day + timedelta(days=SUPERFICIAL_WINDOW_DAYS)).isoformat()
     cutoff = min(hi, today)
-    same = [t for t in ordered if t.symbol == d.symbol]
+    pool = key(d.symbol)
+    same = [t for t in ordered if key(t.symbol) == pool]
 
     # Count purchases in the units at the start of the window, then convert
-    # to sale-date units. Multiply the scale once per split across accounts.
+    # to sale-date units. Multiply the scale once per split across holdings
+    # (one account's units of one listing).
     scale = sale_scale = cutoff_scale = 1.0
     acquired = taxable = 0.0
     window = (t for t in same if lo <= t.date <= hi)
     for day, entries in groupby(window, key=lambda t: t.date):
-        split_accounts: dict[float, Counter[int]] = defaultdict(Counter)
+        split_holdings: dict[float, Counter[tuple[int, str]]] = defaultdict(Counter)
         buys = []
         for t in entries:
             if t.type is TxnType.SPLIT:
-                split_accounts[t.ratio][t.account_id] += 1
+                split_holdings[t.ratio][(t.account_id, t.symbol)] += 1
             elif t.type in (TxnType.BUY, TxnType.DRIP):
                 buys.append(t)
-        # Use the most occurrences in any one account. One row per account
-        # describes one split, while repeated rows in an account compound.
-        splits = [(ratio, max(counts.values()), counts) for ratio, counts in split_accounts.items()]
+        # Use the most occurrences in any one holding. One row per account and listing
+        # describes one split, while repeated rows in a holding compound.
+        splits = [(ratio, max(counts.values()), counts) for ratio, counts in split_holdings.items()]
         for t in buys:
-            # Ledger replay applies a same-day split to purchases in that account.
+            # Ledger replay applies a same-day split to purchases in that holding.
             # Purchases elsewhere are already in the new units for that split.
-            buy_scale = scale * prod(ratio ** (count - counts[t.account_id]) for ratio, count, counts in splits)
+            held_as = (t.account_id, t.symbol)
+            buy_scale = scale * prod(ratio ** (count - counts[held_as]) for ratio, count, counts in splits)
             quantity = t.quantity / buy_scale
             acquired += quantity
             if is_taxable(accounts.get(t.account_id)):
@@ -632,7 +671,7 @@ class ForeignPropertyYear:
         return sum((h.gain for h in self.holdings), 0.0)
 
 
-# End of one ledger date: {symbol: (cost, incomplete)} for every foreign pool still held.
+# End of one ledger date: {pool symbol: (cost, incomplete)} for every foreign pool still held.
 _ForeignDay = tuple[str, dict[str, tuple[float, bool]]]
 
 
@@ -642,7 +681,7 @@ class _ForeignLedger:
 
     days: list[_ForeignDay]
     dispositions: list[Disposition]  # of foreign property, in replay order
-    bought: dict[str, list[str]]  # dates of taxable purchases (and DRIPs), by symbol
+    bought: dict[str, list[str]]  # dates of taxable purchases (and DRIPs), by pool symbol
 
 
 def _foreign_replay(
@@ -651,8 +690,11 @@ def _foreign_replay(
     assets: dict[str, Asset],
     fx_on: FxLookup,
     today: str,
+    identical: IdenticalProperty | None = None,
 ) -> _ForeignLedger:
-    """Replay the ledger once, recording the foreign pools at the end of every ledger date."""
+    """Replay the ledger once, recording the foreign pools at the end of every ledger date.
+
+    Identical lines share a pool, so they are one holding, named and judged by the pool symbol."""
     verdicts: dict[str, bool] = {}
 
     def foreign(symbol: str) -> bool:
@@ -666,12 +708,12 @@ def _foreign_replay(
         held = {s: (p.acb, p.incomplete) for s, p in pools.items() if p.quantity > EPSILON and foreign(s)}
         days.append((day, held))
 
-    report = compute(transactions, accounts, fx_on, today=today, on_day=observe)
+    report = compute(transactions, accounts, fx_on, today=today, on_day=observe, identical=identical)
     bought: dict[str, list[str]] = defaultdict(list)
     for t in transactions:
         if t.type in (TxnType.BUY, TxnType.DRIP) and is_taxable(accounts.get(t.account_id)):
-            bought[t.symbol].append(t.date)
-    return _ForeignLedger(days, [d for d in report.dispositions if foreign(d.symbol)], bought)
+            bought[pool_symbol(t.symbol, identical)].append(t.date)
+    return _ForeignLedger(days, [d for d in report.dispositions if foreign(d.pool)], bought)
 
 
 def _foreign_year(year: int, ledger: _ForeignLedger, today: str, currency: str) -> ForeignPropertyYear:
@@ -697,15 +739,15 @@ def _foreign_year(year: int, ledger: _ForeignLedger, today: str, currency: str) 
         sold = date.fromisoformat(d.date)
         window = timedelta(days=SUPERFICIAL_WINDOW_DAYS)
         lo, hi = (sold - window).isoformat(), (sold + window).isoformat()
-        return any(lo <= day <= hi for day in ledger.bought.get(d.symbol, ()))
+        return any(lo <= day <= hi for day in ledger.bought.get(d.pool, ()))
 
-    guessed: dict[str, str] = {}
+    guessed: dict[str, str] = {}  # by pool symbol
     unknown_gain: set[int] = set()  # dispositions (by position) whose gain rests on a guess
     for i, d in enumerate(dispositions):
-        if d.symbol in guessed:
+        if d.pool in guessed:
             unknown_gain.add(i)
         elif not d.complete and (d.superficial or (d.kind == "sale" and could_be_superficial(d))):
-            guessed[d.symbol] = d.date
+            guessed[d.pool] = d.date
     holdings: dict[str, ForeignHolding] = {}
     for day, held in timeline:
         total = sum((cost for cost, _ in held.values()), 0.0)
@@ -722,7 +764,7 @@ def _foreign_year(year: int, ledger: _ForeignLedger, today: str, currency: str) 
     result.year_end_cost = sum((cost for cost, _ in final.values()), 0.0)
     for i, d in enumerate(dispositions):
         if start <= d.date <= as_of:
-            h = holdings.setdefault(d.symbol, ForeignHolding(d.symbol))
+            h = holdings.setdefault(d.pool, ForeignHolding(d.pool))
             h.dispositions += 1
             if d.complete and i not in unknown_gain:
                 h.gain += d.allowed_gain
@@ -742,6 +784,7 @@ def foreign_property(
     *,
     today: str | None = None,
     currency: str = "CAD",
+    identical: IdenticalProperty | None = None,
 ) -> ForeignPropertyYear:
     """The cost of specified foreign property held during `year`, for form T1135.
 
@@ -751,7 +794,8 @@ def foreign_property(
     because the T1135 thresholds are. A year still in progress runs to `today`.
     """
     today = today or date.today().isoformat()
-    return _foreign_year(year, _foreign_replay(transactions, accounts, assets, fx_on, today), today, currency)
+    ledger = _foreign_replay(transactions, accounts, assets, fx_on, today, identical)
+    return _foreign_year(year, ledger, today, currency)
 
 
 def foreign_property_years(
@@ -762,11 +806,12 @@ def foreign_property_years(
     *,
     today: str | None = None,
     currency: str = "CAD",
+    identical: IdenticalProperty | None = None,
 ) -> list[ForeignPropertyYear]:
     """`foreign_property` for every year in which foreign property was held or sold, newest
     first, from a single replay. Years holding none are left out."""
     today = today or date.today().isoformat()
-    ledger = _foreign_replay(transactions, accounts, assets, fx_on, today)
+    ledger = _foreign_replay(transactions, accounts, assets, fx_on, today, identical)
     days, dispositions = ledger.days, ledger.dispositions
     seen = [day for day, held in days if held and day <= today] + [d.date for d in dispositions if d.date <= today]
     if not seen:

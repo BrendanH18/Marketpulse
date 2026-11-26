@@ -1034,17 +1034,19 @@ def _roc_gain_note(app: App, txn: Transaction, sym: str, *, account_book_exceede
     base = app.tracker.base
     txns = app.store.transactions()
     accounts = app.store.account_map()
+    identical = app.store.identical_property()
+    pool = tax.pool_symbol(sym, identical)
     exact = all(
         transaction_currency(t, accounts).upper() == base
         for t in txns
-        if t.symbol == sym
+        if tax.pool_symbol(t.symbol, identical) == pool
         and (
             tax.is_taxable(accounts.get(t.account_id))
             or (t.target_account_id is not None and tax.is_taxable(accounts.get(t.target_account_id)))
         )
     )
     if exact:
-        report = tax.compute(txns, accounts, tax.fx_lookup({}, base))
+        report = tax.compute(txns, accounts, tax.fx_lookup({}, base), identical=identical)
         d = next((d for d in report.dispositions if d.txn_id == txn.id and d.kind == "roc"), None)
         if d is None:
             return None

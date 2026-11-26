@@ -181,6 +181,9 @@ def _ledger_revision(tracker: Tracker, generation: str, transaction_revisions: l
     )
     if overrides:
         parts.append(json.dumps(overrides))
+    # Linked symbols share an ACB pool, so linking or unlinking changes the tax figures.
+    if links := store.identical_property():
+        parts.append(json.dumps(sorted(links.items())))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
 
 

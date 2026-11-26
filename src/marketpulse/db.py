@@ -133,6 +133,13 @@ CREATE TABLE IF NOT EXISTS automation_runs (
     3: "ALTER TABLE assets ADD COLUMN foreign_property INTEGER",
     # Older versions cannot read ACB_INCREASE transactions, even though the tables are unchanged.
     4: "SELECT 1;",
+    # 5: symbols linked as identical property share one ACB pool, named by `pool` (#238).
+    5: """
+CREATE TABLE IF NOT EXISTS identical_property (
+    symbol TEXT PRIMARY KEY,
+    pool TEXT NOT NULL
+);
+""",
 }
 
 # Where automatic backups go and how many to keep (see Store.backup).
@@ -306,6 +313,12 @@ def _ledger_summary(conn: sqlite3.Connection) -> LedgerSummary:
     return LedgerSummary(*row)
 
 
+def _has_table(conn: sqlite3.Connection, table: str) -> bool:
+    return (
+        conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone() is not None
+    )
+
+
 def _restore_revision(conn: sqlite3.Connection | None) -> str:
     """Hash the saved portfolio and alert state, ignoring caches and routine run logs."""
     digest = sha256()
@@ -321,7 +334,10 @@ def _restore_revision(conn: sqlite3.Connection | None) -> str:
         ("snapshots", "SELECT * FROM snapshots ORDER BY date"),
         ("room", "SELECT * FROM room ORDER BY account_type"),
         ("targets", "SELECT * FROM targets ORDER BY bucket"),
+        ("identical_property", "SELECT * FROM identical_property ORDER BY symbol"),
     ):
+        if table == "identical_property" and not _has_table(conn, table):
+            continue  # a ledger not yet migrated to schema 5 has no links, as an empty table does
         rows = conn.execute(query, (RESTORE_ID_KEY,) if table == "meta" else ())
         columns = [column[0] for column in rows.description]
         for row in rows:
@@ -1170,6 +1186,48 @@ class Store:
 
     def delete_asset(self, symbol: str) -> None:
         self._exec("DELETE FROM assets WHERE symbol = ?", (symbol.upper(),))
+
+    # ── identical property ────────────────────────────────────────────────────
+
+    def identical_property(self) -> dict[str, str]:
+        """Linked symbols: {symbol: the pool symbol whose ACB pool it shares} (see tax.compute)."""
+        return {r["symbol"]: r["pool"] for r in self._query("SELECT symbol, pool FROM identical_property")}
+
+    def link_identical(self, symbol: str, pool: str, *, dry_run: bool = False) -> None:
+        """Pool `symbol` with `pool` for ACB. Links are one level deep: `pool` can't itself be
+        linked to another symbol, and a symbol others are linked to can't be linked elsewhere.
+        `dry_run` checks the link without saving it."""
+        symbol, pool = symbol.strip().upper(), pool.strip().upper()
+        if not symbol or not pool:
+            raise ValueError("Both symbols are needed.")
+        if symbol == pool:
+            raise ValueError(f"{symbol} is already in its own pool.")
+        with self.atomic():
+            links = self.identical_property()
+            if pool in links:
+                raise ValueError(f"{pool} is linked to {links[pool]}. Link {symbol} to {links[pool]} instead.")
+            members = sorted(s for s, p in links.items() if p == symbol)
+            if members:
+                raise ValueError(
+                    f"{', '.join(members)} {'is' if len(members) == 1 else 'are'} linked to {symbol}. "
+                    f"Link {'it' if len(members) == 1 else 'them'} to {pool} first, or unlink."
+                )
+            if dry_run:
+                return
+            self._exec(
+                "INSERT INTO identical_property(symbol, pool) VALUES (?, ?)"
+                " ON CONFLICT(symbol) DO UPDATE SET pool = excluded.pool",
+                (symbol, pool),
+            )
+
+    def unlink_identical(self, symbol: str, *, dry_run: bool = False) -> str | None:
+        """Give `symbol` its own pool again. Returns the pool it left, or None if it wasn't linked."""
+        symbol = symbol.strip().upper()
+        with self.atomic():
+            pool = self.identical_property().get(symbol)
+            if pool is not None and not dry_run:
+                self._exec("DELETE FROM identical_property WHERE symbol = ?", (symbol,))
+            return pool
 
     # ── watchlist ─────────────────────────────────────────────────────────────
 
