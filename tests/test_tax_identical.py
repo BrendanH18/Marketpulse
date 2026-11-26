@@ -12,7 +12,7 @@ from click.testing import CliRunner
 from marketpulse.cli import main
 from marketpulse.db import Store, _restore_revision, latest_version
 from marketpulse.desktop import ledger_revision
-from marketpulse.models import Account, AccountType, Transaction, TxnType
+from marketpulse.models import Account, AccountType, Asset, Transaction, TxnType
 from marketpulse.tax import DENIED_SUPERFICIAL, compute, foreign_property, pool_symbol
 
 QT = 1  # non-registered (taxable)
@@ -221,6 +221,10 @@ def test_links_are_one_level_deep_and_survive_reopening(tmp_path):
     path = tmp_path / "ledger.db"
     store = Store(path)
     assert store.schema_version == latest_version() >= 5
+    for sym in ("FICT.TO", "FICT-U.TO", "FICT.NE"):
+        store.upsert_asset(Asset(symbol=sym))
+    with pytest.raises(ValueError, match="FICT.T0 has no transactions or asset entry"):
+        store.link_identical("FICT-U.TO", "FICT.T0")
     store.link_identical("fict-u.to", " fict.to ")
     with pytest.raises(ValueError, match="linked to FICT.TO. Link OTHER to FICT.TO instead"):
         store.link_identical("OTHER", "FICT-U.TO")
@@ -240,6 +244,8 @@ def test_links_are_one_level_deep_and_survive_reopening(tmp_path):
 
 def test_links_change_the_restore_revision(tmp_path):
     store = Store(tmp_path / "ledger.db")
+    for sym in (CAD_LINE, USD_LINE):
+        store.upsert_asset(Asset(symbol=sym))
     unlinked = _restore_revision(store._conn)
     store.link_identical(USD_LINE, CAD_LINE)
     assert _restore_revision(store._conn) != unlinked

@@ -1196,6 +1196,7 @@ class Store:
     def link_identical(self, symbol: str, pool: str, *, dry_run: bool = False) -> None:
         """Pool `symbol` with `pool` for ACB. Links are one level deep: `pool` can't itself be
         linked to another symbol, and a symbol others are linked to can't be linked elsewhere.
+        Both must be in the ledger or its assets, so a typo isn't saved as a pool.
         `dry_run` checks the link without saving it."""
         symbol, pool = symbol.strip().upper(), pool.strip().upper()
         if not symbol or not pool:
@@ -1212,6 +1213,13 @@ class Store:
                     f"{', '.join(members)} {'is' if len(members) == 1 else 'are'} linked to {symbol}. "
                     f"Link {'it' if len(members) == 1 else 'them'} to {pool} first, or unlink."
                 )
+            for sym in (symbol, pool):
+                if not self._query(
+                    "SELECT 1 FROM transactions WHERE symbol = ?"
+                    " UNION ALL SELECT 1 FROM assets WHERE symbol = ? LIMIT 1",
+                    (sym, sym),
+                ):
+                    raise ValueError(f"{sym} has no transactions or asset entry. Check the symbol.")
             if dry_run:
                 return
             self._exec(

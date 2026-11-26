@@ -226,7 +226,8 @@ flags a split dated differently on the two lines.
 The T1135 estimate shows a linked pool once, under the second symbol (the pool),
 and decides whether it is foreign from that symbol and its `asset foreign` setting.
 
-A symbol links to one pool symbol, which can't itself be linked to another. Link
+Both symbols must already be in your ledger. A symbol links to one pool symbol,
+which can't itself be linked to another. Link
 only listings of the same security, not merely similar funds. A broker journal
 between the two lines is recorded as you'd record it otherwise. Links are saved
 in the ledger (schema version 5) and included in backups.
