@@ -149,6 +149,33 @@ def test_transfers_move_one_line_and_a_deemed_sale_uses_the_pooled_cost():
     assert pool.held(QT, CAD_LINE) == pytest.approx(50) and pool.acb == pytest.approx(2250)
 
 
+def test_a_loss_guessed_without_a_rate_leaves_the_other_lines_later_sale_incomplete():
+    # The USD line's sale has no rate, so its loss (and the part denied) is a guess. The denied
+    # amount goes into the CAD line bought two weeks later, whose own rate is always known.
+    def rates(day, ccy):
+        return 1.0 if ccy == "CAD" else (1.35 if day < "2024-02-01" else None)
+
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", USD_LINE, 100, 20, ccy="USD"),
+        txn(TxnType.SELL, "2024-03-01", USD_LINE, 100, 15, ccy="USD"),
+        txn(TxnType.BUY, "2024-03-15", CAD_LINE, 100, 20),
+        txn(TxnType.SELL, "2024-06-03", CAD_LINE, 100, 21),
+    ]
+    _, after = both(txns, rates)
+    guessed, later = after.dispositions
+    assert not guessed.complete and guessed.denied == pytest.approx(2700)
+    assert later.acb == pytest.approx(2000 + 2700) and not later.complete
+
+
+def test_return_of_capital_on_a_line_not_held_leaves_the_pool_alone():
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", CAD_LINE, 100, 10),
+        txn(TxnType.ROC, "2024-02-01", USD_LINE, amount=50, ccy="USD"),
+    ]
+    _, after = both(txns)
+    assert after.pools[CAD_LINE].acb == pytest.approx(1000) and after.dispositions == []
+
+
 def test_t1135_shows_a_linked_pool_once_under_its_pool_symbol():
     # A fictional US company listed in New York (foreign by listing) and in Toronto.
     us, ca = "FICTCO", "FICTCO.TO"

@@ -221,6 +221,7 @@ A sale of either line then uses the combined average cost of both, with each
 purchase converted at its own date's rate. Buying either line within 30 days of
 a loss on the other can make that loss superficial. Units of the two lines count
 one for one, and splits and transfers stay with the line they're recorded on.
+Record a split on each line you hold with the same date and ratio.
 The T1135 estimate shows a linked pool once, under the second symbol (the pool),
 and decides whether it is foreign from that symbol and its `asset foreign` setting.
 

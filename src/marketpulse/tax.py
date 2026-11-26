@@ -133,6 +133,7 @@ class AcbPool:
     # A superficial loss whose replacement shares haven't been bought yet in
     # a taxable account: added to the ACB of the next taxable purchase.
     pending_denied: float = 0.0
+    pending_incomplete: bool = False  # the pending amount rests on a missing FX rate
 
     @property
     def quantity(self) -> float:
@@ -221,7 +222,8 @@ def compute(
             # These are the replacement shares for an earlier superficial loss:
             # the denied loss becomes part of their cost.
             p.acb += p.pending_denied
-            p.pending_denied = 0.0
+            p.incomplete |= p.pending_incomplete
+            p.pending_denied, p.pending_incomplete = 0.0, False
 
     p: AcbPool | None  # the pool a transaction acts on (lookups may find none)
     day = ""  # the ledger date being replayed
@@ -279,7 +281,9 @@ def compute(
             # Return of capital reduces ACB. If it would push ACB below zero,
             # ACB is set to zero and the excess is a capital gain that year.
             p = pools.get(key(txn.symbol))
-            if p is None or p.quantity <= EPSILON:
+            # Units of this listing must be held somewhere taxable: a linked line's units don't
+            # make a return of capital on a line that isn't held reduce the shared cost base.
+            if p is None or not any(q > EPSILON for (_, s), q in p.holdings.items() if s == txn.symbol):
                 continue
             fx = rate(txn, ccy)
             # Without a rate the reduction is unknown, so everything this pool
@@ -426,7 +430,7 @@ def _superficial_denial(
     ordered: Sequence[Transaction],
     accounts: dict[int, Account],
     today: str,
-    key: Callable[[str], str] = str,
+    key: Callable[[str], str],
 ) -> float:
     """Set the denied loss and return the taxable fraction of replacement purchases.
 
@@ -522,10 +526,13 @@ def _attach_denied_loss(d: Disposition, p: AcbPool, taxable_fraction: float) -> 
     carried = d.denied * taxable_fraction
     if carried <= EPSILON:
         return
+    # A sale missing an FX rate has a guessed loss, so the cost it adds is a guess too.
     if p.quantity > EPSILON:
         p.acb += carried
+        p.incomplete |= not d.complete
     else:
         p.pending_denied += carried
+        p.pending_incomplete |= not d.complete
 
 
 # ── FX lookup from a daily series ─────────────────────────────────────────────
