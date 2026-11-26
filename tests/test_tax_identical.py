@@ -128,9 +128,16 @@ def test_one_split_dated_differently_on_each_line_is_flagged():
     before, after = both(txns)
     assert before.issues == []
     (issue,) = after.issues
-    assert issue.date == "2024-03-04" and "linked FICT.TO is dated 2024-03-01" in issue.message
-    # The same date on each line, as recorded for one split, raises nothing.
+    assert issue.date == "2024-03-04" and "linked FICT.TO 2024-03-01. If they are one split" in issue.message
+    # Both dates can fall in one sale's window: 30 days either side of it.
+    txns[3].date = "2024-04-10"
+    assert len(both(txns)[1].issues) == 1
+    # The same date on each line, as recorded for one split, raises nothing, even for two splits.
     txns[3].date = "2024-03-01"
+    txns += [
+        txn(TxnType.SPLIT, "2024-04-10", CAD_LINE, ratio=2),
+        txn(TxnType.SPLIT, "2024-04-10", USD_LINE, ratio=2, account=WS),
+    ]
     assert both(txns)[1].issues == []
 
 

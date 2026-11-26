@@ -322,30 +322,32 @@ def compute(
 
 
 def _staggered_linked_splits(ordered: Sequence[Transaction], key: Callable[[str], str]) -> list[LedgerIssue]:
-    """Flag one split recorded on different dates for linked lines.
+    """Flag a split that may be recorded on different dates for linked lines.
 
     Superficial-loss checks treat a split row as the security splitting that day, so the same
-    split on another day for the other line is counted again. Rows with the same ratio within
-    the superficial-loss window are assumed to be one split recorded twice."""
+    split on another day for the other line is counted again. A row is flagged when a linked
+    line has no split of the same ratio that day, but has one close enough for both to fall in
+    one sale's 61-day window."""
     issues = []
     splits = [t for t in ordered if t.type is TxnType.SPLIT]
+
+    def linked(a: Transaction, b: Transaction) -> bool:
+        return a.symbol != b.symbol and key(a.symbol) == key(b.symbol) and a.ratio == b.ratio
+
     for i, later in enumerate(splits):
+        if any(linked(later, t) and t.date == later.date for t in splits):
+            continue
         day = date.fromisoformat(later.date)
         for earlier in splits[:i]:
-            if (
-                earlier.symbol != later.symbol
-                and key(earlier.symbol) == key(later.symbol)
-                and earlier.ratio == later.ratio
-                and earlier.date != later.date
-                and (day - date.fromisoformat(earlier.date)).days <= SUPERFICIAL_WINDOW_DAYS
-            ):
+            gap = (day - date.fromisoformat(earlier.date)).days
+            if linked(later, earlier) and 0 < gap <= 2 * SUPERFICIAL_WINDOW_DAYS:
                 issues.append(
                     LedgerIssue(
                         later.id,
                         later.date,
-                        f"Split of {later.symbol} is dated {later.date}, but the split of linked {earlier.symbol} "
-                        f"is dated {earlier.date}. Use the same date for both, or superficial-loss estimates "
-                        "may count it twice",
+                        f"Split of {later.symbol} is dated {later.date} and the split of linked {earlier.symbol} "
+                        f"{earlier.date}. If they are one split, use one date for both: superficial-loss "
+                        "estimates count each date as a split",
                     )
                 )
                 break
