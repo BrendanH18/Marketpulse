@@ -48,9 +48,19 @@ the app's decisions in [docs/app-plan.md](docs/app-plan.md).
   `menubar install` / `desktop install`, `scripts/benchmark_desktop.py`, `scripts/release.py package` and
   `verify` (they use `ditto`, `hdiutil` and `codesign`), and the darwin-only tests (for example
   `tests/test_update_check.py`), which pytest skips on Linux.
-- **Heavy jobs go to Boat.** Anything heavy, long-running or untrusted (Docker,
-  large data jobs, anything taking minutes) runs in a Boat sandbox, not on the Mac
-  or the Raspberry Pi. The macOS-only work above stays on the Mac.
+- **Everything else runs on Boat.** Use Boat as the compute for your task
+  (owner, 2026-11-25). Anything that runs a program to do work happens in a Boat
+  sandbox, never on the machine the agent runs on: builds, tests, lint beyond
+  the Python checks, large data jobs, large downloads, Docker, untrusted code
+  and long jobs. That machine is the owner's Mac or a Raspberry Pi with 8 GB of
+  RAM shared by every agent and the T3 server, where one heavy command stalls
+  them all. Only light work stays local: reading and editing files, git,
+  searches such as `git grep`, the `boat` CLI, the Python checks and the
+  macOS-only work above. If you're unsure, use Boat. If Boat can't start a
+  sandbox, don't fall back to local compute: tell the owner what still needs a
+  Boat run. Work this file keeps on the Mac (no GPU or macOS on Boat) can't run
+  on the Pi either; an agent there leaves it to the owner and says so in its
+  hand-off.
 
 Boat (x86_64 Linux) docs: https://docs.boat.dev/llms.txt. Prices and limits: run `boat limits`; never quote prices from memory.
 
