@@ -316,7 +316,40 @@ def compute(
     if on_day is not None and day:
         on_day(day, pools)
     report.pools = {s: p for s, p in pools.items() if p.quantity > EPSILON}
+    if identical:
+        report.issues += _staggered_linked_splits(ordered, key)
     return report
+
+
+def _staggered_linked_splits(ordered: Sequence[Transaction], key: Callable[[str], str]) -> list[LedgerIssue]:
+    """Flag one split recorded on different dates for linked lines.
+
+    Superficial-loss checks treat a split row as the security splitting that day, so the same
+    split on another day for the other line is counted again. Rows with the same ratio within
+    the superficial-loss window are assumed to be one split recorded twice."""
+    issues = []
+    splits = [t for t in ordered if t.type is TxnType.SPLIT]
+    for i, later in enumerate(splits):
+        day = date.fromisoformat(later.date)
+        for earlier in splits[:i]:
+            if (
+                earlier.symbol != later.symbol
+                and key(earlier.symbol) == key(later.symbol)
+                and earlier.ratio == later.ratio
+                and earlier.date != later.date
+                and (day - date.fromisoformat(earlier.date)).days <= SUPERFICIAL_WINDOW_DAYS
+            ):
+                issues.append(
+                    LedgerIssue(
+                        later.id,
+                        later.date,
+                        f"Split of {later.symbol} is dated {later.date}, but the split of linked {earlier.symbol} "
+                        f"is dated {earlier.date}. Use the same date for both, or superficial-loss estimates "
+                        "may count it twice",
+                    )
+                )
+                break
+    return issues
 
 
 # ── In-kind transfers ─────────────────────────────────────────────────────────

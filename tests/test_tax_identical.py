@@ -118,6 +118,22 @@ def test_split_rows_for_each_line_in_one_account_are_one_split():
     assert after.pools[CAD_LINE].holdings == {(QT, CAD_LINE): pytest.approx(0), (QT, USD_LINE): pytest.approx(100)}
 
 
+def test_one_split_dated_differently_on_each_line_is_flagged():
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", CAD_LINE, 100, 10),
+        txn(TxnType.BUY, "2024-01-02", USD_LINE, 100, 10, account=WS),
+        txn(TxnType.SPLIT, "2024-03-01", CAD_LINE, ratio=2),
+        txn(TxnType.SPLIT, "2024-03-04", USD_LINE, ratio=2, account=WS),
+    ]
+    before, after = both(txns)
+    assert before.issues == []
+    (issue,) = after.issues
+    assert issue.date == "2024-03-04" and "linked FICT.TO is dated 2024-03-01" in issue.message
+    # The same date on each line, as recorded for one split, raises nothing.
+    txns[3].date = "2024-03-01"
+    assert both(txns)[1].issues == []
+
+
 def test_a_sale_never_takes_units_of_the_other_line():
     # The account holds 100 of each line; selling 150 of the CAD line only finds its 100.
     txns = [
