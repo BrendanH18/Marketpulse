@@ -1009,7 +1009,7 @@ private struct ActivityWorkspace: View {
         TableColumn("Account") { t in
           let source = accountName(t.accountId, payload)
           let account = t.targetAccount.isEmpty ? source : "\(source) → \(t.targetAccount)"
-          Text(verbatim: account).help(Text(verbatim: account))
+          Text(verbatim: account)
         }.width(min: 220, ideal: 235)
         TableColumn("Amount") { t in
           Text(activityAmount(t, privacy: payload.status.privacy)).monospacedDigit()
