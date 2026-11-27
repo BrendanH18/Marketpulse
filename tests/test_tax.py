@@ -173,14 +173,98 @@ def test_missing_fx_marks_rows_incomplete_and_keeps_them_out_of_totals():
     txns = [
         txn(TxnType.BUY, "2024-01-02", "AAPL", 1, 100, ccy="USD"),  # no rate for this day
         txn(TxnType.SELL, "2024-02-01", "AAPL", 1, 150, ccy="USD"),
-        txn(TxnType.BUY, "2024-03-01", "AAPL", 1, 100, ccy="USD"),  # fresh pool: fully known
+        # Fresh pool, bought after day +30 so it can't hold a loss the guessed sale might have had.
+        txn(TxnType.BUY, "2024-03-04", "AAPL", 1, 100, ccy="USD"),
         txn(TxnType.SELL, "2024-04-01", "AAPL", 1, 150, ccy="USD"),
     ]
-    report = run(txns, usd({"2024-02-01": 1.3, "2024-03-01": 1.3, "2024-04-01": 1.3}))
+    report = run(txns, usd({"2024-02-01": 1.3, "2024-03-04": 1.3, "2024-04-01": 1.3}))
     first, second = report.dispositions
     assert not first.complete and second.complete  # the gap doesn't poison later pools
     (year,) = capital_gains(report)
     assert year.net_gain == pytest.approx(65) and year.missing_fx == [first]
+
+
+@pytest.mark.parametrize(
+    ("rates", "estimated_gain"),
+    [
+        ({}, 0.0),  # no rate for either leg: C$0 cost, C$0 proceeds
+        ({"2024-02-01": 1.35}, 1350.0),  # no rate for the purchase only: it looks free
+    ],
+    ids=["no-rates", "purchase-rate-missing"],
+)
+def test_a_guessed_gain_with_a_replacement_in_the_window_leaves_the_replacement_incomplete(rates, estimated_gain):
+    # With a real rate of 1.40 on 2023-12-01 the first sale is a C$50 loss (C$1,400 cost, C$1,350
+    # proceeds), superficial because the replacement is still held at day +30, so the denied C$50
+    # would be part of the replacement's cost. Without the rate the estimate shows no loss, but
+    # it is only a guess: the replacement's cost, and the gain on selling it, are guesses too.
+    fx = usd({**rates, "2024-02-15": 1.35, "2024-06-03": 1.35})
+    txns = [
+        txn(TxnType.BUY, "2023-12-01", "AAPL", 10, 100, ccy="USD"),  # no rate
+        txn(TxnType.SELL, "2024-02-01", "AAPL", 10, 100, ccy="USD"),
+        txn(TxnType.BUY, "2024-02-15", "AAPL", 10, 90, ccy="USD"),  # day +14, known rate, still held
+    ]
+    held = run(txns, fx)
+    (first,) = held.dispositions
+    assert not first.complete and first.gain == pytest.approx(estimated_gain) and not first.superficial
+    assert held.pools["AAPL"].incomplete  # before the fix: the replacement pool looked complete
+
+    report = run([*txns, txn(TxnType.SELL, "2024-06-03", "AAPL", 10, 120, ccy="USD")], fx)
+    first, later = report.dispositions
+    assert not later.complete  # before the fix: complete, at a C$405 gain that leaves out the denied loss
+    (year,) = capital_gains(report)
+    assert year.net_gain == 0 and year.missing_fx == [first, later]
+
+
+def test_a_guessed_gain_on_a_partial_sale_with_a_replacement_leaves_the_rest_of_the_pool_incomplete():
+    # Shares received at no cost, then half sold for less than the commission with no rate:
+    # the estimate is C$0, but at any real rate it is a loss, and a superficial one, since more
+    # were bought back within 30 days. The denied part would go into the units still held.
+    fx = usd({"2024-01-02": 1.30, "2024-02-15": 1.35, "2024-06-03": 1.35})
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", "AAPL", 20, 0, ccy="USD"),  # C$0 cost, known
+        txn(TxnType.SELL, "2024-02-01", "AAPL", 10, 1, fees=15, ccy="USD"),  # US$-5 net, no rate
+        txn(TxnType.BUY, "2024-02-15", "AAPL", 10, 1, ccy="USD"),  # day +14, still held
+        txn(TxnType.SELL, "2024-06-03", "AAPL", 20, 2, ccy="USD"),
+    ]
+    first, later = run(txns, fx).dispositions
+    assert not first.complete and first.gain == pytest.approx(0)
+    assert not later.complete  # before the fix: complete
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        txn(TxnType.BUY, "2024-03-03", "AAPL", 10, 90, ccy="USD"),  # day +31: outside the window
+        txn(TxnType.BUY, "2024-02-15", "AAPL", 10, 90, ccy="USD", account=TFSA),  # no taxable cost to add to
+    ],
+    ids=["after-the-window", "in-a-tfsa"],
+)
+def test_a_guessed_gain_without_a_taxable_replacement_in_the_window_leaves_later_sales_alone(replacement):
+    fx = usd({"2024-02-01": 1.35, "2024-02-15": 1.35, "2024-03-03": 1.35, "2024-06-03": 1.35})
+    txns = [
+        txn(TxnType.BUY, "2023-12-01", "AAPL", 10, 100, ccy="USD"),  # no rate
+        txn(TxnType.SELL, "2024-02-01", "AAPL", 10, 100, ccy="USD"),
+        replacement,
+        txn(TxnType.BUY, "2024-03-03", "AAPL", 10, 90, ccy="USD"),  # day +31
+        txn(TxnType.SELL, "2024-06-03", "AAPL", 10, 120, ccy="USD", account=QT),
+    ]
+    first, later = run(txns, fx).dispositions
+    assert not first.complete  # the guessed sale is still flagged on its own
+    # 10 x US$120 x 1.35 = C$1,620 against 10 x US$90 x 1.35 = C$1,215 of pooled cost, all known.
+    assert later.complete and later.acb == pytest.approx(1215) and later.gain == pytest.approx(405)
+
+
+def test_a_known_gain_with_a_replacement_in_the_window_leaves_the_replacement_complete():
+    fx = usd({"2023-12-01": 1.30, "2024-02-01": 1.35, "2024-02-15": 1.35, "2024-06-03": 1.35})
+    txns = [
+        txn(TxnType.BUY, "2023-12-01", "AAPL", 10, 100, ccy="USD"),  # C$1,300
+        txn(TxnType.SELL, "2024-02-01", "AAPL", 10, 110, ccy="USD"),  # C$1,485: a known C$185 gain
+        txn(TxnType.BUY, "2024-02-15", "AAPL", 10, 90, ccy="USD"),  # C$1,215, bought back within 30 days
+        txn(TxnType.SELL, "2024-06-03", "AAPL", 10, 120, ccy="USD"),  # C$1,620
+    ]
+    first, later = run(txns, fx).dispositions
+    assert first.complete and first.gain == pytest.approx(185) and not first.superficial
+    assert later.complete and later.acb == pytest.approx(1215) and later.gain == pytest.approx(405)
 
 
 def test_fx_lookup_takes_the_last_close_on_or_before_the_day():
@@ -320,6 +404,73 @@ def test_multiple_same_day_splits_in_one_account_are_each_counted():
     assert d.denied == pytest.approx(100)
     assert (d.acquired_in_window, d.held_after_window) == (5, 8)
     assert report.pools["X"].acb == pytest.approx(400 + 100)
+
+
+def test_one_split_recorded_on_different_dates_in_two_accounts_counts_once():
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10),
+        txn(TxnType.BUY, "2024-01-02", qty=40, price=10, account=WS),
+        txn(TxnType.BUY, "2024-01-02", qty=20, price=10, account=TFSA),
+        # Pool: 140 taxable units costing 1,400. The sale: ACB 1,000, proceeds 800, a 200 loss.
+        txn(TxnType.SELL, "2024-03-01", qty=100, price=8),
+        # One 2-for-1 split, which Wealthsimple records on 03-05 and the TFSA on 03-08.
+        txn(TxnType.SPLIT, "2024-03-05", ratio=2, account=WS),
+        txn(TxnType.BUY, "2024-03-06", qty=10, price=10, account=TFSA),  # before the TFSA's split row
+        txn(TxnType.SPLIT, "2024-03-08", ratio=2, account=TFSA),
+        txn(TxnType.BUY, "2024-03-20", qty=100, price=4),  # post-split: 50 sale-date units
+    ]
+    report = run(txns)
+    (d,) = report.dispositions
+    # In sale-date (pre-split) units, each holding converted by its own split row:
+    #   P = 100 / 2 (Questrade, after the split) + 10 (TFSA, before its row) = 60
+    #   B = (100 Questrade + 80 Wealthsimple + 60 TFSA) / 2 = 120 at the end of day +30
+    #   denied = 200 x min(100, 60, 120) / 100 = 120
+    # Counting each row as its own split (x4) gave P = 30, B = 60 and denied 60.
+    assert (d.acquired_in_window, d.held_after_window) == (60, 120)
+    assert d.denied == pytest.approx(120)
+    # 50 of the 60 replacement units are taxable: 100 of the 120 joins the pool's cost,
+    # which is Wealthsimple's 400 + 100 + Questrade's 400 replacement purchase.
+    assert report.pools["X"].acb == pytest.approx(400 + 100 + 400)
+
+
+@pytest.mark.parametrize("questrade_row_first", [True, False])
+def test_same_day_split_rows_in_two_accounts_are_one_split_whatever_their_order(questrade_row_first):
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10),
+        txn(TxnType.SELL, "2024-02-20", qty=40, price=8),  # ACB 400, proceeds 320: an 80 loss
+        txn(TxnType.SPLIT, "2024-03-01", ratio=2),  # the first of two 2-for-1 splits
+        txn(TxnType.BUY, "2024-03-05", qty=20, price=5, account=WS),  # Wealthsimple held none on 03-01
+    ]
+    # The ledger orders same-day rows by id, so create them in the order under test.
+    accounts = [QT, WS] if questrade_row_first else [WS, QT]
+    txns += [txn(TxnType.SPLIT, "2024-03-10", ratio=2, account=a) for a in accounts]
+    (d,) = run(txns).dispositions
+    # Both 03-10 rows are the second split. In sale-date units:
+    #   P = 20 Wealthsimple units bought after the first split / 2 = 10
+    #   B = (240 Questrade + 40 Wealthsimple) / 4 = 70
+    #   denied = 80 x min(40, 10, 70) / 40 = 20
+    # The earlier code matched Wealthsimple's row to the first split when it came first,
+    # which gave P = 20 and a denied loss of 40.
+    assert (d.acquired_in_window, d.held_after_window) == (10, 70)
+    assert d.denied == pytest.approx(20)
+
+
+def test_a_split_row_in_an_account_holding_none_changes_nothing():
+    txns = [
+        txn(TxnType.BUY, "2024-01-01", qty=10, price=100),
+        txn(TxnType.SELL, "2024-03-01", qty=10, price=80),  # a 200 loss
+        txn(TxnType.BUY, "2024-03-15", qty=5, price=80),
+    ]
+    stray = txn(TxnType.SPLIT, "2024-03-08", ratio=2, account=WS)
+    assert [i.message for i in replay([*txns, stray], ACCOUNTS).issues] == ["Split of X with nothing held"]
+    # Five of the ten units sold were bought back and still held: half the loss is denied,
+    # with or without the stray row (which used to halve the five to 2.5 and deny 50).
+    for ledger in (txns, [*txns, stray]):
+        report = run(ledger)
+        (d,) = report.dispositions
+        assert (d.acquired_in_window, d.held_after_window) == (5, 5)
+        assert d.denied == pytest.approx(100)
+        assert report.pools["X"].acb == pytest.approx(400 + 100)
 
 
 def test_rebuying_in_a_tfsa_denies_the_loss_permanently():

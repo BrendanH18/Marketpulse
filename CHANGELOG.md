@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New backups written with `backup now PATH` have owner-only file permissions.
 - Mac refreshes and scheduled automation runs wait for any active cycle on the same ledger, preventing overlapping runs from taking duplicate daily backups.
 - Superficial-loss estimates use sale-date share counts across stock splits, including when allocating denied losses to taxable cost basis.
+- A sale missing an FX rate whose estimate shows no loss now flags the shares bought back within 30 days, and the gain when they're sold, as incomplete: at the real rates it could be a superficial loss that changes their cost.
+- Superficial-loss estimates convert each account's shares by its own split rows, so a split recorded on different days in two accounts or on two linked lines counts once, and a split row in an account that held none of the shares no longer changes the result. The tax report no longer flags linked lines whose split dates differ.
 - Contribution-room estimates convert recorded foreign-currency cash flows to CAD at historical rates, including earlier FHSA contributions toward the lifetime cap. Room is unavailable when a required rate is missing. Offline contribution-room reports flag rows that require FX, and the desktop snapshot and tax bridges are now version 2.
 
 ## [3.2.0]

@@ -200,8 +200,16 @@ The tax report implements:
 - Proportional superficial-loss estimates using recorded purchases and holdings
   around the sale date, including registered accounts. The report expresses
   share counts in sale-date units when the window spans a stock split. Record
-  the split with the same effective date and ratio in each account that held
-  the shares at the time.
+  the split with its ratio in each account that held the shares at the time.
+  Each account's shares follow its own split row, so a split your brokers post
+  on different days counts once: rows with the same ratio up to 60 days apart
+  in different accounts are treated as one split. If a security splits twice
+  with the same ratio within 60 days, record each split on the same day in
+  every account, or the estimate may match rows to the wrong split. The pooled
+  ACB itself still counts units as recorded, so a sale made between the days
+  two accounts post one split mixes pre- and post-split units in the average
+  cost. Record a split on the same day in every account (and on every linked
+  line) to keep that average exact.
 - Deemed dispositions for supported in-kind transfers across taxable and
   registered accounts. Registered replacement purchases can permanently deny a loss.
 
@@ -221,8 +229,9 @@ A sale of either line then uses the combined average cost of both, with each
 purchase converted at its own date's rate. Buying either line within 30 days of
 a loss on the other can make that loss superficial. Units of the two lines count
 one for one, and splits and transfers stay with the line they're recorded on.
-Record a split on each line you hold with the same date and ratio; the tax report
-flags a split dated differently on the two lines.
+Record a split on each line you hold, with its ratio. The same split recorded on
+different days for the two lines counts once for superficial losses, but use one
+date for both so a sale in between gets an exact pooled cost.
 The T1135 estimate shows a linked pool once, under the second symbol (the pool),
 and decides whether it is foreign from that symbol and its `asset foreign` setting.
 
@@ -244,6 +253,10 @@ marketpulse tax --year 2025 --csv capital-gains-2025.csv
 Account holdings still show their own cost basis, which can differ from the
 pooled basis used by the tax report. Rows missing historical FX or required
 transfer prices are flagged and excluded from report totals.
+A sale missing an FX rate may be a loss even when the estimate shows a gain, so
+if you buy the security back in a taxable account within 30 days and still hold
+it after that, the cost of those shares and the gain when you sell them are
+flagged as well.
 
 For an in-kind transfer, provide the market price explicitly:
 

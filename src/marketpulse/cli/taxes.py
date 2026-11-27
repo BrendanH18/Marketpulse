@@ -223,7 +223,9 @@ def _check_options(
 @click.option("--superficial", is_flag=True, help="Only dispositions with a superficial loss.")
 @click.option("--min-gain", type=float, callback=_finite_amount, help="Only dispositions with allowed gain >= AMOUNT.")
 @click.option("--max-gain", type=float, callback=_finite_amount, help="Only dispositions with allowed gain <= AMOUNT.")
-@click.option("--incomplete", is_flag=True, help="Only dispositions missing an FX rate (left out of totals).")
+@click.option(
+    "--incomplete", is_flag=True, help="Only dispositions that depend on a missing FX rate (left out of totals)."
+)
 @click.option("--sort", "sort_by", type=click.Choice(SORTS, case_sensitive=False), help="Order dispositions.")
 @click.option("--descending", is_flag=True, help="Reverse the order (date order without --sort).")
 @click.option("--count", "count_only", is_flag=True, help="Print only the number of matching dispositions.")
