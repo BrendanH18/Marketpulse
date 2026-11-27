@@ -455,6 +455,130 @@ def test_same_day_split_rows_in_two_accounts_are_one_split_whatever_their_order(
     assert d.denied == pytest.approx(20)
 
 
+# A sale between the days two accounts post one split (#243). Questrade and Wealthsimple each
+# hold 100 units bought at 10: a pool of 200 units costing 2,000. The 2-for-1 split is posted
+# by Questrade on 03-01 and by Wealthsimple on 03-04. In post-split units the pool is 400 units
+# at 5 each throughout.
+def _staggered(*rows):
+    return [
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10),
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10, account=WS),
+        txn(TxnType.SPLIT, "2024-03-01", ratio=2),
+        txn(TxnType.SPLIT, "2024-03-04", ratio=2, account=WS),
+        *rows,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("day", "account", "qty", "acb"),
+    [
+        # Before either posting, both holdings are pre-split: 100 of 200 units, 1,000. Unchanged.
+        ("2024-02-28", QT, 100, 1000),
+        # Between the postings, 100 post-split Questrade units are 100 of 400 comparable units:
+        # 500. Counting recorded units (Questrade 200 + Wealthsimple 100) gave 2,000 x 100 / 300.
+        ("2024-03-02", QT, 100, 500),
+        # 50 pre-split Wealthsimple units are 100 post-split units: also 500. Counted as
+        # recorded, they took 2,000 x 50 / 300 = 333.33.
+        ("2024-03-02", WS, 50, 500),
+        # On the day of Wealthsimple's row its split comes first: 100 of 400 units. Unchanged.
+        ("2024-03-04", QT, 100, 500),
+    ],
+)
+def test_a_sale_between_two_postings_of_one_split_uses_comparable_units(day, account, qty, acb):
+    report = run(_staggered(txn(TxnType.SELL, day, qty=qty, price=4, account=account)))
+    (d,) = report.dispositions
+    assert d.acb == pytest.approx(acb)
+    assert d.proceeds == pytest.approx(qty * 4)
+    assert d.denied == 0  # nothing bought in the window
+    # What is left is 2,000 - acb, and every unit held after both postings costs 5.
+    pool = report.pools["X"]
+    assert pool.acb == pytest.approx(2000 - acb)
+    assert pool.acb_per_unit == pytest.approx(5)
+
+
+def test_the_issue_example_and_a_later_sale_of_the_rest():
+    report = run(
+        _staggered(
+            txn(TxnType.SELL, "2024-03-02", qty=100, price=4),
+            txn(TxnType.SELL, "2024-06-03", qty=100, price=6),
+            txn(TxnType.SELL, "2024-06-03", qty=200, price=6, account=WS),
+        )
+    )
+    between, *rest = report.dispositions
+    # #243: ACB 500 and a 100 loss, where recorded units gave ACB 666.67 and a 266.67 loss.
+    assert between.acb == pytest.approx(500) and between.gain == pytest.approx(-100)
+    # The other 300 units carry the other 1,500 of cost, 5 each, so the pool's cost is used once.
+    assert [d.acb for d in rest] == [pytest.approx(500), pytest.approx(1000)]
+    assert sum(d.acb for d in report.dispositions) == pytest.approx(2000)
+    assert report.pools == {}
+
+
+def test_a_transfer_into_a_tfsa_between_postings_uses_comparable_units():
+    report = run(_staggered(txn(TxnType.TRANSFER, "2024-03-02", qty=100, price=4, target_account_id=TFSA)))
+    (d,) = report.dispositions
+    assert d.kind == "deemed" and d.acb == pytest.approx(500)  # recorded units gave 666.67
+    assert d.denied == pytest.approx(100)  # the loss on a move into a TFSA is denied outright
+
+
+@pytest.mark.parametrize("exit_row", ["sell", "transfer"])
+def test_selling_all_units_before_the_accounts_own_split_row_uses_comparable_units(exit_row):
+    # Wealthsimple disposes of all 100 of its pre-split units on 03-02, then records the split on
+    # 03-04 with nothing left. The ledger ignores that row, but the units were pre-split: 200 of
+    # 400 comparable units, so ACB 1,000. Without the row, 100 of 300 recorded units gave 666.67.
+    exit = (
+        txn(TxnType.SELL, "2024-03-02", qty=100, price=4, account=WS)
+        if exit_row == "sell"
+        else txn(TxnType.TRANSFER, "2024-03-02", qty=100, price=4, account=WS, target_account_id=TFSA)
+    )
+    report = run(_staggered(exit))
+    (d,) = report.dispositions
+    assert d.acb == pytest.approx(1000)
+    pool = report.pools["X"]  # Questrade's 200 post-split units keep the other 1,000
+    assert pool.acb == pytest.approx(1000) and pool.acb_per_unit == pytest.approx(5)
+
+
+def test_an_ignored_split_row_after_buying_post_split_units_changes_nothing():
+    # Wealthsimple held none when Questrade recorded the split, bought 100 post-split units at 5,
+    # sold them, and then recorded a split row with nothing held. Its units were post-split all
+    # along: 100 of the 300 comparable units (Questrade's 200 plus these), costing 1,000 + 500.
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10),
+        txn(TxnType.SPLIT, "2024-03-01", ratio=2),
+        txn(TxnType.BUY, "2024-03-02", qty=100, price=5, account=WS),
+        txn(TxnType.SELL, "2024-03-03", qty=100, price=5, account=WS),
+        txn(TxnType.SPLIT, "2024-03-04", ratio=2, account=WS),
+    ]
+    for ledger in (txns, txns[:-1]):
+        (d,) = run(ledger).dispositions
+        assert d.acb == pytest.approx(500)  # counting the row as a pending split gave 750
+
+
+@pytest.mark.parametrize(
+    ("arrival", "acb", "without_row"), [(TxnType.BUY, 1000, 2000 / 3), (TxnType.TRANSFER, 500, 500)]
+)
+def test_units_arriving_on_the_first_posting_date_follow_the_ledger_order(arrival, acb, without_row):
+    # Wealthsimple's 100 units arrive on 03-01, the day Questrade records the split. A buy comes
+    # before that day's split rows, so those units are pre-split, and an ignored Wealthsimple split
+    # row on 03-04 marks them so: 200 of 400 comparable units, 1,000 of the 2,000. A transfer from
+    # the TFSA comes after the split rows: post-split units, 100 of 300, so 500 of the 1,500.
+    if arrival is TxnType.BUY:
+        arrive = txn(TxnType.BUY, "2024-03-01", qty=100, price=10, account=WS)
+    else:
+        arrive = txn(TxnType.TRANSFER, "2024-03-01", qty=100, price=5, account=TFSA, target_account_id=WS)
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10),
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10, account=TFSA),
+        txn(TxnType.SPLIT, "2024-03-01", ratio=2),
+        txn(TxnType.SPLIT, "2024-03-01", ratio=2, account=TFSA),
+        arrive,
+        txn(TxnType.SELL, "2024-03-02", qty=100, price=5, account=WS),
+        txn(TxnType.SPLIT, "2024-03-04", ratio=2, account=WS),
+    ]
+    (d,) = run(txns).dispositions
+    assert d.acb == pytest.approx(acb)
+    assert run(txns[:-1]).dispositions[0].acb == pytest.approx(without_row)  # the row ignored, as before
+
+
 def test_a_split_row_in_an_account_holding_none_changes_nothing():
     txns = [
         txn(TxnType.BUY, "2024-01-01", qty=10, price=100),
