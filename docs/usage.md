@@ -203,7 +203,9 @@ The tax report implements:
   the split with its ratio in each account that held the shares at the time.
   Each account's shares follow its own split row, so a split your brokers post
   on different days counts once: rows with the same ratio up to 60 days apart
-  in different accounts are treated as one split.
+  in different accounts are treated as one split. If a security splits twice
+  with the same ratio within 60 days, record each split on the same day in
+  every account, or the estimate may match rows to the wrong split.
 - Deemed dispositions for supported in-kind transfers across taxable and
   registered accounts. Registered replacement purchases can permanently deny a loss.
 

@@ -449,7 +449,8 @@ def test_same_day_split_rows_in_two_accounts_are_one_split_whatever_their_order(
     #   P = 20 Wealthsimple units bought after the first split / 2 = 10
     #   B = (240 Questrade + 40 Wealthsimple) / 4 = 70
     #   denied = 80 x min(40, 10, 70) / 40 = 20
-    # Matching Wealthsimple's row to the first split, when it came first, gave P = 20 and 40.
+    # The earlier code matched Wealthsimple's row to the first split when it came first,
+    # which gave P = 20 and a denied loss of 40.
     assert (d.acquired_in_window, d.held_after_window) == (10, 70)
     assert d.denied == pytest.approx(20)
 
