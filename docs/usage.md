@@ -205,7 +205,11 @@ The tax report implements:
   on different days counts once: rows with the same ratio up to 60 days apart
   in different accounts are treated as one split. If a security splits twice
   with the same ratio within 60 days, record each split on the same day in
-  every account, or the estimate may match rows to the wrong split.
+  every account, or the estimate may match rows to the wrong split. The pooled
+  ACB itself still counts units as recorded, so a sale made between the days
+  two accounts post one split mixes pre- and post-split units in the average
+  cost. Record a split on the same day in every account (and on every linked
+  line) to keep that average exact.
 - Deemed dispositions for supported in-kind transfers across taxable and
   registered accounts. Registered replacement purchases can permanently deny a loss.
 
@@ -225,8 +229,9 @@ A sale of either line then uses the combined average cost of both, with each
 purchase converted at its own date's rate. Buying either line within 30 days of
 a loss on the other can make that loss superficial. Units of the two lines count
 one for one, and splits and transfers stay with the line they're recorded on.
-Record a split on each line you hold, with its ratio; the same split recorded on
-different days for the two lines counts once.
+Record a split on each line you hold, with its ratio. The same split recorded on
+different days for the two lines counts once for superficial losses, but use one
+date for both so a sale in between gets an exact pooled cost.
 The T1135 estimate shows a linked pool once, under the second symbol (the pool),
 and decides whether it is foreign from that symbol and its `asset foreign` setting.
 
