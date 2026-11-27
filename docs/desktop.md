@@ -259,9 +259,18 @@ Edits and deletes send the activity row's `revision` (`txn edit --revision`, `tx
 changed since it was loaded" instead of being overwritten; refresh and try again.
 
 Each activity row also carries `fx_rate`: the rate the broker charged (CAD per unit), recorded with
-`--fx-rate` in the CLI or the terminal app, or `null`. The Mac app doesn't show or edit it
-yet; an edit made in the app keeps it, since `txn edit` only changes the fields it is given, and
-an edit that changes the entry's currency is refused until the rate is changed or removed.
+`--fx-rate`, or `null`. Activity shows it in its **FX rate** column ("1.3612 CAD per USD"), and
+the delete confirmation names it.
+
+The transaction form has an optional **FX rate to CAD** field for a buy, sell, DRIP, deposit,
+withdrawal, in-kind transfer or return of capital whose currency isn't CAD (it shows while the
+currency is blank, since a US listing is in USD). Enter the rate from the broker's confirmation,
+in CAD per unit of the transaction currency; it is sent as `--fx-rate`, and
+[used in CAD calculations](usage.md#the-fx-rate-your-broker-charged). A rate needs a currency
+typed in, so the form knows what it converts. Editing a buy, sell, deposit or withdrawal always
+sends the field: clearing it, or changing the currency to CAD, removes the recorded rate (`--fx-rate
+""`). Changing the currency while keeping the old rate is refused in the form, since that rate is
+for the old currency: enter a new one or clear it.
 
 For clients using the CLI, transaction commands accept `--request-id <uuid>`;
 `marketpulse desktop transaction-status <uuid>` returns `recorded` and `transaction_id`
