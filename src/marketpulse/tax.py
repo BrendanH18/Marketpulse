@@ -36,6 +36,8 @@ so and `marketpulse tax` prints it):
   CAD and USD lines, or a share cross-listed in Toronto and New York) then
   share one pool, and a purchase of either line counts for superficial losses.
   Linked units are treated as interchangeable one for one.
+- A split recorded on different days in two holdings (accounts or linked lines) is one split
+  (see `_split_events`): a disposition between those days takes its cost in post-split units.
 - ACB increases from non-cash distributions and T3 adjustments are entered manually.
 - Superficial losses are computed with CRA's proportional formula; see
   `_superficial_denial` for the exact rule and its approximations.
@@ -150,11 +152,20 @@ class AcbPool:
     def held(self, account_id: int, symbol: str) -> float:
         return self.holdings.get((account_id, symbol), 0.0)
 
-    def remove(self, account_id: int, symbol: str, quantity: float) -> float:
+    def remove(
+        self, account_id: int, symbol: str, quantity: float, scale: Mapping[tuple[int, str], float] | None = None
+    ) -> float:
         """Take `quantity` units of `symbol` out of `account_id` at the pooled
-        average cost and return the ACB that leaves with them."""
-        total = self.quantity
-        share = self.acb * (quantity / total) if total > EPSILON else 0.0
+        average cost and return the ACB that leaves with them.
+
+        `scale` puts holdings in comparable units: comparable units per recorded unit of each
+        (account, symbol) not listed are 1. It is set while one split has been recorded in some
+        holdings and not yet in others (see `_pending_splits`), so the average cost isn't taken
+        over a mix of pre- and post-split units. The holdings themselves change by `quantity`."""
+        scale = scale or {}
+        total = sum(q * scale.get(h, 1.0) for h, q in self.holdings.items() if q > EPSILON)
+        units = quantity * scale.get((account_id, symbol), 1.0)
+        share = self.acb * (units / total) if total > EPSILON else 0.0
         self.holdings[(account_id, symbol)] -= quantity
         self.acb -= share
         if self.quantity <= EPSILON:
@@ -232,6 +243,12 @@ def compute(
             p.incomplete |= p.pending_incomplete
             p.pending_denied, p.pending_incomplete = 0.0, False
 
+    staggered = _staggered_splits(ordered, accounts, key)
+
+    def comparable(p: AcbPool, day: str) -> dict[tuple[int, str], float] | None:
+        """The scale that puts `p`'s holdings in comparable units for a disposition on `day`."""
+        return _pending_splits(staggered.get(p.symbol, ()), day)
+
     p: AcbPool | None  # the pool a transaction acts on (lookups may find none)
     day = ""  # the ledger date being replayed
     for txn in ordered:
@@ -261,7 +278,7 @@ def compute(
                 continue
             fx = rate(txn, ccy)
             complete = fx is not None and not p.incomplete
-            acb = p.remove(txn.account_id, txn.symbol, qty)
+            acb = p.remove(txn.account_id, txn.symbol, qty, comparable(p, txn.date))
             proceeds = (qty * txn.price - txn.fees) * (fx or 0.0)
             d = Disposition(txn.date, txn.account_id, txn.symbol, qty, proceeds, acb, ccy, fx, txn.id, "sale", complete)
             d.pool = p.symbol
@@ -320,7 +337,7 @@ def compute(
                 )
 
         elif t is TxnType.TRANSFER and txn.target_account_id is not None:
-            _transfer(txn, ccy, taxable, accounts, pools.get(key(txn.symbol)), pool, acquire, rate, report)
+            _transfer(txn, ccy, taxable, accounts, pools.get(key(txn.symbol)), pool, acquire, rate, comparable, report)
 
     if on_day is not None and day:
         on_day(day, pools)
@@ -340,6 +357,7 @@ def _transfer(
     pool: Callable[[str], AcbPool],
     acquire: Callable[[AcbPool, int, str, float, float, bool], None],
     rate: Callable[[Transaction, str], float | None],  # the transaction's rate: recorded, else looked up
+    comparable: Callable[[AcbPool, str], Mapping[tuple[int, str], float] | None],  # see `AcbPool.remove`
     report: TaxReport,
 ) -> None:
     """Move shares between accounts. What that means for tax depends on which
@@ -375,7 +393,7 @@ def _transfer(
         if p is None or qty <= EPSILON:
             return
         complete = fx is not None and not p.incomplete
-        acb = p.remove(txn.account_id, sym, qty)
+        acb = p.remove(txn.account_id, sym, qty, comparable(p, txn.date))
         if not priced:
             report.issues.append(
                 LedgerIssue(
@@ -569,6 +587,52 @@ def _split_events(applied: Sequence[Transaction]) -> list[_SplitEvent]:
                 events.append(event)
             event.rows.update(dict.fromkeys(holdings, day))
     return events
+
+
+def _applied_splits(ordered: Sequence[Transaction], accounts: dict[int, Account]) -> list[Transaction]:
+    """The split rows the ledger applies, in ledger order: a row in a holding with nothing held
+    changes nothing, so it is left out."""
+    state = LedgerState()
+    applied = []
+    for t in ordered:
+        if t.type is TxnType.SPLIT:
+            h = state.holdings.get((t.account_id, t.symbol))
+            if h is not None and h.quantity > EPSILON:
+                applied.append(t)
+        _apply(state, t, accounts)
+    return applied
+
+
+def _staggered_splits(
+    ordered: Sequence[Transaction], accounts: dict[int, Account], key: Callable[[str], str]
+) -> dict[str, list[_SplitEvent]]:
+    """Splits recorded on more than one date, by pool: the only ones a disposition can fall between."""
+    if not any(t.type is TxnType.SPLIT for t in ordered):
+        return {}
+    by_pool: dict[str, list[Transaction]] = defaultdict(list)
+    for t in _applied_splits(ordered, accounts):
+        by_pool[key(t.symbol)].append(t)
+    staggered = {
+        pool: [e for e in _split_events(rows) if len(set(e.rows.values())) > 1] for pool, rows in by_pool.items()
+    }
+    return {pool: events for pool, events in staggered.items() if events}
+
+
+def _pending_splits(events: Sequence[_SplitEvent], day: str) -> dict[tuple[int, str], float] | None:
+    """Comparable (post-split) units per recorded unit of each holding still waiting on a split
+    that another holding has already recorded, for a disposition on `day`.
+
+    The ledger applies a split row before a sale or transfer on the same day, so a holding whose
+    row is dated `day` is already in post-split units. A holding with no row for a split held none
+    when it happened (as in `_superficial_denial`), so its units are post-split already."""
+    scale: dict[tuple[int, str], float] = {}
+    for e in events:
+        if e.first > day:
+            continue
+        for holding, own in e.rows.items():
+            if own > day:
+                scale[holding] = scale.get(holding, 1.0) * e.ratio
+    return scale or None
 
 
 def _attach_denied_loss(d: Disposition, p: AcbPool, taxable_fraction: float) -> None:

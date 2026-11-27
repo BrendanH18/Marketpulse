@@ -455,6 +455,71 @@ def test_same_day_split_rows_in_two_accounts_are_one_split_whatever_their_order(
     assert d.denied == pytest.approx(20)
 
 
+# A sale between the days two accounts post one split (#243). Questrade and Wealthsimple each
+# hold 100 units bought at 10: a pool of 200 units costing 2,000. The 2-for-1 split is posted
+# by Questrade on 03-01 and by Wealthsimple on 03-04. In post-split units the pool is 400 units
+# at 5 each throughout.
+def _staggered(*rows):
+    return [
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10),
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10, account=WS),
+        txn(TxnType.SPLIT, "2024-03-01", ratio=2),
+        txn(TxnType.SPLIT, "2024-03-04", ratio=2, account=WS),
+        *rows,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("day", "account", "qty", "acb"),
+    [
+        # Before either posting, both holdings are pre-split: 100 of 200 units, 1,000. Unchanged.
+        ("2024-02-28", QT, 100, 1000),
+        # Between the postings, 100 post-split Questrade units are 100 of 400 comparable units:
+        # 500. Counting recorded units (Questrade 200 + Wealthsimple 100) gave 2,000 x 100 / 300.
+        ("2024-03-02", QT, 100, 500),
+        # 50 pre-split Wealthsimple units are 100 post-split units: also 500. Counted as
+        # recorded, they took 2,000 x 50 / 300 = 333.33.
+        ("2024-03-02", WS, 50, 500),
+        # On the day of Wealthsimple's row its split comes first: 100 of 400 units. Unchanged.
+        ("2024-03-04", QT, 100, 500),
+    ],
+)
+def test_a_sale_between_two_postings_of_one_split_uses_comparable_units(day, account, qty, acb):
+    report = run(_staggered(txn(TxnType.SELL, day, qty=qty, price=4, account=account)))
+    (d,) = report.dispositions
+    assert d.acb == pytest.approx(acb)
+    assert d.proceeds == pytest.approx(qty * 4)
+    assert d.denied == 0  # nothing bought in the window
+    # What is left is 2,000 - acb, and every unit held after both postings costs 5.
+    pool = report.pools["X"]
+    assert pool.acb == pytest.approx(2000 - acb)
+    assert pool.acb_per_unit == pytest.approx(5)
+
+
+def test_the_issue_example_and_a_later_sale_of_the_rest():
+    report = run(
+        _staggered(
+            txn(TxnType.SELL, "2024-03-02", qty=100, price=4),
+            txn(TxnType.SELL, "2024-06-03", qty=100, price=6),
+            txn(TxnType.SELL, "2024-06-03", qty=200, price=6, account=WS),
+        )
+    )
+    between, *rest = report.dispositions
+    # #243: ACB 500 and a 100 loss, where recorded units gave ACB 666.67 and a 266.67 loss.
+    assert between.acb == pytest.approx(500) and between.gain == pytest.approx(-100)
+    # The other 300 units carry the other 1,500 of cost, 5 each, so the pool's cost is used once.
+    assert [d.acb for d in rest] == [pytest.approx(500), pytest.approx(1000)]
+    assert sum(d.acb for d in report.dispositions) == pytest.approx(2000)
+    assert report.pools == {}
+
+
+def test_a_transfer_into_a_tfsa_between_postings_uses_comparable_units():
+    report = run(_staggered(txn(TxnType.TRANSFER, "2024-03-02", qty=100, price=4, target_account_id=TFSA)))
+    (d,) = report.dispositions
+    assert d.kind == "deemed" and d.acb == pytest.approx(500)  # recorded units gave 666.67
+    assert d.denied == pytest.approx(100)  # the loss on a move into a TFSA is denied outright
+
+
 def test_a_split_row_in_an_account_holding_none_changes_nothing():
     txns = [
         txn(TxnType.BUY, "2024-01-01", qty=10, price=100),

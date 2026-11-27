@@ -148,6 +148,29 @@ def test_one_split_dated_differently_on_each_line_is_one_split():
     assert after.issues == []
 
 
+def test_a_sale_between_the_split_dates_of_two_lines_uses_comparable_units():
+    # The example in #243: two linked lines hold 100 units each, costing 2,000 together. The
+    # 2-for-1 split is recorded on 03-01 for the CAD line and on 03-04 for the USD line.
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", CAD_LINE, 100, 10),
+        txn(TxnType.BUY, "2024-01-02", USD_LINE, 100, 10, ccy="CAD"),
+        txn(TxnType.SPLIT, "2024-03-01", CAD_LINE, ratio=2),
+        txn(TxnType.SELL, "2024-03-02", CAD_LINE, 100, 4),
+        txn(TxnType.SPLIT, "2024-03-04", USD_LINE, ratio=2),
+    ]
+    before, after = both(txns)
+    # Unlinked, the CAD line is its own pool: 100 of 200 units, ACB 500.
+    (d,) = before.dispositions
+    assert d.acb == pytest.approx(500)
+    # Linked, the USD line still holds 100 pre-split units, 200 post-split. In comparable units the
+    # sale is 100 of 400: ACB 500 and a 100 loss. Counting recorded units, 100 of 300, gave
+    # ACB 666.67 and a 266.67 loss.
+    (d,) = after.dispositions
+    assert d.acb == pytest.approx(500) and d.gain == pytest.approx(-100)
+    (pool,) = after.pools.values()
+    assert pool.quantity == pytest.approx(300) and pool.acb == pytest.approx(1500)
+
+
 def test_a_sale_never_takes_units_of_the_other_line():
     # The account holds 100 of each line; selling 150 of the CAD line only finds its 100.
     txns = [
