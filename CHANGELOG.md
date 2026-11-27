@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Mac Activity shows both account names on ordinary transfers at the default window size, with the full names available on hover for longer entries.
 - Terminal forms scroll to the full error message after a failed save, including in short windows.
 - New backups written with `backup now PATH` have owner-only file permissions.
 - Mac refreshes and scheduled automation runs wait for any active cycle on the same ledger, preventing overlapping runs from taking duplicate daily backups.

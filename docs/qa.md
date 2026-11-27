@@ -300,7 +300,11 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     disabled until it has a price. Enter Quantity 99 and price 230, then save: the sheet
     says "Not recorded: on <date>, transfer of 99.0000 AAPL exceeds … held." Set Quantity
     to 1 and save: Activity shows "Transfer · AAPL · Spending → Everyday TFSA ·
-    230.00 USD" with no sign, and Holdings lists 1 AAPL in Everyday TFSA. Record a
+    230.00 USD" with no sign, and Holdings lists 1 AAPL in Everyday TFSA. Temporarily rename
+    Spending back to Cash Account and check that "Cash Account → Everyday TFSA" fits at
+    the default window size. Check a populated FX rate and a short note are readable
+    there too. Give the source account a name long enough to be truncated, then hover
+    over the Account cell to see the full transfer text. Restore the Spending name. Record a
     **Reinvested dividend (DRIP)** in Everyday TFSA of 0.5 `XEQT.TO` at 31: Activity shows
     "DRIP" and 15.50 CAD with no sign. Record a **Stock split** of XEQT.TO in Everyday TFSA:
     with 1 and 1, Save is disabled; with 2 and 1, the caption says what the current
