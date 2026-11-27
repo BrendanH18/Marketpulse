@@ -433,6 +433,27 @@ def test_one_split_recorded_on_different_dates_in_two_accounts_counts_once():
     assert report.pools["X"].acb == pytest.approx(400 + 100 + 400)
 
 
+@pytest.mark.parametrize("questrade_row_first", [True, False])
+def test_same_day_split_rows_in_two_accounts_are_one_split_whatever_their_order(questrade_row_first):
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10),
+        txn(TxnType.SELL, "2024-02-20", qty=40, price=8),  # ACB 400, proceeds 320: an 80 loss
+        txn(TxnType.SPLIT, "2024-03-01", ratio=2),  # the first of two 2-for-1 splits
+        txn(TxnType.BUY, "2024-03-05", qty=20, price=5, account=WS),  # Wealthsimple held none on 03-01
+    ]
+    # The ledger orders same-day rows by id, so create them in the order under test.
+    accounts = [QT, WS] if questrade_row_first else [WS, QT]
+    txns += [txn(TxnType.SPLIT, "2024-03-10", ratio=2, account=a) for a in accounts]
+    (d,) = run(txns).dispositions
+    # Both 03-10 rows are the second split. In sale-date units:
+    #   P = 20 Wealthsimple units bought after the first split / 2 = 10
+    #   B = (240 Questrade + 40 Wealthsimple) / 4 = 70
+    #   denied = 80 x min(40, 10, 70) / 40 = 20
+    # Matching Wealthsimple's row to the first split, when it came first, gave P = 20 and 40.
+    assert (d.acquired_in_window, d.held_after_window) == (10, 70)
+    assert d.denied == pytest.approx(20)
+
+
 def test_a_split_row_in_an_account_holding_none_changes_nothing():
     txns = [
         txn(TxnType.BUY, "2024-01-01", qty=10, price=100),

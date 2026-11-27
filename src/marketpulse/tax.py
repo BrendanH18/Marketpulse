@@ -45,6 +45,7 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
+from itertools import groupby
 
 from .ledger import LedgerIssue, LedgerState, _apply, sort_key, transaction_currency
 from .models import EPSILON, Account, Asset, AssetClass, AssetKind, Transaction, TxnType
@@ -535,20 +536,30 @@ def _split_events(applied: Sequence[Transaction]) -> list[_SplitEvent]:
     """Group split rows the ledger applied, in ledger order, into splits of the security.
 
     Brokers can post one split on different days, and each account (or linked line) records it
-    on its own row. A row joins the latest split of the same ratio first recorded at most 60 days
-    earlier that its holding hasn't recorded yet; otherwise it starts a new split. Repeated rows
-    in one holding are successive splits, which compound."""
+    on its own row. Rows of the same ratio on the same day in different holdings are one split,
+    and repeated rows in one holding are successive splits, which compound. Each such group then
+    joins the latest split of the same ratio first recorded at most 60 days earlier that none of
+    its holdings has recorded yet; otherwise it starts a new split. Pairing same-day rows first
+    keeps the result independent of the order of rows within a day."""
     events: list[_SplitEvent] = []
-    for t in applied:
-        holding = (t.account_id, t.symbol)
-        earliest = (date.fromisoformat(t.date) - timedelta(days=2 * SUPERFICIAL_WINDOW_DAYS)).isoformat()
-        joinable = [e for e in events if e.ratio == t.ratio and holding not in e.rows and e.first >= earliest]
-        if joinable:
-            event = max(joinable, key=lambda e: e.first)
-        else:
-            event = _SplitEvent(t.ratio, t.date)
-            events.append(event)
-        event.rows[holding] = t.date
+    for day, rows in groupby(applied, key=lambda t: t.date):
+        same_day: list[tuple[float, set[tuple[int, str]]]] = []
+        for t in rows:
+            holding = (t.account_id, t.symbol)
+            group = next((g for g in same_day if g[0] == t.ratio and holding not in g[1]), None)
+            if group is None:
+                group = (t.ratio, set())
+                same_day.append(group)
+            group[1].add(holding)
+        earliest = (date.fromisoformat(day) - timedelta(days=2 * SUPERFICIAL_WINDOW_DAYS)).isoformat()
+        for ratio, holdings in same_day:
+            joinable = [e for e in events if e.ratio == ratio and e.first >= earliest and not holdings & e.rows.keys()]
+            if joinable:
+                event = max(joinable, key=lambda e: e.first)
+            else:
+                event = _SplitEvent(ratio, day)
+                events.append(event)
+            event.rows.update(dict.fromkeys(holdings, day))
     return events
 
 
