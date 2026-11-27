@@ -589,33 +589,47 @@ def _split_events(applied: Sequence[Transaction]) -> list[_SplitEvent]:
     return events
 
 
-def _applied_splits(ordered: Sequence[Transaction], accounts: dict[int, Account]) -> list[Transaction]:
-    """The split rows the ledger applies, in ledger order: a row in a holding with nothing held
-    changes nothing, so it is left out."""
-    state = LedgerState()
-    applied = []
-    for t in ordered:
-        if t.type is TxnType.SPLIT:
-            h = state.holdings.get((t.account_id, t.symbol))
-            if h is not None and h.quantity > EPSILON:
-                applied.append(t)
-        _apply(state, t, accounts)
-    return applied
-
-
 def _staggered_splits(
     ordered: Sequence[Transaction], accounts: dict[int, Account], key: Callable[[str], str]
 ) -> dict[str, list[_SplitEvent]]:
-    """Splits recorded on more than one date, by pool: the only ones a disposition can fall between."""
+    """Splits recorded on more than one date, by pool: the only ones a disposition can fall between.
+
+    The ledger ignores a split row in a holding with nothing held. One exception counts here: a
+    holding that sold or moved all its units after another holding recorded the split, then
+    recorded the split itself, held pre-split units when it disposed of them. That row joins
+    the split it belongs to, so the disposition is costed in comparable units."""
     if not any(t.type is TxnType.SPLIT for t in ordered):
         return {}
-    by_pool: dict[str, list[Transaction]] = defaultdict(list)
-    for t in _applied_splits(ordered, accounts):
-        by_pool[key(t.symbol)].append(t)
-    staggered = {
-        pool: [e for e in _split_events(rows) if len(set(e.rows.values())) > 1] for pool, rows in by_pool.items()
-    }
-    return {pool: events for pool, events in staggered.items() if events}
+    state = LedgerState()
+    applied: dict[str, list[Transaction]] = defaultdict(list)
+    emptied: list[tuple[Transaction, str]] = []  # (split row in an empty holding, the last day it held units)
+    last_held: dict[tuple[int, str], str] = {}
+    for t in ordered:
+        holding = (t.account_id, t.symbol)
+        h = state.holdings.get(holding)
+        held = h is not None and h.quantity > EPSILON
+        if t.type is TxnType.SPLIT:
+            if held:
+                applied[key(t.symbol)].append(t)
+            elif holding in last_held:
+                emptied.append((t, last_held[holding]))
+        if held:
+            last_held[holding] = t.date
+        _apply(state, t, accounts)
+    events = {pool: _split_events(rows) for pool, rows in applied.items()}
+    window = timedelta(days=2 * SUPERFICIAL_WINDOW_DAYS)
+    for t, held_on in emptied:
+        holding = (t.account_id, t.symbol)
+        earliest = (date.fromisoformat(t.date) - window).isoformat()
+        joinable = [
+            e
+            for e in events.get(key(t.symbol), ())
+            if e.ratio == t.ratio and earliest <= e.first <= held_on and holding not in e.rows
+        ]
+        if joinable:
+            max(joinable, key=lambda e: e.first).rows[holding] = t.date
+    staggered = {pool: [e for e in found if len(set(e.rows.values())) > 1] for pool, found in events.items()}
+    return {pool: found for pool, found in staggered.items() if found}
 
 
 def _pending_splits(events: Sequence[_SplitEvent], day: str) -> dict[tuple[int, str], float] | None:

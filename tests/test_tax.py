@@ -520,6 +520,23 @@ def test_a_transfer_into_a_tfsa_between_postings_uses_comparable_units():
     assert d.denied == pytest.approx(100)  # the loss on a move into a TFSA is denied outright
 
 
+@pytest.mark.parametrize("exit_row", ["sell", "transfer"])
+def test_selling_all_units_before_the_accounts_own_split_row_uses_comparable_units(exit_row):
+    # Wealthsimple disposes of all 100 of its pre-split units on 03-02, then records the split on
+    # 03-04 with nothing left. The ledger ignores that row, but the units were pre-split: 200 of
+    # 400 comparable units, so ACB 1,000. Without the row, 100 of 300 recorded units gave 666.67.
+    exit = (
+        txn(TxnType.SELL, "2024-03-02", qty=100, price=4, account=WS)
+        if exit_row == "sell"
+        else txn(TxnType.TRANSFER, "2024-03-02", qty=100, price=4, account=WS, target_account_id=TFSA)
+    )
+    report = run(_staggered(exit))
+    (d,) = report.dispositions
+    assert d.acb == pytest.approx(1000)
+    pool = report.pools["X"]  # Questrade's 200 post-split units keep the other 1,000
+    assert pool.acb == pytest.approx(1000) and pool.acb_per_unit == pytest.approx(5)
+
+
 def test_a_split_row_in_an_account_holding_none_changes_nothing():
     txns = [
         txn(TxnType.BUY, "2024-01-01", qty=10, price=100),
