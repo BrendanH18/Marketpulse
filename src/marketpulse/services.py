@@ -41,6 +41,7 @@ from .models import (
     Alert,
     AssetClass,
     AssetKind,
+    CodedError,
     FxRates,
     Quote,
     Transaction,
@@ -188,6 +189,15 @@ class Tracker:
             if self.store.get_account(txn.account_id) is None:
                 raise ValueError("Unknown account.")
             before = self._stored(txn_id, revision)
+            stored = next(t for t in before if t.id == txn_id)
+            if stored.fx_rate is not None and txn.fx_rate == stored.fx_rate and txn.currency != stored.currency:
+                # A recorded rate is per unit of the entry's currency, so it can't follow it to another one.
+                raise CodedError(
+                    f"Transaction #{txn_id} has an FX rate for {stored.currency}, and this edit changes its "
+                    f"currency to {txn.currency}. Enter a new rate, or remove it.",
+                    "fx_rate_currency_changed",
+                    {"from": stored.currency, "to": txn.currency},
+                )
             self._refuse_new_issues(before, [txn if t.id == txn_id else t for t in before], txn_id, "saved")
             self.store.update_transaction(txn)
         return txn

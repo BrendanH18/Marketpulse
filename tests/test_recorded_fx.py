@@ -286,6 +286,29 @@ def test_a_rate_on_an_entry_in_cad_is_refused(tracker, store):
     usd.add_transaction(_trade(acct, TxnType.BUY, "2025-01-02", 100, fx_rate=1.36))
 
 
+def test_an_edit_cant_carry_a_rate_to_another_currency(tracker, store):
+    """The TUI and Mac app save through the tracker, so it refuses what `txn edit` does."""
+    acct = _taxable(store)
+    tfsa = store.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA))
+    deposit = tracker.add_transaction(
+        Transaction(tfsa.saved_id, TxnType.DEPOSIT, "2025-01-02", amount=1000, currency="USD", fx_rate=1.38)
+    )
+    deposit.currency = "EUR"
+    with pytest.raises(CodedError, match="has an FX rate for USD") as e:
+        tracker.update_transaction(deposit)
+    assert e.value.code == "fx_rate_currency_changed" and e.value.details == {"from": "USD", "to": "EUR"}
+    assert [(t.currency, t.fx_rate) for t in store.transactions()] == [("USD", 1.38)]
+    # A new rate, or none, goes with the new currency; other edits keep the rate.
+    for rate in (1.52, None):
+        deposit.fx_rate = rate
+        tracker.update_transaction(deposit)
+        assert [(t.currency, t.fx_rate) for t in store.transactions()] == [("EUR", rate)]
+    buy = tracker.add_transaction(_trade(acct, TxnType.BUY, "2025-01-02", 100, fx_rate=1.3))
+    buy.note = "fictional"
+    tracker.update_transaction(buy)
+    assert store.transactions()[-1].fx_rate == 1.3
+
+
 # ── CSV ───────────────────────────────────────────────────────────────────────
 
 CSV = """date,account,type,symbol,quantity,price,currency,fx_rate
