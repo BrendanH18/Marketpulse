@@ -553,6 +553,32 @@ def test_an_ignored_split_row_after_buying_post_split_units_changes_nothing():
         assert d.acb == pytest.approx(500)  # counting the row as a pending split gave 750
 
 
+@pytest.mark.parametrize(
+    ("arrival", "acb", "without_row"), [(TxnType.BUY, 1000, 2000 / 3), (TxnType.TRANSFER, 500, 500)]
+)
+def test_units_arriving_on_the_first_posting_date_follow_the_ledger_order(arrival, acb, without_row):
+    # Wealthsimple's 100 units arrive on 03-01, the day Questrade records the split. A buy comes
+    # before that day's split rows, so those units are pre-split, and an ignored Wealthsimple split
+    # row on 03-04 marks them so: 200 of 400 comparable units, 1,000 of the 2,000. A transfer from
+    # the TFSA comes after the split rows: post-split units, 100 of 300, so 500 of the 1,500.
+    if arrival is TxnType.BUY:
+        arrive = txn(TxnType.BUY, "2024-03-01", qty=100, price=10, account=WS)
+    else:
+        arrive = txn(TxnType.TRANSFER, "2024-03-01", qty=100, price=5, account=TFSA, target_account_id=WS)
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10),
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10, account=TFSA),
+        txn(TxnType.SPLIT, "2024-03-01", ratio=2),
+        txn(TxnType.SPLIT, "2024-03-01", ratio=2, account=TFSA),
+        arrive,
+        txn(TxnType.SELL, "2024-03-02", qty=100, price=5, account=WS),
+        txn(TxnType.SPLIT, "2024-03-04", ratio=2, account=WS),
+    ]
+    (d,) = run(txns).dispositions
+    assert d.acb == pytest.approx(acb)
+    assert run(txns[:-1]).dispositions[0].acb == pytest.approx(without_row)  # the row ignored, as before
+
+
 def test_a_split_row_in_an_account_holding_none_changes_nothing():
     txns = [
         txn(TxnType.BUY, "2024-01-01", qty=10, price=100),

@@ -602,9 +602,11 @@ def _staggered_splits(
         return {}
     state = LedgerState()
     applied: dict[str, list[Transaction]] = defaultdict(list)
-    # (split row in an empty holding, the day its last units were acquired, the last day it held units)
-    emptied: list[tuple[Transaction, str, str]] = []
-    opened: dict[tuple[int, str], str] = {}  # the day each holding last went from none held to some
+    # (split row in an empty holding, where its last units were acquired, the last day it held units)
+    emptied: list[tuple[Transaction, tuple[str, int], str]] = []
+    # Where each holding last went from none held to some: (date, same-day order), as `sort_key` orders
+    # rows, since units that arrive on a split's date after the split rows are already post-split.
+    opened: dict[tuple[int, str], tuple[str, int]] = {}
     last_held: dict[tuple[int, str], str] = {}
 
     def holds(holding: tuple[int, str]) -> bool:
@@ -625,7 +627,7 @@ def _staggered_splits(
         _apply(state, t, accounts)
         for h, was in zip(touched, before, strict=True):
             if not was and holds(h):
-                opened[h] = t.date
+                opened[h] = sort_key(t)[:2]
     events = {pool: _split_events(rows) for pool, rows in applied.items()}
     window = timedelta(days=2 * SUPERFICIAL_WINDOW_DAYS)
     for t, opened_on, held_on in emptied:
@@ -634,7 +636,10 @@ def _staggered_splits(
         joinable = [
             e
             for e in events.get(key(t.symbol), ())
-            if e.ratio == t.ratio and max(earliest, opened_on) <= e.first <= held_on and holding not in e.rows
+            if e.ratio == t.ratio
+            and earliest <= e.first <= held_on
+            and opened_on < (e.first, sort_key(t)[1])  # held units before the first posting applied
+            and holding not in e.rows
         ]
         if joinable:
             max(joinable, key=lambda e: e.first).rows[holding] = t.date
