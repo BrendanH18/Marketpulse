@@ -406,6 +406,51 @@ def test_multiple_same_day_splits_in_one_account_are_each_counted():
     assert report.pools["X"].acb == pytest.approx(400 + 100)
 
 
+def test_one_split_recorded_on_different_dates_in_two_accounts_counts_once():
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10),
+        txn(TxnType.BUY, "2024-01-02", qty=40, price=10, account=WS),
+        txn(TxnType.BUY, "2024-01-02", qty=20, price=10, account=TFSA),
+        # Pool: 140 taxable units costing 1,400. The sale: ACB 1,000, proceeds 800, a 200 loss.
+        txn(TxnType.SELL, "2024-03-01", qty=100, price=8),
+        # One 2-for-1 split, which Wealthsimple records on 03-05 and the TFSA on 03-08.
+        txn(TxnType.SPLIT, "2024-03-05", ratio=2, account=WS),
+        txn(TxnType.BUY, "2024-03-06", qty=10, price=10, account=TFSA),  # before the TFSA's split row
+        txn(TxnType.SPLIT, "2024-03-08", ratio=2, account=TFSA),
+        txn(TxnType.BUY, "2024-03-20", qty=100, price=4),  # post-split: 50 sale-date units
+    ]
+    report = run(txns)
+    (d,) = report.dispositions
+    # In sale-date (pre-split) units, each holding converted by its own split row:
+    #   P = 100 / 2 (Questrade, after the split) + 10 (TFSA, before its row) = 60
+    #   B = (100 Questrade + 80 Wealthsimple + 60 TFSA) / 2 = 120 at the end of day +30
+    #   denied = 200 x min(100, 60, 120) / 100 = 120
+    # Counting each row as its own split (x4) gave P = 30, B = 60 and denied 60.
+    assert (d.acquired_in_window, d.held_after_window) == (60, 120)
+    assert d.denied == pytest.approx(120)
+    # 50 of the 60 replacement units are taxable: 100 of the 120 joins the pool's cost,
+    # which is Wealthsimple's 400 + 100 + Questrade's 400 replacement purchase.
+    assert report.pools["X"].acb == pytest.approx(400 + 100 + 400)
+
+
+def test_a_split_row_in_an_account_holding_none_changes_nothing():
+    txns = [
+        txn(TxnType.BUY, "2024-01-01", qty=10, price=100),
+        txn(TxnType.SELL, "2024-03-01", qty=10, price=80),  # a 200 loss
+        txn(TxnType.BUY, "2024-03-15", qty=5, price=80),
+    ]
+    stray = txn(TxnType.SPLIT, "2024-03-08", ratio=2, account=WS)
+    assert [i.message for i in replay([*txns, stray], ACCOUNTS).issues] == ["Split of X with nothing held"]
+    # Five of the ten units sold were bought back and still held: half the loss is denied,
+    # with or without the stray row (which used to halve the five to 2.5 and deny 50).
+    for ledger in (txns, [*txns, stray]):
+        report = run(ledger)
+        (d,) = report.dispositions
+        assert (d.acquired_in_window, d.held_after_window) == (5, 5)
+        assert d.denied == pytest.approx(100)
+        assert report.pools["X"].acb == pytest.approx(400 + 100)
+
+
 def test_rebuying_in_a_tfsa_denies_the_loss_permanently():
     txns = [
         txn(TxnType.BUY, "2024-01-01", qty=10, price=100),

@@ -118,27 +118,34 @@ def test_split_rows_for_each_line_in_one_account_are_one_split():
     assert after.pools[CAD_LINE].holdings == {(QT, CAD_LINE): pytest.approx(0), (QT, USD_LINE): pytest.approx(100)}
 
 
-def test_one_split_dated_differently_on_each_line_is_flagged():
+def test_one_split_dated_differently_on_each_line_is_one_split():
     txns = [
         txn(TxnType.BUY, "2024-01-02", CAD_LINE, 100, 10),
         txn(TxnType.BUY, "2024-01-02", USD_LINE, 100, 10, account=WS),
+        # Pool: 200 units costing 2,000. The sale: ACB 500, proceeds 400, a 100 loss.
+        txn(TxnType.SELL, "2024-02-20", CAD_LINE, 50, 8),
+        # One 2-for-1 split, recorded on 03-01 for the CAD line and on 03-04 for the USD line.
         txn(TxnType.SPLIT, "2024-03-01", CAD_LINE, ratio=2),
+        txn(TxnType.BUY, "2024-03-03", USD_LINE, 40, 8, account=WS),  # before the USD line's row
         txn(TxnType.SPLIT, "2024-03-04", USD_LINE, ratio=2, account=WS),
     ]
-    before, after = both(txns)
-    assert before.issues == []
-    (issue,) = after.issues
-    assert issue.date == "2024-03-04" and "linked FICT.TO 2024-03-01. If they are one split" in issue.message
-    # Both dates can fall in one sale's window: 30 days either side of it.
-    txns[3].date = "2024-04-10"
-    assert len(both(txns)[1].issues) == 1
-    # The same date on each line, as recorded for one split, raises nothing, even for two splits.
-    txns[3].date = "2024-03-01"
-    txns += [
-        txn(TxnType.SPLIT, "2024-04-10", CAD_LINE, ratio=2),
-        txn(TxnType.SPLIT, "2024-04-10", USD_LINE, ratio=2, account=WS),
-    ]
-    assert both(txns)[1].issues == []
+    before, after = both(txns, rates=lambda day, ccy: 1.0)
+    # Before: the CAD line alone, with nothing bought back in its window.
+    (d,) = before.dispositions
+    assert d.gain == pytest.approx(-100) and d.denied == 0
+    # After, in sale-date (pre-split) units, each line converted by its own split row:
+    #   P = 40 USD-line units bought before that line's row = 40
+    #   B = (100 CAD-line + 280 USD-line) / 2 = 190 at the end of day +30 (03-21)
+    #   denied = 100 x min(50, 40, 190) / 50 = 80
+    # Counting each row as its own split (x4) gave P = 20, B = 95 and denied 40.
+    (d,) = after.dispositions
+    assert d.gain == pytest.approx(-100)
+    assert (d.acquired_in_window, d.held_after_window) == (40, 190)
+    assert d.denied == pytest.approx(80)
+    # The pool's 1,500 after the sale, the 80 denied, and the 320 replacement purchase.
+    assert after.pools[CAD_LINE].acb == pytest.approx(1500 + 80 + 320)
+    # The split dates no longer need to match, so nothing is flagged.
+    assert after.issues == []
 
 
 def test_a_sale_never_takes_units_of_the_other_line():

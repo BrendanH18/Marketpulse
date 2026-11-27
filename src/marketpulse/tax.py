@@ -41,14 +41,12 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_right
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
-from itertools import groupby
-from math import prod
 
-from .ledger import LedgerIssue, replay, sort_key, transaction_currency
+from .ledger import LedgerIssue, LedgerState, _apply, sort_key, transaction_currency
 from .models import EPSILON, Account, Asset, AssetClass, AssetKind, Transaction, TxnType
 
 # (ISO date, currency) -> units of the base currency per 1 unit of `currency`
@@ -318,42 +316,7 @@ def compute(
     if on_day is not None and day:
         on_day(day, pools)
     report.pools = {s: p for s, p in pools.items() if p.quantity > EPSILON}
-    if identical:
-        report.issues += _staggered_linked_splits(ordered, key)
     return report
-
-
-def _staggered_linked_splits(ordered: Sequence[Transaction], key: Callable[[str], str]) -> list[LedgerIssue]:
-    """Flag a split that may be recorded on different dates for linked lines.
-
-    Superficial-loss checks treat a split row as the security splitting that day, so the same
-    split on another day for the other line is counted again. A row is flagged when a linked
-    line has no split of the same ratio that day, but has one close enough for both to fall in
-    one sale's 61-day window."""
-    issues = []
-    splits = [t for t in ordered if t.type is TxnType.SPLIT]
-
-    def linked(a: Transaction, b: Transaction) -> bool:
-        return a.symbol != b.symbol and key(a.symbol) == key(b.symbol) and a.ratio == b.ratio
-
-    for i, later in enumerate(splits):
-        if any(linked(later, t) and t.date == later.date for t in splits):
-            continue
-        day = date.fromisoformat(later.date)
-        for earlier in splits[:i]:
-            gap = (day - date.fromisoformat(earlier.date)).days
-            if linked(later, earlier) and 0 < gap <= 2 * SUPERFICIAL_WINDOW_DAYS:
-                issues.append(
-                    LedgerIssue(
-                        later.id,
-                        later.date,
-                        f"Split of {later.symbol} is dated {later.date} and the split of linked {earlier.symbol} "
-                        f"{earlier.date}. If they are one split, use one date for both: superficial-loss "
-                        "estimates count each date as a split",
-                    )
-                )
-                break
-    return issues
 
 
 # ── In-kind transfers ─────────────────────────────────────────────────────────
@@ -487,62 +450,106 @@ def _superficial_denial(
     "The same property" is every symbol in the sale's pool (`key` maps a symbol to its pool),
     so buying the other listing of identical units counts, one unit for one.
 
+    A split in the window changes what a unit is, so S, P and B are compared in
+    post-split units and reported in the sold holding's units on the sale date.
+    Each holding (one account's units of one listing) is converted by its own
+    split rows (see `_split_events`), so one split recorded on different dates
+    in two accounts, or on two linked lines, counts once. A holding with no row
+    for a split held none when it happened: its purchases on or after the first
+    recorded date of that split are taken as already in post-split units.
+
     Affiliated persons (a spouse, a corporation you control) are outside
     MarketPulse's view, so a clean result here isn't proof: the report says so.
     """
+    window = timedelta(days=SUPERFICIAL_WINDOW_DAYS)
     sale_day = date.fromisoformat(d.date)
-    lo = (sale_day - timedelta(days=SUPERFICIAL_WINDOW_DAYS)).isoformat()
-    hi = (sale_day + timedelta(days=SUPERFICIAL_WINDOW_DAYS)).isoformat()
+    lo, hi = (sale_day - window).isoformat(), (sale_day + window).isoformat()
     cutoff = min(hi, today)
     pool = key(d.symbol)
-    same = [t for t in ordered if key(t.symbol) == pool]
+    # Split rows recorded up to two windows past the end can still be the same split as one inside it.
+    last = (sale_day + 3 * window).isoformat()
+    same = [t for t in ordered if key(t.symbol) == pool and t.date <= last]
 
-    # Count purchases in the units at the start of the window, then convert
-    # to sale-date units. Multiply the scale once per split across holdings
-    # (one account's units of one listing).
-    scale = sale_scale = cutoff_scale = 1.0
+    # Replay the pool's ledger once: B is what each holding held at the end of day +30 (the window
+    # may still be open, in which case today's holdings are the best estimate and the row is marked
+    # provisional), and a split row counts only if the ledger applied it, not if nothing was held.
+    state = LedgerState()
+    held: dict[tuple[int, str], float] | None = None
+    applied = []
+    for t in same:
+        if held is None and t.date > cutoff:
+            held = {(h.account_id, h.symbol): h.quantity for h in state.open_holdings()}
+        if t.type is TxnType.SPLIT:
+            h = state.holdings.get((t.account_id, t.symbol))
+            if h is not None and h.quantity > EPSILON:
+                applied.append(t)
+        _apply(state, t, accounts)
+    if held is None:
+        held = {(h.account_id, h.symbol): h.quantity for h in state.open_holdings()}
+    splits = [e for e in _split_events(applied) if min(e.rows.values()) <= hi and max(e.rows.values()) >= lo]
+
+    def post_split(holding: tuple[int, str], day: str, before_splits: bool = False) -> float:
+        """Post-split units per unit of `holding` on `day`. `before_splits`: a purchase, which
+        the ledger applies before a split row of its own holding on the same day."""
+        factor = 1.0
+        for e in splits:
+            own = e.rows.get(holding)
+            if own is None:
+                pending = day < e.first
+            else:
+                pending = day < own or (day == own and before_splits)
+            if pending:
+                factor *= e.ratio
+        return factor
+
     acquired = taxable = 0.0
-    window = (t for t in same if lo <= t.date <= hi)
-    for day, entries in groupby(window, key=lambda t: t.date):
-        split_holdings: dict[float, Counter[tuple[int, str]]] = defaultdict(Counter)
-        buys = []
-        for t in entries:
-            if t.type is TxnType.SPLIT:
-                split_holdings[t.ratio][(t.account_id, t.symbol)] += 1
-            elif t.type in (TxnType.BUY, TxnType.DRIP):
-                buys.append(t)
-        # Use the most occurrences in any one holding. One row per account and listing
-        # describes one split, while repeated rows in a holding compound.
-        splits = [(ratio, max(counts.values()), counts) for ratio, counts in split_holdings.items()]
-        for t in buys:
-            # Ledger replay applies a same-day split to purchases in that holding.
-            # Purchases elsewhere are already in the new units for that split.
-            held_as = (t.account_id, t.symbol)
-            buy_scale = scale * prod(ratio ** (count - counts[held_as]) for ratio, count, counts in splits)
-            quantity = t.quantity / buy_scale
+    for t in same:
+        if t.type in (TxnType.BUY, TxnType.DRIP) and lo <= t.date <= hi:
+            quantity = t.quantity * post_split((t.account_id, t.symbol), t.date, before_splits=True)
             acquired += quantity
             if is_taxable(accounts.get(t.account_id)):
                 taxable += quantity
-        # On a split day, sells and end-of-day holdings use post-split units.
-        scale *= prod(ratio**count for ratio, count, _ in splits)
-        if day <= d.date:
-            sale_scale = scale
-        if day <= cutoff:
-            cutoff_scale = scale
+    remaining = sum(q * post_split(holding, cutoff) for holding, q in held.items())
 
-    # B: units held across every account at the end of day +30. The window
-    # may still be open (sale less than 30 days ago), in which case today's
-    # holdings are the best estimate and the row is marked provisional.
-    held = sum(h.quantity for h in replay(same, accounts, until=cutoff).open_holdings())
-
-    d.acquired_in_window = acquired * sale_scale
-    d.held_after_window = held * (sale_scale / cutoff_scale)
+    sale_units = post_split((d.account_id, d.symbol), d.date)
+    d.acquired_in_window = acquired / sale_units
+    d.held_after_window = remaining / sale_units
     d.window_open = hi > today
     fraction = min(d.quantity, d.acquired_in_window, d.held_after_window) / d.quantity if d.quantity > EPSILON else 0.0
     if fraction > EPSILON:
         d.denied = -d.gain * fraction
         d.denied_reason = DENIED_SUPERFICIAL
     return taxable / acquired if d.acquired_in_window > EPSILON else 0.0
+
+
+@dataclass
+class _SplitEvent:
+    """One split of a security, as recorded in each holding that held units when it happened."""
+
+    ratio: float
+    first: str  # the earliest date it was recorded
+    rows: dict[tuple[int, str], str] = field(default_factory=dict)  # holding -> the date it was recorded there
+
+
+def _split_events(applied: Sequence[Transaction]) -> list[_SplitEvent]:
+    """Group split rows the ledger applied, in ledger order, into splits of the security.
+
+    Brokers can post one split on different days, and each account (or linked line) records it
+    on its own row. A row joins the latest split of the same ratio first recorded at most 60 days
+    earlier that its holding hasn't recorded yet; otherwise it starts a new split. Repeated rows
+    in one holding are successive splits, which compound."""
+    events: list[_SplitEvent] = []
+    for t in applied:
+        holding = (t.account_id, t.symbol)
+        earliest = (date.fromisoformat(t.date) - timedelta(days=2 * SUPERFICIAL_WINDOW_DAYS)).isoformat()
+        joinable = [e for e in events if e.ratio == t.ratio and holding not in e.rows and e.first >= earliest]
+        if joinable:
+            event = max(joinable, key=lambda e: e.first)
+        else:
+            event = _SplitEvent(t.ratio, t.date)
+            events.append(event)
+        event.rows[holding] = t.date
+    return events
 
 
 def _attach_denied_loss(d: Disposition, p: AcbPool, taxable_fraction: float) -> None:

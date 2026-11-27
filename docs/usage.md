@@ -200,8 +200,10 @@ The tax report implements:
 - Proportional superficial-loss estimates using recorded purchases and holdings
   around the sale date, including registered accounts. The report expresses
   share counts in sale-date units when the window spans a stock split. Record
-  the split with the same effective date and ratio in each account that held
-  the shares at the time.
+  the split with its ratio in each account that held the shares at the time.
+  Each account's shares follow its own split row, so a split your brokers post
+  on different days counts once: rows with the same ratio up to 60 days apart
+  in different accounts are treated as one split.
 - Deemed dispositions for supported in-kind transfers across taxable and
   registered accounts. Registered replacement purchases can permanently deny a loss.
 
@@ -221,8 +223,8 @@ A sale of either line then uses the combined average cost of both, with each
 purchase converted at its own date's rate. Buying either line within 30 days of
 a loss on the other can make that loss superficial. Units of the two lines count
 one for one, and splits and transfers stay with the line they're recorded on.
-Record a split on each line you hold with the same date and ratio; the tax report
-flags a split dated differently on the two lines.
+Record a split on each line you hold, with its ratio; the same split recorded on
+different days for the two lines counts once.
 The T1135 estimate shows a linked pool once, under the second symbol (the pool),
 and decides whether it is foreign from that symbol and its `asset foreign` setting.
 
