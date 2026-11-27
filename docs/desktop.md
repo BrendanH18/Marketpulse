@@ -267,9 +267,9 @@ withdrawal, in-kind transfer or return of capital whose currency isn't CAD (it s
 currency is blank, since a US listing is in USD). Enter the rate from the broker's confirmation,
 in CAD per unit of the transaction currency; it is sent as `--fx-rate`, and
 [used in CAD calculations](usage.md#the-fx-rate-your-broker-charged). A rate needs a currency
-typed in, so the form knows what it converts. Editing a buy, sell, deposit or withdrawal always
-sends the field: clearing it, or changing the currency to CAD, removes the recorded rate (`--fx-rate
-""`). Changing the currency while keeping the old rate is refused in the form, since that rate is
+typed in, so the form knows what it converts. Editing a buy, sell, deposit or withdrawal with a
+recorded rate sends the field: clearing it, or changing the currency to CAD, removes the rate
+(`--fx-rate ""`). Changing the currency while keeping the old rate is refused in the form, since that rate is
 for the old currency: enter a new one or clear it.
 
 For clients using the CLI, transaction commands accept `--request-id <uuid>`;

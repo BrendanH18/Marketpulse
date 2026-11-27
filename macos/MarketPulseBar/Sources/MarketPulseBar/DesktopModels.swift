@@ -235,11 +235,13 @@ struct TransactionEntry {
 
   /// `txn edit` for an editable type, with every field the form shows, so the stored entry ends up
   /// exactly as the form reads. A blank currency is sent too: the CLI then works it out as for a new entry.
-  /// So is a blank or hidden FX rate, which removes a recorded one.
+  /// So is a blank or hidden FX rate when the entry has one recorded, which removes it. With neither a
+  /// rate typed nor one recorded, `--fx-rate` is left out, so an engine older than the option still edits.
   func editArguments(id: Int, revision: [String], locale: Locale = .current) -> [String] {
     func number(_ value: String) -> String { NumberInput.cli(value, locale: locale) }
     var options = ["txn", "edit", "--account", account, "--date", date, "--currency", currencyCode, "--note", note]
-    if usesFxRate { options += ["--fx-rate", fxRateArgument(locale: locale) ?? ""] }
+    let rate = fxRateArgument(locale: locale)
+    if usesFxRate && (rate != nil || recordedFxRate != nil) { options += ["--fx-rate", rate ?? ""] }
     if needsSymbol { options += ["--symbol", symbolCode] }
     if trade {
       options += ["--quantity", number(quantity), "--price", number(price), "--fees", number(fees)]

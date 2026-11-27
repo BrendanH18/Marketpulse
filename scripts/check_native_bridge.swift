@@ -315,7 +315,8 @@ struct NativeBridgeCheck {
     }
     precondition(Set(forms.cases.map { $0.entry["type"]! }).isSuperset(of: ["DRIP", "TRANSFER", "SPLIT", "ROC"]))
     precondition(TransactionEntry.types.count == 11 && TransactionEntry.editableTypes.count == 7)
-    // An edit always sends the FX rate of a type that converts: blank, or hidden for CAD, removes it.
+    // An edit sends the FX rate of a type that converts when one is typed or recorded: blank, or hidden
+    // for CAD, removes a recorded one. With neither, the option is left out for older engines.
     var edited = TransactionEntry(
       type: "BUY", account: "2", date: "2024-01-02", symbol: "AAPL", quantity: "2", price: "150", fees: "0",
       currency: "usd", fxRate: "1.3612", recordedFxRate: 1.3612, recordedCurrency: "USD")
@@ -332,6 +333,13 @@ struct NativeBridgeCheck {
     precondition(edited.validationMessage(locale: us) == changed && changed.hasPrefix("This entry has an FX rate"))
     edited.fxRate = "1.47"
     precondition(edited.isValid(locale: us))
+    var unrated = TransactionEntry(
+      type: "BUY", account: "2", date: "2024-01-02", symbol: "AAPL", quantity: "2", price: "150", fees: "0",
+      currency: "USD")
+    precondition(!unrated.editArguments(id: 7, revision: [], locale: us).contains("--fx-rate"))
+    unrated.fxRate = "1.35"
+    let ratedEdit = unrated.editArguments(id: 7, revision: [], locale: us)
+    precondition(ratedEdit == editHead + ["--currency", "USD", "--note", "", "--fx-rate", "1.35"] + editTail)
     let dividend = TransactionEntry(
       type: "DIVIDEND", account: "2", date: "2024-01-02", symbol: "AAPL", amount: "5", currency: "USD", fxRate: "1.35")
     precondition(!dividend.editArguments(id: 8, revision: [], locale: us).contains("--fx-rate"))
