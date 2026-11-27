@@ -39,7 +39,9 @@ _ALIASES = {
     "note": ["note", "notes", "description", "memo", "details"],
     "ratio": ["ratio", "split ratio"],
     "target_account": ["target_account", "target account", "to account"],
-    "fx_rate": ["fx_rate", "fx rate"],
+    # Not plain "FX rate": brokers quote their own column either way round and fill it on rows
+    # nothing converts, so only MarketPulse's own column is taken as the CAD rate it records.
+    "fx_rate_to_cad": ["fx_rate_to_cad"],
 }
 
 

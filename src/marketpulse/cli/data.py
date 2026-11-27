@@ -541,7 +541,7 @@ def _write_export(
                 "note": t.note,
                 "ratio": t.ratio,
                 "target_account": target.name if target else None,
-                "fx_rate": t.fx_rate,
+                "fx_rate_to_cad": t.fx_rate,
             }
             out.write(json.dumps({name: raw[name] for name in columns}, ensure_ascii=False) + "\n")
             continue
@@ -558,7 +558,7 @@ def _write_export(
             "note": t.note,
             "ratio": f"{t.ratio:g}" if t.ratio else "",
             "target_account": target.name if target else "",
-            "fx_rate": _plain(t.fx_rate) if t.fx_rate is not None else "",
+            "fx_rate_to_cad": _plain(t.fx_rate) if t.fx_rate is not None else "",
         }
         writer.writerow([row[name] for name in columns])
     return len(txns)

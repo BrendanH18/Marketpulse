@@ -407,8 +407,10 @@ account names need an existing account for preview or JSON reporting.
 Create accounts explicitly to control account type,
 currency, and cash tracking instead of relying on the importer's guesses.
 
-An optional `fx_rate` column records the [rate the broker charged](#the-fx-rate-your-broker-charged)
-on each row (CAD per unit of the row's currency; leave it blank for none).
+An optional `fx_rate_to_cad` column records the [rate the broker charged](#the-fx-rate-your-broker-charged)
+on each row (CAD per unit of the row's currency, written with a decimal point; leave it blank
+for none). A broker's own "FX rate" column isn't read as this rate, since brokers quote it
+either way round.
 `export` writes it as the last column. A row whose rate isn't positive, is on an entry in
 CAD, or is on a type that never converts (a dividend, interest, fee, split or
 valuation) is skipped with the reason, in the preview as in the import.

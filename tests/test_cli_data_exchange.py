@@ -85,7 +85,7 @@ def incoming(tmp_path):
 # ── defaults stay byte-for-byte the same ──────────────────────────────────────
 
 EXPORT = (
-    "date,account,type,symbol,quantity,price,amount,fees,currency,note,ratio,target_account,fx_rate\n"
+    "date,account,type,symbol,quantity,price,amount,fees,currency,note,ratio,target_account,fx_rate_to_cad\n"
     "2024-12-02,Old Cedar,BUY,ZAG.TO,10,15,,,CAD,,,,\n"
     "2024-12-20,Old Cedar,SELL,ZAG.TO,10,15.5,,,CAD,,,,\n"
     "2025-01-02,Maple Cash,DEPOSIT,,,,5000,,CAD,,,,\n"
@@ -177,7 +177,7 @@ def test_export_date_window(cli, ledger, tmp_path):
 def test_export_columns(cli, ledger):
     text = unix(cli("export", "--columns", "Symbol, date,amount", "--type", "DIVIDEND").output)
     assert text == "symbol,date,amount\nXEQT.TO,2025-03-31,25\n"
-    every = "date,account,type,symbol,quantity,price,amount,fees,currency,note,ratio,target_account,fx_rate"
+    every = "date,account,type,symbol,quantity,price,amount,fees,currency,note,ratio,target_account,fx_rate_to_cad"
     assert unix(cli("export", "--columns", every).output) == EXPORT
     result = cli("export", "--columns", "date,cost")
     assert result.exit_code == 2 and "Unknown column 'cost'" in result.output
@@ -215,7 +215,7 @@ def test_export_json_lines(cli, ledger, tmp_path):
         "note": "",
         "ratio": 0.0,
         "target_account": None,
-        "fx_rate": None,
+        "fx_rate_to_cad": None,
     }
     assert transfer["type"] == "TRANSFER" and transfer["target_account"] == "Birch TFSA"
     picked = [

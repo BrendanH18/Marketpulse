@@ -47,7 +47,7 @@ EXPORT_COLUMNS = [
     "note",
     "ratio",
     "target_account",
-    "fx_rate",
+    "fx_rate_to_cad",
 ]
 GENERIC_REQUIRED_COLUMNS = ("date", "type")
 
@@ -113,7 +113,7 @@ _VALIDATION_FIELDS = [
     ("fees", "fees"),
     ("split ratio", "ratio"),
     ("transfer", "target_account"),
-    ("fx rate", "fx_rate"),
+    ("fx rate", "fx_rate_to_cad"),
     ("date", "date"),
 ]
 
@@ -447,7 +447,17 @@ def _import(
         if txn_type is not TxnType.ACB_INCREASE:
             cash = abs(cash)
         ratio = parse_number(get("ratio"), "ratio") or 0.0
-        fx_rate = parse_number(get("fx_rate"), "fx_rate")
+        raw_rate = get("fx_rate_to_cad")
+        if raw_rate and "," in raw_rate:
+            # parse_number drops commas as thousands separators, which would make 1,3612 into 13612.
+            raise RowError(
+                "expected a rate like 1.3612, with a decimal point",
+                "fx_rate_to_cad",
+                raw_rate,
+                "not_a_number",
+                {"value": raw_rate},
+            )
+        fx_rate = parse_number(raw_rate, "fx_rate_to_cad")
         if txn_type in (TxnType.BUY, TxnType.SELL) and not price and qty and cash:
             price = cash / qty
         if txn_type is not TxnType.ACB_INCREASE and txn_type.uses_amount and not cash and qty and price:

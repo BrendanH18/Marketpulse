@@ -168,14 +168,21 @@ class Tracker:
             return self.store.add_transaction(txn)
 
     def update_transaction(
-        self, txn: Transaction, *, restore_id: str | None = None, revision: str | None = None
+        self,
+        txn: Transaction,
+        *,
+        restore_id: str | None = None,
+        revision: str | None = None,
+        fx_rate_given: bool = False,
     ) -> Transaction:
         """Replace the stored transaction `txn.id` with `txn`. A blank currency is resolved as for
         a new entry. Refused if the ledger would then have an entry it can't apply (a sale of more
         than was held at the time) that it could apply before; problems already there don't block it.
         `restore_id` works as for `add_transaction`: read it before looking the transaction up.
         `revision`, the stored entry's `Transaction.revision` as the caller saw it, refuses the
-        change if the entry has changed, or the ledger was restored, since."""
+        change if the entry has changed, or the ledger was restored, since. A recorded FX rate can't
+        stay on an entry whose currency changes unless `fx_rate_given` says the caller entered it
+        for the new currency (equal to the stored one by chance)."""
         if restore_id is None:
             restore_id = self.store.restore_id
         txn_id = txn.saved_id
@@ -190,7 +197,8 @@ class Tracker:
                 raise ValueError("Unknown account.")
             before = self._stored(txn_id, revision)
             stored = next(t for t in before if t.id == txn_id)
-            if stored.fx_rate is not None and txn.fx_rate == stored.fx_rate and txn.currency != stored.currency:
+            carried = stored.fx_rate is not None and txn.fx_rate == stored.fx_rate and not fx_rate_given
+            if carried and txn.currency != stored.currency:
                 # A recorded rate is per unit of the entry's currency, so it can't follow it to another one.
                 raise CodedError(
                     f"Transaction #{txn_id} has an FX rate for {stored.currency}, and this edit changes its "

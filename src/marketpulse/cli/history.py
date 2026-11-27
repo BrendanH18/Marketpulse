@@ -992,7 +992,7 @@ def txn_edit(
         _edit_dry_run(app, original, t, revision)
         return
     try:
-        app.tracker.update_transaction(t, restore_id=restore_id, revision=revision)
+        app.tracker.update_transaction(t, restore_id=restore_id, revision=revision, fx_rate_given=fx_rate is not None)
     except ValueError as e:
         fail(str(e))
     app.console.print(render.activity_table([t], app.store.account_map()))

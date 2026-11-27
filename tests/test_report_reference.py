@@ -262,7 +262,7 @@ def test_broker_profiles_list_detection_headers(app):
 def test_import_aliases_number_each_fields_headers(app):
     rows = load_source("import-aliases", app)
     assert rows[0] == {"field": "date", "position": 1, "alias": "date"}
-    assert rows[-1] == {"field": "fx_rate", "position": 2, "alias": "fx rate"}
+    assert rows[-1] == {"field": "fx_rate_to_cad", "position": 1, "alias": "fx_rate_to_cad"}
     assert [row["alias"] for row in rows if row["field"] == "currency"] == ["currency", "ccy", "curr"]
     assert {"field": "fees", "position": 3, "alias": "commission"} in rows
     fields = list(dict.fromkeys(row["field"] for row in rows))
@@ -279,7 +279,7 @@ def test_import_aliases_number_each_fields_headers(app):
         "note",
         "ratio",
         "target_account",
-        "fx_rate",
+        "fx_rate_to_cad",
     ]
     for field in fields:
         positions = [row["position"] for row in rows if row["field"] == field]

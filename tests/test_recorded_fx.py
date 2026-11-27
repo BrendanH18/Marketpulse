@@ -311,13 +311,14 @@ def test_an_edit_cant_carry_a_rate_to_another_currency(tracker, store):
 
 # ── CSV ───────────────────────────────────────────────────────────────────────
 
-CSV = """date,account,type,symbol,quantity,price,currency,fx_rate
+CSV = """date,account,type,symbol,quantity,price,currency,fx_rate_to_cad
 2025-01-02,Fictional Taxable,BUY,AAPL,1,100,USD,1.32
 2025-03-03,Fictional Taxable,SELL,AAPL,1,150,USD,1.45
 2025-03-04,Fictional Taxable,BUY,XEQT.TO,1,30,CAD,1.1
 2025-03-05,Fictional Taxable,DIVIDEND,AAPL,,,USD,1.4
 2025-03-06,Fictional Taxable,BUY,AAPL,1,150,USD,-2
 2025-03-07,Fictional Taxable,BUY,AAPL,1,150,USD,
+2025-03-08,Fictional Taxable,BUY,AAPL,1,150,USD,"1,3612"
 """
 
 
@@ -331,10 +332,23 @@ def test_csv_import_reads_the_rate_and_skips_rows_it_cant_use(store):
     assert result.added == 3
     assert [(t.symbol, t.fx_rate) for t in store.transactions()] == [("AAPL", 1.32), ("AAPL", 1.45), ("AAPL", None)]
     assert [(i.line, i.field, i.value, i.code) for i in result.issues] == [
-        (4, "fx_rate", "1.1", "fx_rate_cad_entry"),
-        (5, "fx_rate", "1.4", "fx_rate_unused"),
-        (6, "fx_rate", "-2", "fx_rate_not_positive"),
+        (4, "fx_rate_to_cad", "1.1", "fx_rate_cad_entry"),
+        (5, "fx_rate_to_cad", "1.4", "fx_rate_unused"),
+        (6, "fx_rate_to_cad", "-2", "fx_rate_not_positive"),
+        (8, "fx_rate_to_cad", "1,3612", "not_a_number"),  # a decimal comma, which would otherwise read as 13612
     ]
+
+
+def test_a_brokers_own_fx_rate_column_is_not_taken_as_the_recorded_rate(store):
+    # Brokers quote their column either way round and fill it on CAD and dividend rows too.
+    _taxable(store)
+    broker = """date,account,type,symbol,quantity,price,amount,currency,FX Rate
+2025-01-02,Fictional Taxable,BUY,AAPL,1,100,,USD,0.7353
+2025-01-03,Fictional Taxable,DIVIDEND,XEQT.TO,,,5,CAD,1.0000
+"""
+    result = import_transactions(store, io.StringIO(broker))
+    assert (result.added, result.issues) == (2, [])
+    assert [t.fx_rate for t in store.transactions()] == [None, None]
 
 
 def test_csv_export_round_trips_the_rate(tmp_path, store):
@@ -346,7 +360,7 @@ def test_csv_export_round_trips_the_rate(tmp_path, store):
     out = io.StringIO()
     assert export_transactions(store, out) == 2
     lines = out.getvalue().splitlines()
-    assert lines[0].endswith(",target_account,fx_rate")
+    assert lines[0].endswith(",target_account,fx_rate_to_cad")
     assert lines[1].endswith(",1.3612345678") and lines[2].endswith(",,")
     fresh = Store(tmp_path / "fresh.db")
     try:
@@ -439,6 +453,10 @@ def test_cli_edit_refuses_to_carry_a_rate_to_another_currency(cli, store):
     assert (store.transactions()[0].currency, store.transactions()[0].fx_rate) == ("USD", 1.32)
     assert cli("txn", "edit", str(buy.id), "--currency", "EUR", "--fx-rate", "1.5").exit_code == 0
     assert (store.transactions()[0].currency, store.transactions()[0].fx_rate) == ("EUR", 1.5)
+    # A rate given for the new currency is kept even when it equals the old one, as the preview says.
+    for extra in (("--dry-run",), ()):
+        assert cli("txn", "edit", str(buy.id), "--currency", "GBP", "--fx-rate", "1.5", *extra).exit_code == 0
+    assert (store.transactions()[0].currency, store.transactions()[0].fx_rate) == ("GBP", 1.5)
     assert cli("txn", "edit", str(buy.id), "--currency", "CAD", "--fx-rate", "").exit_code == 0
     assert (store.transactions()[0].currency, store.transactions()[0].fx_rate) == ("CAD", None)
 
@@ -481,10 +499,10 @@ def test_cli_receipt_and_export_include_the_rate(cli, store):
     _taxable(store)
     receipt = json.loads(cli("buy", "AAPL", "1", "100", "-d", "2025-01-02", "--fx-rate", "1.3", "--json").output)
     assert receipt["fx_rate"] == 1.3
-    exported = cli("export", "--columns", "symbol,fx_rate").output.splitlines()
-    assert exported == ["symbol,fx_rate", "AAPL,1.3"]
-    jsonl = cli("export", "--columns", "symbol,fx_rate", "--jsonl").output.splitlines()
-    assert [json.loads(line) for line in jsonl] == [{"symbol": "AAPL", "fx_rate": 1.3}]
+    exported = cli("export", "--columns", "symbol,fx_rate_to_cad").output.splitlines()
+    assert exported == ["symbol,fx_rate_to_cad", "AAPL,1.3"]
+    jsonl = cli("export", "--columns", "symbol,fx_rate_to_cad", "--jsonl").output.splitlines()
+    assert [json.loads(line) for line in jsonl] == [{"symbol": "AAPL", "fx_rate_to_cad": 1.3}]
 
 
 def test_retry_fingerprint_without_a_rate_is_unchanged(cli, store):
