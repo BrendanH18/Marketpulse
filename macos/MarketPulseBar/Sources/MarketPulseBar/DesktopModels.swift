@@ -70,6 +70,8 @@ struct TransactionEntry {
   ]
   /// The ones it can also edit; the others can be deleted and recorded again.
   static let editableTypes = ["BUY", "SELL", "DEPOSIT", "WITHDRAWAL", "DIVIDEND", "INTEREST", "FEE"]
+  /// The types that can record the FX rate the broker charged (`TxnType.uses_fx_rate`).
+  static let fxRateTypes = ["BUY", "SELL", "DRIP", "DEPOSIT", "WITHDRAWAL", "ROC", "ACB_INCREASE", "TRANSFER"]
   /// For lists and confirmations, where space is short. Display only: commands and
   /// comparisons use the type itself.
   static func label(_ type: String) -> String {
@@ -113,12 +115,17 @@ struct TransactionEntry {
   var amount = ""
   var fees = "0"
   var currency = ""
+  /// The FX rate the broker charged, in CAD per unit of `currency`; blank for none.
+  var fxRate = ""
   var note = ""
   /// A split of `splitNew` shares for every `splitOld`: 2 and 1 for a 2-for-1, 1 and 10 for a consolidation.
   var splitNew = "2"
   var splitOld = "1"
   /// A transfer between a registered and a non-registered account: tax needs its market value.
   var priceRequired = false
+  /// The FX rate stored on the entry being edited, and the currency it converts.
+  var recordedFxRate: Double? = nil
+  var recordedCurrency = ""
 
   var trade: Bool { type == "BUY" || type == "SELL" }
   var needsSymbol: Bool { !["DEPOSIT", "WITHDRAWAL", "INTEREST", "FEE"].contains(type) }
@@ -126,6 +133,15 @@ struct TransactionEntry {
   var usesCurrency: Bool { type != "SPLIT" }
   var symbolCode: String { symbol.trimmingCharacters(in: .whitespaces).uppercased() }
   var currencyCode: String { CurrencyInput.normalize(currency) }
+  var usesFxRate: Bool { Self.fxRateTypes.contains(type) }
+  /// An entry in CAD has nothing to convert, so it can't have a rate. A blank currency may be
+  /// another one (a US listing), so the field shows until the currency reads CAD.
+  var showsFxRate: Bool { usesFxRate && currencyCode != "CAD" }
+  /// The FX rate to send, or nil when the field is hidden or blank.
+  func fxRateArgument(locale: Locale = .current) -> String? {
+    guard showsFxRate, !fxRate.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+    return NumberInput.cli(fxRate, locale: locale)
+  }
   func ratio(locale: Locale = .current) -> Double? {
     guard let new = NumberInput.parse(splitNew, locale: locale), let old = NumberInput.parse(splitOld, locale: locale),
       new > 0, old > 0
@@ -148,6 +164,7 @@ struct TransactionEntry {
     if usesCurrency && !currencyCode.isEmpty && !CurrencyInput.isValid(currencyCode) {
       return String(localized: "Enter a three-letter currency code or leave it blank.")
     }
+    if let message = fxRateMessage(locale: locale) { return message }
     switch type {
     case "BUY", "SELL", "DRIP", "TRANSFER":
       if !positive(quantity) { return String(localized: "Enter a quantity greater than zero.") }
@@ -167,25 +184,44 @@ struct TransactionEntry {
     return nil
   }
 
+  /// Why the FX rate can't be saved as typed, as the engine would refuse it, or nil.
+  private func fxRateMessage(locale: Locale) -> String? {
+    guard showsFxRate, !fxRate.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+    guard let rate = NumberInput.parse(fxRate, locale: locale), rate > 0 else {
+      return EngineMessage.fxRateNotPositive
+    }
+    // The rate is per unit of the entry's currency, so the form needs to know which one that is.
+    if currencyCode.isEmpty { return String(localized: "Enter the currency this FX rate converts, or clear the rate.") }
+    // `txn edit` would refuse a recorded rate carried to another currency (fx_rate_currency_changed),
+    // in English: say so here, before saving.
+    let original = CurrencyInput.normalize(recordedCurrency)
+    if rate == recordedFxRate && !original.isEmpty && original != currencyCode {
+      return EngineMessage.fxRateCurrencyChanged(from: original, to: currencyCode)
+    }
+    return nil
+  }
+
   /// The command that records this entry. User text and numbers go after `--`.
   func arguments(locale: Locale = .current) -> [String] {
     func number(_ value: String) -> String { NumberInput.cli(value, locale: locale) }
     let common = ["--date", date, "--note", note]
     // Blank lets the CLI infer the listing currency, so a USD stock in a CAD account stays USD.
     let currency = currencyCode.isEmpty || !usesCurrency ? [] : ["--currency", currencyCode]
+    let rate: [String] = fxRateArgument(locale: locale).map { ["--fx-rate", $0] } ?? []
     switch type {
     case "TRANSFER":
       let price = self.price.trimmingCharacters(in: .whitespaces).isEmpty ? [] : ["--price", number(self.price)]
-      return ["transfer", "--from", account, "--to", target] + common + price + currency
+      return ["transfer", "--from", account, "--to", target] + common + price + currency + rate
         + ["--", symbolCode, number(quantity)]
     case "SPLIT":
       return ["split", "--account", account] + common + [
         "--", symbolCode, ratio(locale: locale).map { String($0) } ?? "",
       ]
     case "DRIP":
-      return ["drip", "--account", account] + common + currency + ["--", symbolCode, number(quantity), number(price)]
+      return ["drip", "--account", account] + common + currency + rate
+        + ["--", symbolCode, number(quantity), number(price)]
     case "ROC":
-      return ["roc", "--account", account] + common + currency + ["--", symbolCode, number(amount)]
+      return ["roc", "--account", account] + common + currency + rate + ["--", symbolCode, number(amount)]
     default:
       let command = [
         "BUY": "buy", "SELL": "sell", "DEPOSIT": "deposit", "WITHDRAWAL": "withdraw",
@@ -193,15 +229,17 @@ struct TransactionEntry {
       ][type]!
       let fees = trade ? ["--fees", number(self.fees)] : []
       let values = (needsSymbol ? [symbolCode] : []) + (trade ? [quantity, price] : [amount]).map(number)
-      return [command, "--account", account] + common + fees + currency + ["--"] + values
+      return [command, "--account", account] + common + fees + currency + rate + ["--"] + values
     }
   }
 
   /// `txn edit` for an editable type, with every field the form shows, so the stored entry ends up
   /// exactly as the form reads. A blank currency is sent too: the CLI then works it out as for a new entry.
+  /// So is a blank or hidden FX rate, which removes a recorded one.
   func editArguments(id: Int, revision: [String], locale: Locale = .current) -> [String] {
     func number(_ value: String) -> String { NumberInput.cli(value, locale: locale) }
     var options = ["txn", "edit", "--account", account, "--date", date, "--currency", currencyCode, "--note", note]
+    if usesFxRate { options += ["--fx-rate", fxRateArgument(locale: locale) ?? ""] }
     if needsSymbol { options += ["--symbol", symbolCode] }
     if trade {
       options += ["--quantity", number(quantity), "--price", number(price), "--fees", number(fees)]
@@ -719,6 +757,12 @@ struct DesktopTransaction: Decodable, Identifiable {
   /// The FX rate the broker charged (CAD per unit of `currency`), if one was recorded.
   /// Absent from older engines.
   let fxRate: Double?
+  /// The recorded FX rate as the app shows it ("1.3612 CAD per USD"), or nil without one.
+  var fxRateLabel: String? {
+    guard let fxRate else { return nil }
+    let rate = fxRate.formatted(.number.precision(.fractionLength(0...6)))
+    return String(localized: "\(rate) CAD per \(currency)")
+  }
   /// Unsigned headline value, computed by the Python ledger (`Transaction.gross_value`).
   let value: Double
   /// +1 money into the account, -1 money out, 0 for share-only entries (DRIP, split, transfer).
@@ -1405,6 +1449,10 @@ enum EngineMessage {
     case "transfer_needs_target": return String(localized: "Transfer needs a different target account.")
     case "future_date": return String(localized: "Date cannot be in the future.")
     case "not_a_number": return String(localized: "expected a number like 1234.56")
+    case "fx_rate_not_positive": return fxRateNotPositive
+    case "fx_rate_unused": return type.map { String(localized: "\($0) doesn't use an FX rate.") }
+    case "fx_rate_cad_entry":
+      return String(localized: "An FX rate only applies to an entry in a currency other than CAD.")
     case "questrade_unsupported_activity":
       return value.map { String(localized: "Questrade activity type '\($0)' isn't supported") }
     case "questrade_unsupported_action":
@@ -1432,6 +1480,19 @@ enum EngineMessage {
       guard let date = args["date"]?.text, let message = issue(code, args, locale: locale) else { return nil }
       return String(localized: "\(date): \(message)")
     }
+  }
+
+  /// `fx_rate_not_positive`: a recorded FX rate must be a positive number.
+  static var fxRateNotPositive: String { String(localized: "FX rate must be a positive number.") }
+
+  /// `fx_rate_currency_changed`: an edit that moves an entry with a recorded FX rate to another
+  /// currency, keeping the rate. The CLI refuses it with the transaction's number, in English; the
+  /// transaction form checks it before saving and says this instead.
+  static func fxRateCurrencyChanged(from: String, to: String) -> String {
+    String(
+      localized:
+        "This entry has an FX rate for \(from), and this edit changes its currency to \(to). Enter a new rate, or remove it."
+    )
   }
 
   /// Two listings sent as "A B".

@@ -1016,6 +1016,8 @@ private struct ActivityWorkspace: View {
           Text(activityAmount(t, privacy: payload.status.privacy)).monospacedDigit()
             .modifier(RowTint(activityColor(t)))
         }.width(120)
+        // The rate the broker charged, on the entries that have one.
+        TableColumn("FX rate") { t in Text(t.fxRateLabel ?? "") }.width(min: 90, ideal: 130)
         TableColumn("Note", value: \.note)
       }.scrollContentBackground(.hidden).alternatingRowBackgrounds(.disabled)
         .contextMenu(forSelectionType: DesktopTransaction.ID.self) { ids in
@@ -1073,8 +1075,8 @@ private struct ActivityWorkspace: View {
   private func describe(_ t: DesktopTransaction) -> String {
     [
       shownDay(t.date), [TransactionEntry.label(t.type), t.symbol].filter { !$0.isEmpty }.joined(separator: " "),
-      activityAmount(t, privacy: payload.status.privacy), accountName(t.accountId, payload),
-    ].joined(separator: " · ")
+      activityAmount(t, privacy: payload.status.privacy), t.fxRateLabel ?? "", accountName(t.accountId, payload),
+    ].filter { !$0.isEmpty }.joined(separator: " · ")
   }
 }
 

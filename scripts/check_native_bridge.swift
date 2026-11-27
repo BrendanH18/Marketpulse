@@ -181,6 +181,7 @@ struct NativeBridgeCheck {
       let converts = ["BUY", "SELL", "DRIP", "DEPOSIT", "WITHDRAWAL", "ROC", "ACB_INCREASE", "TRANSFER"]
       let expectedFxRate: Double? = converts.contains(row.transaction.type) ? 1.35 : nil
       precondition(row.transaction.fxRate == expectedFxRate, "FX rate differs for \(row.transaction.type)")
+      precondition(row.transaction.fxRateLabel == expectedFxRate.map { _ in "1.35 CAD per USD" })
     }
     precondition(payload.activity.contains { $0.type == "BUY" && $0.signedValue < 0 })
     precondition(payload.activity.contains { $0.type == "DIVIDEND" && $0.signedValue > 0 })
@@ -304,8 +305,8 @@ struct NativeBridgeCheck {
       let entry = TransactionEntry(
         type: f["type"]!, account: f["account"] ?? "", target: f["target"] ?? "", date: f["date"] ?? "",
         symbol: f["symbol"] ?? "", quantity: f["quantity"] ?? "", price: f["price"] ?? "", amount: f["amount"] ?? "",
-        fees: f["fees"] ?? "0", currency: f["currency"] ?? "", note: f["note"] ?? "", splitNew: f["splitNew"] ?? "2",
-        splitOld: f["splitOld"] ?? "1", priceRequired: f["priceRequired"] == "true")
+        fees: f["fees"] ?? "0", currency: f["currency"] ?? "", fxRate: f["fxRate"] ?? "", note: f["note"] ?? "",
+        splitNew: f["splitNew"] ?? "2", splitOld: f["splitOld"] ?? "1", priceRequired: f["priceRequired"] == "true")
       precondition(entry.isValid(locale: us) == form.valid, "Form validity differs for \(f)")
       if let expected = form.arguments {
         let sent = entry.arguments(locale: us)
@@ -314,6 +315,26 @@ struct NativeBridgeCheck {
     }
     precondition(Set(forms.cases.map { $0.entry["type"]! }).isSuperset(of: ["DRIP", "TRANSFER", "SPLIT", "ROC"]))
     precondition(TransactionEntry.types.count == 11 && TransactionEntry.editableTypes.count == 7)
+    // An edit always sends the FX rate of a type that converts: blank, or hidden for CAD, removes it.
+    var edited = TransactionEntry(
+      type: "BUY", account: "2", date: "2024-01-02", symbol: "AAPL", quantity: "2", price: "150", fees: "0",
+      currency: "usd", fxRate: "1.3612", recordedFxRate: 1.3612, recordedCurrency: "USD")
+    let editHead = ["txn", "edit", "--account", "2", "--date", "2024-01-02"]
+    let editTail = ["--symbol", "AAPL", "--quantity", "2.0", "--price", "150.0", "--fees", "0.0", "--", "7"]
+    let usdEdit = edited.editArguments(id: 7, revision: [], locale: us)
+    precondition(usdEdit == editHead + ["--currency", "USD", "--note", "", "--fx-rate", "1.3612"] + editTail)
+    edited.currency = "CAD"
+    let cadEdit = edited.editArguments(id: 7, revision: [], locale: us)
+    precondition(cadEdit == editHead + ["--currency", "CAD", "--note", "", "--fx-rate", ""] + editTail)
+    // The rate recorded for USD can't follow the entry to EUR (fx_rate_currency_changed).
+    edited.currency = "EUR"
+    let changed = EngineMessage.fxRateCurrencyChanged(from: "USD", to: "EUR")
+    precondition(edited.validationMessage(locale: us) == changed && changed.hasPrefix("This entry has an FX rate"))
+    edited.fxRate = "1.47"
+    precondition(edited.isValid(locale: us))
+    let dividend = TransactionEntry(
+      type: "DIVIDEND", account: "2", date: "2024-01-02", symbol: "AAPL", amount: "5", currency: "USD", fxRate: "1.35")
+    precondition(!dividend.editArguments(id: 8, revision: [], locale: us).contains("--fx-rate"))
     precondition(TransactionEntry.label("ROC") == "ROC" && TransactionEntry.label("TRANSFER") == "Transfer")
 
     // Assets and allocation: the demo's GIC and targets, and the forms' commands.
@@ -411,7 +432,9 @@ struct NativeBridgeCheck {
     let badRows = try decoder.decode(
       ImportPreview.self, from: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[16])))
     let rowIssues = badRows.issues ?? []
-    precondition(rowIssues.count == 12, "Expected 12 skipped rows, got \(rowIssues.map(\.reason))")
+    precondition(rowIssues.count == 15, "Expected 15 skipped rows, got \(rowIssues.map(\.reason))")
+    let fxCodes: Set = ["fx_rate_not_positive", "fx_rate_unused", "fx_rate_cad_entry"]
+    precondition(Set(rowIssues.compactMap(\.code)).isSuperset(of: fxCodes))
     precondition(
       rowIssues.contains { $0.code == "sell_exceeds_held" } && rowIssues.contains { $0.code == "breaks_later_entry" })
     precondition(

@@ -49,6 +49,20 @@
       "arguments": ["roc", "--account", "2", "--date", "2024-12-31", "--note", "T3 box 42", "--currency", "CAD", "--", "XEQT.TO", "12.5"],
       "expect": {"type": "ROC", "account_id": 2, "symbol": "XEQT.TO", "amount": 12.5, "currency": "CAD"}
     },
+    {
+      "entry": {"type": "DEPOSIT", "account": "2", "date": "2024-01-03", "amount": "500", "currency": "usd", "fxRate": " 1.3612"},
+      "valid": true,
+      "arguments": ["deposit", "--account", "2", "--date", "2024-01-03", "--note", "", "--currency", "USD", "--fx-rate", "1.3612", "--", "500.0"],
+      "expect": {"type": "DEPOSIT", "account_id": 2, "amount": 500, "currency": "USD", "fx_rate": 1.3612}
+    },
+    {
+      "entry": {"type": "DEPOSIT", "account": "2", "date": "2024-01-04", "amount": "10", "currency": "CAD", "fxRate": "1.3612"},
+      "valid": true,
+      "arguments": ["deposit", "--account", "2", "--date", "2024-01-04", "--note", "", "--currency", "CAD", "--", "10.0"],
+      "expect": {"type": "DEPOSIT", "account_id": 2, "amount": 10, "currency": "CAD", "fx_rate": null}
+    },
+    {"entry": {"type": "DEPOSIT", "account": "2", "date": "2024-01-03", "amount": "500", "currency": "USD", "fxRate": "0"}, "valid": false},
+    {"entry": {"type": "BUY", "account": "2", "date": "2024-01-02", "symbol": "AAPL", "quantity": "1", "price": "150", "fxRate": "1.3612"}, "valid": false},
     {"entry": {"type": "TRANSFER", "account": "2", "target": "1", "date": "2024-06-03", "symbol": "XEQT.TO", "quantity": "4", "price": "", "priceRequired": "true"}, "valid": false},
     {"entry": {"type": "TRANSFER", "account": "2", "target": "2", "date": "2024-06-03", "symbol": "XEQT.TO", "quantity": "4"}, "valid": false},
     {"entry": {"type": "TRANSFER", "account": "2", "target": "", "date": "2024-06-03", "symbol": "XEQT.TO", "quantity": "4"}, "valid": false},

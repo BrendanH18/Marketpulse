@@ -201,23 +201,26 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
     coded_tax = Path(tmp) / "coded-tax.json"
     coded_tax.write_text(json.dumps(tax_report(coded_tracker), allow_nan=False))
     coded.close()
-    # A generic CSV with a row for each import reason the engine codes.
+    # A generic CSV with a row for each import reason the engine codes, the last three for a broker FX rate.
     bad_rows = Path(tmp) / "bad-rows.csv"
     bad_rows.write_text(
-        "date,type,symbol,quantity,price,amount,fees,account\n"
-        "2025-01-02,BUY,AAPL,1,2x,,,Fictional Cash\n"
-        "2025-13-01,BUY,AAPL,1,10,,,Fictional Cash\n"
-        "03-04-2025,BUY,AAPL,1,10,,,Fictional Cash\n"
-        "2025-01-02,Mystery,AAPL,1,10,,,Fictional Cash\n"
-        "2025-01-02,BUY,AAPL,0,10,,,Fictional Cash\n"
-        "2025-01-02,DIVIDEND,,,,5,,Fictional Cash\n"
-        "2025-01-02,DIVIDEND,AAPL,,,,,Fictional Cash\n"
-        "2025-01-02,BUY,AAPL,1,10,,,Old Fictional\n"
-        "2999-01-02,BUY,AAPL,1,10,,,Fictional Cash\n"
-        "2025-01-02,SPLIT,AAPL,,,,,Fictional Cash\n"
-        "2025-01-02,BUY,AAPL,1,10,,,Fictional Cash\n"
-        "2025-01-01,SELL,QAZ,1,10,,,Fictional Cash\n"
-        "2025-01-04,SELL,MSFT,1,10,,,Fictional Cash\n"
+        "date,type,symbol,quantity,price,amount,fees,account,fx_rate_to_cad\n"
+        "2025-01-02,BUY,AAPL,1,2x,,,Fictional Cash,\n"
+        "2025-13-01,BUY,AAPL,1,10,,,Fictional Cash,\n"
+        "03-04-2025,BUY,AAPL,1,10,,,Fictional Cash,\n"
+        "2025-01-02,Mystery,AAPL,1,10,,,Fictional Cash,\n"
+        "2025-01-02,BUY,AAPL,0,10,,,Fictional Cash,\n"
+        "2025-01-02,DIVIDEND,,,,5,,Fictional Cash,\n"
+        "2025-01-02,DIVIDEND,AAPL,,,,,Fictional Cash,\n"
+        "2025-01-02,BUY,AAPL,1,10,,,Old Fictional,\n"
+        "2999-01-02,BUY,AAPL,1,10,,,Fictional Cash,\n"
+        "2025-01-02,SPLIT,AAPL,,,,,Fictional Cash,\n"
+        "2025-01-02,BUY,AAPL,1,10,,,Fictional Cash,\n"
+        "2025-01-01,SELL,QAZ,1,10,,,Fictional Cash,\n"
+        "2025-01-04,SELL,MSFT,1,10,,,Fictional Cash,\n"
+        "2025-01-02,BUY,AAPL,1,10,,,Fictional Cash,0\n"
+        "2025-01-02,DIVIDEND,AAPL,,,5,,Fictional Cash,1.35\n"
+        "2025-01-02,BUY,XEQT.TO,1,10,,,Fictional Cash,1.35\n"
     )
     import_env = {**env, "MARKETPULSE_DATA": str(Path(tmp) / "bad-rows-data")}
     for args in (["accounts", "add", "Fictional Cash"], ["accounts", "add", "Old Fictional"]):

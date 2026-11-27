@@ -10,8 +10,9 @@ struct TransactionSheet: View {
     TransactionEntry(
       type: draft.type, account: draft.account, target: draft.target, date: LedgerDate.string(draft.date),
       symbol: draft.symbol, quantity: draft.quantity, price: draft.price, amount: draft.amount, fees: draft.fees,
-      currency: draft.currency, note: draft.note, splitNew: draft.splitNew, splitOld: draft.splitOld,
-      priceRequired: crossesRegistered)
+      currency: draft.currency, fxRate: draft.fxRate, note: draft.note, splitNew: draft.splitNew,
+      splitOld: draft.splitOld, priceRequired: crossesRegistered, recordedFxRate: editing?.fxRate,
+      recordedCurrency: editing?.currency ?? "")
   }
   private var accounts: [DesktopAccount] { model.desktop?.accounts ?? [] }
   private func account(_ id: String) -> DesktopAccount? { accounts.first { String($0.id) == id } }
@@ -68,6 +69,14 @@ struct TransactionSheet: View {
             String(
               localized:
                 "Leave blank to use the symbol's listing currency (or the account's for cash entries). Enter one if the price is in another currency."
+            ))
+        }
+        if entry.showsFxRate {
+          NumberField(title: String(localized: "FX rate to CAD"), text: $draft.fxRate)
+          caption(
+            String(
+              localized:
+                "Optional: the rate your broker charged, in CAD per unit of the transaction currency (for example 1.3612 for USD). Contribution room and the T1135 estimate use it instead of the day's rate, and so do capital gains when your base currency is CAD."
             ))
         }
         TextField("Note (optional)", text: $draft.note)
@@ -1126,6 +1135,7 @@ private final class TransactionSheetDraft: ObservableObject {
   @Published var amount = ""
   @Published var fees = "0"
   @Published var currency = ""
+  @Published var fxRate = ""
   @Published var note = ""
   @Published var date = Date.now
   @Published var splitNew = "2"
@@ -1141,6 +1151,7 @@ private final class TransactionSheetDraft: ObservableObject {
     amount = NumberInput.editable(t.amount)
     fees = NumberInput.editable(t.fees)
     currency = t.currency
+    fxRate = t.fxRate.map { NumberInput.editable($0) } ?? ""
     note = t.note
     date = LedgerDate.date(t.date) ?? date
   }
