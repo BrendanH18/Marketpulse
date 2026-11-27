@@ -156,6 +156,7 @@
 "Symbol" = "Symbole";
 "Amount" = "Montant";
 "Note" = "Note";
+"FX rate" = "Taux de change";
 "Edit…" = "Modifier…";
 "Delete…" = "Supprimer…";
 "No matching activity" = "Aucune activité correspondante";
@@ -392,6 +393,8 @@
 "Transaction updated" = "Opération mise à jour";
 "Price per share" = "Prix par action";
 "Fees" = "Frais";
+"FX rate to CAD" = "Taux de change en CAD";
+"Optional: the rate your broker charged, in CAD per unit of the transaction currency (for example 1.3612 for USD). Contribution room and the T1135 estimate use it instead of the day's rate, and so do capital gains when your base currency is CAD." = "Facultatif : le taux facturé par votre courtier, en CAD par unité de la devise de l’opération (p. ex. 1,3612 pour le USD). Les droits de cotisation et l’estimation T1135 l’utilisent au lieu du taux du jour, tout comme les gains en capital si votre devise de base est le CAD.";
 "New shares" = "Nouvelles actions";
 "The reinvested dividend counts as income and adds to the cost base. No cash moves." = "Le dividende réinvesti compte comme revenu et s’ajoute au PBR. Aucun mouvement d’espèces.";
 "Market price per share" = "Cours par action";
@@ -711,6 +714,9 @@
 "Enter fees of zero or more." = "Saisissez des frais supérieurs ou égaux à zéro.";
 "Enter two different, positive share counts." = "Saisissez deux nombres de parts positifs et différents.";
 "Enter an amount greater than zero." = "Saisissez un montant supérieur à zéro.";
+"Enter the currency this FX rate converts, or clear the rate." = "Saisissez la devise que ce taux de change convertit, ou effacez le taux.";
+"%@ CAD per %@" = "%1$@ CAD par %2$@";
+"This entry has an FX rate for %@, and this edit changes its currency to %@. Enter a new rate, or remove it." = "Cette écriture a un taux de change pour le %1$@, et cette modification change sa devise en %2$@. Saisissez un nouveau taux ou supprimez-le.";
 "Run the checkout installer again to refresh the saved CLI path." = "Relancez l’installation depuis le dépôt pour actualiser le chemin de l’interface en ligne de commande.";
 "Check the executable path in MARKETPULSE_CLI." = "Vérifiez le chemin de l’exécutable dans MARKETPULSE_CLI.";
 "Split ratio" = "Ratio de fractionnement";
@@ -829,6 +835,9 @@
 "Transfer needs a different target account." = "Le transfert exige un compte de destination différent.";
 "Date cannot be in the future." = "La date ne peut pas être dans le futur.";
 "expected a number like 1234.56" = "nombre attendu, comme 1234.56";
+"FX rate must be a positive number." = "Le taux de change doit être un nombre positif.";
+"%@ doesn't use an FX rate." = "%@ n’utilise pas de taux de change.";
+"An FX rate only applies to an entry in a currency other than CAD." = "Un taux de change ne s’applique qu’à une écriture dans une devise autre que le CAD.";
 "Questrade activity type '%@' isn't supported" = "type d’activité Questrade « %@ » non pris en charge";
 "Questrade trade action '%@' isn't a buy or sell" = "l’action Questrade « %@ » n’est ni un achat ni une vente";
 "Wealthsimple transaction code '%@' isn't supported" = "code d’opération Wealthsimple « %@ » non pris en charge";

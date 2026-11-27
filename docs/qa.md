@@ -221,6 +221,15 @@ on-screen text). UNVERIFIED means your tool couldn't check it, not that it faile
     confirmation names it (its date, "Fee", the amount, "Cash Account"); **Cancel** changes nothing,
     **Delete** removes it and the totals refresh. On the split, **Edit…** is disabled and
     **Delete…** isn't (don't delete it). In the demo, both are disabled.
+    - **FX rate.** Edit the AAPL sell again: **FX rate to CAD** is empty. Enter 1.3612 and
+      save: Activity's **FX rate** column reads "1.3612 CAD per USD". Edit it again: the field
+      reads 1.3612. Type `EUR` as the currency: the sheet says "This entry has an FX rate for
+      USD, and this edit changes its currency to EUR. Enter a new rate, or remove it." and
+      **Save changes** is disabled. Type `CAD`: the field disappears; **Cancel**. Edit it once
+      more, clear the rate and save: the column is empty. Press ⌘N: a Buy of AAPL in Cash
+      Account with the currency blank shows the field, and entering a rate says "Enter the currency this FX rate
+      converts, or clear the rate."; a rate of 0 says "FX rate must be a positive number.";
+      Dividend shows no field; **Cancel**.
 
 22. **Manage accounts and contribution room.** In **Accounts**, **Edit account…** on Cash
     Account opens "Edit account" with Cash Account, NONREG, USD and **Track cash balance**

@@ -117,7 +117,7 @@ whatever your base currency), and capital gains, including in-kind transfers, wh
 base currency is CAD. With another base currency, capital gains ignore recorded rates and
 convert at the looked-up ones. Holdings and net worth are still valued at today's rates.
 The rate must be positive, and an entry in CAD can't have one. In the terminal
-app, the transaction form's **FX rate to CAD** field does the same. `txn edit` refuses to
+app and the Mac app, the transaction form's **FX rate to CAD** field does the same. `txn edit` refuses to
 change the currency of an entry with a recorded rate unless you also give a new
 `--fx-rate` or remove it with `--fx-rate ""`.
 
