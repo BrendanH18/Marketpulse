@@ -258,6 +258,11 @@ Edits and deletes send the activity row's `revision` (`txn edit --revision`, `tx
 --revision`), so an entry that changed since the window loaded it is refused with "has
 changed since it was loaded" instead of being overwritten; refresh and try again.
 
+Each activity row also carries `fx_rate`: the rate the broker charged (CAD per unit), recorded with
+`--fx-rate` in the CLI or the terminal app, or `null`. The Mac app doesn't show or edit it
+yet; an edit made in the app keeps it, since `txn edit` only changes the fields it is given, and
+an edit that changes the entry's currency is refused until the rate is changed or removed.
+
 For clients using the CLI, transaction commands accept `--request-id <uuid>`;
 `marketpulse desktop transaction-status <uuid>` returns `recorded` and `transaction_id`
 without fetching prices. Reusing an ID with a different command or arguments is refused.

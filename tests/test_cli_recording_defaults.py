@@ -100,6 +100,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 1,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -115,6 +116,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 2,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -130,6 +132,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 3,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -145,6 +148,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 4,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -160,6 +164,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 5,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -175,6 +180,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 6,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -190,6 +196,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 7,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -205,6 +212,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 8,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -220,6 +228,7 @@ EXPECTED_ROWS = [
         "ratio": 2.0,
         "target_account_id": None,
         "id": 9,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -235,6 +244,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 10,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -250,6 +260,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 11,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -265,6 +276,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": 2,
         "id": 12,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -280,6 +292,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 13,
+        "fx_rate": None,
     },
     {
         "account_id": 2,
@@ -295,6 +308,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 14,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -310,6 +324,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 15,
+        "fx_rate": None,
     },
     {
         "account_id": 1,
@@ -325,6 +340,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": 2,
         "id": 16,
+        "fx_rate": None,
     },
     {
         "account_id": 2,
@@ -340,6 +356,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 17,
+        "fx_rate": None,
     },
     {
         "account_id": 2,
@@ -355,6 +372,7 @@ EXPECTED_ROWS = [
         "ratio": 0.0,
         "target_account_id": None,
         "id": 18,
+        "fx_rate": None,
     },
 ]
 

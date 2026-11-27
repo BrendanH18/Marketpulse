@@ -118,6 +118,21 @@ class TxnType(StrEnum):
             TxnType.ACB_INCREASE,
         }
 
+    @property
+    def uses_fx_rate(self) -> bool:
+        """Entries the tax report or contribution room converts into the base currency, so a
+        recorded broker rate (`Transaction.fx_rate`) can replace the looked-up one."""
+        return self in {
+            TxnType.BUY,
+            TxnType.SELL,
+            TxnType.DRIP,
+            TxnType.DEPOSIT,
+            TxnType.WITHDRAWAL,
+            TxnType.ROC,
+            TxnType.ACB_INCREASE,
+            TxnType.TRANSFER,
+        }
+
 
 class AssetKind(StrEnum):
     MARKET = "market"  # priced live from the market data provider
@@ -313,6 +328,9 @@ class Transaction:
     ratio: float = 0.0  # SPLIT: new shares per old share
     target_account_id: int | None = None  # TRANSFER destination
     id: int | None = None
+    # The rate the broker charged: CAD per unit of `currency`, whatever the base currency. Tax
+    # and contribution room use it instead of the rate looked up for the date (see `recorded_rate`).
+    fx_rate: float | None = None
 
     def __post_init__(self) -> None:
         self.type = TxnType(self.type)
@@ -366,8 +384,28 @@ class Transaction:
             raise CodedError("Split ratio must be positive (e.g. 2 for a 2-for-1).", "ratio_not_positive")
         if t is TxnType.TRANSFER and (self.target_account_id is None or self.target_account_id == self.account_id):
             raise CodedError("Transfer needs a different target account.", "transfer_needs_target")
+        if self.fx_rate is not None:
+            if not math.isfinite(self.fx_rate) or self.fx_rate <= 0:
+                raise CodedError("FX rate must be a positive number.", "fx_rate_not_positive")
+            if not t.uses_fx_rate:
+                raise CodedError(f"{t} doesn't use an FX rate.", "fx_rate_unused", {"type": t.value})
         if parse_date(self.date) > today():
             raise CodedError("Date cannot be in the future.", "future_date")
+
+    def check_fx_rate(self) -> None:
+        """Refuse a recorded FX rate (CAD per unit) on an entry in CAD: there is nothing to
+        convert. `currency` must already be resolved (it is after `Tracker` fills it in)."""
+        if self.fx_rate is not None and (not self.currency or self.currency.upper() == "CAD"):
+            raise CodedError("An FX rate only applies to an entry in a currency other than CAD.", "fx_rate_cad_entry")
+
+
+def recorded_rate(txn: Transaction, currency: str, into: str | None) -> float | None:
+    """`txn.fx_rate` when converting its `currency` into `into`, else None.
+
+    A recorded rate is CAD per unit, so it applies only when `into` is CAD and `currency` isn't."""
+    if txn.fx_rate is None or into is None or into.upper() != "CAD" or currency.upper() == "CAD":
+        return None
+    return txn.fx_rate
 
 
 @dataclass

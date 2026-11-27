@@ -140,6 +140,8 @@ CREATE TABLE IF NOT EXISTS identical_property (
     pool TEXT NOT NULL
 );
 """,
+    # 6: the FX rate the broker charged on an entry (CAD per unit of its currency), NULL when none (#241).
+    6: "ALTER TABLE transactions ADD COLUMN fx_rate REAL",
 }
 
 # Where automatic backups go and how many to keep (see Store.backup).
@@ -432,7 +434,9 @@ def preview_restore(current: Path, source: Path, *, require_ready: bool = False)
         raise RestoreError(str(error)) from error
 
 
-_TXN_COLS = "account_id, date, type, symbol, quantity, price, amount, fees, currency, note, ratio, target_account_id"
+_TXN_COLS = (
+    "account_id, date, type, symbol, quantity, price, amount, fees, currency, note, ratio, target_account_id, fx_rate"
+)
 _SNAPSHOT_UPSERT = (
     "INSERT INTO snapshots(date, net_worth, book, contributions, currency, detail) VALUES (?,?,?,?,?,?)"
     " ON CONFLICT(date) DO UPDATE SET net_worth=excluded.net_worth, book=excluded.book,"
@@ -1064,6 +1068,7 @@ class Store:
             note=row["note"],
             ratio=row["ratio"],
             target_account_id=row["target_account_id"],
+            fx_rate=row["fx_rate"],
         )
 
     def transactions(self, account_id: int | None = None, symbol: str | None = None) -> list[Transaction]:
@@ -1105,11 +1110,12 @@ class Store:
             txn.note,
             txn.ratio,
             txn.target_account_id,
+            txn.fx_rate,
         )
 
     def add_transaction(self, txn: Transaction) -> Transaction:
         cur = self._exec(
-            f"INSERT INTO transactions({_TXN_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", self._txn_params(txn)
+            f"INSERT INTO transactions({_TXN_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", self._txn_params(txn)
         )
         txn.id = cur.lastrowid
         return txn
@@ -1117,7 +1123,7 @@ class Store:
     def add_transactions(self, txns: list[Transaction]) -> int:
         params = [self._txn_params(t) for t in txns]
         with self._write():
-            self._conn.executemany(f"INSERT INTO transactions({_TXN_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", params)
+            self._conn.executemany(f"INSERT INTO transactions({_TXN_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", params)
         return len(params)
 
     def update_transaction(self, txn: Transaction) -> None:

@@ -20,6 +20,10 @@ cases:
    USD gain at the sale-date rate (what MarketPulse 2.0 did) leaves that
    movement out.
 
+   A transaction can record the CAD rate the broker actually charged
+   (`Transaction.fx_rate`); in CAD figures that rate replaces the looked-up
+   one, so they reconcile with the broker's statements and slips.
+
 This module replays the whole ledger once, keeping one `AcbPool` per symbol,
 and produces a `Disposition` for every taxable event. It is pure: FX comes in
 through the `fx_on` callback, so tests can hand it fixed rates and the
@@ -48,7 +52,7 @@ from datetime import date, timedelta
 from itertools import groupby
 
 from .ledger import LedgerIssue, LedgerState, _apply, sort_key, transaction_currency
-from .models import EPSILON, Account, Asset, AssetClass, AssetKind, Transaction, TxnType
+from .models import EPSILON, Account, Asset, AssetClass, AssetKind, Transaction, TxnType, recorded_rate
 
 # (ISO date, currency) -> units of the base currency per 1 unit of `currency`
 # on that date, or None if unknown. Must return 1.0 for the base currency.
@@ -186,6 +190,7 @@ def compute(
     today: str | None = None,
     on_day: DayObserver | None = None,
     identical: IdenticalProperty | None = None,
+    fx_currency: str | None = None,
 ) -> TaxReport:
     """Replay the ledger through pooled ACB and return every taxable event.
 
@@ -194,6 +199,8 @@ def compute(
     `on_day`, if given, sees the pools at the end of every ledger date (see
     `foreign_property`); it only observes, so the report is the same with or without it.
     `identical` links symbols listing the same units into one pool (see `pool_symbol`).
+    `fx_currency` is the currency `fx_on` converts into. When it is CAD, a transaction's recorded
+    `fx_rate` (CAD per unit) is used instead of `fx_on`; otherwise, or when None, it is ignored.
     """
     today = today or date.today().isoformat()
     report = TaxReport()
@@ -210,7 +217,8 @@ def compute(
         return pools[k]
 
     def rate(txn: Transaction, ccy: str) -> float | None:
-        return fx_on(txn.date, ccy)
+        recorded = recorded_rate(txn, ccy, fx_currency)
+        return recorded if recorded is not None else fx_on(txn.date, ccy)
 
     def acquire(p: AcbPool, account_id: int, symbol: str, quantity: float, cost: float, known: bool) -> None:
         """Add units of `symbol` to the pool at `cost` (base currency)."""
@@ -312,7 +320,7 @@ def compute(
                 )
 
         elif t is TxnType.TRANSFER and txn.target_account_id is not None:
-            _transfer(txn, ccy, taxable, accounts, pools.get(key(txn.symbol)), pool, acquire, fx_on, report)
+            _transfer(txn, ccy, taxable, accounts, pools.get(key(txn.symbol)), pool, acquire, rate, report)
 
     if on_day is not None and day:
         on_day(day, pools)
@@ -331,7 +339,7 @@ def _transfer(
     p: AcbPool | None,  # the symbol's pool, if it has one yet
     pool: Callable[[str], AcbPool],
     acquire: Callable[[AcbPool, int, str, float, float, bool], None],
-    fx_on: FxLookup,
+    rate: Callable[[Transaction, str], float | None],  # the transaction's rate: recorded, else looked up
     report: TaxReport,
 ) -> None:
     """Move shares between accounts. What that means for tax depends on which
@@ -360,7 +368,7 @@ def _transfer(
         p.holdings[(target, sym)] += qty
         return
 
-    fx = fx_on(txn.date, ccy)
+    fx = rate(txn, ccy)
     priced = txn.price > 0
     if src_taxable and not dst_taxable:
         qty = min(txn.quantity, p.held(txn.account_id, sym)) if p else 0.0
@@ -779,6 +787,7 @@ def _foreign_replay(
     fx_on: FxLookup,
     today: str,
     identical: IdenticalProperty | None = None,
+    currency: str = "CAD",
 ) -> _ForeignLedger:
     """Replay the ledger once, recording the foreign pools at the end of every ledger date.
 
@@ -796,7 +805,9 @@ def _foreign_replay(
         held = {s: (p.acb, p.incomplete) for s, p in pools.items() if p.quantity > EPSILON and foreign(s)}
         days.append((day, held))
 
-    report = compute(transactions, accounts, fx_on, today=today, on_day=observe, identical=identical)
+    report = compute(
+        transactions, accounts, fx_on, today=today, on_day=observe, identical=identical, fx_currency=currency
+    )
     bought: dict[str, list[str]] = defaultdict(list)
     for t in transactions:
         if t.type in (TxnType.BUY, TxnType.DRIP) and is_taxable(accounts.get(t.account_id)):
@@ -879,10 +890,11 @@ def foreign_property(
     Replays the ledger through the same pooled ACB as `compute` (so registered accounts are
     left out and every purchase is converted at its own date's rate) and totals the foreign
     pools at the end of every day. `fx_on` must give rates in `currency`, which should be CAD
-    because the T1135 thresholds are. A year still in progress runs to `today`.
+    because the T1135 thresholds are, and then recorded broker rates are used. A year still in
+    progress runs to `today`.
     """
     today = today or date.today().isoformat()
-    ledger = _foreign_replay(transactions, accounts, assets, fx_on, today, identical)
+    ledger = _foreign_replay(transactions, accounts, assets, fx_on, today, identical, currency)
     return _foreign_year(year, ledger, today, currency)
 
 
@@ -899,7 +911,7 @@ def foreign_property_years(
     """`foreign_property` for every year in which foreign property was held or sold, newest
     first, from a single replay. Years holding none are left out."""
     today = today or date.today().isoformat()
-    ledger = _foreign_replay(transactions, accounts, assets, fx_on, today, identical)
+    ledger = _foreign_replay(transactions, accounts, assets, fx_on, today, identical, currency)
     days, dispositions = ledger.days, ledger.dispositions
     seen = [day for day, held in days if held and day <= today] + [d.date for d in dispositions if d.date <= today]
     if not seen:

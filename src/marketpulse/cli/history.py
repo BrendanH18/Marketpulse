@@ -15,7 +15,7 @@ from rich.text import Text
 
 from .. import fmt, render
 from ..ledger import replay, sort_key
-from ..models import Account, AccountType, Transaction, TxnType
+from ..models import Account, AccountType, CodedError, Transaction, TxnType
 from .base import App, date_callback, fail, pass_app
 from .root import main
 
@@ -880,6 +880,29 @@ def _id_list(ids: list[int]) -> str:
     return ", ".join(f"#{txn_id}" for txn_id in sorted(ids))
 
 
+class _FxRateOrBlank(click.ParamType):
+    """A positive FX rate, or blank ("") to remove the recorded one."""
+
+    name = "rate"
+
+    def convert(self, value, param, ctx):
+        if isinstance(value, float) or value == "":
+            return value
+        text = str(value).strip()
+        if not text:
+            return ""
+        try:
+            rate = float(text)
+        except ValueError:
+            self.fail(f"{value!r} is not a number.", param, ctx)
+        if not (math.isfinite(rate) and rate > 0):
+            self.fail("must be a positive number.", param, ctx)
+        return rate
+
+
+FX_RATE_OR_BLANK = _FxRateOrBlank()
+
+
 @txn.command("edit")
 @click.argument("txn_id", type=int)
 @click.option("--date", "when", callback=date_callback)
@@ -890,12 +913,31 @@ def _id_list(ids: list[int]) -> str:
 @click.option("--amount", type=float)
 @click.option("--fees", type=float)
 @click.option("--currency", help="Blank to use the symbol's listing currency (or the account's for cash).")
+@click.option(
+    "--fx-rate",
+    type=FX_RATE_OR_BLANK,
+    metavar="RATE",
+    help="FX rate the broker charged (CAD per unit of the entry's currency); blank to remove it.",
+)
 @click.option("--note")
 @click.option("--revision", help=REVISION_HELP)
 @click.option("--dry-run", is_flag=True, help="Show the fields that would change and whether the edit is accepted.")
 @pass_app
 def txn_edit(
-    app: App, txn_id: int, when, account, symbol, quantity, price, amount, fees, currency, note, revision, dry_run
+    app: App,
+    txn_id: int,
+    when,
+    account,
+    symbol,
+    quantity,
+    price,
+    amount,
+    fees,
+    currency,
+    fx_rate,
+    note,
+    revision,
+    dry_run,
 ) -> None:
     """Change a transaction's fields; its type stays the same.
 
@@ -929,28 +971,46 @@ def txn_edit(
     ):
         if value is not None:
             setattr(t, name, value.strip().upper() if name in ("symbol", "currency") else value)
+    if fx_rate is not None:
+        t.fx_rate = None if fx_rate == "" else fx_rate
+    elif t.fx_rate is not None:
+        # A recorded rate is per unit of the entry's currency, so it can't follow it to another one.
+        # The currency is worked out once here, and the preview and save use this checked one.
+        try:
+            resolved = t.currency = app.tracker.transaction_currency(t)
+        except ValueError as e:
+            fail(str(e))
+        if resolved.upper() != original.currency.upper():
+            changed = CodedError(
+                f"Transaction #{txn_id} has an FX rate for {original.currency}, and this edit changes its currency "
+                f'to {resolved.upper()}. Give a new --fx-rate, or remove it with --fx-rate "".',
+                "fx_rate_currency_changed",
+                {"from": original.currency, "to": resolved.upper()},
+            )
+            fail(str(changed))
     if dry_run:
         _edit_dry_run(app, original, t, revision)
         return
     try:
-        app.tracker.update_transaction(t, restore_id=restore_id, revision=revision)
+        app.tracker.update_transaction(t, restore_id=restore_id, revision=revision, fx_rate_given=fx_rate is not None)
     except ValueError as e:
         fail(str(e))
     app.console.print(render.activity_table([t], app.store.account_map()))
     app.ok(f"Updated #{txn_id}.")
 
 
-EDIT_FIELDS = ("date", "account", "symbol", "quantity", "price", "amount", "fees", "currency", "note")
+EDIT_FIELDS = ("date", "account", "symbol", "quantity", "price", "amount", "fees", "currency", "fx_rate", "note")
 
 
 def _edit_dry_run(app: App, original: Transaction, edited: Transaction, revision: str) -> None:
     """Show the changed fields and run the checks `update_transaction` would, without saving."""
     accounts = app.store.account_map()
-    if not edited.currency and edited.account_id in accounts:
-        # Worked out exactly as the save would (an asset override, the listing, then a suffix guess).
-        edited.currency, _ = app.tracker.resolve_currency(edited.symbol, accounts[edited.account_id])
     try:
+        # Worked out exactly as the save would: an ACB increase takes the holding's currency, other
+        # entries an asset override, the listing, then a suffix guess.
+        edited.currency = app.tracker.transaction_currency(edited)
         edited.validate()
+        edited.check_fx_rate()
         before = app.tracker._stored(edited.saved_id, revision)
     except ValueError as e:
         problem: str | None = str(e)
@@ -963,6 +1023,8 @@ def _edit_dry_run(app: App, original: Transaction, edited: Transaction, revision
             return accounts[t.account_id].name if t.account_id in accounts else str(t.account_id)
         if app.privacy and field in ("quantity", "price", "amount", "fees"):
             return fmt.MASK
+        if field == "fx_rate":
+            return "" if t.fx_rate is None else str(t.fx_rate)
         return str(getattr(t, field))
 
     def raw(t: Transaction, field: str) -> object:

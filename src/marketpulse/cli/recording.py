@@ -30,7 +30,7 @@ from ..market import MarketError
 from ..models import EPSILON, Account, Transaction, TxnType, parse_date
 from ..requests import record_once
 from ..themes import rich_styles
-from .base import App, date_callback, fail, pass_app, retryable, txn_options
+from .base import App, date_callback, fail, fx_rate_option, pass_app, retryable, txn_options
 from .root import main
 
 
@@ -522,6 +522,7 @@ def _receipt(app: App, out: Outcome, *, dry_run: bool, duplicate: bool = False) 
         "target_account_id": t.target_account_id,
         "target_account": name(t.target_account_id),
         "note": t.note,
+        "fx_rate": t.fx_rate,
         "message": out.message,
         "notes": out.notes,
         "warnings": [{"code": w.code, "message": w.message} for w in out.warnings],
@@ -693,6 +694,7 @@ def _trade(
     when: str | None,
     currency: str,
     note: str,
+    fx_rate: float | None = None,
 ) -> None:
     ex = _extras()
     if ex.keep is not None and quantity != ALL:
@@ -786,6 +788,7 @@ def _trade(
         fees=fees,
         currency=ccy,
         note=note,
+        fx_rate=fx_rate,
     )
     _finish(app, txn, [acct], describe)
 
@@ -796,16 +799,17 @@ def _trade(
 @click.argument("price", type=float, required=False)
 @click.option("-f", "--fees", type=float, default=0.0, help="Commission; added to cost base.")
 @click.option("-c", "--currency", default="", help="Trade currency (default: the listing's).")
+@fx_rate_option
 @recording_extras(total=True, extra=("fee_pct", "net", "max_value"))
 @txn_options
 @pass_app
-def buy(app: App, symbol, quantity, price, fees, currency, account, when, note) -> None:
+def buy(app: App, symbol, quantity, price, fees, currency, fx_rate, account, when, note) -> None:
     """Record a buy. PRICE defaults to the live price.
 
     QUANTITY can be `max`: the most whole units the account's cash covers at PRICE,
     fees included (accounts that track cash only).
     """
-    _trade(app, TxnType.BUY, symbol, quantity, price, account, fees, when, currency, note)
+    _trade(app, TxnType.BUY, symbol, quantity, price, account, fees, when, currency, note, fx_rate)
 
 
 @main.command()
@@ -814,16 +818,17 @@ def buy(app: App, symbol, quantity, price, fees, currency, account, when, note) 
 @click.argument("price", type=float, required=False)
 @click.option("-f", "--fees", type=float, default=0.0, help="Commission; deducted from proceeds.")
 @click.option("-c", "--currency", default="", help="Trade currency (default: the listing's).")
+@fx_rate_option
 @recording_extras(total=True, extra=("fee_pct", "net", "max_value", "keep"))
 @txn_options
 @pass_app
-def sell(app: App, symbol, quantity, price, fees, currency, account, when, note) -> None:
+def sell(app: App, symbol, quantity, price, fees, currency, fx_rate, account, when, note) -> None:
     """Record a sell (average-cost ACB). PRICE defaults to the live price.
 
     QUANTITY can be `all`: every unit held in the account at the end of the date,
     or a percentage of them such as `50%`.
     """
-    _trade(app, TxnType.SELL, symbol, quantity, price, account, fees, when, currency, note)
+    _trade(app, TxnType.SELL, symbol, quantity, price, account, fees, when, currency, note, fx_rate)
 
 
 def _cash_event(
@@ -835,6 +840,7 @@ def _cash_event(
     when: str | None,
     currency: str,
     note: str,
+    fx_rate: float | None = None,
 ) -> None:
     ex = _extras()
     if ex.leave is not None and amount != ALL:
@@ -882,6 +888,7 @@ def _cash_event(
         amount=amount,
         currency=currency.upper(),
         note=note,
+        fx_rate=fx_rate,
     )
     paid = amount
 
@@ -909,10 +916,11 @@ def dividend(app: App, symbol, amount, currency, account, when, note) -> None:
 @click.argument("quantity", type=float)
 @click.argument("price", type=float, required=False, metavar="PRICE")
 @click.option("-c", "--currency", default="", help="Currency of PRICE (default: the listing's).")
+@fx_rate_option
 @recording_extras(total=True)
 @txn_options
 @pass_app
-def drip(app: App, symbol, quantity, price, currency, account, when, note) -> None:
+def drip(app: App, symbol, quantity, price, currency, fx_rate, account, when, note) -> None:
     """Record a reinvested dividend (new shares at PRICE)."""
     total = _extras().total
     if price is None and total is None:
@@ -936,6 +944,7 @@ def drip(app: App, symbol, quantity, price, currency, account, when, note) -> No
         price=price,
         currency=ccy,
         note=note,
+        fx_rate=fx_rate,
     )
     message = f"DRIP {fmt.qty(quantity)} {symbol.upper()} @ {fmt.price(price)} {ccy} in {acct.name}"
     _finish(app, txn, [acct], lambda _: (message, []))
@@ -944,27 +953,29 @@ def drip(app: App, symbol, quantity, price, currency, account, when, note) -> No
 @main.command()
 @click.argument("amount", type=float)
 @click.option("-c", "--currency", default="")
+@fx_rate_option
 @recording_extras()
 @txn_options
 @pass_app
-def deposit(app: App, amount, currency, account, when, note) -> None:
+def deposit(app: App, amount, currency, fx_rate, account, when, note) -> None:
     """Record money added to an account (counts as a contribution)."""
-    _cash_event(app, TxnType.DEPOSIT, amount, "", account, when, currency, note)
+    _cash_event(app, TxnType.DEPOSIT, amount, "", account, when, currency, note, fx_rate)
 
 
 @main.command()
 @click.argument("amount", type=FLOAT_OR_ALL)
 @click.option("-c", "--currency", default="")
+@fx_rate_option
 @recording_extras(extra=("leave",))
 @txn_options
 @pass_app
-def withdraw(app: App, amount, currency, account, when, note) -> None:
+def withdraw(app: App, amount, currency, fx_rate, account, when, note) -> None:
     """Record money taken out of an account.
 
     AMOUNT can be `all`: the account's whole cash balance at the end of the date
     (accounts that track cash only).
     """
-    _cash_event(app, TxnType.WITHDRAWAL, amount, "", account, when, currency, note)
+    _cash_event(app, TxnType.WITHDRAWAL, amount, "", account, when, currency, note, fx_rate)
 
 
 @main.command()
@@ -1037,7 +1048,7 @@ def _roc_gain_note(app: App, txn: Transaction, sym: str, *, account_book_exceede
     identical = app.store.identical_property()
     pool = tax.pool_symbol(sym, identical)
     exact = all(
-        transaction_currency(t, accounts).upper() == base
+        transaction_currency(t, accounts).upper() == base or (t.fx_rate is not None and base == "CAD")
         for t in txns
         if tax.pool_symbol(t.symbol, identical) == pool
         and (
@@ -1046,7 +1057,7 @@ def _roc_gain_note(app: App, txn: Transaction, sym: str, *, account_book_exceede
         )
     )
     if exact:
-        report = tax.compute(txns, accounts, tax.fx_lookup({}, base), identical=identical)
+        report = tax.compute(txns, accounts, tax.fx_lookup({}, base), identical=identical, fx_currency=base)
         d = next((d for d in report.dispositions if d.txn_id == txn.id and d.kind == "roc"), None)
         if d is None:
             return None
@@ -1061,10 +1072,11 @@ def _roc_gain_note(app: App, txn: Transaction, sym: str, *, account_book_exceede
 @click.argument("symbol")
 @click.argument("amount", type=float)
 @click.option("-c", "--currency", default="", help="Currency of AMOUNT (default: the listing's).")
+@fx_rate_option
 @recording_extras(per_unit=True)
 @txn_options
 @pass_app
-def roc(app: App, symbol, amount, currency, account, when, note) -> None:
+def roc(app: App, symbol, amount, currency, fx_rate, account, when, note) -> None:
     """Record a return of capital: AMOUNT paid out that lowers the cost base.
 
     \b
@@ -1106,6 +1118,7 @@ def roc(app: App, symbol, amount, currency, account, when, note) -> None:
         amount=amount,
         currency=currency.upper(),
         note=note,
+        fx_rate=fx_rate,
     )
     _finish(app, txn, [acct], describe)
 
@@ -1114,10 +1127,11 @@ def roc(app: App, symbol, amount, currency, account, when, note) -> None:
 @click.argument("symbol")
 @click.argument("amount", type=float)
 @click.option("-c", "--currency", default="", help="Currency of AMOUNT (defaults to the holding's on DATE).")
+@fx_rate_option
 @recording_extras()
 @txn_options
 @pass_app
-def acb_increase(app: App, symbol, amount, currency, account, when, note) -> None:
+def acb_increase(app: App, symbol, amount, currency, fx_rate, account, when, note) -> None:
     """Increase a holding's cost base by AMOUNT without adding shares or cash."""
     acct = _account(app, account)
     txn = Transaction(
@@ -1128,6 +1142,7 @@ def acb_increase(app: App, symbol, amount, currency, account, when, note) -> Non
         amount=amount,
         currency=currency,
         note=note,
+        fx_rate=fx_rate,
     )
 
     def describe(saved: Transaction) -> tuple[str, list[str]]:
@@ -1156,10 +1171,11 @@ def acb_increase(app: App, symbol, amount, currency, account, when, note) -> Non
 @click.option("-c", "--currency", default="", help="Currency of --price (default: the listing's).")
 @click.option("-d", "--date", "when", default=None, callback=date_callback)
 @click.option("-m", "--note", default="")
+@fx_rate_option
 @recording_extras()
 @retryable
 @pass_app
-def transfer(app: App, symbol, quantity, source, target, price, currency, when, note) -> None:
+def transfer(app: App, symbol, quantity, source, target, price, currency, when, note, fx_rate) -> None:
     """Move shares between accounts (e.g. in-kind to a TFSA).
 
     \b
@@ -1198,6 +1214,7 @@ def transfer(app: App, symbol, quantity, source, target, price, currency, when, 
         currency=currency,
         target_account_id=dst.id,
         note=note,
+        fx_rate=fx_rate,
     )
     message = f"Transferred {fmt.qty(quantity)} {symbol.upper()} {src.name} → {dst.name}"
     _finish(app, txn, [src, dst], lambda _: (message, []))

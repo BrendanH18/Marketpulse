@@ -30,6 +30,7 @@ from .ledger import (
     replay,
     replay_by_day,
     room_flows,
+    room_rate,
     sort_key,
     transaction_currency,
 )
@@ -40,12 +41,14 @@ from .models import (
     Alert,
     AssetClass,
     AssetKind,
+    CodedError,
     FxRates,
     Quote,
     Transaction,
     TxnType,
     guess_currency,
     parse_date,
+    recorded_rate,
 )
 from .providers import make_fallback
 from .tax import TaxReport
@@ -137,6 +140,7 @@ class Tracker:
         # May fetch a quote, so it stays outside the write lock below.
         txn.currency = self.transaction_currency(txn)
         txn.validate()
+        txn.check_fx_rate()
         # The checks and the write hold the write lock together: no restore (or sale in another
         # window) can land between them.
         with self.store.atomic():
@@ -164,14 +168,21 @@ class Tracker:
             return self.store.add_transaction(txn)
 
     def update_transaction(
-        self, txn: Transaction, *, restore_id: str | None = None, revision: str | None = None
+        self,
+        txn: Transaction,
+        *,
+        restore_id: str | None = None,
+        revision: str | None = None,
+        fx_rate_given: bool = False,
     ) -> Transaction:
         """Replace the stored transaction `txn.id` with `txn`. A blank currency is resolved as for
         a new entry. Refused if the ledger would then have an entry it can't apply (a sale of more
         than was held at the time) that it could apply before; problems already there don't block it.
         `restore_id` works as for `add_transaction`: read it before looking the transaction up.
         `revision`, the stored entry's `Transaction.revision` as the caller saw it, refuses the
-        change if the entry has changed, or the ledger was restored, since."""
+        change if the entry has changed, or the ledger was restored, since. A recorded FX rate can't
+        stay on an entry whose currency changes unless `fx_rate_given` says the caller entered it
+        for the new currency (equal to the stored one by chance)."""
         if restore_id is None:
             restore_id = self.store.restore_id
         txn_id = txn.saved_id
@@ -179,11 +190,22 @@ class Tracker:
         txn.date = parse_date(txn.date)
         txn.currency = self.transaction_currency(txn)
         txn.validate()
+        txn.check_fx_rate()
         with self.store.atomic():
             self._refuse_if_restored(restore_id, retry="try again")
             if self.store.get_account(txn.account_id) is None:
                 raise ValueError("Unknown account.")
             before = self._stored(txn_id, revision)
+            stored = next(t for t in before if t.id == txn_id)
+            carried = stored.fx_rate is not None and txn.fx_rate == stored.fx_rate and not fx_rate_given
+            if carried and txn.currency != stored.currency:
+                # A recorded rate is per unit of the entry's currency, so it can't follow it to another one.
+                raise CodedError(
+                    f"Transaction #{txn_id} has an FX rate for {stored.currency}, and this edit changes its "
+                    f"currency to {txn.currency}. Enter a new rate, or remove it.",
+                    "fx_rate_currency_changed",
+                    {"from": stored.currency, "to": txn.currency},
+                )
             self._refuse_new_issues(before, [txn if t.id == txn_id else t for t in before], txn_id, "saved")
             self.store.update_transaction(txn)
         return txn
@@ -519,7 +541,7 @@ class Tracker:
         txns = self.store.transactions()
         accounts = self.store.account_map()
         fx = self._tax_fx(txns, accounts, self.base)
-        report = tax.compute(txns, accounts, fx, identical=self.store.identical_property())
+        report = tax.compute(txns, accounts, fx, identical=self.store.identical_property(), fx_currency=self.base)
         return capital_gains(report, inclusion_rate=self.config.capital_gains_inclusion), report
 
     def foreign_property(self, year: int | None = None) -> list[tax.ForeignPropertyYear]:
@@ -542,12 +564,14 @@ class Tracker:
         Every foreign-currency transaction that touches a taxable account needs its own day's
         rate (purchases as well as sales), so a daily series is fetched for each such currency
         from a week before the earliest one. The extra week covers a first trade on a Monday or
-        just after a holiday, which takes the previous close.
+        just after a holiday, which takes the previous close. A transaction with a recorded rate
+        that converts into `base` needs no lookup.
         """
         relevant = [
             t
             for t in txns
             if t.symbol
+            and recorded_rate(t, transaction_currency(t, accounts), base) is None
             and (
                 tax.is_taxable(accounts.get(t.account_id))
                 or (t.target_account_id is not None and tax.is_taxable(accounts.get(t.target_account_id)))
@@ -618,8 +642,12 @@ class Tracker:
             plans.append((acct_type, year, amount, members, ids, relevant))
         fx = None
         if not offline:
+            # A flow with a recorded rate needs no lookup.
             dated_currencies = (
-                (flow.date, flow.currency) for *_, relevant in plans for flow in relevant if flow.amount is not None
+                (flow.date, flow.currency)
+                for *_, relevant in plans
+                for flow in relevant
+                if flow.amount is not None and room_rate(flow, None) is None
             )
             fx = self._historical_fx(dated_currencies, "CAD", budget=fx_budget)
         out = []
@@ -628,7 +656,14 @@ class Tracker:
             if details is not None:
                 breakdown = details[acct_type] = []
             status = contribution_room(
-                acct_type, year, amount, relevant, ids, current_year=current_year, fx=fx, details=breakdown
+                acct_type,
+                year,
+                amount,
+                relevant,
+                ids,
+                current_year=current_year,
+                fx=fx,
+                details=breakdown,
             )
             out.append((status, [a for a in members if not a.archived]))
         return out

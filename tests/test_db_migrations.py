@@ -15,16 +15,29 @@ import pytest
 from marketpulse import db
 from marketpulse.csvio import import_transactions
 from marketpulse.db import BASELINE_VERSION, SchemaError, Store, latest_version
-from marketpulse.models import Account, Asset, AssetClass, AssetKind, Transaction, TxnType
+from marketpulse.models import Account, Asset, AssetClass, AssetKind
 
 
 def _seed(store: Store) -> Account:
-    """One account with one buy: the smallest ledger worth backing up."""
+    """One account with one buy: the smallest ledger worth backing up. The buy is written with
+    the baseline columns only, so it can seed a ledger kept at any older schema version."""
     acct = store.add_account(Account(name="Main"))
-    store.add_transaction(
-        Transaction(account_id=acct.id, type=TxnType.BUY, date="2024-01-01", symbol="AAPL", quantity=1, price=10)
-    )
+    _add_baseline_txn(store, acct, "BUY", "2024-01-01", 10)
     return acct
+
+
+def _add_baseline_txn(store: Store, acct: Account, kind: str, day: str, price: float) -> None:
+    with store._write():
+        store._conn.execute(
+            "INSERT INTO transactions(account_id, date, type, symbol, quantity, price) VALUES (?, ?, ?, 'AAPL', 1, ?)",
+            (acct.id, day, kind, price),
+        )
+
+
+def _baseline_rows(store: Store) -> list[tuple]:
+    """Transaction rows as the baseline schema has them, readable at any schema version."""
+    rows = store._query("SELECT id, account_id, date, type, symbol, quantity, price FROM transactions ORDER BY id")
+    return [tuple(row) for row in rows]
 
 
 @pytest.fixture
@@ -58,11 +71,11 @@ def test_acb_increase_schema_prevents_opening_with_older_build(tmp_path, monkeyp
         patch.setattr(db, "MIGRATIONS", prior_migrations)
         previous = Store(path)
         _seed(previous)
-        original = previous.transactions()
+        original = _baseline_rows(previous)
         previous.close()
 
     upgraded = Store(path)
-    assert upgraded.transactions() == original
+    assert _baseline_rows(upgraded) == original
     (backup,) = upgraded.backups()
     assert Store.backup_reason(backup) == f"pre-v{latest_version()}"
     assert _user_version(backup) == 3
@@ -81,7 +94,7 @@ def test_unversioned_2_0_database_is_adopted_as_baseline(tmp_path, baseline):
     store.close()
     reopened = Store(path)
     assert reopened.schema_version == BASELINE_VERSION
-    assert len(reopened.transactions()) == 1
+    assert len(_baseline_rows(reopened)) == 1
 
 
 def test_pending_migrations_run_in_order_after_a_backup(tmp_path, monkeypatch, baseline):
@@ -121,7 +134,7 @@ def test_failed_migration_rolls_back_and_keeps_old_version(tmp_path, monkeypatch
         Store(path)
     assert _user_version(path) == 1
     monkeypatch.setattr(db, "MIGRATIONS", {})
-    assert len(Store(path).transactions()) == 1
+    assert len(_baseline_rows(Store(path))) == 1
 
 
 def test_failed_sql_migration_also_rolls_back(tmp_path, monkeypatch, baseline):
@@ -132,7 +145,7 @@ def test_failed_sql_migration_also_rolls_back(tmp_path, monkeypatch, baseline):
         Store(path)
     monkeypatch.setattr(db, "MIGRATIONS", {})
     store = Store(path)
-    assert store.schema_version == 1 and len(store.transactions()) == 1
+    assert store.schema_version == 1 and len(_baseline_rows(store)) == 1
 
 
 def test_database_from_a_newer_marketpulse_is_refused(tmp_path):
@@ -454,6 +467,37 @@ def test_v3_adds_the_foreign_property_setting_to_existing_assets(tmp_path, monke
     for setting in (True, False, None):
         upgraded.set_foreign_property(Asset("FICT", asset_class=AssetClass.ETF, foreign_property=setting))
         assert upgraded.assets()["FICT"].foreign_property is setting
+
+
+def test_v6_adds_an_unset_fx_rate_to_existing_transactions(tmp_path, monkeypatch):
+    path = tmp_path / "existing.db"
+    prior_migrations = {version: step for version, step in db.MIGRATIONS.items() if version <= 5}
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "MIGRATIONS", prior_migrations)
+        seeded = Store(path)
+        acct = _seed(seeded)
+        _add_baseline_txn(seeded, acct, "SELL", "2024-02-01", 12)
+        original = _baseline_rows(seeded)
+        seeded.close()
+
+    upgraded = Store(path)
+    assert upgraded.schema_version == latest_version() >= 6
+    # Every row is kept, with no rate recorded, and the pre-upgrade file is backed up first.
+    assert _baseline_rows(upgraded) == original
+    assert [t.fx_rate for t in upgraded.transactions()] == [None, None]
+    (backup,) = upgraded.backups()
+    assert Store.backup_reason(backup) == f"pre-v{latest_version()}"
+    assert _user_version(backup) == 5
+    sale = upgraded.transactions()[1]
+    sale.fx_rate = 1.35
+    upgraded.update_transaction(sale)
+    assert [t.fx_rate for t in upgraded.transactions()] == [None, 1.35]
+    upgraded.close()
+
+    # An older MarketPulse would drop the recorded rates, so it refuses the upgraded ledger.
+    monkeypatch.setattr(db, "MIGRATIONS", prior_migrations)
+    with pytest.raises(db.SchemaError, match="Upgrade MarketPulse"):
+        Store(path)
 
 
 def test_private_permissions_survive_reopen_backup_and_restore():

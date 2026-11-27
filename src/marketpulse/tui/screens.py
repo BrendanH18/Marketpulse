@@ -219,6 +219,13 @@ class TransactionForm(BaseForm):
             with Horizontal(classes="field-row"):
                 yield Input(val(t.fees) if t else "", placeholder="Fees", id="f-fees", classes="k-fees")
                 yield Input(t.currency if t else "", placeholder="Currency (auto)", id="f-currency", max_length=3)
+                # The broker's rate, used by tax and contribution room instead of the day's looked-up one.
+                yield Input(
+                    repr(t.fx_rate) if t and t.fx_rate is not None else "",
+                    placeholder="FX rate to CAD (optional)",
+                    id="f-fx",
+                    classes="k-fx",
+                )
                 yield Input(t.date if t else today(), placeholder="Date  YYYY-MM-DD / yesterday / -3d", id="f-date")
             yield Input(t.note if t else "", placeholder="Note (optional)", id="f-note")
             yield self.buttons()
@@ -244,6 +251,7 @@ class TransactionForm(BaseForm):
             "k-ratio": k is TxnType.SPLIT,
             "k-fees": k in (TxnType.BUY, TxnType.SELL),
             "k-transfer": k is TxnType.TRANSFER,
+            "k-fx": k.uses_fx_rate,
         }
         for cls, visible in show.items():
             for w in self.query(f".{cls}"):
@@ -350,8 +358,11 @@ class TransactionForm(BaseForm):
                 or (self.live_currency if symbol == self.symbol and k is not TxnType.ACB_INCREASE else ""),
                 note=self.query_one("#f-note", Input).value.strip(),
                 target_account_id=target if isinstance(target, int) and k is TxnType.TRANSFER else None,
+                fx_rate=_num(self, "#f-fx", "FX rate", None) if k.uses_fx_rate else None,
             )
             txn.validate()
+            if txn.currency:  # a blank one is worked out when saving, which checks it then
+                txn.check_fx_rate()
         except (FormError, ValueError) as e:
             self.show_error(str(e))
             return
