@@ -110,14 +110,13 @@ marketpulse buy AAPL 10 150.00 --account "My Taxable" --date 2025-01-02 --fx-rat
 marketpulse deposit 1000 --currency USD --account "My TFSA" --fx-rate 1.3801
 ```
 
-The tax report (capital gains, in-kind transfers and the T1135 cost) and contribution
-room then convert that entry at the recorded rate instead of the rate looked up for its
-date, so the figures match the broker's slips, and the entry is never missing a rate,
-even offline. Holdings and net worth are still valued at today's rates. The rate must be
-positive, and an entry in CAD can't have one. Contribution room and the T1135 estimate are
-always in CAD, so they use the recorded rate whatever your base currency. The capital gains
-report is in your base currency, so it uses recorded rates only when that is CAD; with
-another base currency it ignores them and converts at the looked-up rates. In the terminal
+Calculations in CAD then convert that entry at the recorded rate instead of the rate
+looked up for its date, so they match the broker's slips, and in them the entry is never
+missing a rate, even offline: contribution room and the T1135 estimate (always in CAD,
+whatever your base currency), and capital gains, including in-kind transfers, when your
+base currency is CAD. With another base currency, capital gains ignore recorded rates and
+convert at the looked-up ones. Holdings and net worth are still valued at today's rates.
+The rate must be positive, and an entry in CAD can't have one. In the terminal
 app, the transaction form's **FX rate to CAD** field does the same. `txn edit` refuses to
 change the currency of an entry with a recorded rate unless you also give a new
 `--fx-rate` or remove it with `--fx-rate ""`.

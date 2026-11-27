@@ -165,7 +165,7 @@ def test_recorded_rates_mean_cad_whatever_the_base_currency(tracker, store, fake
     tracker.add_transaction(_trade(acct, TxnType.BUY, "2025-01-02", 100, fx_rate=1.32, quantity=1000))
     tracker.add_transaction(_trade(acct, TxnType.SELL, "2025-03-03", 150, fx_rate=1.45, quantity=1))
     tracker.add_transaction(
-        Transaction(tfsa.saved_id, TxnType.DEPOSIT, f"{year}-01-02", amount=1000, currency="USD", fx_rate=1.38)
+        Transaction(tfsa.saved_id, TxnType.DEPOSIT, f"{year}-01-01", amount=1000, currency="USD", fx_rate=1.38)
     )
     fake.offline = True
     usd = Tracker(store, tracker.market, Config(base_currency="USD"))
@@ -188,9 +188,9 @@ def test_a_usd_tfsa_contribution_counts_at_its_recorded_rate(tracker, store, fak
     tfsa = store.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA))
     store.set_room("TFSA", year, 7000)
     deposit = tracker.add_transaction(
-        Transaction(tfsa.saved_id, TxnType.DEPOSIT, f"{year}-01-02", amount=1000, currency="USD")
+        Transaction(tfsa.saved_id, TxnType.DEPOSIT, f"{year}-01-01", amount=1000, currency="USD")
     )
-    fake.set_history("USDCAD=X", {f"{year}-01-02": 1.30}, currency="CAD")
+    fake.set_history("USDCAD=X", {f"{year}-01-01": 1.30}, currency="CAD")
 
     # Before: US$1,000 at the looked-up 1.30.
     [(status, _)] = tracker.room()

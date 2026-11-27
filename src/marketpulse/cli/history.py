@@ -975,8 +975,9 @@ def txn_edit(
         t.fx_rate = None if fx_rate == "" else fx_rate
     elif t.fx_rate is not None:
         # A recorded rate is per unit of the entry's currency, so it can't follow it to another one.
+        # The currency is worked out once here, and the preview and save use this checked one.
         try:
-            resolved = app.tracker.transaction_currency(replace(t))
+            resolved = t.currency = app.tracker.transaction_currency(t)
         except ValueError as e:
             fail(str(e))
         if resolved.upper() != original.currency.upper():

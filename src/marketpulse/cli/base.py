@@ -183,7 +183,8 @@ def fx_rate_option(f):
         callback=fx_rate_callback,
         metavar="RATE",
         help="FX rate the broker charged, in CAD per unit of the entry's currency (e.g. 1.3612 for USD). "
-        "Tax and contribution room use it instead of the day's looked-up rate.",
+        "CAD figures use it instead of the day's looked-up rate: contribution room, the T1135 estimate, "
+        "and capital gains when the base currency is CAD.",
     )(f)
 
 
