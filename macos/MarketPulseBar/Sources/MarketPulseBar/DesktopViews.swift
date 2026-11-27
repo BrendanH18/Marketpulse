@@ -1007,11 +1007,10 @@ private struct ActivityWorkspace: View {
         TableColumn("Type") { t in Text(TransactionEntry.label(t.type)).modifier(RowTint(Studio.mint)) }.width(115)
         TableColumn("Symbol", value: \.symbol).width(85)
         TableColumn("Account") { t in
-          Text(
-            t.targetAccount.isEmpty
-              ? accountName(t.accountId, payload)
-              : "\(accountName(t.accountId, payload)) → \(t.targetAccount)")
-        }.width(min: 130, ideal: 160)
+          let source = accountName(t.accountId, payload)
+          let account = t.targetAccount.isEmpty ? source : "\(source) → \(t.targetAccount)"
+          Text(verbatim: account)
+        }.width(min: 220, ideal: 235)
         TableColumn("Amount") { t in
           Text(activityAmount(t, privacy: payload.status.privacy)).monospacedDigit()
             .modifier(RowTint(activityColor(t)))
