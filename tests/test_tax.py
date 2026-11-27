@@ -537,6 +537,22 @@ def test_selling_all_units_before_the_accounts_own_split_row_uses_comparable_uni
     assert pool.acb == pytest.approx(1000) and pool.acb_per_unit == pytest.approx(5)
 
 
+def test_an_ignored_split_row_after_buying_post_split_units_changes_nothing():
+    # Wealthsimple held none when Questrade recorded the split, bought 100 post-split units at 5,
+    # sold them, and then recorded a split row with nothing held. Its units were post-split all
+    # along: 100 of the 300 comparable units (Questrade's 200 plus these), costing 1,000 + 500.
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", qty=100, price=10),
+        txn(TxnType.SPLIT, "2024-03-01", ratio=2),
+        txn(TxnType.BUY, "2024-03-02", qty=100, price=5, account=WS),
+        txn(TxnType.SELL, "2024-03-03", qty=100, price=5, account=WS),
+        txn(TxnType.SPLIT, "2024-03-04", ratio=2, account=WS),
+    ]
+    for ledger in (txns, txns[:-1]):
+        (d,) = run(ledger).dispositions
+        assert d.acb == pytest.approx(500)  # counting the row as a pending split gave 750
+
+
 def test_a_split_row_in_an_account_holding_none_changes_nothing():
     txns = [
         txn(TxnType.BUY, "2024-01-01", qty=10, price=100),

@@ -595,36 +595,46 @@ def _staggered_splits(
     """Splits recorded on more than one date, by pool: the only ones a disposition can fall between.
 
     The ledger ignores a split row in a holding with nothing held. One exception counts here: a
-    holding that sold or moved all its units after another holding recorded the split, then
-    recorded the split itself, held pre-split units when it disposed of them. That row joins
-    the split it belongs to, so the disposition is costed in comparable units."""
+    holding that already held units when another holding recorded the split, and sold or moved
+    them all before recording the split itself, held pre-split units when it disposed of them.
+    That row joins the split it belongs to, so the disposition is costed in comparable units."""
     if not any(t.type is TxnType.SPLIT for t in ordered):
         return {}
     state = LedgerState()
     applied: dict[str, list[Transaction]] = defaultdict(list)
-    emptied: list[tuple[Transaction, str]] = []  # (split row in an empty holding, the last day it held units)
+    # (split row in an empty holding, the day its last units were acquired, the last day it held units)
+    emptied: list[tuple[Transaction, str, str]] = []
+    opened: dict[tuple[int, str], str] = {}  # the day each holding last went from none held to some
     last_held: dict[tuple[int, str], str] = {}
+
+    def holds(holding: tuple[int, str]) -> bool:
+        h = state.holdings.get(holding)
+        return h is not None and h.quantity > EPSILON
+
     for t in ordered:
         holding = (t.account_id, t.symbol)
-        h = state.holdings.get(holding)
-        held = h is not None and h.quantity > EPSILON
+        touched = [holding] if t.target_account_id is None else [holding, (t.target_account_id, t.symbol)]
+        before = [holds(h) for h in touched]
         if t.type is TxnType.SPLIT:
-            if held:
+            if before[0]:
                 applied[key(t.symbol)].append(t)
             elif holding in last_held:
-                emptied.append((t, last_held[holding]))
-        if held:
+                emptied.append((t, opened[holding], last_held[holding]))
+        if before[0]:
             last_held[holding] = t.date
         _apply(state, t, accounts)
+        for h, was in zip(touched, before, strict=True):
+            if not was and holds(h):
+                opened[h] = t.date
     events = {pool: _split_events(rows) for pool, rows in applied.items()}
     window = timedelta(days=2 * SUPERFICIAL_WINDOW_DAYS)
-    for t, held_on in emptied:
+    for t, opened_on, held_on in emptied:
         holding = (t.account_id, t.symbol)
         earliest = (date.fromisoformat(t.date) - window).isoformat()
         joinable = [
             e
             for e in events.get(key(t.symbol), ())
-            if e.ratio == t.ratio and earliest <= e.first <= held_on and holding not in e.rows
+            if e.ratio == t.ratio and max(earliest, opened_on) <= e.first <= held_on and holding not in e.rows
         ]
         if joinable:
             max(joinable, key=lambda e: e.first).rows[holding] = t.date
