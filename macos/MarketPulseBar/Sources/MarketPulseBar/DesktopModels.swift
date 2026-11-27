@@ -716,7 +716,7 @@ struct DesktopTransaction: Decodable, Identifiable {
   let currency: String
   let note: String
   let ratio: Double
-  /// The FX rate the broker charged (base currency per unit of `currency`), if one was recorded.
+  /// The FX rate the broker charged (CAD per unit of `currency`), if one was recorded.
   /// Absent from older engines.
   let fxRate: Double?
   /// Unsigned headline value, computed by the Python ledger (`Transaction.gross_value`).

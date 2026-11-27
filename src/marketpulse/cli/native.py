@@ -169,7 +169,6 @@ def desktop_import(
                 dry_run=dry_run,
                 expect_fingerprint=expect_fingerprint,
                 profile=profile,
-                base_currency=app.config.base_currency.upper(),
             )
         )
         if result["backup"] is not None:

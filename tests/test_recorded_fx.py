@@ -8,6 +8,7 @@ import asyncio
 import io
 import json
 import math
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -77,9 +78,10 @@ def test_one_recorded_rate_is_used_and_the_other_leg_is_looked_up(store):
     ]
     fx = tax.fx_lookup({"USD": LOOKED_UP}, "CAD")
     accounts = store.account_map()
-    # Recorded rates are only used when the caller says they are in the currency fx_on converts into.
+    # A recorded rate is CAD per unit, so it is used only when fx_on converts into CAD too.
     assert tax.compute(txns, accounts, fx).dispositions[0].gain == pytest.approx(80)
-    (d,) = tax.compute(txns, accounts, fx, recorded_in="CAD").dispositions
+    assert tax.compute(txns, accounts, fx, fx_currency="USD").dispositions[0].gain == pytest.approx(80)
+    (d,) = tax.compute(txns, accounts, fx, fx_currency="CAD").dispositions
     assert d.gain == pytest.approx(150 * 1.45 - 130)
 
 
@@ -131,28 +133,51 @@ def test_recorded_rates_apply_to_drip_roc_acb_increase_and_transfers(store):
     fx = tax.fx_lookup({}, "CAD")  # no historical rates at all
     looked_up = tax.compute(txns, accounts, fx)
     assert not looked_up.dispositions[0].complete
-    (d,) = tax.compute(txns, accounts, fx, recorded_in="CAD").dispositions
+    (d,) = tax.compute(txns, accounts, fx, fx_currency="CAD").dispositions
     # ACB: 400 x 1.25 + 100 x 1.5 + 10 x 2 - 20 x 1.5 = 640; proceeds 5 x 120 x 1.6 = 960.
     assert d.kind == "deemed" and d.complete
     assert d.acb == pytest.approx(640) and d.proceeds == pytest.approx(960) and d.fx == 1.6
 
 
-def test_t1135_cost_uses_recorded_rates_only_when_the_base_is_cad(tracker, store, fake):
+def test_t1135_cost_uses_recorded_rates(tracker, store, fake):
     acct = _taxable(store)
     tracker.add_transaction(_trade(acct, TxnType.BUY, "2025-01-02", 100, fx_rate=1.32, quantity=1000))
     fake.offline = True
     (year,) = [y for y in tracker.foreign_property() if y.year == 2025]
     assert year.max_cost == pytest.approx(132000) and not year.incomplete
-
-    # A recorded rate is in the base currency, so with another base T1135 (in CAD) looks the rate up.
+    # The estimate is in CAD, so a rate looked up in another currency would be ignored.
     accounts = store.account_map()
     fx = tax.fx_lookup({"USD": {"2025-01-02": 1.30}}, "CAD")
-    (other,) = [
+    (looked_up,) = [
         y
-        for y in tax.foreign_property_years(store.transactions(), accounts, {}, fx, today="2025-12-31")
+        for y in tax.foreign_property_years(store.transactions(), accounts, {}, fx, today="2025-12-31", currency="USD")
         if y.year == 2025
     ]
-    assert other.max_cost == pytest.approx(130000)
+    assert looked_up.max_cost == pytest.approx(130000)
+
+
+def test_recorded_rates_mean_cad_whatever_the_base_currency(tracker, store, fake):
+    """Changing the base currency never reinterprets a saved rate (CAD per unit)."""
+    year = date.today().year
+    acct = _taxable(store)
+    tfsa = store.add_account(Account(name="Fictional TFSA", type=AccountType.TFSA))
+    store.set_room("TFSA", year, 7000)
+    tracker.add_transaction(_trade(acct, TxnType.BUY, "2025-01-02", 100, fx_rate=1.32, quantity=1000))
+    tracker.add_transaction(_trade(acct, TxnType.SELL, "2025-03-03", 150, fx_rate=1.45, quantity=1))
+    tracker.add_transaction(
+        Transaction(tfsa.saved_id, TxnType.DEPOSIT, f"{year}-01-02", amount=1000, currency="USD", fx_rate=1.38)
+    )
+    fake.offline = True
+    usd = Tracker(store, tracker.market, Config(base_currency="USD"))
+
+    # Capital gains in USD don't convert USD trades, so the CAD rates are left out: US$150 - US$100.
+    (gains,), _ = usd.tax_years()
+    assert gains.net_gain == pytest.approx(50)
+    # T1135 and contribution room are always in CAD, so they still use the recorded rates.
+    (t1135,) = [y for y in usd.foreign_property() if y.year == 2025]
+    assert t1135.max_cost == pytest.approx(132000) and not t1135.incomplete
+    [(room, _)] = usd.room()
+    assert room.contributions == pytest.approx(1380) and room.missing_fx == []
 
 
 # ── contribution room ─────────────────────────────────────────────────────────
@@ -204,13 +229,15 @@ def test_room_uses_recorded_rates_for_withdrawals_and_in_kind_contributions():
         ),
         Transaction(2, TxnType.WITHDRAWAL, f"{year - 1}-03-04", amount=500, currency="USD", id=3, fx_rate=1.4),
     ]
-    state = replay(txns, accounts)
-    flows = [*state.flows, *state.in_kind_contributions]
-    looked_up = contribution_room("TFSA", year - 1, 7000, flows, {2}, current_year=year)
+
+    def flows(entries):
+        state = replay(entries, accounts)
+        return [*state.flows, *state.in_kind_contributions]
+
+    unrecorded = [replace(t, fx_rate=None) for t in txns]
+    looked_up = contribution_room("TFSA", year - 1, 7000, flows(unrecorded), {2}, current_year=year)
     assert looked_up.remaining is None and len(looked_up.missing_fx) == 2
-    # Recorded rates are in the base currency, so they count only when that is CAD.
-    assert contribution_room("TFSA", year - 1, 7000, flows, {2}, current_year=year, recorded_in="USD").remaining is None
-    status = contribution_room("TFSA", year - 1, 7000, flows, {2}, current_year=year, recorded_in="CAD")
+    status = contribution_room("TFSA", year - 1, 7000, flows(txns), {2}, current_year=year)
     assert status.contributions == pytest.approx(1500)  # 10 x US$120 x 1.25
     assert status.withdrawals_added_back == pytest.approx(700)  # US$500 x 1.4
     assert status.remaining == pytest.approx(7000 + status.new_limits + 700 - 1500)
@@ -235,13 +262,13 @@ def test_types_that_never_convert_refuse_a_rate(kind):
     assert e.value.code == "fx_rate_unused" and e.value.details == {"type": kind.value}
 
 
-def test_a_rate_on_an_entry_in_the_base_currency_is_refused(tracker, store):
+def test_a_rate_on_an_entry_in_cad_is_refused(tracker, store):
     acct = _taxable(store)
     with pytest.raises(CodedError, match="only applies to an entry in a currency other than CAD") as e:
         tracker.add_transaction(
             Transaction(acct.saved_id, TxnType.BUY, "2025-01-02", "XEQT.TO", 1, 30, currency="CAD", fx_rate=1.0)
         )
-    assert e.value.code == "fx_rate_base_currency"
+    assert e.value.code == "fx_rate_cad_entry"
     # The currency is worked out first: XEQT.TO is listed in CAD.
     with pytest.raises(ValueError, match="other than CAD"):
         tracker.add_transaction(Transaction(acct.saved_id, TxnType.BUY, "2025-01-02", "XEQT.TO", 1, 30, fx_rate=1.2))
@@ -250,13 +277,13 @@ def test_a_rate_on_an_entry_in_the_base_currency_is_refused(tracker, store):
     with pytest.raises(ValueError, match="other than CAD"):
         tracker.update_transaction(saved)
     assert [t.fx_rate for t in store.transactions()] == [1.3]
-    # With a USD base, a USD entry needs no rate while a CAD one may have one.
+    # The rate is CAD per unit whatever the base: with a USD base, a CAD entry still can't have one.
     usd = Tracker(store, tracker.market, Config(base_currency="USD"))
-    with pytest.raises(ValueError, match="other than USD"):
-        usd.add_transaction(_trade(acct, TxnType.BUY, "2025-01-02", 100, fx_rate=1.0))
-    usd.add_transaction(
-        Transaction(acct.saved_id, TxnType.BUY, "2025-01-02", "XEQT.TO", 1, 30, currency="CAD", fx_rate=0.74)
-    )
+    with pytest.raises(ValueError, match="other than CAD"):
+        usd.add_transaction(
+            Transaction(acct.saved_id, TxnType.BUY, "2025-01-02", "XEQT.TO", 1, 30, currency="CAD", fx_rate=0.74)
+        )
+    usd.add_transaction(_trade(acct, TxnType.BUY, "2025-01-02", 100, fx_rate=1.36))
 
 
 # ── CSV ───────────────────────────────────────────────────────────────────────
@@ -273,35 +300,18 @@ CSV = """date,account,type,symbol,quantity,price,currency,fx_rate
 
 def test_csv_import_reads_the_rate_and_skips_rows_it_cant_use(store):
     _taxable(store)
-    preview = import_transactions(store, io.StringIO(CSV), dry_run=True, base_currency="CAD")
+    preview = import_transactions(store, io.StringIO(CSV), dry_run=True)
     assert store.transactions() == []
-    result = import_transactions(store, io.StringIO(CSV), expect_fingerprint=preview.fingerprint, base_currency="CAD")
+    result = import_transactions(store, io.StringIO(CSV), expect_fingerprint=preview.fingerprint)
     # The preview runs the real import, so it reports exactly what the import then does.
     assert (preview.added, preview.skipped, preview.issues) == (result.added, result.skipped, result.issues)
     assert result.added == 3
     assert [(t.symbol, t.fx_rate) for t in store.transactions()] == [("AAPL", 1.32), ("AAPL", 1.45), ("AAPL", None)]
     assert [(i.line, i.field, i.value, i.code) for i in result.issues] == [
-        (4, "fx_rate", "1.1", "fx_rate_base_currency"),
+        (4, "fx_rate", "1.1", "fx_rate_cad_entry"),
         (5, "fx_rate", "1.4", "fx_rate_unused"),
         (6, "fx_rate", "-2", "fx_rate_not_positive"),
     ]
-
-
-def test_csv_preview_and_import_depend_on_the_base_currency(store):
-    _taxable(store)
-    preview = import_transactions(store, io.StringIO(CSV), dry_run=True, base_currency="USD")
-    with pytest.raises(ValueError, match="changed since the preview"):
-        import_transactions(store, io.StringIO(CSV), expect_fingerprint=preview.fingerprint, base_currency="CAD")
-    # A USD base refuses the rate on USD rows instead, and keeps the CAD one.
-    result = import_transactions(store, io.StringIO(CSV), expect_fingerprint=preview.fingerprint, base_currency="USD")
-    assert [(t.symbol, t.fx_rate) for t in store.transactions()] == [("XEQT.TO", 1.1), ("AAPL", None)]
-    assert result.added == preview.added == 2
-    # Without a base currency to check against, a row with a rate is skipped.
-    assert {i.code for i in import_transactions(store, io.StringIO(CSV), dry_run=True).issues} == {
-        "fx_rate_no_base",
-        "fx_rate_unused",
-        "fx_rate_not_positive",
-    }
 
 
 def test_csv_export_round_trips_the_rate(tmp_path, store):
@@ -317,11 +327,11 @@ def test_csv_export_round_trips_the_rate(tmp_path, store):
     assert lines[1].endswith(",1.3612345678") and lines[2].endswith(",,")
     fresh = Store(tmp_path / "fresh.db")
     try:
-        result = import_transactions(fresh, io.StringIO(out.getvalue()), base_currency="CAD")
+        result = import_transactions(fresh, io.StringIO(out.getvalue()))
         assert result.added == 2 and result.issues == []
         assert [t.fx_rate for t in fresh.transactions()] == [1.3612345678, None]
         # Importing the export again finds every row already there.
-        assert import_transactions(fresh, io.StringIO(out.getvalue()), base_currency="CAD").duplicates == 2
+        assert import_transactions(fresh, io.StringIO(out.getvalue())).duplicates == 2
     finally:
         fresh.close()
 
@@ -387,6 +397,42 @@ def test_cli_records_and_edits_the_rate(cli, store):
     assert cli("txn", "edit", str(buy.id), "--fx-rate", "").exit_code == 0
     assert store.transactions()[0].fx_rate is None
     assert taxable.saved_id == buy.account_id
+
+
+def test_cli_edit_refuses_to_carry_a_rate_to_another_currency(cli, store):
+    _taxable(store)
+    assert cli("buy", "AAPL", "1", "100", "-d", "2025-01-02", "--fx-rate", "1.32").exit_code == 0
+    (buy,) = store.transactions()
+    hint = 'Give a new --fx-rate, or remove it with --fx-rate "".'
+    for args in (("--currency", "EUR"), ("--symbol", "XEQT.TO"), ("--currency", "EUR", "--dry-run")):
+        refused = cli("txn", "edit", str(buy.id), *args)
+        assert refused.exit_code == 1, args
+        assert (
+            "has an FX rate for USD, and this edit changes its currency to" in refused.output and hint in refused.output
+        )
+    assert (store.transactions()[0].currency, store.transactions()[0].fx_rate) == ("USD", 1.32)
+    # The Mac editor sends every field, with a blank currency worked out again: the same one keeps the rate.
+    assert cli("txn", "edit", str(buy.id), "--currency", "", "--note", "kept").exit_code == 0
+    assert (store.transactions()[0].currency, store.transactions()[0].fx_rate) == ("USD", 1.32)
+    assert cli("txn", "edit", str(buy.id), "--currency", "EUR", "--fx-rate", "1.5").exit_code == 0
+    assert (store.transactions()[0].currency, store.transactions()[0].fx_rate) == ("EUR", 1.5)
+    assert cli("txn", "edit", str(buy.id), "--currency", "CAD", "--fx-rate", "").exit_code == 0
+    assert (store.transactions()[0].currency, store.transactions()[0].fx_rate) == ("CAD", None)
+
+
+def test_cli_edit_preview_works_out_a_blank_currency_as_the_save_does(cli, store):
+    acct = _taxable(store)
+    # A USD purchase of a Toronto listing: an ACB increase takes the holding's USD, not the CAD
+    # that the .TO suffix suggests.
+    store.add_transaction(Transaction(acct.saved_id, TxnType.BUY, "2025-01-02", "FICT.TO", 10, 10, currency="USD"))
+    assert cli("acb-increase", "FICT.TO", "5", "-d", "2025-02-03").exit_code == 0
+    increase = store.transactions()[-1]
+    assert increase.currency == "USD"
+    args = ("txn", "edit", str(increase.id), "--currency", "", "--fx-rate", "1.3")
+    preview = cli(*args, "--dry-run")
+    assert preview.exit_code == 0 and "would update" in preview.output, preview.output
+    assert cli(*args).exit_code == 0
+    assert (store.transactions()[-1].currency, store.transactions()[-1].fx_rate) == ("USD", 1.3)
 
 
 def test_cli_refuses_a_rate_it_cant_use(cli, store):

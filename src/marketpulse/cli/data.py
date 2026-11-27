@@ -207,14 +207,7 @@ def import_cmd(
             nonlocal added, names
             if summary:
                 result, added, names = _import_rows(
-                    app.store,
-                    path,
-                    default,
-                    create_accounts,
-                    preview,
-                    profile,
-                    expect_fingerprint=fingerprint,
-                    base_currency=app.config.base_currency.upper(),
+                    app.store, path, default, create_accounts, preview, profile, expect_fingerprint=fingerprint
                 )
                 return result
             return import_transactions(
@@ -225,7 +218,6 @@ def import_cmd(
                 dry_run=preview,
                 expect_fingerprint=fingerprint,
                 profile=profile,
-                base_currency=app.config.base_currency.upper(),
             )
 
         result = run(dry_run or strict)
@@ -288,7 +280,6 @@ def _import_rows(
     profile: str,
     *,
     expect_fingerprint: str | None = None,
-    base_currency: str | None = None,
 ) -> tuple[ImportResult, list[Transaction], dict[int, Account]]:
     """Import (or preview) and return the result, the rows it added and the accounts naming them.
 
@@ -309,7 +300,6 @@ def _import_rows(
             create_accounts=create_accounts,
             expect_fingerprint=expect_fingerprint,
             profile=profile,
-            base_currency=base_currency,
         )
         return result, [t for t in target.transactions() if t.id not in before], target.account_map()
 

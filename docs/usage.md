@@ -99,11 +99,11 @@ deletes the latest transaction after confirmation.
 
 #### The FX rate your broker charged
 
-For an entry in a currency other than your base currency, `--fx-rate RATE` records the
-exchange rate the broker actually used, in base-currency units per unit of the entry's
-currency (for example `1.3612` CAD per USD), as it appears on the trade confirmation or
-statement. `buy`, `sell`, `drip`, `deposit`, `withdraw`, `roc`, `acb-increase` and
-`transfer` take it:
+For an entry in a currency other than CAD, `--fx-rate RATE` records the exchange rate the
+broker actually used, in Canadian dollars per unit of the entry's currency (for example
+`1.3612` CAD per USD), as it appears on the trade confirmation or statement. It is always
+CAD per unit, whatever your base currency. `buy`, `sell`, `drip`, `deposit`, `withdraw`,
+`roc`, `acb-increase` and `transfer` take it:
 
 ```bash
 marketpulse buy AAPL 10 150.00 --account "My Taxable" --date 2025-01-02 --fx-rate 1.4352
@@ -114,10 +114,13 @@ The tax report (capital gains, in-kind transfers and the T1135 cost) and contrib
 room then convert that entry at the recorded rate instead of the rate looked up for its
 date, so the figures match the broker's slips, and the entry is never missing a rate,
 even offline. Holdings and net worth are still valued at today's rates. The rate must be
-positive, and an entry already in the base currency can't have one. Recorded rates are in
-the base currency, so contribution room and the T1135 estimate, which are always in CAD,
-use them only when the base currency is CAD; if you change the base currency, record the
-rates again. In the terminal app, the transaction form's **FX rate** field does the same.
+positive, and an entry in CAD can't have one. Contribution room and the T1135 estimate are
+always in CAD, so they use the recorded rate whatever your base currency. The capital gains
+report is in your base currency, so it uses recorded rates only when that is CAD; with
+another base currency it ignores them and converts at the looked-up rates. In the terminal
+app, the transaction form's **FX rate to CAD** field does the same. `txn edit` refuses to
+change the currency of an entry with a recorded rate unless you also give a new
+`--fx-rate` or remove it with `--fx-rate ""`.
 
 `drip` records a reinvested dividend: new shares at a price, counted as income. `split`
 takes the new shares per old share: `2` for a 2-for-1 split, `0.1` for a 1-for-10
@@ -209,7 +212,7 @@ Add `--json` for unmasked amounts and a `flows` array on each room row.
 `accounts room`, `tax`, and the app use each foreign-currency flow's historical CAD
 rate on its date, or the most recent preceding close if there was no close that
 day. A flow with a [recorded broker rate](#the-fx-rate-your-broker-charged) uses
-that rate instead (when the base currency is CAD) and needs no lookup. When a required rate is missing, the estimate is unavailable and JSON
+that rate instead and needs no lookup. When a required rate is missing, the estimate is unavailable and JSON
 includes the affected dates and currencies in `missing_fx`. `report contribution-room`
 and `summarize contribution-room` stay offline, so a row that requires FX has a
 `null` remaining amount. Live estimates reuse recently fetched rates for up to
@@ -221,7 +224,8 @@ The tax report implements:
 
 - A pooled adjusted cost base (ACB) across taxable accounts holding an identical symbol.
 - Purchase costs and sale proceeds converted using each transaction date's FX rate,
-  or the [rate the broker charged](#the-fx-rate-your-broker-charged) when one is recorded.
+  or the [rate the broker charged](#the-fx-rate-your-broker-charged) when one is recorded
+  and the base currency is CAD.
 - Proportional superficial-loss estimates using recorded purchases and holdings
   around the sale date, including registered accounts. The report expresses
   share counts in sale-date units when the window spans a stock split. Record
@@ -313,8 +317,8 @@ and a status: not required (at or under $100,000 all year), the simplified
 method (over $100,000 but under $250,000 all year), or the detailed method
 ($250,000 or more at some point). A year that peaked mid-year is flagged even
 if it ended below the line. Cost amounts are ACB in Canadian dollars, with each
-purchase converted at its own date's rate, whatever your base currency (or at its
-recorded broker rate, when the base currency is CAD).
+purchase converted at its own date's rate, or at its recorded broker rate, whatever
+your base currency.
 Missing FX rates are flagged as incomplete, because the totals are then too
 low. The tax view in the terminal app shows the same status for the selected
 year, and the Mac app's `desktop tax` payload carries it as `foreign_property`.
@@ -405,9 +409,9 @@ Create accounts explicitly to control account type,
 currency, and cash tracking instead of relying on the importer's guesses.
 
 An optional `fx_rate` column records the [rate the broker charged](#the-fx-rate-your-broker-charged)
-on each row (base-currency units per unit of the row's currency; leave it blank for none).
-`export` writes it as the last column. A row whose rate isn't positive, is on an entry in the
-base currency, or is on a type that never converts (a dividend, interest, fee, split or
+on each row (CAD per unit of the row's currency; leave it blank for none).
+`export` writes it as the last column. A row whose rate isn't positive, is on an entry in
+CAD, or is on a type that never converts (a dividend, interest, fee, split or
 valuation) is skipped with the reason, in the preview as in the import.
 
 Use `marketpulse import activities.csv --dry-run --json` for the complete report,

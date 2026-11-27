@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS identical_property (
     pool TEXT NOT NULL
 );
 """,
-    # 6: the FX rate the broker charged on an entry (base per unit of its currency), NULL when none (#241).
+    # 6: the FX rate the broker charged on an entry (CAD per unit of its currency), NULL when none (#241).
     6: "ALTER TABLE transactions ADD COLUMN fx_rate REAL",
 }
 
@@ -434,20 +434,8 @@ def preview_restore(current: Path, source: Path, *, require_ready: bool = False)
         raise RestoreError(str(error)) from error
 
 
-_TXN_COLUMNS = (
-    "account_id",
-    "date",
-    "type",
-    "symbol",
-    "quantity",
-    "price",
-    "amount",
-    "fees",
-    "currency",
-    "note",
-    "ratio",
-    "target_account_id",
-    "fx_rate",
+_TXN_COLS = (
+    "account_id, date, type, symbol, quantity, price, amount, fees, currency, note, ratio, target_account_id, fx_rate"
 )
 _SNAPSHOT_UPSERT = (
     "INSERT INTO snapshots(date, net_worth, book, contributions, currency, detail) VALUES (?,?,?,?,?,?)"
@@ -522,11 +510,6 @@ class Store:
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._conn.executescript(SCHEMA)
             self._migrate(backup_first=existed)
-            # Every column, once migrated. A ledger kept at an older schema version (only
-            # migration tests open one without upgrading it) lacks the later ones, which
-            # are then read as unset and not written.
-            present = {row[1] for row in self._conn.execute("PRAGMA table_info(transactions)")}
-            self._txn_columns = tuple(c for c in _TXN_COLUMNS if c in present)
 
     @classmethod
     def open_default(cls) -> Store:
@@ -1085,7 +1068,7 @@ class Store:
             note=row["note"],
             ratio=row["ratio"],
             target_account_id=row["target_account_id"],
-            fx_rate=row["fx_rate"] if "fx_rate" in row.keys() else None,
+            fx_rate=row["fx_rate"],
         )
 
     def transactions(self, account_id: int | None = None, symbol: str | None = None) -> list[Transaction]:
@@ -1114,42 +1097,39 @@ class Store:
     def _txn_params(self, txn: Transaction) -> tuple:
         txn.date = parse_date(txn.date)
         txn.validate()
-        values = {
-            "account_id": txn.account_id,
-            "date": txn.date,
-            "type": txn.type.value,
-            "symbol": txn.symbol,
-            "quantity": txn.quantity,
-            "price": txn.price,
-            "amount": txn.amount,
-            "fees": txn.fees,
-            "currency": txn.currency,
-            "note": txn.note,
-            "ratio": txn.ratio,
-            "target_account_id": txn.target_account_id,
-            "fx_rate": txn.fx_rate,
-        }
-        return tuple(values[c] for c in self._txn_columns)
-
-    def _txn_insert(self) -> str:
-        placeholders = ",".join("?" * len(self._txn_columns))
-        return f"INSERT INTO transactions({', '.join(self._txn_columns)}) VALUES ({placeholders})"
+        return (
+            txn.account_id,
+            txn.date,
+            txn.type.value,
+            txn.symbol,
+            txn.quantity,
+            txn.price,
+            txn.amount,
+            txn.fees,
+            txn.currency,
+            txn.note,
+            txn.ratio,
+            txn.target_account_id,
+            txn.fx_rate,
+        )
 
     def add_transaction(self, txn: Transaction) -> Transaction:
-        cur = self._exec(self._txn_insert(), self._txn_params(txn))
+        cur = self._exec(
+            f"INSERT INTO transactions({_TXN_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", self._txn_params(txn)
+        )
         txn.id = cur.lastrowid
         return txn
 
     def add_transactions(self, txns: list[Transaction]) -> int:
         params = [self._txn_params(t) for t in txns]
         with self._write():
-            self._conn.executemany(self._txn_insert(), params)
+            self._conn.executemany(f"INSERT INTO transactions({_TXN_COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", params)
         return len(params)
 
     def update_transaction(self, txn: Transaction) -> None:
         if txn.id is None:
             raise ValueError("Transaction has no id.")
-        sets = ", ".join(f"{c} = ?" for c in self._txn_columns)
+        sets = ", ".join(f"{c.strip()} = ?" for c in _TXN_COLS.split(","))
         self._exec(f"UPDATE transactions SET {sets} WHERE id = ?", (*self._txn_params(txn), txn.id))
 
     def delete_transaction(self, txn_id: int) -> None:

@@ -177,6 +177,10 @@ struct NativeBridgeCheck {
       precondition(
         (row.transaction.type == "TRANSFER") == (row.transaction.targetAccount == "RRSP"),
         "Transfer target differs for \(row.transaction.type)")
+      // check_native_bridge.py records 1.35 on every type that converts, and no rate on the rest.
+      let converts = ["BUY", "SELL", "DRIP", "DEPOSIT", "WITHDRAWAL", "ROC", "ACB_INCREASE", "TRANSFER"]
+      let expectedFxRate: Double? = converts.contains(row.transaction.type) ? 1.35 : nil
+      precondition(row.transaction.fxRate == expectedFxRate, "FX rate differs for \(row.transaction.type)")
     }
     precondition(payload.activity.contains { $0.type == "BUY" && $0.signedValue < 0 })
     precondition(payload.activity.contains { $0.type == "DIVIDEND" && $0.signedValue > 0 })

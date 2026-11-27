@@ -328,8 +328,8 @@ class Transaction:
     ratio: float = 0.0  # SPLIT: new shares per old share
     target_account_id: int | None = None  # TRANSFER destination
     id: int | None = None
-    # The rate the broker charged: base-currency units per unit of `currency`. Tax and
-    # contribution room use it instead of the rate looked up for the date (see `recorded_rate`).
+    # The rate the broker charged: CAD per unit of `currency`, whatever the base currency. Tax
+    # and contribution room use it instead of the rate looked up for the date (see `recorded_rate`).
     fx_rate: float | None = None
 
     def __post_init__(self) -> None:
@@ -392,23 +392,18 @@ class Transaction:
         if parse_date(self.date) > today():
             raise CodedError("Date cannot be in the future.", "future_date")
 
-    def check_fx_rate(self, base: str) -> None:
-        """Refuse a recorded FX rate on an entry already in the base currency: there is nothing
-        to convert. `currency` must already be resolved (it is after `Tracker` fills it in)."""
-        if self.fx_rate is not None and (not self.currency or self.currency.upper() == base.upper()):
-            raise CodedError(
-                f"An FX rate only applies to an entry in a currency other than {base.upper()}.",
-                "fx_rate_base_currency",
-                {"currency": base.upper()},
-            )
+    def check_fx_rate(self) -> None:
+        """Refuse a recorded FX rate (CAD per unit) on an entry in CAD: there is nothing to
+        convert. `currency` must already be resolved (it is after `Tracker` fills it in)."""
+        if self.fx_rate is not None and (not self.currency or self.currency.upper() == "CAD"):
+            raise CodedError("An FX rate only applies to an entry in a currency other than CAD.", "fx_rate_cad_entry")
 
 
-def recorded_rate(txn: Transaction, currency: str, base: str | None) -> float | None:
-    """`txn.fx_rate` when it converts `currency` into `base`, the currency recorded rates are in.
+def recorded_rate(txn: Transaction, currency: str, into: str | None) -> float | None:
+    """`txn.fx_rate` when converting its `currency` into `into`, else None.
 
-    None when nothing was recorded, when `base` is None (the caller's rates are in another
-    currency than the base, so a recorded rate doesn't apply), or when `currency` is the base."""
-    if base is None or txn.fx_rate is None or currency.upper() == base.upper():
+    A recorded rate is CAD per unit, so it applies only when `into` is CAD and `currency` isn't."""
+    if txn.fx_rate is None or into is None or into.upper() != "CAD" or currency.upper() == "CAD":
         return None
     return txn.fx_rate
 

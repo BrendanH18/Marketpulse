@@ -254,20 +254,17 @@ def import_transactions(
     dry_run: bool = False,
     expect_fingerprint: str | None = None,
     profile: str = "auto",
-    base_currency: str | None = None,
 ) -> ImportResult:
     """Import (or preview) CSV rows. A commit given `expect_fingerprint` from its preview
     refuses to write anything if the file or the ledger changed in between. `profile` names
-    a broker profile from `brokers.PROFILES`; "auto" picks one from the header row.
-    `base_currency` (the config's) refuses a row's `fx_rate` in that currency, as recording
-    the entry by hand does; without it, a row with an `fx_rate` is skipped."""
+    a broker profile from `brokers.PROFILES`; "auto" picks one from the header row."""
     text = Path(source).read_text(encoding="utf-8-sig") if isinstance(source, Path | str) else source.read()
     if not dry_run:
         # One transaction from the check to the last write: no other process can change the
         # ledger in between, and a failure leaves no half-import (or new accounts) behind.
         with store.transaction():
             default_account = _reread(store, default_account)
-            fingerprint = import_fingerprint(store, text, default_account, create_accounts, profile, base_currency)
+            fingerprint = import_fingerprint(store, text, default_account, create_accounts, profile)
             if expect_fingerprint is not None and expect_fingerprint != fingerprint:
                 raise ValueError("The ledger or the file changed since the preview. Preview the import again.")
             result = _import(
@@ -277,7 +274,6 @@ def import_transactions(
                 create_accounts=create_accounts,
                 profile=profile,
                 backup=True,
-                base_currency=base_currency,
             )
         result.fingerprint = fingerprint
         return result
@@ -291,7 +287,7 @@ def import_transactions(
             # Use the exact copy the preview runs on, not the live ledger (or the caller's
             # account object) as it was a moment earlier.
             default_account = _reread(scratch, default_account)
-            fingerprint = import_fingerprint(scratch, text, default_account, create_accounts, profile, base_currency)
+            fingerprint = import_fingerprint(scratch, text, default_account, create_accounts, profile)
             result = _import(
                 scratch,
                 text,
@@ -299,7 +295,6 @@ def import_transactions(
                 create_accounts=create_accounts,
                 profile=profile,
                 backup=False,
-                base_currency=base_currency,
             )
         finally:
             scratch.close()
@@ -318,12 +313,7 @@ def _reread(store: Store, account: Account | None) -> Account | None:
 
 
 def import_fingerprint(
-    store: Store,
-    text: str,
-    default_account: Account | None,
-    create_accounts: bool,
-    profile: str = "auto",
-    base_currency: str | None = None,
+    store: Store, text: str, default_account: Account | None, create_accounts: bool, profile: str = "auto"
 ) -> str:
     """Everything an import's outcome depends on: the file, the options, the ledger, and the
     day (dates in the future are rejected, so a preview from yesterday may no longer hold)."""
@@ -333,7 +323,6 @@ def import_fingerprint(
         "profile": profile,
         "default_account": default_account.id if default_account else None,
         "create_accounts": create_accounts,
-        "base_currency": base_currency,
         "accounts": [asdict(a) for a in store.accounts(include_archived=True)],
         "transactions": [asdict(t) for t in store.transactions()],
     }
@@ -369,14 +358,7 @@ def _summary(txn: Transaction, account: str) -> str:
 
 
 def _import(
-    store: Store,
-    text: str,
-    *,
-    default_account: Account | None,
-    create_accounts: bool,
-    profile: str,
-    backup: bool,
-    base_currency: str | None = None,
+    store: Store, text: str, *, default_account: Account | None, create_accounts: bool, profile: str, backup: bool
 ) -> ImportResult:
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames:
@@ -514,16 +496,7 @@ def _import(
         )
         try:
             txn.validate()
-            if fx_rate is not None:
-                # Only the configured base says which currency needs no rate.
-                if base_currency is None:
-                    raise RowError(
-                        "an FX rate can't be checked without the base currency",
-                        "fx_rate",
-                        get("fx_rate"),
-                        "fx_rate_no_base",
-                    )
-                txn.check_fx_rate(base_currency)
+            txn.check_fx_rate()
             if txn_type.uses_amount and txn.amount <= 0:
                 raise RowError(
                     f"{txn_type.value} row has no amount",

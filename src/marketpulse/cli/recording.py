@@ -1048,7 +1048,7 @@ def _roc_gain_note(app: App, txn: Transaction, sym: str, *, account_book_exceede
     identical = app.store.identical_property()
     pool = tax.pool_symbol(sym, identical)
     exact = all(
-        transaction_currency(t, accounts).upper() == base or t.fx_rate is not None
+        transaction_currency(t, accounts).upper() == base or (t.fx_rate is not None and base == "CAD")
         for t in txns
         if tax.pool_symbol(t.symbol, identical) == pool
         and (
@@ -1057,7 +1057,7 @@ def _roc_gain_note(app: App, txn: Transaction, sym: str, *, account_book_exceede
         )
     )
     if exact:
-        report = tax.compute(txns, accounts, tax.fx_lookup({}, base), identical=identical, recorded_in=base)
+        report = tax.compute(txns, accounts, tax.fx_lookup({}, base), identical=identical, fx_currency=base)
         d = next((d for d in report.dispositions if d.txn_id == txn.id and d.kind == "roc"), None)
         if d is None:
             return None

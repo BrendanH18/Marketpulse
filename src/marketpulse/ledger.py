@@ -64,7 +64,7 @@ class CashFlow:
     account_id: int
     amount: float
     currency: str
-    fx_rate: float | None = None  # the rate recorded on the transaction (base per unit of `currency`)
+    fx_rate: float | None = None  # the rate recorded on the transaction (CAD per unit of `currency`)
 
 
 @dataclass
@@ -75,7 +75,7 @@ class InKindContribution:
     account_id: int
     amount: float | None
     currency: str
-    fx_rate: float | None = None  # the rate recorded on the transfer (base per unit of `currency`)
+    fx_rate: float | None = None  # the rate recorded on the transfer (CAD per unit of `currency`)
 
 
 @dataclass
@@ -494,15 +494,14 @@ def room_flows(
 
 def room_rate(
     flow: CashFlow | InKindContribution,
-    recorded_in: str | None,
     fx: Callable[[str, str], float | None] | None,
 ) -> float | None:
-    """CAD per unit of the flow's currency: 1 for CAD, the recorded rate when it is in CAD (see
-    `contribution_room`), else `fx`'s rate for the date, if any."""
+    """CAD per unit of the flow's currency: 1 for CAD, the rate recorded on it, else `fx`'s
+    rate for the date, if any."""
     currency = flow.currency.upper()
     if currency == "CAD":
         return 1.0
-    if flow.fx_rate is not None and recorded_in is not None and recorded_in.upper() == "CAD":
+    if flow.fx_rate is not None:
         return flow.fx_rate
     return fx(flow.date, currency) if fx else None
 
@@ -517,12 +516,11 @@ def contribution_room(
     current_year: int | None = None,
     fx: Callable[[str, str], float | None] | None = None,
     details: list[RoomFlow] | None = None,
-    recorded_in: str | None = None,
 ) -> RoomStatus:
     """Remaining CAD room given room known at Jan 1 of `as_of_year`.
 
-    `fx` gives historical CAD rates. A flow's recorded rate (the broker's, in the base currency)
-    is used instead when `recorded_in`, the base currency, is CAD; then the flow needs no `fx`.
+    `fx` gives historical CAD rates. A flow with a recorded rate (the broker's, CAD per unit)
+    uses that instead and needs no `fx`.
 
     TFSA: adds each new year's limit and prior-year withdrawals.
     FHSA: see _fhsa_room (annual limit, capped carry-forward, lifetime limit).
@@ -538,7 +536,7 @@ def contribution_room(
         if flow.amount is None:
             missing_values += 1
         else:
-            rate = room_rate(flow, recorded_in, fx)
+            rate = room_rate(flow, fx)
             if rate is None or not isfinite(rate) or rate <= 0:
                 missing.add((flow.date, currency))
             else:

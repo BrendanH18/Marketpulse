@@ -222,7 +222,7 @@ class TransactionForm(BaseForm):
                 # The broker's rate, used by tax and contribution room instead of the day's looked-up one.
                 yield Input(
                     repr(t.fx_rate) if t and t.fx_rate is not None else "",
-                    placeholder=f"FX rate to {self.tracker.base} (optional)",
+                    placeholder="FX rate to CAD (optional)",
                     id="f-fx",
                     classes="k-fx",
                 )
@@ -362,7 +362,7 @@ class TransactionForm(BaseForm):
             )
             txn.validate()
             if txn.currency:  # a blank one is worked out when saving, which checks it then
-                txn.check_fx_rate(self.tracker.base)
+                txn.check_fx_rate()
         except (FormError, ValueError) as e:
             self.show_error(str(e))
             return
