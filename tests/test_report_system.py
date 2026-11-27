@@ -147,6 +147,7 @@ def test_schema_lists_every_table_and_column_in_order(app):
         "note",
         "ratio",
         "target_account_id",
+        "fx_rate",  # added by schema version 6
     ]
 
 
@@ -525,7 +526,7 @@ def test_summarize_command_groups_schema_columns(cli, fake):
     for expected in (
         {"table": "accounts", "columns": 8},
         {"table": "meta", "columns": 2},
-        {"table": "transactions", "columns": 13},
+        {"table": "transactions", "columns": 14},
     ):
         assert expected in summary
     output = cli(

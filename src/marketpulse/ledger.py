@@ -64,6 +64,7 @@ class CashFlow:
     account_id: int
     amount: float
     currency: str
+    fx_rate: float | None = None  # the rate recorded on the transaction (base per unit of `currency`)
 
 
 @dataclass
@@ -74,6 +75,7 @@ class InKindContribution:
     account_id: int
     amount: float | None
     currency: str
+    fx_rate: float | None = None  # the rate recorded on the transfer (base per unit of `currency`)
 
 
 @dataclass
@@ -311,7 +313,7 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
             value = qty * txn.price
             state.in_kind_contributions.append(
                 InKindContribution(
-                    txn.date, txn.target_account_id, value if value > 0 and isfinite(value) else None, ccy
+                    txn.date, txn.target_account_id, value if value > 0 and isfinite(value) else None, ccy, txn.fx_rate
                 )
             )
 
@@ -321,12 +323,12 @@ def _apply(state: LedgerState, txn: Transaction, accounts: dict[int, Account]) -
             state.cash[cash_key] += txn.amount
 
     elif t is TxnType.DEPOSIT:
-        state.flows.append(CashFlow(txn.date, acct, txn.amount, ccy))
+        state.flows.append(CashFlow(txn.date, acct, txn.amount, ccy, txn.fx_rate))
         if tracks_cash:
             state.cash[cash_key] += txn.amount
 
     elif t is TxnType.WITHDRAWAL:
-        state.flows.append(CashFlow(txn.date, acct, -txn.amount, ccy))
+        state.flows.append(CashFlow(txn.date, acct, -txn.amount, ccy, txn.fx_rate))
         if tracks_cash:
             state.cash[cash_key] -= txn.amount
 
@@ -490,6 +492,21 @@ def room_flows(
     return relevant
 
 
+def room_rate(
+    flow: CashFlow | InKindContribution,
+    recorded_in: str | None,
+    fx: Callable[[str, str], float | None] | None,
+) -> float | None:
+    """CAD per unit of the flow's currency: 1 for CAD, the recorded rate when it is in CAD (see
+    `contribution_room`), else `fx`'s rate for the date, if any."""
+    currency = flow.currency.upper()
+    if currency == "CAD":
+        return 1.0
+    if flow.fx_rate is not None and recorded_in is not None and recorded_in.upper() == "CAD":
+        return flow.fx_rate
+    return fx(flow.date, currency) if fx else None
+
+
 def contribution_room(
     account_type: str,
     as_of_year: int,
@@ -500,8 +517,12 @@ def contribution_room(
     current_year: int | None = None,
     fx: Callable[[str, str], float | None] | None = None,
     details: list[RoomFlow] | None = None,
+    recorded_in: str | None = None,
 ) -> RoomStatus:
     """Remaining CAD room given room known at Jan 1 of `as_of_year`.
+
+    `fx` gives historical CAD rates. A flow's recorded rate (the broker's, in the base currency)
+    is used instead when `recorded_in`, the base currency, is CAD; then the flow needs no `fx`.
 
     TFSA: adds each new year's limit and prior-year withdrawals.
     FHSA: see _fhsa_room (annual limit, capped carry-forward, lifetime limit).
@@ -517,7 +538,7 @@ def contribution_room(
         if flow.amount is None:
             missing_values += 1
         else:
-            rate = 1.0 if currency == "CAD" else fx(flow.date, currency) if fx else None
+            rate = room_rate(flow, recorded_in, fx)
             if rate is None or not isfinite(rate) or rate <= 0:
                 missing.add((flow.date, currency))
             else:

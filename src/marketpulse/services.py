@@ -30,6 +30,7 @@ from .ledger import (
     replay,
     replay_by_day,
     room_flows,
+    room_rate,
     sort_key,
     transaction_currency,
 )
@@ -46,6 +47,7 @@ from .models import (
     TxnType,
     guess_currency,
     parse_date,
+    recorded_rate,
 )
 from .providers import make_fallback
 from .tax import TaxReport
@@ -137,6 +139,7 @@ class Tracker:
         # May fetch a quote, so it stays outside the write lock below.
         txn.currency = self.transaction_currency(txn)
         txn.validate()
+        txn.check_fx_rate(self.base)
         # The checks and the write hold the write lock together: no restore (or sale in another
         # window) can land between them.
         with self.store.atomic():
@@ -179,6 +182,7 @@ class Tracker:
         txn.date = parse_date(txn.date)
         txn.currency = self.transaction_currency(txn)
         txn.validate()
+        txn.check_fx_rate(self.base)
         with self.store.atomic():
             self._refuse_if_restored(restore_id, retry="try again")
             if self.store.get_account(txn.account_id) is None:
@@ -519,22 +523,31 @@ class Tracker:
         txns = self.store.transactions()
         accounts = self.store.account_map()
         fx = self._tax_fx(txns, accounts, self.base)
-        report = tax.compute(txns, accounts, fx, identical=self.store.identical_property())
+        report = tax.compute(txns, accounts, fx, identical=self.store.identical_property(), recorded_in=self.base)
         return capital_gains(report, inclusion_rate=self.config.capital_gains_inclusion), report
 
     def foreign_property(self, year: int | None = None) -> list[tax.ForeignPropertyYear]:
         """Specified foreign property cost for form T1135: `year`'s, or every year's, newest first.
 
-        Always in CAD, whatever the base currency, because the T1135 thresholds are.
+        Always in CAD, whatever the base currency, because the T1135 thresholds are. Recorded
+        rates are in the base currency, so they are used only when that is CAD.
         """
         txns = self.store.transactions()
         accounts = self.store.account_map()
         fx = self._tax_fx(txns, accounts, "CAD")
         assets = self.store.assets()
         identical = self.store.identical_property()
+        recorded_in = self._recorded_in("CAD")
         if year is not None:
-            return [tax.foreign_property(txns, accounts, assets, fx, year, identical=identical)]
-        return tax.foreign_property_years(txns, accounts, assets, fx, identical=identical)
+            return [
+                tax.foreign_property(txns, accounts, assets, fx, year, identical=identical, recorded_in=recorded_in)
+            ]
+        return tax.foreign_property_years(txns, accounts, assets, fx, identical=identical, recorded_in=recorded_in)
+
+    def _recorded_in(self, currency: str) -> str | None:
+        """The base currency when figures in `currency` can use recorded rates (which are in the
+        base currency), else None, which leaves them out (see `tax.compute`)."""
+        return self.base if currency.upper() == self.base else None
 
     def _tax_fx(self, txns: list[Transaction], accounts: dict[int, Account], base: str) -> tax.FxLookup:
         """Trade-date FX into `base` for the tax engine.
@@ -542,12 +555,15 @@ class Tracker:
         Every foreign-currency transaction that touches a taxable account needs its own day's
         rate (purchases as well as sales), so a daily series is fetched for each such currency
         from a week before the earliest one. The extra week covers a first trade on a Monday or
-        just after a holiday, which takes the previous close.
+        just after a holiday, which takes the previous close. A transaction with a recorded rate
+        that converts into `base` needs no lookup.
         """
+        recorded_in = self._recorded_in(base)
         relevant = [
             t
             for t in txns
             if t.symbol
+            and recorded_rate(t, transaction_currency(t, accounts), recorded_in) is None
             and (
                 tax.is_taxable(accounts.get(t.account_id))
                 or (t.target_account_id is not None and tax.is_taxable(accounts.get(t.target_account_id)))
@@ -618,8 +634,12 @@ class Tracker:
             plans.append((acct_type, year, amount, members, ids, relevant))
         fx = None
         if not offline:
+            # A flow with a recorded CAD rate needs no lookup.
             dated_currencies = (
-                (flow.date, flow.currency) for *_, relevant in plans for flow in relevant if flow.amount is not None
+                (flow.date, flow.currency)
+                for *_, relevant in plans
+                for flow in relevant
+                if flow.amount is not None and room_rate(flow, self.base, None) is None
             )
             fx = self._historical_fx(dated_currencies, "CAD", budget=fx_budget)
         out = []
@@ -628,7 +648,15 @@ class Tracker:
             if details is not None:
                 breakdown = details[acct_type] = []
             status = contribution_room(
-                acct_type, year, amount, relevant, ids, current_year=current_year, fx=fx, details=breakdown
+                acct_type,
+                year,
+                amount,
+                relevant,
+                ids,
+                current_year=current_year,
+                fx=fx,
+                details=breakdown,
+                recorded_in=self.base,
             )
             out.append((status, [a for a in members if not a.archived]))
         return out

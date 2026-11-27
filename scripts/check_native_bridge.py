@@ -46,6 +46,8 @@ with tempfile.TemporaryDirectory(prefix="marketpulse-bridge-") as tmp:
         )
         if kind is TxnType.TRANSFER:
             txn.target_account_id = 2
+        if kind.uses_fx_rate:
+            txn.fx_rate = 1.35  # the broker's rate, decoded as an optional field
         signed = txn.cash_direction * txn.gross_value if txn.cash_direction else txn.gross_value
         rows.append({"transaction": activity_row(txn, target), "expected_signed_value": signed})
     transactions.write_text(json.dumps(rows, allow_nan=False))

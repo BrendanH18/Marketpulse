@@ -39,6 +39,7 @@ _ALIASES = {
     "note": ["note", "notes", "description", "memo", "details"],
     "ratio": ["ratio", "split ratio"],
     "target_account": ["target_account", "target account", "to account"],
+    "fx_rate": ["fx_rate", "fx rate"],
 }
 
 

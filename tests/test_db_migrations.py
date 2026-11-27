@@ -456,6 +456,38 @@ def test_v3_adds_the_foreign_property_setting_to_existing_assets(tmp_path, monke
         assert upgraded.assets()["FICT"].foreign_property is setting
 
 
+def test_v6_adds_an_unset_fx_rate_to_existing_transactions(tmp_path, monkeypatch):
+    path = tmp_path / "existing.db"
+    prior_migrations = {version: step for version, step in db.MIGRATIONS.items() if version <= 5}
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "MIGRATIONS", prior_migrations)
+        seeded = Store(path)
+        acct = _seed(seeded)
+        seeded.add_transaction(
+            Transaction(account_id=acct.id, type=TxnType.SELL, date="2024-02-01", symbol="AAPL", quantity=1, price=12)
+        )
+        original = seeded.transactions()
+        seeded.close()
+
+    upgraded = Store(path)
+    assert upgraded.schema_version == latest_version() >= 6
+    # Every row is kept, with no rate recorded, and the pre-upgrade file is backed up first.
+    assert upgraded.transactions() == original and all(t.fx_rate is None for t in original)
+    (backup,) = upgraded.backups()
+    assert Store.backup_reason(backup) == f"pre-v{latest_version()}"
+    assert _user_version(backup) == 5
+    sale = upgraded.transactions()[1]
+    sale.fx_rate = 1.35
+    upgraded.update_transaction(sale)
+    assert [t.fx_rate for t in upgraded.transactions()] == [None, 1.35]
+    upgraded.close()
+
+    # An older MarketPulse would drop the recorded rates, so it refuses the upgraded ledger.
+    monkeypatch.setattr(db, "MIGRATIONS", prior_migrations)
+    with pytest.raises(db.SchemaError, match="Upgrade MarketPulse"):
+        Store(path)
+
+
 def test_private_permissions_survive_reopen_backup_and_restore():
     from contextlib import closing
     from pathlib import Path

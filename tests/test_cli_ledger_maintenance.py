@@ -73,14 +73,15 @@ SHOW_3 = (
     " amount              0.0              \n fees                5.0              \n"
     " currency            CAD              \n note                first lot        \n"
     " ratio               0.0              \n target_account_id   —                \n"
-    " id                  3                \n account             Maple Cash       \n"
-    " target_account      —                \n revision            REVISION__REVISI \n"
+    " id                  3                \n fx_rate             —                \n"
+    " account             Maple Cash       \n target_account      —                \n"
+    " revision            REVISION__REVISI \n"
     "                                      \n"
 )
 SHOW_3_JSON = (
     '{"account_id": 1, "type": "BUY", "date": "2025-01-03", "symbol": "XEQT.TO", "quantity": 50.0, '
     '"price": 30.0, "amount": 0.0, "fees": 5.0, "currency": "CAD", "note": "first lot", "ratio": 0.0, '
-    '"target_account_id": null, "id": 3, "account": "Maple Cash", "target_account": null, '
+    '"target_account_id": null, "id": 3, "fx_rate": null, "account": "Maple Cash", "target_account": null, '
     '"revision": "REVISION__REVISI"}\n'
 )
 UNDO_YES = (

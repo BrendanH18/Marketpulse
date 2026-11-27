@@ -125,7 +125,12 @@ def import_csv(app: MarketPulseApp, path: str) -> None:
 
     store = app.tracker.store
     try:
-        result = import_transactions(store, Path(path).expanduser(), default_account=next(iter(store.accounts()), None))
+        result = import_transactions(
+            store,
+            Path(path).expanduser(),
+            default_account=next(iter(store.accounts()), None),
+            base_currency=app.tracker.base,
+        )
     except (OSError, ValueError) as e:
         app.call_from_thread(app.notify, str(e), title="Import failed", severity="error")
         return

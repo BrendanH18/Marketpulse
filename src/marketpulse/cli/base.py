@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import sys
 from functools import wraps
 from typing import TYPE_CHECKING, NoReturn
@@ -140,6 +141,9 @@ def retryable(f):
         # Fingerprint the user's parsed command, before inferred quotes/currency or
         # current holdings can change. Replays skip resolution and validation entirely.
         fields = kwargs
+        if "fx_rate" in kwargs and kwargs["fx_rate"] is None:
+            # Keep the fingerprints of saves from before the option existed.
+            fields = {key: value for key, value in kwargs.items() if key != "fx_rate"}
         if "as_json" in kwargs:  # asset value
             if kwargs["dry_run"]:
                 raise click.UsageError("--dry-run cannot be combined with --request-id.")
@@ -162,6 +166,25 @@ def retryable(f):
     return click.option("--request-id", type=click.UUID, help="Retry identity for a native transaction save.")(
         requested
     )
+
+
+def fx_rate_callback(ctx: click.Context, param: click.Parameter, value: float | None) -> float | None:
+    if value is not None and not (math.isfinite(value) and value > 0):
+        raise click.BadParameter("must be a positive number.", ctx=ctx, param=param)
+    return value
+
+
+def fx_rate_option(f):
+    """`--fx-rate`: the rate the broker charged, which tax and contribution room then use."""
+    return click.option(
+        "--fx-rate",
+        type=float,
+        default=None,
+        callback=fx_rate_callback,
+        metavar="RATE",
+        help="FX rate the broker charged: base-currency units per unit of the entry's currency "
+        "(e.g. 1.3612 CAD per USD). Tax and contribution room use it instead of the day's looked-up rate.",
+    )(f)
 
 
 def txn_options(f):

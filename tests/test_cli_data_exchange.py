@@ -85,16 +85,16 @@ def incoming(tmp_path):
 # ── defaults stay byte-for-byte the same ──────────────────────────────────────
 
 EXPORT = (
-    "date,account,type,symbol,quantity,price,amount,fees,currency,note,ratio,target_account\n"
-    "2024-12-02,Old Cedar,BUY,ZAG.TO,10,15,,,CAD,,,\n"
-    "2024-12-20,Old Cedar,SELL,ZAG.TO,10,15.5,,,CAD,,,\n"
-    "2025-01-02,Maple Cash,DEPOSIT,,,,5000,,CAD,,,\n"
-    '2025-01-03,Maple Cash,BUY,XEQT.TO,50,30,,4.95,CAD,"first lot, rounded",,\n'
-    "2025-01-06,Birch TFSA,BUY,VFV.TO,10,100,,,CAD,,,\n"
-    "2025-03-31,Maple Cash,DIVIDEND,XEQT.TO,,,25,,CAD,,,\n"
-    "2025-05-01,Birch TFSA,BUY,AAPL,2,150,,,USD,top-up,,\n"
-    "2025-06-02,Maple Cash,TRANSFER,XEQT.TO,10,31,,,CAD,,,Birch TFSA\n"
-    "2025-07-02,Maple Cash,SPLIT,XEQT.TO,,,,,CAD,,2,\n"
+    "date,account,type,symbol,quantity,price,amount,fees,currency,note,ratio,target_account,fx_rate\n"
+    "2024-12-02,Old Cedar,BUY,ZAG.TO,10,15,,,CAD,,,,\n"
+    "2024-12-20,Old Cedar,SELL,ZAG.TO,10,15.5,,,CAD,,,,\n"
+    "2025-01-02,Maple Cash,DEPOSIT,,,,5000,,CAD,,,,\n"
+    '2025-01-03,Maple Cash,BUY,XEQT.TO,50,30,,4.95,CAD,"first lot, rounded",,,\n'
+    "2025-01-06,Birch TFSA,BUY,VFV.TO,10,100,,,CAD,,,,\n"
+    "2025-03-31,Maple Cash,DIVIDEND,XEQT.TO,,,25,,CAD,,,,\n"
+    "2025-05-01,Birch TFSA,BUY,AAPL,2,150,,,USD,top-up,,,\n"
+    "2025-06-02,Maple Cash,TRANSFER,XEQT.TO,10,31,,,CAD,,,Birch TFSA,\n"
+    "2025-07-02,Maple Cash,SPLIT,XEQT.TO,,,,,CAD,,2,,\n"
 )
 IMPORT_DRY_RUN = (
     "✓ Would import 3 transaction(s); 1 duplicate(s) skipped. (Generic CSV)\n"
@@ -177,7 +177,7 @@ def test_export_date_window(cli, ledger, tmp_path):
 def test_export_columns(cli, ledger):
     text = unix(cli("export", "--columns", "Symbol, date,amount", "--type", "DIVIDEND").output)
     assert text == "symbol,date,amount\nXEQT.TO,2025-03-31,25\n"
-    every = "date,account,type,symbol,quantity,price,amount,fees,currency,note,ratio,target_account"
+    every = "date,account,type,symbol,quantity,price,amount,fees,currency,note,ratio,target_account,fx_rate"
     assert unix(cli("export", "--columns", every).output) == EXPORT
     result = cli("export", "--columns", "date,cost")
     assert result.exit_code == 2 and "Unknown column 'cost'" in result.output
@@ -215,6 +215,7 @@ def test_export_json_lines(cli, ledger, tmp_path):
         "note": "",
         "ratio": 0.0,
         "target_account": None,
+        "fx_rate": None,
     }
     assert transfer["type"] == "TRANSFER" and transfer["target_account"] == "Birch TFSA"
     picked = [

@@ -207,7 +207,14 @@ def import_cmd(
             nonlocal added, names
             if summary:
                 result, added, names = _import_rows(
-                    app.store, path, default, create_accounts, preview, profile, expect_fingerprint=fingerprint
+                    app.store,
+                    path,
+                    default,
+                    create_accounts,
+                    preview,
+                    profile,
+                    expect_fingerprint=fingerprint,
+                    base_currency=app.config.base_currency.upper(),
                 )
                 return result
             return import_transactions(
@@ -218,6 +225,7 @@ def import_cmd(
                 dry_run=preview,
                 expect_fingerprint=fingerprint,
                 profile=profile,
+                base_currency=app.config.base_currency.upper(),
             )
 
         result = run(dry_run or strict)
@@ -280,6 +288,7 @@ def _import_rows(
     profile: str,
     *,
     expect_fingerprint: str | None = None,
+    base_currency: str | None = None,
 ) -> tuple[ImportResult, list[Transaction], dict[int, Account]]:
     """Import (or preview) and return the result, the rows it added and the accounts naming them.
 
@@ -300,6 +309,7 @@ def _import_rows(
             create_accounts=create_accounts,
             expect_fingerprint=expect_fingerprint,
             profile=profile,
+            base_currency=base_currency,
         )
         return result, [t for t in target.transactions() if t.id not in before], target.account_map()
 
@@ -519,6 +529,8 @@ def _write_export(
 ) -> int:
     """Write rows formatted exactly as `csvio.export_transactions` writes them (CSV), or with
     raw values (JSON Lines: numbers as numbers, no transfer target as null)."""
+    from ..csvio import _plain
+
     writer = csv.writer(out)
     if not jsonl:
         writer.writerow(columns)
@@ -539,6 +551,7 @@ def _write_export(
                 "note": t.note,
                 "ratio": t.ratio,
                 "target_account": target.name if target else None,
+                "fx_rate": t.fx_rate,
             }
             out.write(json.dumps({name: raw[name] for name in columns}, ensure_ascii=False) + "\n")
             continue
@@ -555,6 +568,7 @@ def _write_export(
             "note": t.note,
             "ratio": f"{t.ratio:g}" if t.ratio else "",
             "target_account": target.name if target else "",
+            "fx_rate": _plain(t.fx_rate) if t.fx_rate is not None else "",
         }
         writer.writerow([row[name] for name in columns])
     return len(txns)
