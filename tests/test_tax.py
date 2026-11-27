@@ -173,14 +173,98 @@ def test_missing_fx_marks_rows_incomplete_and_keeps_them_out_of_totals():
     txns = [
         txn(TxnType.BUY, "2024-01-02", "AAPL", 1, 100, ccy="USD"),  # no rate for this day
         txn(TxnType.SELL, "2024-02-01", "AAPL", 1, 150, ccy="USD"),
-        txn(TxnType.BUY, "2024-03-01", "AAPL", 1, 100, ccy="USD"),  # fresh pool: fully known
+        # Fresh pool, bought after day +30 so it can't hold a loss the guessed sale might have had.
+        txn(TxnType.BUY, "2024-03-04", "AAPL", 1, 100, ccy="USD"),
         txn(TxnType.SELL, "2024-04-01", "AAPL", 1, 150, ccy="USD"),
     ]
-    report = run(txns, usd({"2024-02-01": 1.3, "2024-03-01": 1.3, "2024-04-01": 1.3}))
+    report = run(txns, usd({"2024-02-01": 1.3, "2024-03-04": 1.3, "2024-04-01": 1.3}))
     first, second = report.dispositions
     assert not first.complete and second.complete  # the gap doesn't poison later pools
     (year,) = capital_gains(report)
     assert year.net_gain == pytest.approx(65) and year.missing_fx == [first]
+
+
+@pytest.mark.parametrize(
+    ("rates", "estimated_gain"),
+    [
+        ({}, 0.0),  # no rate for either leg: C$0 cost, C$0 proceeds
+        ({"2024-02-01": 1.35}, 1350.0),  # no rate for the purchase only: it looks free
+    ],
+    ids=["no-rates", "purchase-rate-missing"],
+)
+def test_a_guessed_gain_with_a_replacement_in_the_window_leaves_the_replacement_incomplete(rates, estimated_gain):
+    # With a real rate of 1.40 on 2023-12-01 the first sale is a C$50 loss (C$1,400 cost, C$1,350
+    # proceeds), superficial because the replacement is still held at day +30, so the denied C$50
+    # would be part of the replacement's cost. Without the rate the estimate shows no loss, but
+    # it is only a guess: the replacement's cost, and the gain on selling it, are guesses too.
+    fx = usd({**rates, "2024-02-15": 1.35, "2024-06-03": 1.35})
+    txns = [
+        txn(TxnType.BUY, "2023-12-01", "AAPL", 10, 100, ccy="USD"),  # no rate
+        txn(TxnType.SELL, "2024-02-01", "AAPL", 10, 100, ccy="USD"),
+        txn(TxnType.BUY, "2024-02-15", "AAPL", 10, 90, ccy="USD"),  # day +14, known rate, still held
+    ]
+    held = run(txns, fx)
+    (first,) = held.dispositions
+    assert not first.complete and first.gain == pytest.approx(estimated_gain) and not first.superficial
+    assert held.pools["AAPL"].incomplete  # before the fix: the replacement pool looked complete
+
+    report = run([*txns, txn(TxnType.SELL, "2024-06-03", "AAPL", 10, 120, ccy="USD")], fx)
+    first, later = report.dispositions
+    assert not later.complete  # before the fix: complete, at a C$405 gain that leaves out the denied loss
+    (year,) = capital_gains(report)
+    assert year.net_gain == 0 and year.missing_fx == [first, later]
+
+
+def test_a_guessed_gain_on_a_partial_sale_with_a_replacement_leaves_the_rest_of_the_pool_incomplete():
+    # Shares received at no cost, then half sold for less than the commission with no rate:
+    # the estimate is C$0, but at any real rate it is a loss, and a superficial one, since more
+    # were bought back within 30 days. The denied part would go into the units still held.
+    fx = usd({"2024-01-02": 1.30, "2024-02-15": 1.35, "2024-06-03": 1.35})
+    txns = [
+        txn(TxnType.BUY, "2024-01-02", "AAPL", 20, 0, ccy="USD"),  # C$0 cost, known
+        txn(TxnType.SELL, "2024-02-01", "AAPL", 10, 1, fees=15, ccy="USD"),  # US$-5 net, no rate
+        txn(TxnType.BUY, "2024-02-15", "AAPL", 10, 1, ccy="USD"),  # day +14, still held
+        txn(TxnType.SELL, "2024-06-03", "AAPL", 20, 2, ccy="USD"),
+    ]
+    first, later = run(txns, fx).dispositions
+    assert not first.complete and first.gain == pytest.approx(0)
+    assert not later.complete  # before the fix: complete
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        txn(TxnType.BUY, "2024-03-03", "AAPL", 10, 90, ccy="USD"),  # day +31: outside the window
+        txn(TxnType.BUY, "2024-02-15", "AAPL", 10, 90, ccy="USD", account=TFSA),  # no taxable cost to add to
+    ],
+    ids=["after-the-window", "in-a-tfsa"],
+)
+def test_a_guessed_gain_without_a_taxable_replacement_in_the_window_leaves_later_sales_alone(replacement):
+    fx = usd({"2024-02-01": 1.35, "2024-02-15": 1.35, "2024-03-03": 1.35, "2024-06-03": 1.35})
+    txns = [
+        txn(TxnType.BUY, "2023-12-01", "AAPL", 10, 100, ccy="USD"),  # no rate
+        txn(TxnType.SELL, "2024-02-01", "AAPL", 10, 100, ccy="USD"),
+        replacement,
+        txn(TxnType.BUY, "2024-03-03", "AAPL", 10, 90, ccy="USD"),  # day +31
+        txn(TxnType.SELL, "2024-06-03", "AAPL", 10, 120, ccy="USD", account=QT),
+    ]
+    first, later = run(txns, fx).dispositions
+    assert not first.complete  # the guessed sale is still flagged on its own
+    # 10 x US$120 x 1.35 = C$1,620 against 10 x US$90 x 1.35 = C$1,215 of pooled cost, all known.
+    assert later.complete and later.acb == pytest.approx(1215) and later.gain == pytest.approx(405)
+
+
+def test_a_known_gain_with_a_replacement_in_the_window_leaves_the_replacement_complete():
+    fx = usd({"2023-12-01": 1.30, "2024-02-01": 1.35, "2024-02-15": 1.35, "2024-06-03": 1.35})
+    txns = [
+        txn(TxnType.BUY, "2023-12-01", "AAPL", 10, 100, ccy="USD"),  # C$1,300
+        txn(TxnType.SELL, "2024-02-01", "AAPL", 10, 110, ccy="USD"),  # C$1,485: a known C$185 gain
+        txn(TxnType.BUY, "2024-02-15", "AAPL", 10, 90, ccy="USD"),  # C$1,215, bought back within 30 days
+        txn(TxnType.SELL, "2024-06-03", "AAPL", 10, 120, ccy="USD"),  # C$1,620
+    ]
+    first, later = run(txns, fx).dispositions
+    assert first.complete and first.gain == pytest.approx(185) and not first.superficial
+    assert later.complete and later.acb == pytest.approx(1215) and later.gain == pytest.approx(405)
 
 
 def test_fx_lookup_takes_the_last_close_on_or_before_the_day():

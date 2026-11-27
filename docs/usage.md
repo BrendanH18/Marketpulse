@@ -244,6 +244,10 @@ marketpulse tax --year 2025 --csv capital-gains-2025.csv
 Account holdings still show their own cost basis, which can differ from the
 pooled basis used by the tax report. Rows missing historical FX or required
 transfer prices are flagged and excluded from report totals.
+A sale missing an FX rate may be a loss even when the estimate shows a gain, so
+if you buy the security back in a taxable account within 30 days and still hold
+it after that, the cost of those shares and the gain when you sell them are
+flagged as well.
 
 For an in-kind transfer, provide the market price explicitly:
 

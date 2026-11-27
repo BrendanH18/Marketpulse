@@ -43,7 +43,7 @@ import re
 from bisect import bisect_right
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from itertools import groupby
 from math import prod
@@ -218,9 +218,9 @@ def compute(
         p.holdings[(account_id, symbol)] += quantity
         p.acb += cost
         p.incomplete |= not known
-        if p.pending_denied > EPSILON:
+        if p.pending_denied > EPSILON or p.pending_incomplete:
             # These are the replacement shares for an earlier superficial loss:
-            # the denied loss becomes part of their cost.
+            # the denied loss (or the doubt about one) becomes part of their cost.
             p.acb += p.pending_denied
             p.incomplete |= p.pending_incomplete
             p.pending_denied, p.pending_incomplete = 0.0, False
@@ -263,6 +263,8 @@ def compute(
                 taxable_fraction = _superficial_denial(d, ordered, accounts, today, key)
                 if d.denied > EPSILON:
                     _attach_denied_loss(d, p, taxable_fraction)
+            elif not d.complete:
+                _carry_guessed_gain(d, p, ordered, accounts, today, key)
 
         elif t is TxnType.SPLIT and taxable:
             # A split changes the unit count, never the cost: ACB per unit falls.
@@ -568,6 +570,32 @@ def _attach_denied_loss(d: Disposition, p: AcbPool, taxable_fraction: float) -> 
     else:
         p.pending_denied += carried
         p.pending_incomplete |= not d.complete
+
+
+def _carry_guessed_gain(
+    d: Disposition,
+    p: AcbPool,
+    ordered: Sequence[Transaction],
+    accounts: dict[int, Account],
+    today: str,
+    key: Callable[[str], str],
+) -> None:
+    """Flag the replacement shares' cost when a sale's gain is only a guess.
+
+    A sale missing an FX rate (on it, or on a purchase in its pool) may be a loss at the real
+    rates even though the estimate shows none. If replacement units bought in a taxable account
+    in the window would make that loss superficial, the denied part would go into their cost, so
+    their cost, and the gain on selling them, are guesses too. A sale with no such replacement
+    keeps its own `complete=False` and nothing else changes.
+    """
+    probe = replace(d)  # check the window without changing the row as reported
+    taxable_fraction = _superficial_denial(probe, ordered, accounts, today, key)
+    if taxable_fraction <= EPSILON or min(probe.acquired_in_window, probe.held_after_window) <= EPSILON:
+        return
+    if p.quantity > EPSILON:
+        p.incomplete = True
+    else:
+        p.pending_incomplete = True
 
 
 # ── FX lookup from a daily series ─────────────────────────────────────────────
